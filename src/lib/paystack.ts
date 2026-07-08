@@ -1,7 +1,34 @@
-const PAYSTACK_PUBLIC_KEY = import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || '';
+const PAYSTACK_PUBLIC_KEY = (import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || '').trim().replace(/^["']|["']$/g, '');
+
+const PAYSTACK_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/;
 
 export function isPaystackConfigured(): boolean {
   return PAYSTACK_PUBLIC_KEY.length > 0 && PAYSTACK_PUBLIC_KEY.startsWith('pk_');
+}
+
+export function isValidPaystackEmail(email: string): boolean {
+  const trimmed = email.trim();
+  if (!PAYSTACK_EMAIL_REGEX.test(trimmed)) return false;
+
+  const domain = trimmed.split('@')[1]?.toLowerCase() ?? '';
+  // Paystack rejects uncommon TLDs like .pos that are not in most email validators.
+  if (domain.endsWith('.pos') || domain.endsWith('.local') || domain.endsWith('.test')) {
+    return false;
+  }
+
+  return true;
+}
+
+export function resolvePaystackEmail(
+  preferredEmail?: string,
+  reference?: string
+): string {
+  if (preferredEmail && isValidPaystackEmail(preferredEmail)) {
+    return preferredEmail.trim();
+  }
+
+  const suffix = (reference || Date.now().toString(36)).toLowerCase().replace(/[^a-z0-9]/g, '');
+  return `customer+${suffix}@adimatpos.com`;
 }
 
 export function generatePaystackReference(): string {
@@ -42,6 +69,11 @@ export async function initializePaystack(config: PaystackConfig): Promise<void> 
     throw new Error('Paystack not configured. Add VITE_PAYSTACK_PUBLIC_KEY to environment variables.');
   }
 
+  const email = resolvePaystackEmail(config.email, config.reference);
+  if (!isValidPaystackEmail(email)) {
+    throw new Error('A valid customer email is required for Paystack payments.');
+  }
+
   try {
     await loadPaystackScript();
 
@@ -53,7 +85,7 @@ export async function initializePaystack(config: PaystackConfig): Promise<void> 
 
     const handler = PaystackPop.setup({
       key: PAYSTACK_PUBLIC_KEY,
-      email: config.email,
+      email,
       amount: Math.round(config.amount), // Amount in pesewas
       currency: 'GHS',
       ref: config.reference,

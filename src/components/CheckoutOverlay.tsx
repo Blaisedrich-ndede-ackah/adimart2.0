@@ -7,7 +7,7 @@ import {
 import { useCartStore, CartItem } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { LocalStore } from '@/lib/dexie';
-import { generatePaystackReference, initializePaystack, isPaystackConfigured } from '@/lib/paystack';
+import { generatePaystackReference, initializePaystack, isPaystackConfigured, isValidPaystackEmail, resolvePaystackEmail } from '@/lib/paystack';
 import { printReceipt, isPrinterConnected, ReceiptData } from '@/lib/bluetoothPrinter';
 import { shareReceipt, downloadReceipt, PDFReceiptData } from '@/lib/receiptGenerator';
 
@@ -40,7 +40,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
   const [error, setError] = useState('');
   const [isPrinting, setIsPrinting] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
-  const [customerEmail, setCustomerEmail] = useState('customer@adimat.pos');
+  const [customerEmail, setCustomerEmail] = useState('');
   const [paystackError, setPaystackError] = useState('');
 
   const discountCap = currentStore?.discount_cap_percentage ?? 10;
@@ -56,6 +56,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
       setSaleResult(null);
       setError('');
       setPaystackError('');
+      setCustomerEmail('');
     }
   }, [isOpen]);
 
@@ -209,12 +210,20 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
   }
 
   async function handlePaystackPayment(amount: number, reference: string, cashPortion: number) {
+    const email = resolvePaystackEmail(customerEmail, reference);
+
+    if (customerEmail.trim() && !isValidPaystackEmail(customerEmail)) {
+      setPaystackError('Enter a valid customer email (e.g. customer@gmail.com) or leave blank.');
+      setStep('method');
+      return;
+    }
+
     setStep('paystack');
     setPaystackError('');
 
     try {
       await initializePaystack({
-        email: customerEmail,
+        email,
         amount: Math.round(amount * 100),
         reference,
         onSuccess: (ref) => {
@@ -327,6 +336,23 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
                   <p className="text-xs text-gray-500">Part cash, part mobile money</p>
                 </div>
               </button>
+
+              <div className="rounded-xl border border-gray-200 p-4 space-y-2">
+                <label className="text-sm font-medium text-gray-700 block">
+                  Customer email (optional)
+                </label>
+                <input
+                  type="email"
+                  value={customerEmail}
+                  onChange={e => setCustomerEmail(e.target.value)}
+                  placeholder="customer@gmail.com"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary focus:border-primary outline-none"
+                  autoComplete="email"
+                />
+                <p className="text-xs text-gray-500">
+                  Required by Paystack for mobile money and card payments. Leave blank to use a default receipt email.
+                </p>
+              </div>
 
               <button
                 onClick={handlePaystackSale}

@@ -1,5 +1,6 @@
 import Dexie, { Table } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
+import { isSupabaseConfigured, supabase, testSupabaseConnection } from './supabase';
 
 // Store represents a business/shop
 export interface LocalStore {
@@ -337,7 +338,6 @@ export async function getCurrentStoreTransactions(): Promise<LocalTransaction[]>
 
 // Sync to Supabase
 export async function syncToSupabase(): Promise<{ success: boolean; message: string }> {
-  const { isSupabaseConfigured } = await import('./supabase');
   if (!isSupabaseConfigured()) {
     return { success: false, message: 'Supabase not configured. Add environment variables to enable cloud sync.' };
   }
@@ -347,152 +347,169 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
     return { success: false, message: 'No store selected' };
   }
 
+  const connection = await testSupabaseConnection();
+  if (!connection.ok) {
+    return { success: false, message: connection.error || 'Could not connect to Supabase.' };
+  }
+
   const errors: string[] = [];
   let syncedCount = 0;
 
-  try {
-    const { supabase } = await import('./supabase');
+  const formatSyncError = (label: string, error: unknown): string => {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('Load failed') || message.includes('Failed to fetch')) {
+      return `${label}: Could not reach Supabase. Check your internet connection and VITE_SUPABASE_URL.`;
+    }
+    return `${label}: ${message}`;
+  };
 
-    // Sync store
+  const upsertRows = async <T extends Record<string, unknown>>(
+    label: string,
+    table: 'stores' | 'users' | 'products' | 'transactions' | 'transaction_items',
+    rows: T[],
+    markSynced: () => Promise<void>
+  ) => {
+    if (rows.length === 0) return;
+
+    try {
+      const { error } = await supabase.from(table).upsert(rows, { onConflict: 'id' });
+      if (error) {
+        errors.push(formatSyncError(label, error));
+        return;
+      }
+
+      await markSynced();
+      syncedCount += rows.length;
+    } catch (error) {
+      errors.push(formatSyncError(label, error));
+    }
+  };
+
+  try {
     const store = await db.stores.get(storeId);
     if (store && store.synced === 0) {
-      const { error } = await supabase.from('stores').upsert({
-        id: store.id,
-        name: store.name,
-        address: store.address,
-        support_number: store.support_number,
-        discount_cap_percentage: store.discount_cap_percentage,
-        pin_on_discount_enabled: store.pin_on_discount_enabled === 1,
-        created_at: store.created_at,
-      });
-      if (error) {
-        errors.push(`Store: ${error.message}`);
-      } else {
-        await db.stores.update(storeId, { synced: 1 });
-        syncedCount++;
-      }
+      await upsertRows(
+        'Store',
+        'stores',
+        [{
+          id: store.id,
+          name: store.name,
+          address: store.address,
+          support_number: store.support_number,
+          discount_cap_percentage: store.discount_cap_percentage,
+          pin_on_discount_enabled: store.pin_on_discount_enabled === 1,
+          created_at: store.created_at,
+        }],
+        async () => {
+          await db.stores.update(storeId, { synced: 1 });
+        }
+      );
     }
 
-    // Sync users
     const unsyncedUsers = await db.users
       .where('store_id').equals(storeId)
       .and(u => u.synced === 0)
       .toArray();
-    if (unsyncedUsers.length > 0) {
-      const { error } = await supabase.from('users').upsert(
-        unsyncedUsers.map(u => ({
-          id: u.id,
-          store_id: u.store_id,
-          name: u.name,
-          role: u.role,
-          pin_hash: u.pin_hash,
-          is_active: u.is_active === 1,
-          created_at: u.created_at,
-        }))
-      );
-      if (error) {
-        errors.push(`Users: ${error.message}`);
-      } else {
+    await upsertRows(
+      'Users',
+      'users',
+      unsyncedUsers.map(u => ({
+        id: u.id,
+        store_id: u.store_id,
+        name: u.name,
+        role: u.role,
+        pin_hash: u.pin_hash,
+        is_active: u.is_active === 1,
+        created_at: u.created_at,
+      })),
+      async () => {
         await Promise.all(unsyncedUsers.map(u => db.users.update(u.id, { synced: 1 })));
-        syncedCount += unsyncedUsers.length;
       }
-    }
+    );
 
-    // Sync products
     const unsyncedProducts = await db.products
       .where('store_id').equals(storeId)
       .and(p => p.synced === 0)
       .toArray();
-    if (unsyncedProducts.length > 0) {
-      const { error } = await supabase.from('products').upsert(
-        unsyncedProducts.map(p => ({
-          id: p.id,
-          store_id: p.store_id,
-          name: p.name,
-          category: p.category,
-          sku_type: p.sku_type,
-          barcode: p.barcode,
-          cost_price: p.cost_price,
-          selling_price: p.selling_price,
-          stock_level: p.stock_level,
-          is_active: p.is_active === 1,
-          created_at: p.created_at,
-          updated_at: p.updated_at,
-        }))
-      );
-      if (error) {
-        errors.push(`Products: ${error.message}`);
-      } else {
+    await upsertRows(
+      'Products',
+      'products',
+      unsyncedProducts.map(p => ({
+        id: p.id,
+        store_id: p.store_id,
+        name: p.name,
+        category: p.category,
+        sku_type: p.sku_type,
+        barcode: p.barcode,
+        cost_price: p.cost_price,
+        selling_price: p.selling_price,
+        stock_level: p.stock_level,
+        is_active: p.is_active === 1,
+        created_at: p.created_at,
+        updated_at: p.updated_at,
+      })),
+      async () => {
         await Promise.all(unsyncedProducts.map(p => db.products.update(p.id, { synced: 1 })));
-        syncedCount += unsyncedProducts.length;
       }
-    }
+    );
 
-    // Sync transactions
     const unsyncedTxns = await db.transactions
       .where('store_id').equals(storeId)
       .and(t => t.synced === 0)
       .toArray();
-    if (unsyncedTxns.length > 0) {
-      const { error } = await supabase.from('transactions').upsert(
-        unsyncedTxns.map(t => ({
-          id: t.id,
-          store_id: t.store_id,
-          receipt_number: t.receipt_number,
-          cashier_id: t.cashier_id,
-          cashier_name: t.cashier_name,
-          total_amount: t.total_amount,
-          discount_applied: t.discount_applied,
-          payment_method: t.payment_method,
-          cash_amount: t.cash_amount,
-          paystack_amount: t.paystack_amount,
-          paystack_reference: t.paystack_reference,
-          status: t.status,
-          created_at: t.created_at,
-        }))
-      );
-      if (error) {
-        errors.push(`Transactions: ${error.message}`);
-      } else {
+    await upsertRows(
+      'Transactions',
+      'transactions',
+      unsyncedTxns.map(t => ({
+        id: t.id,
+        store_id: t.store_id,
+        receipt_number: t.receipt_number,
+        cashier_id: t.cashier_id,
+        cashier_name: t.cashier_name,
+        total_amount: t.total_amount,
+        discount_applied: t.discount_applied,
+        payment_method: t.payment_method,
+        cash_amount: t.cash_amount,
+        paystack_amount: t.paystack_amount,
+        paystack_reference: t.paystack_reference,
+        status: t.status,
+        created_at: t.created_at,
+      })),
+      async () => {
         await Promise.all(unsyncedTxns.map(t => db.transactions.update(t.id, { synced: 1 })));
-        syncedCount += unsyncedTxns.length;
       }
-    }
+    );
 
-    // Sync transaction items
     const unsyncedItems = await db.transaction_items
       .where('store_id').equals(storeId)
       .and(i => i.synced === 0)
       .toArray();
-    if (unsyncedItems.length > 0) {
-      const { error } = await supabase.from('transaction_items').upsert(
-        unsyncedItems.map(i => ({
-          id: i.id,
-          store_id: i.store_id,
-          transaction_id: i.transaction_id,
-          product_id: i.product_id,
-          product_name: i.product_name,
-          quantity: i.quantity,
-          unit_price: i.unit_price,
-          subtotal: i.subtotal,
-        }))
-      );
-      if (error) {
-        errors.push(`Transaction items: ${error.message}`);
-      } else {
+    await upsertRows(
+      'Transaction items',
+      'transaction_items',
+      unsyncedItems.map(i => ({
+        id: i.id,
+        store_id: i.store_id,
+        transaction_id: i.transaction_id,
+        product_id: i.product_id,
+        product_name: i.product_name,
+        quantity: i.quantity,
+        unit_price: i.unit_price,
+        subtotal: i.subtotal,
+      })),
+      async () => {
         await Promise.all(unsyncedItems.map(i => db.transaction_items.update(i.id, { synced: 1 })));
-        syncedCount += unsyncedItems.length;
       }
+    );
+
+    if (errors.length > 0) {
+      return { success: false, message: `Partial sync. Errors: ${errors.join('; ')}` };
     }
 
     await db.sync_meta.put({
       id: 'last_sync',
       last_synced_at: new Date().toISOString(),
     });
-
-    if (errors.length > 0) {
-      return { success: false, message: `Partial sync. Errors: ${errors.join('; ')}` };
-    }
 
     if (syncedCount === 0) {
       return { success: true, message: 'Everything is already synced!' };
@@ -501,6 +518,12 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
     return { success: true, message: `Synced ${syncedCount} records at ${new Date().toLocaleTimeString()}` };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('Load failed') || msg.includes('Failed to fetch')) {
+      return {
+        success: false,
+        message: 'Sync failed: Could not reach Supabase. Check your internet connection, VITE_SUPABASE_URL, and that your Supabase project is active.',
+      };
+    }
     return { success: false, message: `Sync failed: ${msg}` };
   }
 }
