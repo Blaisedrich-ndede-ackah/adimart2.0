@@ -188,6 +188,19 @@ export async function connectPrinter(): Promise<{ success: boolean; deviceName: 
   }
 }
 
+export async function sendRawBytes(bytes: Uint8Array): Promise<void> {
+  if (!printerConnection || !printerConnection.device.gatt?.connected) {
+    throw new Error('No printer connected. Go to Settings to connect.');
+  }
+
+  const chunkSize = 100;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.slice(i, i + chunkSize);
+    await printerConnection.characteristic.writeValue(chunk);
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+}
+
 export async function printReceipt(data: ReceiptData): Promise<{ success: boolean; error?: string }> {
   if (!printerConnection || !printerConnection.device.gatt?.connected) {
     return { success: false, error: 'No printer connected. Go to Settings to connect.' };
@@ -195,14 +208,7 @@ export async function printReceipt(data: ReceiptData): Promise<{ success: boolea
 
   try {
     const receiptBytes = buildReceiptBytes(data);
-
-    const chunkSize = 100;
-    for (let i = 0; i < receiptBytes.length; i += chunkSize) {
-      const chunk = receiptBytes.slice(i, i + chunkSize);
-      await printerConnection.characteristic.writeValue(chunk);
-      await new Promise(resolve => setTimeout(resolve, 50));
-    }
-
+    await sendRawBytes(receiptBytes);
     return { success: true };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

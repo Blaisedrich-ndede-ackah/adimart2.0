@@ -10,13 +10,16 @@ import {
   db, 
   LocalStore,
   LocalUser,
-  syncToSupabase, 
+  syncToSupabase,
+  syncFromSupabase,
+  syncBidirectional,
   getLastSyncTime, 
   getCurrentStoreId,
   getCurrentStoreUsers,
   addUserToStore,
   deleteUser
 } from '@/lib/dexie';
+import { isAutoSyncEnabled, setAutoSyncEnabled, startAutoSync, stopAutoSync } from '@/lib/sync';
 import { connectPrinter, isPrinterConnected, getConnectedPrinterName, disconnectPrinter } from '@/lib/bluetoothPrinter';
 import { useAuthStore } from '@/store/useAuthStore';
 import { isBiometricAvailable, registerBiometric, hasBiometricRegistered, clearBiometricRegistration } from '@/lib/biometric';
@@ -39,6 +42,8 @@ export default function SettingsPage() {
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [supabaseReady, setSupabaseReady] = useState(false);
+  const [autoSync, setAutoSync] = useState(isAutoSyncEnabled());
+  const [storeId, setStoreId] = useState<string | null>(null);
   
   const [printerName, setPrinterName] = useState<string | null>(null);
   const [connectingPrinter, setConnectingPrinter] = useState(false);
@@ -72,6 +77,8 @@ export default function SettingsPage() {
     setLastSync(syncTime);
     setPrinterName(getConnectedPrinterName());
     setSupabaseReady(isSupabaseConfigured());
+    setStoreId(await getCurrentStoreId());
+    setAutoSync(isAutoSyncEnabled());
 
     const storeUsers = await getCurrentStoreUsers();
     setUsers(storeUsers);
@@ -114,22 +121,30 @@ export default function SettingsPage() {
     setSaving(false);
   };
 
-  const handleSync = async () => {
+  const handleSync = async (mode: 'push' | 'pull' | 'full' = 'push') => {
     if (!supabaseReady) {
       setSyncStatus('Supabase not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your environment.');
       return;
     }
     
     setIsSyncing(true);
-    setSyncStatus('Connecting to cloud...');
+    setSyncStatus(
+      mode === 'pull' ? 'Pulling from cloud...' :
+      mode === 'full' ? 'Running full sync...' :
+      'Pushing to cloud...'
+    );
     
     try {
-      const result = await syncToSupabase();
+      const result =
+        mode === 'pull' ? await syncFromSupabase() :
+        mode === 'full' ? await syncBidirectional() :
+        await syncToSupabase();
       setSyncStatus(result.message);
       
       if (result.success) {
         const syncTime = await getLastSyncTime();
         setLastSync(syncTime);
+        await refreshStore();
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -138,6 +153,19 @@ export default function SettingsPage() {
     
     setIsSyncing(false);
     setTimeout(() => setSyncStatus(''), 8000);
+  };
+
+  const handleAutoSyncToggle = (enabled: boolean) => {
+    setAutoSync(enabled);
+    setAutoSyncEnabled(enabled);
+    if (enabled) {
+      startAutoSync();
+      setSyncStatus('Auto-sync enabled');
+    } else {
+      stopAutoSync();
+      setSyncStatus('Auto-sync disabled');
+    }
+    setTimeout(() => setSyncStatus(''), 4000);
   };
 
   const handleConnectPrinter = async () => {
@@ -558,23 +586,49 @@ export default function SettingsPage() {
             </div>
           )}
 
-          <button
-            onClick={handleSync}
-            disabled={isSyncing}
-            className="w-full py-3 bg-primary text-white rounded-xl font-medium text-sm flex items-center justify-center gap-2 touch-target disabled:opacity-50"
-          >
-            {isSyncing ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Syncing...
-              </>
-            ) : (
-              <>
-                <RefreshCcw className="w-4 h-4" />
-                Sync to Cloud
-              </>
-            )}
-          </button>
+          {storeId && (
+            <div className="bg-gray-50 rounded-lg p-3 mb-3">
+              <p className="text-[10px] text-gray-500 mb-1">Store ID (for restore on new device)</p>
+              <p className="text-xs font-mono text-gray-800 break-all">{storeId}</p>
+            </div>
+          )}
+
+          <label className="flex items-center justify-between py-2 mb-3">
+            <span className="text-sm text-gray-700">Auto-sync when online</span>
+            <button
+              onClick={() => handleAutoSyncToggle(!autoSync)}
+              className={`w-12 h-7 rounded-full transition-colors ${autoSync ? 'bg-primary' : 'bg-gray-300'}`}
+            >
+              <span className={`block w-5 h-5 bg-white rounded-full transition-transform mx-1 ${autoSync ? 'translate-x-5' : ''}`} />
+            </button>
+          </label>
+
+          <div className="grid grid-cols-1 gap-2 mb-2">
+            <button
+              onClick={() => handleSync('full')}
+              disabled={isSyncing}
+              className="w-full py-3 bg-primary text-white rounded-xl font-medium text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCcw className="w-4 h-4" />}
+              Full Sync (Pull + Push)
+            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => handleSync('pull')}
+                disabled={isSyncing}
+                className="py-3 border border-primary text-primary rounded-xl font-medium text-xs disabled:opacity-50"
+              >
+                Pull from Cloud
+              </button>
+              <button
+                onClick={() => handleSync('push')}
+                disabled={isSyncing}
+                className="py-3 border border-gray-300 text-gray-700 rounded-xl font-medium text-xs disabled:opacity-50"
+              >
+                Push to Cloud
+              </button>
+            </div>
+          </div>
 
           {syncStatus && (
             <p className={`text-xs mt-2 text-center ${

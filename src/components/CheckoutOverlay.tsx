@@ -2,14 +2,14 @@ import { useState, useEffect } from 'react';
 import {
   X, Banknote, CreditCard, Split, Percent, Shield,
   CheckCircle2, Loader2, Printer, AlertTriangle, Share2, Download,
-  Smartphone
+  Smartphone, MessageCircle
 } from 'lucide-react';
 import { useCartStore, CartItem } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { LocalStore } from '@/lib/dexie';
 import { generatePaystackReference, initializePaystack, isPaystackConfigured, isValidPaystackEmail, resolvePaystackEmail } from '@/lib/paystack';
 import { printReceipt, isPrinterConnected, ReceiptData } from '@/lib/bluetoothPrinter';
-import { shareReceipt, downloadReceipt, PDFReceiptData } from '@/lib/receiptGenerator';
+import { shareReceipt, downloadReceipt, shareViaWhatsApp, PDFReceiptData } from '@/lib/receiptGenerator';
 
 interface CheckoutOverlayProps {
   isOpen: boolean;
@@ -176,6 +176,12 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
     }
     
     setIsSharing(false);
+  }
+
+  function handleWhatsAppReceipt() {
+    if (!saleResult) return;
+    const receiptData = buildReceiptData(saleResult, 'cash');
+    shareViaWhatsApp(receiptData, currentStore?.support_number);
   }
 
   function handleDownloadReceipt() {
@@ -531,25 +537,28 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
                 </div>
               )}
 
-              <div className="w-full grid grid-cols-2 gap-3 mb-4">
+              <div className="w-full grid grid-cols-3 gap-2 mb-4">
                 <button
                   onClick={handleShareReceipt}
                   disabled={isSharing}
-                  className="flex items-center justify-center gap-2 py-3 bg-blue-50 text-blue-700 rounded-xl font-medium touch-target disabled:opacity-50"
+                  className="flex items-center justify-center gap-1 py-3 bg-blue-50 text-blue-700 rounded-xl font-medium text-xs disabled:opacity-50"
                 >
-                  {isSharing ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Share2 className="w-4 h-4" />
-                  )}
+                  {isSharing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Share2 className="w-4 h-4" />}
                   Share
                 </button>
                 <button
+                  onClick={handleWhatsAppReceipt}
+                  className="flex items-center justify-center gap-1 py-3 bg-green-50 text-green-700 rounded-xl font-medium text-xs"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  WhatsApp
+                </button>
+                <button
                   onClick={handleDownloadReceipt}
-                  className="flex items-center justify-center gap-2 py-3 bg-gray-100 text-gray-700 rounded-xl font-medium touch-target"
+                  className="flex items-center justify-center gap-1 py-3 bg-gray-100 text-gray-700 rounded-xl font-medium text-xs"
                 >
                   <Download className="w-4 h-4" />
-                  Download
+                  PDF
                 </button>
               </div>
 

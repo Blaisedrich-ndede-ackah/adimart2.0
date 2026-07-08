@@ -137,6 +137,31 @@ CREATE INDEX IF NOT EXISTS idx_transaction_items_store ON transaction_items(stor
 CREATE INDEX IF NOT EXISTS idx_transaction_items_txn ON transaction_items(transaction_id);
 
 -- ============================================================
+-- EXPENSES TABLE (linked to stores)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS expenses (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  description VARCHAR(255) NOT NULL,
+  category VARCHAR(100) DEFAULT 'Other',
+  amount DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (amount >= 0),
+  notes TEXT DEFAULT '',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE expenses ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "expenses_select" ON expenses FOR SELECT USING (true);
+CREATE POLICY "expenses_insert" ON expenses FOR INSERT WITH CHECK (true);
+CREATE POLICY "expenses_update" ON expenses FOR UPDATE USING (true);
+CREATE POLICY "expenses_delete" ON expenses FOR DELETE USING (true);
+
+CREATE INDEX IF NOT EXISTS idx_expenses_store ON expenses(store_id);
+CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(store_id, category);
+CREATE INDEX IF NOT EXISTS idx_expenses_created_at ON expenses(store_id, created_at);
+
+-- ============================================================
 -- HELPER FUNCTIONS
 -- ============================================================
 
@@ -162,6 +187,11 @@ CREATE TRIGGER update_users_updated_at
 
 CREATE TRIGGER update_products_updated_at
   BEFORE UPDATE ON products
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_expenses_updated_at
+  BEFORE UPDATE ON expenses
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 

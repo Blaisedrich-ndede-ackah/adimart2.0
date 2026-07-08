@@ -2,15 +2,19 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Package, AlertTriangle, TrendingDown, DollarSign,
   Plus, Search, ArrowUpDown, Edit, Trash2, ToggleLeft, ToggleRight,
-  PackagePlus, RefreshCw
+  PackagePlus, RefreshCw, Upload, Barcode
 } from 'lucide-react';
 import { db, LocalProduct, getCurrentStoreProducts } from '@/lib/dexie';
 import AddProduct from '@/components/AddProduct';
 import StockAdjustment from '@/components/StockAdjustment';
+import CsvImportModal from '@/components/CsvImportModal';
+import { downloadBarcodeLabel, printBarcodeLabel } from '@/lib/barcodeLabels';
+import { useAuthStore } from '@/store/useAuthStore';
 
 type SortMode = 'recent' | 'alpha' | 'stock-low' | 'stock-high';
 
 export default function InventoryPage() {
+  const { currentStore } = useAuthStore();
   const [products, setProducts] = useState<LocalProduct[]>([]);
   const [filteredProducts, setFilteredProducts] = useState<LocalProduct[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
@@ -22,6 +26,8 @@ export default function InventoryPage() {
   const [showSortDropdown, setShowSortDropdown] = useState(false);
   const [stockAdjustProduct, setStockAdjustProduct] = useState<LocalProduct | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showCsvImport, setShowCsvImport] = useState(false);
+  const [labelStatus, setLabelStatus] = useState('');
 
   const loadProducts = useCallback(async () => {
     const allProducts = await getCurrentStoreProducts();
@@ -102,6 +108,18 @@ export default function InventoryPage() {
     loadProducts();
   };
 
+  const handlePrintLabel = async (product: LocalProduct) => {
+    setLabelStatus('');
+    try {
+      await printBarcodeLabel(product, currentStore?.name || 'Store');
+      setLabelStatus(`Printed label for ${product.name}`);
+    } catch {
+      downloadBarcodeLabel(product, currentStore?.name || 'Store');
+      setLabelStatus(`Downloaded label PDF for ${product.name}`);
+    }
+    setTimeout(() => setLabelStatus(''), 3000);
+  };
+
   return (
     <div className="flex flex-col h-full bg-gray-50">
       {/* Header */}
@@ -115,6 +133,13 @@ export default function InventoryPage() {
               title="Refresh"
             >
               <RefreshCw className={`w-4 h-4 text-white ${isRefreshing ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              onClick={() => setShowCsvImport(true)}
+              className="bg-white/20 p-2 rounded-xl touch-target"
+              title="Import CSV"
+            >
+              <Upload className="w-4 h-4 text-white" />
             </button>
             <button
               onClick={() => { setEditProduct(null); setShowAddProduct(true); }}
@@ -159,6 +184,9 @@ export default function InventoryPage() {
 
       {/* Search & Sort */}
       <div className="px-3 pt-3 flex-shrink-0">
+        {labelStatus && (
+          <p className="text-xs text-primary mb-2 text-center">{labelStatus}</p>
+        )}
         <div className="flex gap-2 mb-3">
           <div className="flex-1 relative">
             <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -274,6 +302,13 @@ export default function InventoryPage() {
 
                 <div className="flex items-center justify-end gap-1 mt-2 pt-2 border-t border-gray-50">
                   <button
+                    onClick={() => handlePrintLabel(product)}
+                    className="p-1.5 rounded-lg hover:bg-emerald-50 touch-target"
+                    title="Print Barcode Label"
+                  >
+                    <Barcode className="w-4 h-4 text-primary" />
+                  </button>
+                  <button
                     onClick={() => setStockAdjustProduct(product)}
                     className="p-1.5 rounded-lg hover:bg-blue-50 touch-target"
                     title="Adjust Stock"
@@ -322,6 +357,12 @@ export default function InventoryPage() {
         product={stockAdjustProduct}
         onClose={() => setStockAdjustProduct(null)}
         onSaved={loadProducts}
+      />
+
+      <CsvImportModal
+        isOpen={showCsvImport}
+        onClose={() => setShowCsvImport(false)}
+        onImported={loadProducts}
       />
     </div>
   );
