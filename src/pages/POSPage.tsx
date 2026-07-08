@@ -7,6 +7,7 @@ import CheckoutOverlay from '@/components/CheckoutOverlay';
 import { useCartStore } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { LocalProduct, getCurrentStoreActiveProducts } from '@/lib/dexie';
+import { playScanBeep, primeScanBeep } from '@/lib/scanBeep';
 
 export default function POSPage() {
   const cart = useCartStore();
@@ -19,16 +20,29 @@ export default function POSPage() {
   const [searchResults, setSearchResults] = useState<LocalProduct[]>([]);
   const [stockError, setStockError] = useState<string | null>(null);
 
+  useEffect(() => {
+    // iOS/Safari often blocks WebAudio until the first user gesture.
+    const handler = () => {
+      primeScanBeep();
+      window.removeEventListener('pointerdown', handler);
+    };
+    window.addEventListener('pointerdown', handler, { passive: true });
+    return () => window.removeEventListener('pointerdown', handler);
+  }, []);
+
   const handleScan = useCallback(async (barcode: string) => {
     const result = await cart.addItemByBarcode(barcode);
     
     if (result.success && result.product) {
       setScanFeedback({ type: 'success', message: `Added: ${result.product.name}` });
+      playScanBeep('success');
     } else if (result.error) {
       if (result.error.includes('out of stock') || result.error.includes('available')) {
         setScanFeedback({ type: 'warning', message: result.error });
+        playScanBeep('warning');
       } else {
         setScanFeedback({ type: 'error', message: result.error });
+        playScanBeep('error');
       }
     }
     
@@ -57,10 +71,12 @@ export default function POSPage() {
     
     if (result.success) {
       setScanFeedback({ type: 'success', message: `Added: ${product.name}` });
+      playScanBeep('success');
       setShowProductSearch(false);
       setSearchQuery('');
     } else if (result.error) {
       setStockError(result.error);
+      playScanBeep('error');
       setTimeout(() => setStockError(null), 3000);
     }
     
