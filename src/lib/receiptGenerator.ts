@@ -235,7 +235,7 @@ function downloadReceiptAsText(data: ReceiptData): void {
 
 export async function shareReceipt(data: ReceiptData): Promise<boolean> {
   const text = generateReceiptText(data);
-  
+
   // Try to generate PDF for sharing
   let pdfBlob: Blob | null = null;
   try {
@@ -360,5 +360,16 @@ function generateReceiptText(data: ReceiptData): string {
   
   return lines.join('\n');
 }
+
+export function shareViaWhatsApp(data: ReceiptData, phoneNumber?: string): void {
+  const text = generateReceiptText(data);
+  const encoded = encodeURIComponent(text);
+  const base = phoneNumber
+    ? `https://wa.me/${phoneNumber.replace(/\D/g, '')}?text=${encoded}`
+    : `https://wa.me/?text=${encoded}`;
+  window.open(base, '_blank', 'noopener,noreferrer');
+}
+
+export { generateReceiptText };
 
 export type { ReceiptData as PDFReceiptData };

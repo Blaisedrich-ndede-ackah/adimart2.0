@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { db, generateId, generateReceiptNumber, LocalProduct, getProductByBarcode, getCurrentStoreId } from '@/lib/dexie';
+import { triggerAutoSync } from '@/lib/sync';
 
 export interface CartItem {
   id: string;
@@ -296,6 +297,8 @@ export const useCartStore = create<CartState>((set, get) => ({
       subtotal: 0,
       total: 0,
     });
+
+    void triggerAutoSync('sale');
 
     return saleData;
   },

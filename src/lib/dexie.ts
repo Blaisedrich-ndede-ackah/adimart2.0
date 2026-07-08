@@ -70,6 +70,18 @@ export interface LocalTransactionItem {
   synced: number;
 }
 
+export interface LocalExpense {
+  id: string;
+  store_id: string;
+  description: string;
+  category: string;
+  amount: number;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
 export interface SyncMeta {
   id: string;
   last_synced_at: string;
@@ -87,6 +99,7 @@ class AdimatDB extends Dexie {
   products!: Table<LocalProduct, string>;
   transactions!: Table<LocalTransaction, string>;
   transaction_items!: Table<LocalTransactionItem, string>;
+  expenses!: Table<LocalExpense, string>;
   sync_meta!: Table<SyncMeta, string>;
   app_config!: Table<AppConfig, string>;
 
@@ -98,6 +111,16 @@ class AdimatDB extends Dexie {
       products: 'id, store_id, name, category, barcode, is_active, synced, updated_at',
       transactions: 'id, store_id, receipt_number, cashier_id, status, created_at, synced',
       transaction_items: 'id, store_id, transaction_id, product_id, synced',
+      sync_meta: 'id',
+      app_config: 'id',
+    });
+    this.version(3).stores({
+      stores: 'id, synced',
+      users: 'id, store_id, role, pin_hash, is_active, synced',
+      products: 'id, store_id, name, category, barcode, is_active, synced, updated_at',
+      transactions: 'id, store_id, receipt_number, cashier_id, status, created_at, synced',
+      transaction_items: 'id, store_id, transaction_id, product_id, synced',
+      expenses: 'id, store_id, category, created_at, synced',
       sync_meta: 'id',
       app_config: 'id',
     });
@@ -336,6 +359,136 @@ export async function getCurrentStoreTransactions(): Promise<LocalTransaction[]>
   return db.transactions.where('store_id').equals(storeId).toArray();
 }
 
+export async function getCurrentStoreExpenses(): Promise<LocalExpense[]> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) return [];
+  return db.expenses.where('store_id').equals(storeId).toArray();
+}
+
+export async function addExpense(
+  expense: Omit<LocalExpense, 'id' | 'store_id' | 'created_at' | 'updated_at' | 'synced'>
+): Promise<LocalExpense> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) throw new Error('No store selected');
+
+  const now = new Date().toISOString();
+  const newExpense: LocalExpense = {
+    id: generateId(),
+    store_id: storeId,
+    ...expense,
+    created_at: now,
+    updated_at: now,
+    synced: 0,
+  };
+
+  await db.expenses.add(newExpense);
+  return newExpense;
+}
+
+export async function updateExpense(
+  id: string,
+  updates: Partial<Pick<LocalExpense, 'description' | 'category' | 'amount' | 'notes'>>
+): Promise<void> {
+  await db.expenses.update(id, {
+    ...updates,
+    updated_at: new Date().toISOString(),
+    synced: 0,
+  });
+}
+
+export async function deleteExpense(id: string): Promise<void> {
+  await db.expenses.delete(id);
+}
+
+export async function importProductsFromRows(
+  rows: Array<{
+    name: string;
+    category: string;
+    barcode: string;
+    cost_price: number;
+    selling_price: number;
+    stock_level: number;
+    sku_type?: string;
+  }>
+): Promise<{ imported: number; skipped: number }> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) throw new Error('No store selected');
+
+  let imported = 0;
+  let skipped = 0;
+  const now = new Date().toISOString();
+
+  for (const row of rows) {
+    if (!row.name.trim()) {
+      skipped++;
+      continue;
+    }
+
+    if (row.barcode) {
+      const existing = await db.products
+        .where('store_id')
+        .equals(storeId)
+        .and(p => p.barcode === row.barcode)
+        .first();
+      if (existing) {
+        skipped++;
+        continue;
+      }
+    }
+
+    await db.products.add({
+      id: generateId(),
+      store_id: storeId,
+      name: row.name.trim(),
+      category: row.category.trim() || 'Other',
+      sku_type: row.sku_type?.trim() || 'unit',
+      barcode: row.barcode.trim(),
+      cost_price: row.cost_price,
+      selling_price: row.selling_price,
+      stock_level: row.stock_level,
+      is_active: 1,
+      created_at: now,
+      updated_at: now,
+      synced: 0,
+    });
+    imported++;
+  }
+
+  return { imported, skipped };
+}
+
+function formatSyncError(label: string, error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes('Load failed') || message.includes('Failed to fetch')) {
+    return `${label}: Could not reach Supabase. Check your internet connection and VITE_SUPABASE_URL.`;
+  }
+  return `${label}: ${message}`;
+}
+
+async function upsertToSupabase<T extends Record<string, unknown>>(
+  label: string,
+  table: 'stores' | 'users' | 'products' | 'transactions' | 'transaction_items' | 'expenses',
+  rows: T[],
+  markSynced: () => Promise<void>,
+  errors: string[]
+): Promise<number> {
+  if (rows.length === 0) return 0;
+
+  try {
+    const { error } = await supabase.from(table).upsert(rows, { onConflict: 'id' });
+    if (error) {
+      errors.push(formatSyncError(label, error));
+      return 0;
+    }
+
+    await markSynced();
+    return rows.length;
+  } catch (error) {
+    errors.push(formatSyncError(label, error));
+    return 0;
+  }
+}
+
 // Sync to Supabase
 export async function syncToSupabase(): Promise<{ success: boolean; message: string }> {
   if (!isSupabaseConfigured()) {
@@ -355,40 +508,10 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
   const errors: string[] = [];
   let syncedCount = 0;
 
-  const formatSyncError = (label: string, error: unknown): string => {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.includes('Load failed') || message.includes('Failed to fetch')) {
-      return `${label}: Could not reach Supabase. Check your internet connection and VITE_SUPABASE_URL.`;
-    }
-    return `${label}: ${message}`;
-  };
-
-  const upsertRows = async <T extends Record<string, unknown>>(
-    label: string,
-    table: 'stores' | 'users' | 'products' | 'transactions' | 'transaction_items',
-    rows: T[],
-    markSynced: () => Promise<void>
-  ) => {
-    if (rows.length === 0) return;
-
-    try {
-      const { error } = await supabase.from(table).upsert(rows, { onConflict: 'id' });
-      if (error) {
-        errors.push(formatSyncError(label, error));
-        return;
-      }
-
-      await markSynced();
-      syncedCount += rows.length;
-    } catch (error) {
-      errors.push(formatSyncError(label, error));
-    }
-  };
-
   try {
     const store = await db.stores.get(storeId);
     if (store && store.synced === 0) {
-      await upsertRows(
+      syncedCount += await upsertToSupabase(
         'Store',
         'stores',
         [{
@@ -400,17 +523,13 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
           pin_on_discount_enabled: store.pin_on_discount_enabled === 1,
           created_at: store.created_at,
         }],
-        async () => {
-          await db.stores.update(storeId, { synced: 1 });
-        }
+        async () => { await db.stores.update(storeId, { synced: 1 }); },
+        errors
       );
     }
 
-    const unsyncedUsers = await db.users
-      .where('store_id').equals(storeId)
-      .and(u => u.synced === 0)
-      .toArray();
-    await upsertRows(
+    const unsyncedUsers = await db.users.where('store_id').equals(storeId).and(u => u.synced === 0).toArray();
+    syncedCount += await upsertToSupabase(
       'Users',
       'users',
       unsyncedUsers.map(u => ({
@@ -422,16 +541,12 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         is_active: u.is_active === 1,
         created_at: u.created_at,
       })),
-      async () => {
-        await Promise.all(unsyncedUsers.map(u => db.users.update(u.id, { synced: 1 })));
-      }
+      async () => { await Promise.all(unsyncedUsers.map(u => db.users.update(u.id, { synced: 1 }))); },
+      errors
     );
 
-    const unsyncedProducts = await db.products
-      .where('store_id').equals(storeId)
-      .and(p => p.synced === 0)
-      .toArray();
-    await upsertRows(
+    const unsyncedProducts = await db.products.where('store_id').equals(storeId).and(p => p.synced === 0).toArray();
+    syncedCount += await upsertToSupabase(
       'Products',
       'products',
       unsyncedProducts.map(p => ({
@@ -448,16 +563,12 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         created_at: p.created_at,
         updated_at: p.updated_at,
       })),
-      async () => {
-        await Promise.all(unsyncedProducts.map(p => db.products.update(p.id, { synced: 1 })));
-      }
+      async () => { await Promise.all(unsyncedProducts.map(p => db.products.update(p.id, { synced: 1 }))); },
+      errors
     );
 
-    const unsyncedTxns = await db.transactions
-      .where('store_id').equals(storeId)
-      .and(t => t.synced === 0)
-      .toArray();
-    await upsertRows(
+    const unsyncedTxns = await db.transactions.where('store_id').equals(storeId).and(t => t.synced === 0).toArray();
+    syncedCount += await upsertToSupabase(
       'Transactions',
       'transactions',
       unsyncedTxns.map(t => ({
@@ -475,16 +586,12 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         status: t.status,
         created_at: t.created_at,
       })),
-      async () => {
-        await Promise.all(unsyncedTxns.map(t => db.transactions.update(t.id, { synced: 1 })));
-      }
+      async () => { await Promise.all(unsyncedTxns.map(t => db.transactions.update(t.id, { synced: 1 }))); },
+      errors
     );
 
-    const unsyncedItems = await db.transaction_items
-      .where('store_id').equals(storeId)
-      .and(i => i.synced === 0)
-      .toArray();
-    await upsertRows(
+    const unsyncedItems = await db.transaction_items.where('store_id').equals(storeId).and(i => i.synced === 0).toArray();
+    syncedCount += await upsertToSupabase(
       'Transaction items',
       'transaction_items',
       unsyncedItems.map(i => ({
@@ -497,9 +604,26 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         unit_price: i.unit_price,
         subtotal: i.subtotal,
       })),
-      async () => {
-        await Promise.all(unsyncedItems.map(i => db.transaction_items.update(i.id, { synced: 1 })));
-      }
+      async () => { await Promise.all(unsyncedItems.map(i => db.transaction_items.update(i.id, { synced: 1 }))); },
+      errors
+    );
+
+    const unsyncedExpenses = await db.expenses.where('store_id').equals(storeId).and(e => e.synced === 0).toArray();
+    syncedCount += await upsertToSupabase(
+      'Expenses',
+      'expenses',
+      unsyncedExpenses.map(e => ({
+        id: e.id,
+        store_id: e.store_id,
+        description: e.description,
+        category: e.category,
+        amount: e.amount,
+        notes: e.notes,
+        created_at: e.created_at,
+        updated_at: e.updated_at,
+      })),
+      async () => { await Promise.all(unsyncedExpenses.map(e => db.expenses.update(e.id, { synced: 1 }))); },
+      errors
     );
 
     if (errors.length > 0) {
@@ -526,6 +650,290 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
     }
     return { success: false, message: `Sync failed: ${msg}` };
   }
+}
+
+export async function syncFromSupabase(): Promise<{ success: boolean; message: string; pulledCount: number }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, message: 'Supabase not configured.', pulledCount: 0 };
+  }
+
+  const storeId = await getCurrentStoreId();
+  if (!storeId) {
+    return { success: false, message: 'No store selected', pulledCount: 0 };
+  }
+
+  const connection = await testSupabaseConnection();
+  if (!connection.ok) {
+    return { success: false, message: connection.error || 'Could not connect to Supabase.', pulledCount: 0 };
+  }
+
+  let pulledCount = 0;
+  const errors: string[] = [];
+
+  try {
+    const { data: remoteStore, error: storeError } = await supabase
+      .from('stores')
+      .select('*')
+      .eq('id', storeId)
+      .maybeSingle();
+
+    if (storeError) errors.push(formatSyncError('Store', storeError));
+    else if (remoteStore) {
+      const localStore = await db.stores.get(storeId);
+      await db.stores.put({
+        id: storeId,
+        name: remoteStore.name,
+        address: remoteStore.address || '',
+        support_number: remoteStore.support_number || '',
+        discount_cap_percentage: remoteStore.discount_cap_percentage ?? 10,
+        pin_on_discount_enabled: remoteStore.pin_on_discount_enabled ? 1 : 0,
+        created_at: remoteStore.created_at,
+        synced: localStore?.synced === 0 ? 0 : 1,
+      });
+      pulledCount++;
+    }
+
+    const tables = [
+      {
+        label: 'Users',
+        table: 'users',
+        map: (row: Record<string, unknown>) => ({
+          id: row.id as string,
+          store_id: row.store_id as string,
+          name: row.name as string,
+          role: row.role as 'owner' | 'cashier',
+          pin_hash: row.pin_hash as string,
+          is_active: row.is_active ? 1 : 0,
+          created_at: row.created_at as string,
+          synced: 1,
+        }),
+        dbTable: db.users,
+      },
+      {
+        label: 'Products',
+        table: 'products',
+        map: (row: Record<string, unknown>) => {
+          const local = row;
+          return {
+            id: local.id as string,
+            store_id: local.store_id as string,
+            name: local.name as string,
+            category: (local.category as string) || 'Other',
+            sku_type: (local.sku_type as string) || 'unit',
+            barcode: (local.barcode as string) || '',
+            cost_price: Number(local.cost_price) || 0,
+            selling_price: Number(local.selling_price) || 0,
+            stock_level: Number(local.stock_level) || 0,
+            is_active: local.is_active ? 1 : 0,
+            created_at: local.created_at as string,
+            updated_at: (local.updated_at as string) || (local.created_at as string),
+            synced: 1,
+          };
+        },
+        dbTable: db.products,
+        merge: async (remote: LocalProduct, local: LocalProduct | undefined) => {
+          if (!local) return remote;
+          if (local.synced === 0) {
+            const remoteTime = new Date(remote.updated_at).getTime();
+            const localTime = new Date(local.updated_at).getTime();
+            return remoteTime >= localTime ? { ...remote, synced: 1 } : local;
+          }
+          return remote;
+        },
+      },
+      {
+        label: 'Transactions',
+        table: 'transactions',
+        map: (row: Record<string, unknown>) => ({
+          id: row.id as string,
+          store_id: row.store_id as string,
+          receipt_number: row.receipt_number as string,
+          cashier_id: (row.cashier_id as string) || '',
+          cashier_name: (row.cashier_name as string) || '',
+          total_amount: Number(row.total_amount) || 0,
+          discount_applied: Number(row.discount_applied) || 0,
+          payment_method: row.payment_method as 'cash' | 'split' | 'paystack',
+          cash_amount: Number(row.cash_amount) || 0,
+          paystack_amount: Number(row.paystack_amount) || 0,
+          paystack_reference: (row.paystack_reference as string) || '',
+          status: row.status as 'completed' | 'pending',
+          created_at: row.created_at as string,
+          synced: 1,
+        }),
+        dbTable: db.transactions,
+      },
+      {
+        label: 'Transaction items',
+        table: 'transaction_items',
+        map: (row: Record<string, unknown>) => ({
+          id: row.id as string,
+          store_id: row.store_id as string,
+          transaction_id: row.transaction_id as string,
+          product_id: (row.product_id as string) || '',
+          product_name: (row.product_name as string) || '',
+          quantity: Number(row.quantity) || 0,
+          unit_price: Number(row.unit_price) || 0,
+          subtotal: Number(row.subtotal) || 0,
+          synced: 1,
+        }),
+        dbTable: db.transaction_items,
+      },
+      {
+        label: 'Expenses',
+        table: 'expenses',
+        map: (row: Record<string, unknown>) => ({
+          id: row.id as string,
+          store_id: row.store_id as string,
+          description: row.description as string,
+          category: (row.category as string) || 'Other',
+          amount: Number(row.amount) || 0,
+          notes: (row.notes as string) || '',
+          created_at: row.created_at as string,
+          updated_at: (row.updated_at as string) || (row.created_at as string),
+          synced: 1,
+        }),
+        dbTable: db.expenses,
+        merge: async (remote: LocalExpense, local: LocalExpense | undefined) => {
+          if (!local) return remote;
+          if (local.synced === 0) {
+            const remoteTime = new Date(remote.updated_at).getTime();
+            const localTime = new Date(local.updated_at).getTime();
+            return remoteTime >= localTime ? { ...remote, synced: 1 } : local;
+          }
+          return remote;
+        },
+      },
+    ] as const;
+
+    for (const config of tables) {
+      const { data, error } = await supabase
+        .from(config.table)
+        .select('*')
+        .eq('store_id', storeId);
+
+      if (error) {
+        errors.push(formatSyncError(config.label, error));
+        continue;
+      }
+
+      for (const row of data || []) {
+        const mapped = config.map(row) as LocalUser & LocalProduct & LocalTransaction & LocalTransactionItem & LocalExpense;
+        const existing = await config.dbTable.get(mapped.id);
+
+        let record = mapped;
+        if ('merge' in config && config.merge) {
+          record = await (config.merge as (r: typeof mapped, l: typeof existing) => Promise<typeof mapped>)(mapped, existing);
+        }
+
+        if (!existing || existing.id === record.id) {
+          await config.dbTable.put(record);
+          if (!existing) pulledCount++;
+        }
+      }
+    }
+
+    if (errors.length > 0) {
+      return { success: false, message: `Partial pull. Errors: ${errors.join('; ')}`, pulledCount };
+    }
+
+    await db.sync_meta.put({
+      id: 'last_sync',
+      last_synced_at: new Date().toISOString(),
+    });
+
+    return {
+      success: true,
+      message: pulledCount > 0 ? `Pulled ${pulledCount} new records from cloud` : 'Cloud data is up to date',
+      pulledCount,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, message: `Pull failed: ${msg}`, pulledCount: 0 };
+  }
+}
+
+export async function syncBidirectional(): Promise<{ success: boolean; message: string }> {
+  const pull = await syncFromSupabase();
+  const push = await syncToSupabase();
+
+  if (!pull.success && !push.success) {
+    return { success: false, message: `Pull: ${pull.message}; Push: ${push.message}` };
+  }
+
+  if (!pull.success) {
+    return { success: push.success, message: `Pushed to cloud. Pull issue: ${pull.message}` };
+  }
+
+  if (!push.success) {
+    return { success: false, message: `Pulled from cloud. Push issue: ${push.message}` };
+  }
+
+  return {
+    success: true,
+    message: `Full sync complete. ${pull.message}. ${push.message}`,
+  };
+}
+
+export async function restoreStoreFromCloud(
+  storeId: string,
+  ownerPin: string
+): Promise<{ success: boolean; message: string }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, message: 'Supabase not configured.' };
+  }
+
+  const connection = await testSupabaseConnection();
+  if (!connection.ok) {
+    return { success: false, message: connection.error || 'Could not connect to Supabase.' };
+  }
+
+  const { data: remoteStore, error: storeError } = await supabase
+    .from('stores')
+    .select('*')
+    .eq('id', storeId)
+    .maybeSingle();
+
+  if (storeError || !remoteStore) {
+    return { success: false, message: 'Store not found in cloud. Check your Store ID.' };
+  }
+
+  const { data: owners, error: ownerError } = await supabase
+    .from('users')
+    .select('*')
+    .eq('store_id', storeId)
+    .eq('role', 'owner')
+    .eq('is_active', true);
+
+  if (ownerError || !owners?.length) {
+    return { success: false, message: 'No owner account found for this store.' };
+  }
+
+  const pinHash = hashPin(ownerPin);
+  const ownerMatch = owners.find(o => o.pin_hash === pinHash);
+  if (!ownerMatch) {
+    return { success: false, message: 'Invalid owner PIN for this store.' };
+  }
+
+  await db.transaction('rw', [db.stores, db.users, db.products, db.transactions, db.transaction_items, db.expenses, db.app_config], async () => {
+    await db.stores.clear();
+    await db.users.clear();
+    await db.products.clear();
+    await db.transactions.clear();
+    await db.transaction_items.clear();
+    await db.expenses.clear();
+  });
+
+  await setCurrentStoreId(storeId);
+  const pull = await syncFromSupabase();
+
+  if (!pull.success) {
+    return { success: false, message: pull.message };
+  }
+
+  return {
+    success: true,
+    message: `Restored "${remoteStore.name}" from cloud. ${pull.message}`,
+  };
 }
 
 export async function getLastSyncTime(): Promise<string | null> {
