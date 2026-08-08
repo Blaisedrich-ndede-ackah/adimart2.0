@@ -8,6 +8,7 @@ import SubscriptionWarningBanner from '@/components/SubscriptionWarningBanner';
 import BottomNav from '@/components/BottomNav';
 import StoreSetupPage from '@/pages/StoreSetupPage';
 import LoginPage from '@/pages/LoginPage';
+import CashierBlockedPage from '@/pages/CashierBlockedPage';
 import POSPage from '@/pages/POSPage';
 import InventoryPage from '@/pages/InventoryPage';
 import ReportsPage from '@/pages/ReportsPage';
@@ -93,6 +94,18 @@ export default function App() {
         <PWAInstallBanner />
         <div className="flex-1">
           <LoginPage onOpenAdmin={() => setAppMode('admin-login')} />
+        </div>
+      </div>
+    );
+  }
+
+  // Blocked cashiers can authenticate but cannot use the POS
+  if (currentUser?.role === 'cashier' && currentUser.is_active === 0) {
+    return (
+      <div className="h-screen flex flex-col">
+        <PWAInstallBanner />
+        <div className="flex-1">
+          <CashierBlockedPage />
         </div>
       </div>
     );
