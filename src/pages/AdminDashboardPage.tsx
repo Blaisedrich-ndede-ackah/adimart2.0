@@ -113,7 +113,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
     data?.stores.find((s) => s.id === storeId)?.name || 'Unknown store';
 
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col">
+    <div className="h-dvh bg-slate-100 flex flex-col overflow-hidden">
       <header className="bg-slate-950 text-white px-4 py-3 flex-shrink-0">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -180,7 +180,10 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         ))}
       </nav>
 
-      <main className="flex-1 overflow-y-auto px-3 py-3 pb-8">
+      <main
+        className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-3 pb-8"
+        style={{ WebkitOverflowScrolling: 'touch' }}
+      >
         {loading && !data && (
           <div className="flex flex-col items-center justify-center py-20 text-slate-500">
             <Loader2 className="w-8 h-8 animate-spin mb-3" />
