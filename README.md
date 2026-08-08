@@ -2,6 +2,8 @@
 
 A mobile-first Point of Sale (POS) and inventory management Progressive Web App (PWA) designed for SMEs in Ghana.
 
+**Full system documentation:** see [`SYSTEM_DOCUMENTATION.md`](./SYSTEM_DOCUMENTATION.md) for architecture, data models, sync, security, integrations, and operations.
+
 ![Adimat POS](public/logo.png)
 
 ## Features
