@@ -10,6 +10,7 @@ import { LocalProduct, getCurrentStoreActiveProducts } from '@/lib/dexie';
 import { playScanBeep, primeScanBeep } from '@/lib/scanBeep';
 import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 import { getBluetoothHardwareStatus, subscribeBluetoothStatus } from '@/lib/bluetoothPeripherals';
+import ProductImage from '@/components/ProductImage';
 
 export default function POSPage() {
   const cart = useCartStore();
@@ -185,14 +186,15 @@ export default function POSPage() {
                   key={p.id}
                   onClick={() => handleAddFromSearch(p)}
                   disabled={p.stock_level <= 0}
-                  className={`w-full flex items-center justify-between px-3 py-2.5 border-b border-gray-100 last:border-0 touch-target ${
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 border-b border-gray-100 last:border-0 touch-target ${
                     p.stock_level <= 0 
                       ? 'bg-gray-50 opacity-60 cursor-not-allowed' 
                       : 'hover:bg-gray-50'
                   }`}
                 >
-                  <div className="text-left">
-                    <p className="text-sm font-medium text-gray-900">{p.name}</p>
+                  <ProductImage src={p.image_url} alt={p.name} size="sm" />
+                  <div className="text-left flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">{p.name}</p>
                     <p className="text-xs text-gray-500">
                       {p.category} • 
                       {p.stock_level <= 0 ? (
@@ -204,7 +206,7 @@ export default function POSPage() {
                       )}
                     </p>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right flex-shrink-0">
                     <span className="text-sm font-bold text-primary">GH₵{p.selling_price.toFixed(2)}</span>
                     {p.stock_level <= 0 && (
                       <p className="text-[10px] text-red-500">Unavailable</p>
@@ -250,6 +252,7 @@ export default function POSPage() {
                 className="bg-white rounded-xl p-3 shadow-sm border border-gray-100"
               >
                 <div className="flex items-center gap-3">
+                  <ProductImage src={item.image_url} alt={item.name} size="md" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
                     <div className="flex items-center gap-2 mt-0.5">

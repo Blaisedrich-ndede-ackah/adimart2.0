@@ -11,6 +11,7 @@ import { generatePaystackReference, initializePaystack, isPaystackConfigured, is
 import { isPrinterConnected } from '@/lib/bluetoothPeripherals';
 import { printReceipt, type ReceiptData } from '@/lib/printService';
 import { shareReceipt, downloadReceipt, shareViaWhatsApp, PDFReceiptData } from '@/lib/receiptGenerator';
+import ProductImage from '@/components/ProductImage';
 
 interface CheckoutOverlayProps {
   isOpen: boolean;
@@ -308,6 +309,18 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
         <div className="p-5">
           {step !== 'success' && step !== 'processing' && step !== 'paystack' && (
             <div className="bg-gray-50 rounded-xl p-4 mb-5">
+              <div className="space-y-2 mb-3 max-h-36 overflow-y-auto">
+                {cart.items.map((item) => (
+                  <div key={item.id} className="flex items-center gap-2">
+                    <ProductImage src={item.image_url} alt={item.name} size="sm" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-gray-800 truncate">{item.name}</p>
+                      <p className="text-[10px] text-gray-500">×{item.quantity}</p>
+                    </div>
+                    <p className="text-xs font-semibold text-gray-800">GH₵{item.subtotal.toFixed(2)}</p>
+                  </div>
+                ))}
+              </div>
               <div className="flex justify-between text-sm text-gray-600 mb-1">
                 <span>Subtotal ({cart.items.length} items)</span>
                 <span>GH₵{cart.subtotal.toFixed(2)}</span>

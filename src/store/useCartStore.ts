@@ -10,6 +10,7 @@ export interface CartItem {
   quantity: number;
   subtotal: number;
   available_stock: number;
+  image_url?: string;
 }
 
 interface CartState {
@@ -99,7 +100,8 @@ export const useCartStore = create<CartState>((set, get) => ({
               ...i, 
               quantity: i.quantity + 1, 
               subtotal: (i.quantity + 1) * i.unit_price,
-              available_stock: product.stock_level
+              available_stock: product.stock_level,
+              image_url: product.image_url || i.image_url || '',
             }
           : i
       );
@@ -114,6 +116,7 @@ export const useCartStore = create<CartState>((set, get) => ({
           quantity: 1,
           subtotal: product.selling_price,
           available_stock: product.stock_level,
+          image_url: product.image_url || '',
         },
       ];
     }

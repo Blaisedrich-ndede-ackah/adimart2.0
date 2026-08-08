@@ -1,10 +1,12 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { X, Camera, Save, AlertTriangle, StopCircle, ScanBarcode, Bluetooth } from 'lucide-react';
+import { X, Camera, Save, AlertTriangle, StopCircle, ScanBarcode, Bluetooth, ImagePlus, Trash2 } from 'lucide-react';
 import { BrowserMultiFormatReader, NotFoundException } from '@zxing/library';
 import { db, generateId, LocalProduct, getCurrentStoreId } from '@/lib/dexie';
 import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 import { playScanBeep } from '@/lib/scanBeep';
 import { getBluetoothHardwareStatus } from '@/lib/bluetoothPeripherals';
+import { fileToProductImageDataUrl } from '@/lib/productImage';
+import ProductImage from '@/components/ProductImage';
 
 interface AddProductProps {
   isOpen: boolean;
@@ -31,10 +33,13 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
   const [scannerReady, setScannerReady] = useState(false);
   const [scanPulse, setScanPulse] = useState(false);
   const [hardwareHint, setHardwareHint] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
+  const [imageBusy, setImageBusy] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const barcodeInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const stopCameraScanner = useCallback(() => {
     if (readerRef.current) {
@@ -64,6 +69,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         setSellingPrice(editProduct.selling_price.toString());
         setStockLevel(editProduct.stock_level.toString());
         setSkuType(editProduct.sku_type);
+        setImageUrl(editProduct.image_url || '');
       } else {
         setName('');
         setCategory('Food');
@@ -72,9 +78,11 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         setSellingPrice('');
         setStockLevel('');
         setSkuType('unit');
+        setImageUrl('');
       }
       setError('');
       setScanPulse(Boolean(initialBarcode?.trim()));
+      setImageBusy(false);
       stopCameraScanner();
 
       // Focus barcode field so handheld HID scanners type/submit directly into inventory entry
@@ -158,6 +166,20 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
     };
   }, []);
 
+  const handleImagePick = async (file: File | null) => {
+    if (!file) return;
+    setImageBusy(true);
+    setError('');
+    try {
+      const dataUrl = await fileToProductImageDataUrl(file);
+      setImageUrl(dataUrl);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to process image');
+    }
+    setImageBusy(false);
+    if (imageInputRef.current) imageInputRef.current.value = '';
+  };
+
   const handleSave = async () => {
     setError('');
 
@@ -197,6 +219,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           selling_price: parseFloat(sellingPrice),
           stock_level: parseInt(stockLevel),
           sku_type: skuType,
+          image_url: imageUrl || '',
           updated_at: now,
           synced: 0,
         });
@@ -212,6 +235,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           selling_price: parseFloat(sellingPrice),
           stock_level: parseInt(stockLevel),
           is_active: 1,
+          image_url: imageUrl || '',
           created_at: now,
           updated_at: now,
           synced: 0,
@@ -253,6 +277,48 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
               {error}
             </div>
           )}
+
+          {/* Optional product photo */}
+          <div className="rounded-xl border border-gray-200 p-3">
+            <div className="flex items-center gap-3">
+              <ProductImage src={imageUrl} alt={name || 'Product'} size="lg" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-gray-900">Product photo</p>
+                <p className="text-[11px] text-gray-500 mt-0.5">
+                  Optional — shown in inventory and at checkout
+                </p>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => imageInputRef.current?.click()}
+                    disabled={imageBusy}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 bg-primary/10 text-primary rounded-lg text-xs font-medium touch-target disabled:opacity-50"
+                  >
+                    <ImagePlus className="w-3.5 h-3.5" />
+                    {imageBusy ? 'Processing…' : imageUrl ? 'Change photo' : 'Add photo'}
+                  </button>
+                  {imageUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setImageUrl('')}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 bg-red-50 text-red-600 rounded-lg text-xs font-medium touch-target"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={(e) => void handleImagePick(e.target.files?.[0] || null)}
+            />
+          </div>
 
           {/* Handheld scanner is primary for inventory barcode entry */}
           <div
