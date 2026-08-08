@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS stores (
   subscription_started_at TIMESTAMPTZ,
   subscription_expires_at TIMESTAMPTZ,
   subscription_months_granted INTEGER DEFAULT 0,
+  logo_url TEXT DEFAULT '',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );

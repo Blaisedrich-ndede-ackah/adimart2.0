@@ -5,6 +5,7 @@ import { autoReconnectPeripherals } from '@/lib/bluetoothPeripherals';
 import { isAdminSessionActive, clearAdminSession } from '@/lib/adminAuth';
 import PWAInstallBanner from '@/components/PWAInstallBanner';
 import SubscriptionWarningBanner from '@/components/SubscriptionWarningBanner';
+import StoreBrandingBar from '@/components/StoreBrandingBar';
 import BottomNav from '@/components/BottomNav';
 import StoreSetupPage from '@/pages/StoreSetupPage';
 import LoginPage from '@/pages/LoginPage';
@@ -135,6 +136,7 @@ export default function App() {
     <div className="h-screen flex flex-col">
       <PWAInstallBanner />
       <SubscriptionWarningBanner />
+      <StoreBrandingBar />
       <div className="flex-1 overflow-hidden">
         {renderPage()}
       </div>
