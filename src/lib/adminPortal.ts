@@ -10,6 +10,7 @@ import {
   getSubscriptionInfo,
   type SubscriptionStatus,
 } from './subscription';
+import { notifySubscriptionActivated, resolveStoreOwnerPhone } from './mnotify';
 
 export interface AdminStoreRow {
   id: string;
@@ -448,12 +449,28 @@ export async function grantStoreSubscription(
   const { error: grantError } = await supabase.from('subscription_grants').insert(grantPayload);
   if (grantError) {
     // Store was updated; surface grant-history failure but treat grant as applied
+    void notifySubscriptionActivated({
+      storeId: store.id,
+      storeName: store.name,
+      ownerPhone: resolveStoreOwnerPhone(store),
+      months,
+      expiresAt: periodEnd,
+    });
     return {
       success: true,
       expiresAt: periodEnd,
       error: `Subscription saved, but grant history failed: ${grantError.message}`,
     };
   }
+
+  // Alert store owner via mNotify SMS (soft-fail if not configured)
+  void notifySubscriptionActivated({
+    storeId: store.id,
+    storeName: store.name,
+    ownerPhone: resolveStoreOwnerPhone(store),
+    months,
+    expiresAt: periodEnd,
+  });
 
   return { success: true, expiresAt: periodEnd };
 }

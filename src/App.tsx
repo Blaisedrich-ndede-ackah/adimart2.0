@@ -16,8 +16,10 @@ import ReportsPage from '@/pages/ReportsPage';
 import SettingsPage from '@/pages/SettingsPage';
 import DevicesPage from '@/pages/DevicesPage';
 import TransactionsPage from '@/pages/TransactionsPage';
+import SubscriptionPage from '@/pages/SubscriptionPage';
 import AdminLoginPage from '@/pages/AdminLoginPage';
 import AdminDashboardPage from '@/pages/AdminDashboardPage';
+import { checkAndSendSubscriptionExpirySms } from '@/lib/subscriptionReminders';
 
 type AppMode = 'store' | 'admin-login' | 'admin';
 
@@ -41,6 +43,13 @@ export default function App() {
       setCurrentPage('pos');
     }
   }, [currentUser, currentPage]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    void checkAndSendSubscriptionExpirySms();
+    const timer = window.setInterval(() => void checkAndSendSubscriptionExpirySms(), 6 * 60 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [isAuthenticated]);
 
   if (appMode === 'admin-login') {
     return (
@@ -121,6 +130,8 @@ export default function App() {
         return <TransactionsPage />;
       case 'devices':
         return <DevicesPage />;
+      case 'subscription':
+        return <SubscriptionPage />;
       case 'inventory':
         return role === 'owner' ? <InventoryPage /> : <POSPage />;
       case 'reports':
@@ -135,7 +146,7 @@ export default function App() {
   return (
     <div className="h-screen flex flex-col">
       <PWAInstallBanner />
-      <SubscriptionWarningBanner />
+      <SubscriptionWarningBanner onOpenPlan={() => setCurrentPage('subscription')} />
       <StoreBrandingBar />
       <div className="flex-1 overflow-hidden">
         {renderPage()}

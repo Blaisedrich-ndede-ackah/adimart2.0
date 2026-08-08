@@ -1,4 +1,4 @@
-import { ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt } from 'lucide-react';
+import { ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, CalendarClock } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
 
 interface BottomNavProps {
@@ -14,6 +14,7 @@ export default function BottomNav({ currentPage, onNavigate }: BottomNavProps) {
     { id: 'pos', label: 'POS', icon: ScanBarcode, show: true },
     { id: 'transactions', label: isOwner ? 'Sales' : 'My Sales', icon: Receipt, show: true },
     { id: 'devices', label: 'Devices', icon: Bluetooth, show: true },
+    { id: 'subscription', label: 'Plan', icon: CalendarClock, show: true },
     { id: 'inventory', label: 'Inventory', icon: Package, show: isOwner },
     { id: 'reports', label: 'Reports', icon: BarChart3, show: isOwner },
     { id: 'settings', label: 'Settings', icon: Settings, show: isOwner },
