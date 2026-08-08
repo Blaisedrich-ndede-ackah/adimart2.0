@@ -1,8 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { X, Camera, Save, AlertTriangle, StopCircle } from 'lucide-react';
+import { X, Camera, Save, AlertTriangle, StopCircle, ScanBarcode, Bluetooth } from 'lucide-react';
 import { BrowserMultiFormatReader, NotFoundException } from '@zxing/library';
 import { db, generateId, LocalProduct, getCurrentStoreId } from '@/lib/dexie';
 import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
+import { playScanBeep } from '@/lib/scanBeep';
+import { getBluetoothHardwareStatus } from '@/lib/bluetoothPeripherals';
 
 interface AddProductProps {
   isOpen: boolean;
@@ -13,7 +15,7 @@ interface AddProductProps {
   initialBarcode?: string | null;
 }
 
-const CATEGORIES = ['Food', 'Beverages', 'Dairy', 'Household', 'Electronics', 'Clothing', 'Health', 'Other'];
+const CATEGORIES = ['Food', 'Beverages', 'Dairy', 'Household', 'Electronics', 'Clothing', 'Health', 'Accessories', 'Other'];
 
 export default function AddProduct({ isOpen, onClose, onSaved, editProduct, initialBarcode }: AddProductProps) {
   const [name, setName] = useState('');
@@ -25,14 +27,35 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
   const [skuType, setSkuType] = useState('unit');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
+  const [showCameraScanner, setShowCameraScanner] = useState(false);
   const [scannerReady, setScannerReady] = useState(false);
-  
+  const [scanPulse, setScanPulse] = useState(false);
+  const [hardwareHint, setHardwareHint] = useState('');
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+  const barcodeInputRef = useRef<HTMLInputElement>(null);
+
+  const stopCameraScanner = useCallback(() => {
+    if (readerRef.current) {
+      readerRef.current.reset();
+      readerRef.current = null;
+    }
+    setShowCameraScanner(false);
+    setScannerReady(false);
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
+      const hw = getBluetoothHardwareStatus();
+      if (hw.scannerConnected) {
+        setHardwareHint(`BLE scanner ready: ${hw.scannerName}`);
+      } else if (hw.hidScannerEnabled) {
+        setHardwareHint('Point your handheld scanner at a barcode — no camera needed');
+      } else {
+        setHardwareHint('Enable HID Scanner Input in Settings → Bluetooth Hardware');
+      }
+
       if (editProduct) {
         setName(editProduct.name);
         setCategory(editProduct.category);
@@ -51,16 +74,34 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         setSkuType('unit');
       }
       setError('');
-      setShowBarcodeScanner(false);
-    }
-  }, [isOpen, editProduct, initialBarcode]);
+      setScanPulse(Boolean(initialBarcode?.trim()));
+      stopCameraScanner();
 
-  useBluetoothBarcodeInput(
-    (code) => {
-      setBarcode(code);
-    },
-    isOpen && !showBarcodeScanner
-  );
+      // Focus barcode field so handheld HID scanners type/submit directly into inventory entry
+      requestAnimationFrame(() => {
+        barcodeInputRef.current?.focus();
+        barcodeInputRef.current?.select();
+      });
+    }
+  }, [isOpen, editProduct, initialBarcode, stopCameraScanner]);
+
+  const applyHandheldBarcode = useCallback((code: string) => {
+    const cleaned = code.trim();
+    if (!cleaned) return;
+    setBarcode(cleaned);
+    setScanPulse(true);
+    playScanBeep('success');
+    stopCameraScanner();
+    // Keep focus on barcode so the next scan overwrites cleanly
+    requestAnimationFrame(() => {
+      barcodeInputRef.current?.focus();
+      barcodeInputRef.current?.select();
+    });
+    setTimeout(() => setScanPulse(false), 1500);
+  }, [stopCameraScanner]);
+
+  // Handheld Bluetooth / HID scanner is the primary inventory barcode input
+  useBluetoothBarcodeInput(applyHandheldBarcode, isOpen);
 
   const profitMargin = (() => {
     const cost = parseFloat(costPrice);
@@ -69,18 +110,18 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
     return ((sell - cost) / cost * 100).toFixed(1);
   })();
 
-  const startBarcodeScanner = useCallback(async () => {
-    setShowBarcodeScanner(true);
+  const startCameraScanner = useCallback(async () => {
+    setShowCameraScanner(true);
     setScannerReady(false);
-    
+
     try {
       const reader = new BrowserMultiFormatReader();
       readerRef.current = reader;
 
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoDevices = devices.filter(d => d.kind === 'videoinput');
-      const backCamera = videoDevices.find(d => 
-        d.label.toLowerCase().includes('back') || 
+      const backCamera = videoDevices.find(d =>
+        d.label.toLowerCase().includes('back') ||
         d.label.toLowerCase().includes('rear') ||
         d.label.toLowerCase().includes('environment')
       );
@@ -93,30 +134,21 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         videoRef.current,
         (result, err) => {
           if (result) {
-            setBarcode(result.getText());
-            stopBarcodeScanner();
+            applyHandheldBarcode(result.getText());
           }
           if (err && !(err instanceof NotFoundException)) {
             console.debug('Scan error:', err);
           }
         }
       );
-      
+
       setScannerReady(true);
     } catch (err) {
       console.error('Camera error:', err);
-      setShowBarcodeScanner(false);
+      setShowCameraScanner(false);
+      setError('Camera unavailable. Use a handheld Bluetooth scanner or type the barcode.');
     }
-  }, []);
-
-  const stopBarcodeScanner = useCallback(() => {
-    if (readerRef.current) {
-      readerRef.current.reset();
-      readerRef.current = null;
-    }
-    setShowBarcodeScanner(false);
-    setScannerReady(false);
-  }, []);
+  }, [applyHandheldBarcode]);
 
   useEffect(() => {
     return () => {
@@ -128,26 +160,26 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
 
   const handleSave = async () => {
     setError('');
-    
-    if (!name.trim()) { 
-      setError('Product name is required'); 
-      return; 
+
+    if (!name.trim()) {
+      setError('Product name is required');
+      return;
     }
-    if (!costPrice || parseFloat(costPrice) < 0) { 
-      setError('Enter a valid cost price'); 
-      return; 
+    if (!costPrice || parseFloat(costPrice) < 0) {
+      setError('Enter a valid cost price');
+      return;
     }
-    if (!sellingPrice || parseFloat(sellingPrice) < 0) { 
-      setError('Enter a valid selling price'); 
-      return; 
+    if (!sellingPrice || parseFloat(sellingPrice) < 0) {
+      setError('Enter a valid selling price');
+      return;
     }
-    if (!stockLevel || parseInt(stockLevel) < 0) { 
-      setError('Enter a valid stock level'); 
-      return; 
+    if (!stockLevel || parseInt(stockLevel) < 0) {
+      setError('Enter a valid stock level');
+      return;
     }
 
     setSaving(true);
-    
+
     try {
       const storeId = await getCurrentStoreId();
       if (!storeId) {
@@ -155,7 +187,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
       }
 
       const now = new Date().toISOString();
-      
+
       if (editProduct) {
         await db.products.update(editProduct.id, {
           name: name.trim(),
@@ -185,18 +217,18 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           synced: 0,
         });
       }
-      
+
       onSaved();
       onClose();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to save product');
     }
-    
+
     setSaving(false);
   };
 
   const handleClose = () => {
-    stopBarcodeScanner();
+    stopCameraScanner();
     onClose();
   };
 
@@ -219,6 +251,94 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-center gap-2 text-sm">
               <AlertTriangle className="w-4 h-4 flex-shrink-0" />
               {error}
+            </div>
+          )}
+
+          {/* Handheld scanner is primary for inventory barcode entry */}
+          <div
+            className={`rounded-xl border px-4 py-3 ${
+              scanPulse
+                ? 'border-primary bg-primary/5'
+                : 'border-blue-100 bg-blue-50'
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <div className={`mt-0.5 w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
+                scanPulse ? 'bg-primary text-white' : 'bg-blue-100 text-blue-700'
+              }`}>
+                {scanPulse ? <ScanBarcode className="w-4 h-4" /> : <Bluetooth className="w-4 h-4" />}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-gray-900">
+                  {scanPulse ? 'Barcode captured' : 'Handheld scanner ready'}
+                </p>
+                <p className="text-xs text-gray-600 mt-0.5">
+                  {scanPulse
+                    ? `Using ${barcode}`
+                    : hardwareHint}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-gray-700 mb-1.5 block">Barcode</label>
+            <input
+              ref={barcodeInputRef}
+              type="text"
+              value={barcode}
+              onChange={e => setBarcode(e.target.value)}
+              placeholder="Scan with handheld scanner or type barcode"
+              data-barcode-input="true"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              className={`w-full px-4 py-3 border rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none font-mono ${
+                scanPulse ? 'border-primary bg-primary/5' : 'border-gray-300'
+              }`}
+            />
+            <div className="flex items-center justify-between mt-2 gap-2">
+              <p className="text-[11px] text-gray-500">
+                Scan first, then fill name, prices, and stock.
+              </p>
+              <button
+                type="button"
+                onClick={showCameraScanner ? stopCameraScanner : startCameraScanner}
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium touch-target ${
+                  showCameraScanner
+                    ? 'bg-red-50 text-red-600'
+                    : 'bg-gray-100 text-gray-600'
+                }`}
+              >
+                {showCameraScanner ? <StopCircle className="w-3.5 h-3.5" /> : <Camera className="w-3.5 h-3.5" />}
+                {showCameraScanner ? 'Stop camera' : 'Use camera'}
+              </button>
+            </div>
+          </div>
+
+          {showCameraScanner && (
+            <div className="bg-black rounded-xl overflow-hidden relative animate-fade-in">
+              <video
+                ref={videoRef}
+                className="w-full h-36 object-cover"
+                playsInline
+                muted
+                autoPlay
+              />
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="w-48 h-20 border-2 border-accent rounded-lg relative">
+                  <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-accent rounded-tl" />
+                  <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-accent rounded-tr" />
+                  <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-accent rounded-bl" />
+                  <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-accent rounded-br" />
+                  {scannerReady && (
+                    <div className="absolute inset-x-2 top-1/2 h-0.5 bg-red-500 animate-pulse" />
+                  )}
+                </div>
+              </div>
+              <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-1 rounded text-[10px] text-white">
+                {scannerReady ? 'Point camera at barcode' : 'Starting camera...'}
+              </div>
             </div>
           )}
 
@@ -255,61 +375,12 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
                 <option value="bag">Bag</option>
                 <option value="box">Box</option>
                 <option value="pack">Pack</option>
+                <option value="peaces">Peaces</option>
                 <option value="kg">Kilogram</option>
                 <option value="liter">Liter</option>
               </select>
             </div>
           </div>
-
-          <div>
-            <label className="text-sm font-medium text-gray-700 mb-1.5 block">Barcode</label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={barcode}
-                onChange={e => setBarcode(e.target.value)}
-                placeholder="Scan handheld or enter manually"
-                data-barcode-input="true"
-                className="flex-1 px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
-              />
-              <button
-                onClick={showBarcodeScanner ? stopBarcodeScanner : startBarcodeScanner}
-                className={`px-4 py-3 rounded-xl touch-target ${
-                  showBarcodeScanner 
-                    ? 'bg-red-500 text-white' 
-                    : 'bg-primary text-white'
-                }`}
-              >
-                {showBarcodeScanner ? <StopCircle className="w-5 h-5" /> : <Camera className="w-5 h-5" />}
-              </button>
-            </div>
-          </div>
-
-          {showBarcodeScanner && (
-            <div className="bg-black rounded-xl overflow-hidden relative animate-fade-in">
-              <video 
-                ref={videoRef} 
-                className="w-full h-36 object-cover" 
-                playsInline 
-                muted 
-                autoPlay 
-              />
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-48 h-20 border-2 border-accent rounded-lg relative">
-                  <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-accent rounded-tl" />
-                  <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-accent rounded-tr" />
-                  <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-accent rounded-bl" />
-                  <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-accent rounded-br" />
-                  {scannerReady && (
-                    <div className="absolute inset-x-2 top-1/2 h-0.5 bg-red-500 animate-pulse" />
-                  )}
-                </div>
-              </div>
-              <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-1 rounded text-[10px] text-white">
-                {scannerReady ? 'Point at barcode' : 'Starting camera...'}
-              </div>
-            </div>
-          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
