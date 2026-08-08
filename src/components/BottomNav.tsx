@@ -1,4 +1,4 @@
-import { ScanBarcode, Package, BarChart3, Settings, LogOut } from 'lucide-react';
+import { ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
 
 interface BottomNavProps {
@@ -12,6 +12,8 @@ export default function BottomNav({ currentPage, onNavigate }: BottomNavProps) {
 
   const navItems = [
     { id: 'pos', label: 'POS', icon: ScanBarcode, show: true },
+    { id: 'transactions', label: isOwner ? 'Sales' : 'My Sales', icon: Receipt, show: true },
+    { id: 'devices', label: 'Devices', icon: Bluetooth, show: true },
     { id: 'inventory', label: 'Inventory', icon: Package, show: isOwner },
     { id: 'reports', label: 'Reports', icon: BarChart3, show: isOwner },
     { id: 'settings', label: 'Settings', icon: Settings, show: isOwner },
@@ -19,7 +21,7 @@ export default function BottomNav({ currentPage, onNavigate }: BottomNavProps) {
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-      <div className="flex items-center justify-around px-1 py-1">
+      <div className="flex items-center justify-around px-0.5 py-1 overflow-x-auto no-scrollbar">
         {navItems.map(item => {
           const Icon = item.icon;
           const isActive = currentPage === item.id;
@@ -27,14 +29,14 @@ export default function BottomNav({ currentPage, onNavigate }: BottomNavProps) {
             <button
               key={item.id}
               onClick={() => onNavigate(item.id)}
-              className={`flex flex-col items-center justify-center py-2 px-3 rounded-lg touch-target flex-1 transition-colors ${
+              className={`flex flex-col items-center justify-center py-2 px-1.5 rounded-lg touch-target flex-1 min-w-0 transition-colors ${
                 isActive
                   ? 'text-primary bg-emerald-50'
                   : 'text-gray-500 hover:text-gray-700'
               }`}
             >
               <Icon className={`w-5 h-5 ${isActive ? 'stroke-[2.5]' : ''}`} />
-              <span className={`text-[10px] mt-0.5 ${isActive ? 'font-bold' : 'font-medium'}`}>
+              <span className={`text-[9px] mt-0.5 truncate max-w-full ${isActive ? 'font-bold' : 'font-medium'}`}>
                 {item.label}
               </span>
             </button>
@@ -42,10 +44,10 @@ export default function BottomNav({ currentPage, onNavigate }: BottomNavProps) {
         })}
         <button
           onClick={switchUser}
-          className="flex flex-col items-center justify-center py-2 px-3 rounded-lg touch-target flex-1 text-gray-500 hover:text-red-500 transition-colors"
+          className="flex flex-col items-center justify-center py-2 px-1.5 rounded-lg touch-target flex-1 min-w-0 text-gray-500 hover:text-red-500 transition-colors"
         >
           <LogOut className="w-5 h-5" />
-          <span className="text-[10px] mt-0.5 font-medium">Switch</span>
+          <span className="text-[9px] mt-0.5 font-medium">Switch</span>
         </button>
       </div>
     </nav>

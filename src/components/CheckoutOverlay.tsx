@@ -6,7 +6,6 @@ import {
 } from 'lucide-react';
 import { useCartStore, CartItem } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
-import { LocalStore } from '@/lib/dexie';
 import { generatePaystackReference, initializePaystack, isPaystackConfigured, isValidPaystackEmail, resolvePaystackEmail } from '@/lib/paystack';
 import { isPrinterConnected } from '@/lib/bluetoothPeripherals';
 import { printReceipt, type ReceiptData } from '@/lib/printService';
@@ -48,9 +47,17 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
   const [printError, setPrintError] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
   const [paystackError, setPaystackError] = useState('');
+  const [discountMode, setDiscountMode] = useState<'percentage' | 'fixed'>('percentage');
+  const [pendingDiscountKind, setPendingDiscountKind] = useState<'percentage' | 'fixed'>('percentage');
+  const [pendingDiscountValue, setPendingDiscountValue] = useState(0);
 
   const discountCap = currentStore?.discount_cap_percentage ?? 10;
   const pinOnDiscount = currentStore?.pin_on_discount_enabled === 1;
+  const allowPercentage = (currentStore?.discount_allow_percentage ?? 1) === 1;
+  const allowFixed = (currentStore?.discount_allow_fixed ?? 1) === 1;
+  const cashierCanDiscount = (currentStore?.cashier_can_discount ?? 1) === 1;
+  const isOwner = currentUser?.role === 'owner';
+  const canApplyDiscount = isOwner || cashierCanDiscount;
 
   useEffect(() => {
     if (isOpen) {
@@ -64,8 +71,11 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
       setPaystackError('');
       setPrintError('');
       setCustomerEmail('');
+      setDiscountMode(allowPercentage ? 'percentage' : 'fixed');
+      setPendingDiscountKind('percentage');
+      setPendingDiscountValue(0);
     }
-  }, [isOpen]);
+  }, [isOpen, allowPercentage]);
 
   function buildReceiptData(result: SaleResult, method: 'cash' | 'split' | 'paystack', cashAmt?: number, paystackAmt?: number, paystackRef?: string): PDFReceiptData {
     return {
@@ -91,20 +101,53 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
     };
   }
 
+  function discountExceedsCap(kind: 'percentage' | 'fixed', value: number): boolean {
+    if (kind === 'percentage') return value > discountCap;
+    const capAmount = (cart.subtotal * discountCap) / 100;
+    return value > capAmount + 0.001;
+  }
+
   async function handleDiscountApply() {
-    const percent = parseFloat(discountInput);
-    if (isNaN(percent) || percent < 0) {
-      setError('Enter a valid discount percentage');
+    setError('');
+    const value = parseFloat(discountInput);
+    if (isNaN(value) || value < 0) {
+      setError(discountMode === 'percentage' ? 'Enter a valid discount percentage' : 'Enter a valid discount amount');
+      return;
+    }
+    if (discountMode === 'percentage' && value > 100) {
+      setError('Percentage cannot exceed 100%');
+      return;
+    }
+    if (discountMode === 'fixed' && value > cart.subtotal) {
+      setError('Fixed discount cannot exceed the subtotal');
       return;
     }
 
-    if (percent > discountCap && pinOnDiscount) {
-      cart.setDiscount(percent);
+    if (discountExceedsCap(discountMode, value) && pinOnDiscount && !isOwner) {
+      setPendingDiscountKind(discountMode);
+      setPendingDiscountValue(value);
+      if (discountMode === 'percentage') cart.setDiscountPercent(value);
+      else cart.setDiscountFixed(value);
       setStep('pin-verify');
       return;
     }
 
-    cart.setDiscount(Math.min(percent, discountCap));
+    if (discountExceedsCap(discountMode, value) && pinOnDiscount && isOwner) {
+      // Owners still confirm with PIN when over cap if PIN enforcement is on
+      setPendingDiscountKind(discountMode);
+      setPendingDiscountValue(value);
+      if (discountMode === 'percentage') cart.setDiscountPercent(value);
+      else cart.setDiscountFixed(value);
+      setStep('pin-verify');
+      return;
+    }
+
+    if (discountMode === 'percentage') {
+      cart.setDiscountPercent(Math.min(value, pinOnDiscount ? 100 : discountCap));
+    } else {
+      const capAmount = (cart.subtotal * discountCap) / 100;
+      cart.setDiscountFixed(pinOnDiscount ? value : Math.min(value, capAmount));
+    }
     setStep('method');
   }
 
@@ -112,6 +155,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
     const isValid = await verifyOwnerPin(pinInput);
     if (isValid) {
       setPinError('');
+      if (pendingDiscountKind === 'percentage') cart.setDiscountPercent(pendingDiscountValue);
+      else cart.setDiscountFixed(pendingDiscountValue);
       setStep('method');
     } else {
       setPinError('Invalid owner PIN');
@@ -120,7 +165,11 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
   }
 
   async function handlePinReject() {
-    cart.setDiscount(discountCap);
+    if (pendingDiscountKind === 'percentage') {
+      cart.setDiscountPercent(discountCap);
+    } else {
+      cart.setDiscountFixed((cart.subtotal * discountCap) / 100);
+    }
     setStep('method');
   }
 
@@ -327,7 +376,14 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
               </div>
               {cart.discountAmount > 0 && (
                 <div className="flex justify-between text-sm text-red-500 mb-1">
-                  <span>Discount ({cart.discountPercent}%)</span>
+                  <span>
+                    Discount
+                    {cart.discountKind === 'percentage'
+                      ? ` (${cart.discountPercent}%)`
+                      : cart.discountKind === 'fixed'
+                        ? ' (fixed)'
+                        : ''}
+                  </span>
                   <span>-GH₵{cart.discountAmount.toFixed(2)}</span>
                 </div>
               )}
@@ -347,20 +403,35 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
 
           {step === 'method' && (
             <div className="space-y-3">
-              <button
-                onClick={() => { setDiscountInput(String(cart.discountPercent || '')); setStep('discount'); }}
-                className="w-full flex items-center gap-3 p-4 rounded-xl border border-gray-200 hover:border-accent hover:bg-amber-50 transition touch-target"
-              >
-                <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
-                  <Percent className="w-5 h-5 text-accent" />
-                </div>
-                <div className="text-left flex-1">
-                  <p className="font-semibold text-gray-900">Apply Discount</p>
-                  <p className="text-xs text-gray-500">
-                    {cart.discountPercent > 0 ? `${cart.discountPercent}% applied` : 'No discount applied'}
-                  </p>
-                </div>
-              </button>
+              {canApplyDiscount && (allowPercentage || allowFixed) && (
+                <button
+                  onClick={() => {
+                    const mode = allowPercentage ? 'percentage' : 'fixed';
+                    setDiscountMode(mode);
+                    setDiscountInput(
+                      mode === 'percentage'
+                        ? String(cart.discountKind === 'percentage' ? cart.discountPercent || '' : '')
+                        : String(cart.discountKind === 'fixed' ? cart.discountFixed || '' : '')
+                    );
+                    setStep('discount');
+                  }}
+                  className="w-full flex items-center gap-3 p-4 rounded-xl border border-gray-200 hover:border-accent hover:bg-amber-50 transition touch-target"
+                >
+                  <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
+                    <Percent className="w-5 h-5 text-accent" />
+                  </div>
+                  <div className="text-left flex-1">
+                    <p className="font-semibold text-gray-900">Apply Discount</p>
+                    <p className="text-xs text-gray-500">
+                      {cart.discountAmount > 0
+                        ? cart.discountKind === 'fixed'
+                          ? `GH₵${cart.discountAmount.toFixed(2)} off`
+                          : `${cart.discountPercent}% applied`
+                        : 'Percentage or fixed amount'}
+                    </p>
+                  </div>
+                </button>
+              )}
 
               <button
                 onClick={handleCashSale}
@@ -428,8 +499,32 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
 
           {step === 'discount' && (
             <div className="space-y-4">
+              {allowPercentage && allowFixed && (
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setDiscountMode('percentage'); setDiscountInput(''); }}
+                    className={`py-2.5 rounded-xl text-sm font-semibold touch-target ${
+                      discountMode === 'percentage' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700'
+                    }`}
+                  >
+                    Percentage
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setDiscountMode('fixed'); setDiscountInput(''); }}
+                    className={`py-2.5 rounded-xl text-sm font-semibold touch-target ${
+                      discountMode === 'fixed' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700'
+                    }`}
+                  >
+                    Fixed amount
+                  </button>
+                </div>
+              )}
               <div>
-                <label className="text-sm font-medium text-gray-700 mb-2 block">Discount Percentage (%)</label>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">
+                  {discountMode === 'percentage' ? 'Discount Percentage (%)' : 'Discount Amount (GH₵)'}
+                </label>
                 <input
                   type="number"
                   value={discountInput}
@@ -437,13 +532,25 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
                   placeholder="0"
                   className="w-full px-4 py-3 border border-gray-300 rounded-xl text-lg font-semibold text-center focus:ring-2 focus:ring-primary focus:border-primary outline-none"
                   min="0"
-                  max="100"
+                  max={discountMode === 'percentage' ? 100 : undefined}
+                  step={discountMode === 'fixed' ? '0.01' : '1'}
                   autoFocus
                 />
                 <p className="text-xs text-gray-500 mt-2">
-                  Cap: {discountCap}%. Exceeding requires owner PIN.
+                  Cap: {discountCap}% of subtotal
+                  {discountMode === 'fixed' ? ` (GH₵${((cart.subtotal * discountCap) / 100).toFixed(2)})` : ''}.
+                  {pinOnDiscount ? ' Exceeding requires owner PIN.' : ''}
                 </p>
               </div>
+              {cart.discountAmount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => { cart.clearDiscount(); setDiscountInput(''); setStep('method'); }}
+                  className="w-full py-2.5 text-sm text-red-600 font-medium"
+                >
+                  Remove discount
+                </button>
+              )}
               <div className="flex gap-3">
                 <button
                   onClick={() => setStep('method')}

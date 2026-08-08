@@ -10,6 +10,12 @@ export interface LocalStore {
   support_number: string;
   discount_cap_percentage: number;
   pin_on_discount_enabled: number;
+  /** Allow percentage discounts at checkout (0/1) */
+  discount_allow_percentage?: number;
+  /** Allow fixed-amount discounts at checkout (0/1) */
+  discount_allow_fixed?: number;
+  /** Allow cashiers to apply discounts (0/1); owners always can */
+  cashier_can_discount?: number;
   /** Preferred Mobile Money account name for Paystack payouts */
   momo_account_name: string;
   /** Preferred Mobile Money number (e.g. 024XXXXXXX) */
@@ -207,6 +213,9 @@ export async function createStoreWithOwner(
     support_number: '',
     discount_cap_percentage: 10,
     pin_on_discount_enabled: 1,
+    discount_allow_percentage: 1,
+    discount_allow_fixed: 1,
+    cashier_can_discount: 1,
     momo_account_name: '',
     momo_number: '',
     momo_network: '',
@@ -232,7 +241,7 @@ export async function createStoreWithOwner(
   return { store, owner };
 }
 
-// Get all users for a store
+// Get active users for a store
 export async function getStoreUsers(storeId: string): Promise<LocalUser[]> {
   return db.users
     .where('store_id')
@@ -241,11 +250,22 @@ export async function getStoreUsers(storeId: string): Promise<LocalUser[]> {
     .toArray();
 }
 
-// Get all users for current store
+/** Active + blocked staff for owner management UI */
+export async function getAllStoreUsers(storeId: string): Promise<LocalUser[]> {
+  return db.users.where('store_id').equals(storeId).toArray();
+}
+
+// Get all users for current store (active only — login / staff pickers)
 export async function getCurrentStoreUsers(): Promise<LocalUser[]> {
   const storeId = await getCurrentStoreId();
   if (!storeId) return [];
   return getStoreUsers(storeId);
+}
+
+export async function getCurrentStoreUsersIncludingBlocked(): Promise<LocalUser[]> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) return [];
+  return getAllStoreUsers(storeId);
 }
 
 // Authenticate user by PIN within current store
@@ -302,14 +322,38 @@ export async function addUserToStore(
   return user;
 }
 
-// Deactivate a user
+// Block a user (cannot log in until unblocked)
 export async function deactivateUser(userId: string): Promise<void> {
   await db.users.update(userId, { is_active: 0, synced: 0 });
+}
+
+export async function activateUser(userId: string): Promise<void> {
+  await db.users.update(userId, { is_active: 1, synced: 0 });
 }
 
 // Delete a user
 export async function deleteUser(userId: string): Promise<void> {
   await db.users.delete(userId);
+}
+
+export async function getCurrentStoreTransactions(): Promise<LocalTransaction[]> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) return [];
+  return db.transactions.where('store_id').equals(storeId).toArray();
+}
+
+export async function getTransactionsForCashier(cashierId: string): Promise<LocalTransaction[]> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) return [];
+  return db.transactions
+    .where('store_id')
+    .equals(storeId)
+    .and((t) => t.cashier_id === cashierId)
+    .toArray();
+}
+
+export async function getTransactionItems(transactionId: string): Promise<LocalTransactionItem[]> {
+  return db.transaction_items.where('transaction_id').equals(transactionId).toArray();
 }
 
 // Get products for current store
@@ -361,13 +405,6 @@ export async function getProductByBarcode(barcode: string): Promise<LocalProduct
     .toArray();
   
   return products.length > 0 ? products[0] : null;
-}
-
-// Get transactions for current store
-export async function getCurrentStoreTransactions(): Promise<LocalTransaction[]> {
-  const storeId = await getCurrentStoreId();
-  if (!storeId) return [];
-  return db.transactions.where('store_id').equals(storeId).toArray();
 }
 
 export async function getCurrentStoreExpenses(): Promise<LocalExpense[]> {
@@ -533,6 +570,9 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
           support_number: store.support_number,
           discount_cap_percentage: store.discount_cap_percentage,
           pin_on_discount_enabled: store.pin_on_discount_enabled === 1,
+          discount_allow_percentage: (store.discount_allow_percentage ?? 1) === 1,
+          discount_allow_fixed: (store.discount_allow_fixed ?? 1) === 1,
+          cashier_can_discount: (store.cashier_can_discount ?? 1) === 1,
           momo_account_name: store.momo_account_name || '',
           momo_number: store.momo_number || '',
           momo_network: store.momo_network || '',
@@ -703,6 +743,9 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
         support_number: remoteStore.support_number || '',
         discount_cap_percentage: remoteStore.discount_cap_percentage ?? 10,
         pin_on_discount_enabled: remoteStore.pin_on_discount_enabled ? 1 : 0,
+        discount_allow_percentage: remoteStore.discount_allow_percentage === false ? 0 : 1,
+        discount_allow_fixed: remoteStore.discount_allow_fixed === false ? 0 : 1,
+        cashier_can_discount: remoteStore.cashier_can_discount === false ? 0 : 1,
         momo_account_name: remoteStore.momo_account_name || '',
         momo_number: remoteStore.momo_number || '',
         momo_network: remoteStore.momo_network || '',
