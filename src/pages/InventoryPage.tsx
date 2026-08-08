@@ -166,7 +166,7 @@ export default function InventoryPage() {
             <h1 className="text-white font-bold text-lg">Inventory</h1>
             <p className="text-emerald-200 text-[10px] flex items-center gap-1 mt-0.5">
               <Bluetooth className="w-3 h-3" />
-              Handheld scanner ready for stock logging
+              Scan to add products or adjust stock
             </p>
           </div>
           <div className="flex items-center gap-2">

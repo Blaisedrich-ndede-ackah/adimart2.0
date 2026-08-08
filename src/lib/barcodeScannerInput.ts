@@ -10,7 +10,8 @@ import { loadBluetoothPrefs, subscribeBleScanner } from './bluetoothPeripherals'
 
 export type BarcodeScanHandler = (barcode: string) => void;
 
-const HID_INTER_KEY_MS = 80;
+/** Many handheld scanners send keys slightly slower than 50ms; keep this forgiving. */
+const HID_INTER_KEY_MS = 140;
 const HID_MIN_LENGTH = 3;
 const DEDUPE_MS = 600;
 
@@ -22,6 +23,10 @@ let lastEmitted = { code: '', at: 0 };
 
 const handlers = new Set<BarcodeScanHandler>();
 let bleUnsubscribe: (() => void) | null = null;
+
+function isBarcodeInputElement(target: EventTarget | null): target is HTMLInputElement {
+  return target instanceof HTMLInputElement && target.dataset.barcodeInput === 'true';
+}
 
 function shouldIgnoreTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -67,6 +72,7 @@ function onKeyDown(event: KeyboardEvent): void {
   if (event.ctrlKey || event.altKey || event.metaKey) return;
   if (shouldIgnoreTarget(event.target)) return;
 
+  const barcodeField = isBarcodeInputElement(event.target);
   const now = Date.now();
   const gap = now - lastKeyAt;
   lastKeyAt = now;
@@ -77,10 +83,19 @@ function onKeyDown(event: KeyboardEvent): void {
   }
 
   if (event.key === 'Enter') {
-    if (hidBuffer.length >= HID_MIN_LENGTH && rapidKeyCount >= HID_MIN_LENGTH - 1) {
+    // Prefer buffer; when typing landed in a barcode field, fall back to its value
+    let code = hidBuffer;
+    if (code.length < HID_MIN_LENGTH && barcodeField) {
+      code = event.target.value || '';
+    }
+
+    const looksLikeScan =
+      code.length >= HID_MIN_LENGTH &&
+      (barcodeField || rapidKeyCount >= 1 || hidBuffer.length >= HID_MIN_LENGTH);
+
+    if (looksLikeScan) {
       event.preventDefault();
       event.stopPropagation();
-      const code = hidBuffer;
       hidBuffer = '';
       rapidKeyCount = 0;
       emitScan(code);
@@ -102,12 +117,13 @@ function onKeyDown(event: KeyboardEvent): void {
     if (gap > 0 && gap <= HID_INTER_KEY_MS) {
       rapidKeyCount += 1;
     }
-    // Suppress scanner keystrokes from leaking into focused search fields
+
+    // Keep scanner keystrokes out of unrelated focused fields (name, price, search, etc.)
     if (
-      rapidKeyCount >= 2 &&
-      hidBuffer.length >= HID_MIN_LENGTH &&
+      !barcodeField &&
+      rapidKeyCount >= 1 &&
+      hidBuffer.length >= 2 &&
       document.activeElement instanceof HTMLElement &&
-      document.activeElement.dataset.barcodeInput !== 'true' &&
       document.activeElement.dataset.allowTyping !== 'true'
     ) {
       event.preventDefault();
