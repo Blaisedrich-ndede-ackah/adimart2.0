@@ -13,7 +13,7 @@ interface AddProductProps {
   initialBarcode?: string | null;
 }
 
-const CATEGORIES = ['Food', 'Beverages', 'Dairy', 'Household', 'Electronics', 'Clothing', 'Health', 'Other'];
+const CATEGORIES = ['Food', 'Beverages', 'Dairy', 'Household', 'Electronics', 'Clothing', 'Health', 'Accessories', 'Other'];
 
 export default function AddProduct({ isOpen, onClose, onSaved, editProduct, initialBarcode }: AddProductProps) {
   const [name, setName] = useState('');
@@ -255,6 +255,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
                 <option value="bag">Bag</option>
                 <option value="box">Box</option>
                 <option value="pack">Pack</option>
+                <option value="peaces">Peaces</option>
                 <option value="kg">Kilogram</option>
                 <option value="liter">Liter</option>
               </select>

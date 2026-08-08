@@ -26,6 +26,9 @@ interface SaleResult {
   subtotal: number;
   discount: number;
   total: number;
+  paymentMethod?: 'cash' | 'split' | 'paystack';
+  cashAmount?: number;
+  paystackAmount?: number;
 }
 
 export default function CheckoutOverlay({ isOpen, onClose, onComplete }: CheckoutOverlayProps) {
@@ -41,6 +44,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
   const [error, setError] = useState('');
   const [isPrinting, setIsPrinting] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
+  const [printError, setPrintError] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
   const [paystackError, setPaystackError] = useState('');
 
@@ -57,6 +61,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
       setSaleResult(null);
       setError('');
       setPaystackError('');
+      setPrintError('');
       setCustomerEmail('');
     }
   }, [isOpen]);
@@ -138,11 +143,17 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
         paystackRef
       );
       
-      setSaleResult(result);
+      const completed: SaleResult = {
+        ...result,
+        paymentMethod: method,
+        cashAmount: cashAmt,
+        paystackAmount: paystackAmt,
+      };
+      setSaleResult(completed);
       setStep('success');
 
       if (isPrinterConnected() && currentStore) {
-        await tryPrintReceipt(result, method, cashAmt, paystackAmt);
+        await tryPrintReceipt(completed, method, cashAmt, paystackAmt);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -151,18 +162,38 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
     }
   }
 
-  async function tryPrintReceipt(result: SaleResult, method: 'cash' | 'split' | 'paystack', cashAmt?: number, paystackAmt?: number) {
+  async function tryPrintReceipt(
+    result: SaleResult,
+    method: 'cash' | 'split' | 'paystack',
+    cashAmt?: number,
+    paystackAmt?: number
+  ) {
     if (!currentStore) return;
     setIsPrinting(true);
-    
+    setPrintError('');
+
     try {
       const receiptData: ReceiptData = buildReceiptData(result, method, cashAmt, paystackAmt);
-      await printReceipt(receiptData);
-    } catch {
-      // Printing failed silently
+      const printResult = await printReceipt(receiptData);
+      if (!printResult.success) {
+        setPrintError(printResult.error || 'Print failed');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setPrintError(msg || 'Print failed');
     }
-    
+
     setIsPrinting(false);
+  }
+
+  async function handlePrintReceipt() {
+    if (!saleResult) return;
+    await tryPrintReceipt(
+      saleResult,
+      saleResult.paymentMethod || 'cash',
+      saleResult.cashAmount,
+      saleResult.paystackAmount
+    );
   }
 
   async function handleShareReceipt() {
@@ -538,7 +569,15 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
                 </div>
               )}
 
-              <div className="w-full grid grid-cols-3 gap-2 mb-4">
+              <div className="w-full grid grid-cols-4 gap-2 mb-2">
+                <button
+                  onClick={handlePrintReceipt}
+                  disabled={isPrinting}
+                  className="flex items-center justify-center gap-1 py-3 bg-emerald-50 text-emerald-700 rounded-xl font-medium text-xs disabled:opacity-50"
+                >
+                  {isPrinting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                  Print
+                </button>
                 <button
                   onClick={handleShareReceipt}
                   disabled={isSharing}
@@ -563,19 +602,13 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
                 </button>
               </div>
 
-              {isPrinterConnected() && !isPrinting && (
-                <button
-                  onClick={() => tryPrintReceipt(saleResult, 'cash')}
-                  className="w-full flex items-center justify-center gap-2 py-3 border border-gray-300 text-gray-700 rounded-xl font-medium touch-target mb-4"
-                >
-                  <Printer className="w-4 h-4" />
-                  Print Again
-                </button>
+              {printError && (
+                <p className="text-red-500 text-[11px] text-center mb-3 px-1">{printError}</p>
               )}
 
               <button
                 onClick={() => onComplete(saleResult.receiptNumber)}
-                className="w-full py-4 bg-primary text-white rounded-xl font-bold touch-target text-lg"
+                className="w-full py-4 bg-primary text-white rounded-xl font-bold touch-target text-lg mt-2"
               >
                 New Sale
               </button>
