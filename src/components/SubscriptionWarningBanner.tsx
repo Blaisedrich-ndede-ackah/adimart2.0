@@ -7,11 +7,15 @@ import {
   type SubscriptionInfo,
 } from '@/lib/subscription';
 
+interface SubscriptionWarningBannerProps {
+  onOpenPlan?: () => void;
+}
+
 /**
  * Shows a simple warning when the store subscription is expiring soon or expired.
- * Store owners/cashiers are asked to contact the system administrator to renew.
+ * Store owners/cashiers can open the Plan tab to contact the administrator.
  */
-export default function SubscriptionWarningBanner() {
+export default function SubscriptionWarningBanner({ onOpenPlan }: SubscriptionWarningBannerProps) {
   const [info, setInfo] = useState<SubscriptionInfo | null>(null);
   const [dismissedKey, setDismissedKey] = useState<string | null>(null);
 
@@ -67,15 +71,23 @@ export default function SubscriptionWarningBanner() {
         {isExpired ? (
           <p>
             <span className="font-bold">Subscription expired</span>
-            {daysText ? ` (${daysText})` : ''}. Contact the system administrator to renew
-            your monthly subscription.
+            {daysText ? ` (${daysText})` : ''}. Open Plan to contact the system administrator to renew.
           </p>
         ) : (
           <p>
             <span className="font-bold">Subscription ending soon</span>
             {daysText ? ` — expires ${daysText}` : ''} (
-            {formatSubscriptionDate(info.expiresAt)}). Contact the system administrator to renew.
+            {formatSubscriptionDate(info.expiresAt)}). Open Plan to renew with the administrator.
           </p>
+        )}
+        {onOpenPlan && (
+          <button
+            type="button"
+            onClick={onOpenPlan}
+            className="mt-1.5 underline font-semibold"
+          >
+            Open Plan
+          </button>
         )}
       </div>
       <button

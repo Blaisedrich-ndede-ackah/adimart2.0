@@ -95,6 +95,10 @@ VITE_PAYSTACK_PUBLIC_KEY=pk_live_your-public-key
 
 # Administrator portal PIN (platform-wide)
 VITE_ADMIN_PIN=9999
+
+# Optional mNotify SMS fallbacks (prefer Admin → Contact in the portal)
+# VITE_MNOTIFY_API_KEY=
+# VITE_MNOTIFY_SENDER_ID=Adimat
 ```
 
 > **Note:** The app works fully offline without Supabase configured. Cloud sync and the **Administrator portal** require Supabase credentials.
@@ -106,13 +110,17 @@ Platform admins can open **Administrator portal** from the store login or first-
 The portal loads cloud data and shows:
 
 - All stores, users, and products
+- Subscription grants and usage
+- **Contact** settings: WhatsApp number + email shown on every store’s **Plan** tab, plus mNotify SMS API key/sender ID
 - All-time revenue and Paystack (online) totals per store
 - Weekly Paystack collections with each store’s MoMo account name/number for remittance
 - **Mark sent** to record that a weekly payout was transferred
 
+Store owners and cashiers open **Plan** to view subscription status and contact the administrator (WhatsApp / email loaded from Admin → Contact). SMS alerts via mNotify notify the store’s Support Phone when a subscription is activated and once when it is within 7 days of expiry.
+
 Store owners set their preferred MoMo account under **Settings → Mobile Money Payout**, then sync to Supabase.
 
-If your Supabase project was created before this feature, run `supabase-migrate-admin.sql` in the SQL Editor (or re-apply the latest `supabase-init.sql`).
+If your Supabase project was created before these features, run `supabase-migrate-admin.sql`, `supabase-migrate-subscriptions.sql`, and `supabase-migrate-platform-settings.sql` in the SQL Editor (or re-apply the latest `supabase-init.sql`).
 
 ### First-Time Setup
 

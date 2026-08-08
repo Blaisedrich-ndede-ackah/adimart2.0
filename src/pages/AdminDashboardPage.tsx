@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Building2, Users, Package, Wallet, RefreshCcw, LogOut, ChevronLeft, ChevronRight,
-  Smartphone, CheckCircle2, AlertCircle, Loader2, Store, CreditCard, CalendarClock
+  Smartphone, CheckCircle2, AlertCircle, Loader2, Store, CreditCard, CalendarClock, Mail
 } from 'lucide-react';
 import {
   AdminDashboardData,
@@ -20,8 +20,13 @@ import {
   formatSubscriptionDate,
   subscriptionStatusLabel,
 } from '@/lib/subscription';
+import {
+  loadPlatformSettings,
+  savePlatformSettings,
+  type PlatformSettings,
+} from '@/lib/platformSettings';
 
-type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions';
+type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'contact';
 
 interface AdminDashboardPageProps {
   onLogout: () => void;
@@ -36,6 +41,12 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
   const [busyStoreId, setBusyStoreId] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState('');
   const [grantMonths, setGrantMonths] = useState<Record<string, number>>({});
+  const [platformSettings, setPlatformSettings] = useState<PlatformSettings | null>(null);
+  const [contactWhatsapp, setContactWhatsapp] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [mnotifyApiKey, setMnotifyApiKey] = useState('');
+  const [mnotifySenderId, setMnotifySenderId] = useState('Adimat');
+  const [savingContact, setSavingContact] = useState(false);
 
   const weekEnd = useMemo(() => getWeekEnd(weekStart), [weekStart]);
 
@@ -53,9 +64,24 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
     setLoading(false);
   }, [weekStart]);
 
+  const refreshPlatformSettings = useCallback(async () => {
+    const settings = await loadPlatformSettings(true);
+    setPlatformSettings(settings);
+    setContactWhatsapp(settings.contact_whatsapp);
+    setContactEmail(settings.contact_email);
+    setMnotifyApiKey(settings.mnotify_api_key);
+    setMnotifySenderId(settings.mnotify_sender_id || 'Adimat');
+  }, []);
+
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (tab === 'contact') {
+      void refreshPlatformSettings();
+    }
+  }, [tab, refreshPlatformSettings]);
 
   const handleLogout = () => {
     clearAdminSession();
@@ -82,6 +108,25 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       await refresh();
     }
     setBusyStoreId(null);
+    setTimeout(() => setStatusMsg(''), 5000);
+  };
+
+  const handleSaveContact = async () => {
+    setSavingContact(true);
+    setStatusMsg('');
+    const result = await savePlatformSettings({
+      contact_whatsapp: contactWhatsapp,
+      contact_email: contactEmail,
+      mnotify_api_key: mnotifyApiKey,
+      mnotify_sender_id: mnotifySenderId,
+    });
+    if (!result.success) {
+      setStatusMsg(result.error || 'Failed to save contact settings');
+    } else {
+      setPlatformSettings(result.settings || null);
+      setStatusMsg('Admin contact & SMS settings saved. Store Plan screens will use these details.');
+    }
+    setSavingContact(false);
     setTimeout(() => setStatusMsg(''), 5000);
   };
 
@@ -163,6 +208,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         {([
           ['overview', 'Overview'],
           ['subscriptions', 'Subscriptions'],
+          ['contact', 'Contact'],
           ['payouts', 'Payouts'],
           ['stores', 'Stores'],
           ['users', 'Users'],
@@ -184,7 +230,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-3 pb-8"
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
-        {loading && !data && (
+        {loading && !data && tab !== 'contact' && (
           <div className="flex flex-col items-center justify-center py-20 text-slate-500">
             <Loader2 className="w-8 h-8 animate-spin mb-3" />
             <p className="text-sm">Loading cloud data…</p>
@@ -194,9 +240,10 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm mb-3">
             {error}
-            {(error.includes('momo_') || error.includes('payouts') || error.includes('subscription') || error.includes('column')) && (
+            {(error.includes('momo_') || error.includes('payouts') || error.includes('subscription') || error.includes('platform_settings') || error.includes('column')) && (
               <p className="text-xs mt-2">
-                Run <code>supabase-migrate-admin.sql</code> / <code>supabase-migrate-subscriptions.sql</code> (or the latest <code>supabase-init.sql</code>) in your Supabase SQL Editor.
+                Run <code>supabase-migrate-admin.sql</code> / <code>supabase-migrate-subscriptions.sql</code> /{' '}
+                <code>supabase-migrate-platform-settings.sql</code> (or the latest <code>supabase-init.sql</code>) in your Supabase SQL Editor.
               </p>
             )}
           </div>
@@ -394,6 +441,92 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                   ))}
                 </div>
               </div>
+            )}
+          </div>
+        )}
+
+        {tab === 'contact' && (
+          <div className="space-y-3">
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-700">
+              These details appear on every store’s <strong>Plan</strong> screen so owners and cashiers can
+              contact you to renew. mNotify powers SMS alerts when you grant a subscription and when a plan
+              is nearing expiry.
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
+              <div className="flex items-center gap-2 mb-1">
+                <Mail className="w-4 h-4 text-slate-500" />
+                <h2 className="text-sm font-bold text-slate-900">Public contact</h2>
+              </div>
+              <div>
+                <label className="text-[11px] font-medium text-slate-500 mb-1 block">WhatsApp number</label>
+                <input
+                  type="tel"
+                  value={contactWhatsapp}
+                  onChange={(e) => setContactWhatsapp(e.target.value)}
+                  placeholder="e.g. 024XXXXXXX or +23324XXXXXXX"
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-medium text-slate-500 mb-1 block">Email address</label>
+                <input
+                  type="email"
+                  value={contactEmail}
+                  onChange={(e) => setContactEmail(e.target.value)}
+                  placeholder="admin@example.com"
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
+              <div className="flex items-center gap-2 mb-1">
+                <Smartphone className="w-4 h-4 text-slate-500" />
+                <h2 className="text-sm font-bold text-slate-900">mNotify SMS</h2>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Get an API key from mNotify. SMS is sent to each store’s Support Phone (or MoMo number)
+                on activation and once when expiry is within 7 days.
+              </p>
+              <div>
+                <label className="text-[11px] font-medium text-slate-500 mb-1 block">API key</label>
+                <input
+                  type="password"
+                  value={mnotifyApiKey}
+                  onChange={(e) => setMnotifyApiKey(e.target.value)}
+                  placeholder="mNotify API key"
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-mono"
+                  autoComplete="off"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-medium text-slate-500 mb-1 block">Sender ID</label>
+                <input
+                  type="text"
+                  value={mnotifySenderId}
+                  onChange={(e) => setMnotifySenderId(e.target.value.slice(0, 11))}
+                  placeholder="Adimat"
+                  maxLength={11}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">Max 11 characters (approved sender ID)</p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => void handleSaveContact()}
+              disabled={savingContact}
+              className="w-full py-3 bg-slate-900 text-white rounded-xl text-sm font-semibold disabled:opacity-50 touch-target"
+            >
+              {savingContact ? 'Saving…' : 'Save contact settings'}
+            </button>
+
+            {platformSettings?.updated_at && (
+              <p className="text-[11px] text-slate-500 text-center">
+                Last updated {formatSubscriptionDate(platformSettings.updated_at)}
+              </p>
             )}
           </div>
         )}
