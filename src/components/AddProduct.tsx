@@ -2,17 +2,20 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { X, Camera, Save, AlertTriangle, StopCircle } from 'lucide-react';
 import { BrowserMultiFormatReader, NotFoundException } from '@zxing/library';
 import { db, generateId, LocalProduct, getCurrentStoreId } from '@/lib/dexie';
+import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 
 interface AddProductProps {
   isOpen: boolean;
   onClose: () => void;
   onSaved: () => void;
   editProduct?: LocalProduct | null;
+  /** Prefill barcode from handheld scanner (inventory logging) */
+  initialBarcode?: string | null;
 }
 
 const CATEGORIES = ['Food', 'Beverages', 'Dairy', 'Household', 'Electronics', 'Clothing', 'Health', 'Other'];
 
-export default function AddProduct({ isOpen, onClose, onSaved, editProduct }: AddProductProps) {
+export default function AddProduct({ isOpen, onClose, onSaved, editProduct, initialBarcode }: AddProductProps) {
   const [name, setName] = useState('');
   const [category, setCategory] = useState('Food');
   const [barcode, setBarcode] = useState('');
@@ -41,7 +44,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct }: Ad
       } else {
         setName('');
         setCategory('Food');
-        setBarcode('');
+        setBarcode(initialBarcode?.trim() || '');
         setCostPrice('');
         setSellingPrice('');
         setStockLevel('');
@@ -50,7 +53,14 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct }: Ad
       setError('');
       setShowBarcodeScanner(false);
     }
-  }, [isOpen, editProduct]);
+  }, [isOpen, editProduct, initialBarcode]);
+
+  useBluetoothBarcodeInput(
+    (code) => {
+      setBarcode(code);
+    },
+    isOpen && !showBarcodeScanner
+  );
 
   const profitMargin = (() => {
     const cost = parseFloat(costPrice);
@@ -258,7 +268,8 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct }: Ad
                 type="text"
                 value={barcode}
                 onChange={e => setBarcode(e.target.value)}
-                placeholder="Scan or enter manually"
+                placeholder="Scan handheld or enter manually"
+                data-barcode-input="true"
                 className="flex-1 px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
               />
               <button
