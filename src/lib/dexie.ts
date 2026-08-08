@@ -36,6 +36,8 @@ export interface LocalProduct {
   selling_price: number;
   stock_level: number;
   is_active: number;
+  /** Optional compressed JPEG data URL for product photo */
+  image_url?: string;
   created_at: string;
   updated_at: string;
   synced: number;
@@ -447,6 +449,7 @@ export async function importProductsFromRows(
       selling_price: row.selling_price,
       stock_level: row.stock_level,
       is_active: 1,
+      image_url: '',
       created_at: now,
       updated_at: now,
       synced: 0,
@@ -560,6 +563,7 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         selling_price: p.selling_price,
         stock_level: p.stock_level,
         is_active: p.is_active === 1,
+        image_url: p.image_url || '',
         created_at: p.created_at,
         updated_at: p.updated_at,
       })),
@@ -725,6 +729,7 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
             selling_price: Number(local.selling_price) || 0,
             stock_level: Number(local.stock_level) || 0,
             is_active: local.is_active ? 1 : 0,
+            image_url: (local.image_url as string) || '',
             created_at: local.created_at as string,
             updated_at: (local.updated_at as string) || (local.created_at as string),
             synced: 1,

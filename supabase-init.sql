@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS products (
   selling_price DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (selling_price >= 0),
   stock_level INTEGER NOT NULL DEFAULT 0 CHECK (stock_level >= 0),
   is_active BOOLEAN DEFAULT TRUE,
+  image_url TEXT DEFAULT '',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );

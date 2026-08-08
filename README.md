@@ -17,6 +17,7 @@ A mobile-first Point of Sale (POS) and inventory management Progressive Web App 
 
 ### 📦 Inventory Management
 - **Product Catalog** — Full CRUD operations for products with categories
+- **Optional Product Photos** — Add a picture when creating/editing a product; shown in inventory and at checkout
 - **Stock Tracking** — Automatic stock deduction on sales, low stock and out-of-stock alerts
 - **Stock Adjustment** — Manually add, remove, or set stock levels with reason tracking
 - **Barcode Assignment** — Scan barcodes directly when adding products

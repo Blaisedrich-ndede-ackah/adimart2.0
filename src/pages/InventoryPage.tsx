@@ -12,6 +12,7 @@ import { downloadBarcodeLabel, printBarcodeLabel } from '@/lib/barcodeLabels';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 import { playScanBeep } from '@/lib/scanBeep';
+import ProductImage from '@/components/ProductImage';
 
 type SortMode = 'recent' | 'alpha' | 'stock-low' | 'stock-high';
 
@@ -317,35 +318,39 @@ export default function InventoryPage() {
                     : 'border-gray-100'
                 } ${product.is_active === 0 ? 'opacity-50' : ''}`}
               >
-                <div className="flex items-start justify-between">
+                <div className="flex items-start gap-3">
+                  <ProductImage src={product.image_url} alt={product.name} size="md" />
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-semibold text-gray-900 truncate">{product.name}</p>
-                      {product.stock_level === 0 && product.is_active === 1 && (
-                        <span className="px-1.5 py-0.5 bg-red-100 text-red-700 text-[9px] font-bold rounded">OUT OF STOCK</span>
-                      )}
-                      {product.stock_level > 0 && product.stock_level < 5 && product.is_active === 1 && (
-                        <span className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 text-[9px] font-bold rounded">LOW</span>
-                      )}
-                      {product.is_active === 0 && (
-                        <span className="px-1.5 py-0.5 bg-gray-100 text-gray-500 text-[9px] font-bold rounded">INACTIVE</span>
-                      )}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-semibold text-gray-900 truncate">{product.name}</p>
+                          {product.stock_level === 0 && product.is_active === 1 && (
+                            <span className="px-1.5 py-0.5 bg-red-100 text-red-700 text-[9px] font-bold rounded">OUT OF STOCK</span>
+                          )}
+                          {product.stock_level > 0 && product.stock_level < 5 && product.is_active === 1 && (
+                            <span className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 text-[9px] font-bold rounded">LOW</span>
+                          )}
+                          {product.is_active === 0 && (
+                            <span className="px-1.5 py-0.5 bg-gray-100 text-gray-500 text-[9px] font-bold rounded">INACTIVE</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-0.5">{product.category} • {product.sku_type}</p>
+                        {product.barcode && (
+                          <p className="text-[10px] text-gray-400 font-mono mt-0.5">{product.barcode}</p>
+                        )}
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-sm font-bold text-primary">GH₵{product.selling_price.toFixed(2)}</p>
+                        <p className="text-[10px] text-gray-400">Cost: GH₵{product.cost_price.toFixed(2)}</p>
+                        <p className={`text-xs font-medium mt-0.5 ${
+                          product.stock_level === 0 ? 'text-red-500' : 
+                          product.stock_level < 5 ? 'text-amber-500' : 'text-gray-600'
+                        }`}>
+                          Stock: {product.stock_level}
+                        </p>
+                      </div>
                     </div>
-                    <p className="text-xs text-gray-500 mt-0.5">{product.category} • {product.sku_type}</p>
-                    {product.barcode && (
-                      <p className="text-[10px] text-gray-400 font-mono mt-0.5">{product.barcode}</p>
-                    )}
-                  </div>
-
-                  <div className="text-right ml-3">
-                    <p className="text-sm font-bold text-primary">GH₵{product.selling_price.toFixed(2)}</p>
-                    <p className="text-[10px] text-gray-400">Cost: GH₵{product.cost_price.toFixed(2)}</p>
-                    <p className={`text-xs font-medium mt-0.5 ${
-                      product.stock_level === 0 ? 'text-red-500' : 
-                      product.stock_level < 5 ? 'text-amber-500' : 'text-gray-600'
-                    }`}>
-                      Stock: {product.stock_level}
-                    </p>
                   </div>
                 </div>
 
