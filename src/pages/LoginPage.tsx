@@ -3,6 +3,7 @@ import { Delete, Fingerprint, Shield } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { authenticateWithBiometric, isBiometricAvailable, hasBiometricRegistered } from '@/lib/biometric';
 import { db } from '@/lib/dexie';
+import { hasStoreLogo } from '@/lib/productImage';
 
 interface LoginPageProps {
   onOpenAdmin?: () => void;
@@ -14,7 +15,9 @@ export default function LoginPage({ onOpenAdmin }: LoginPageProps) {
   const [shake, setShake] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricError, setBiometricError] = useState('');
-  const { login, loginError } = useAuthStore();
+  const { login, loginError, currentStore } = useAuthStore();
+  const storeLogo = currentStore?.logo_url;
+  const storeName = currentStore?.name?.trim();
 
   useEffect(() => {
     async function checkBiometric() {
@@ -87,10 +90,16 @@ export default function LoginPage({ onOpenAdmin }: LoginPageProps) {
   return (
     <div className="min-h-screen bg-gradient-to-b from-primary-dark to-primary flex flex-col items-center justify-center p-6">
       <div className="flex flex-col items-center mb-8">
-        <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center mb-4 shadow-lg">
-          <img src="/logo.png" alt="Adimat" className="w-14 h-14 object-contain" />
+        <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center mb-4 shadow-lg overflow-hidden">
+          {hasStoreLogo(storeLogo) ? (
+            <img src={storeLogo!} alt={storeName || 'Store logo'} className="w-full h-full object-cover" />
+          ) : (
+            <img src="/logo.png" alt="Adimat" className="w-14 h-14 object-contain" />
+          )}
         </div>
-        <h1 className="text-2xl font-bold text-white">Adimat POS</h1>
+        <h1 className="text-2xl font-bold text-white">
+          {hasStoreLogo(storeLogo) && storeName ? storeName : 'Adimat POS'}
+        </h1>
         <p className="text-emerald-200 text-sm mt-1">Enter your PIN to continue</p>
       </div>
 

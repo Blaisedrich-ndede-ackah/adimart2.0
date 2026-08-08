@@ -90,3 +90,49 @@ async function loadImageElement(file: File): Promise<{
 export function hasProductImage(imageUrl?: string | null): boolean {
   return Boolean(imageUrl && imageUrl.startsWith('data:image/'));
 }
+
+const LOGO_MAX_DIMENSION = 320;
+const LOGO_JPEG_QUALITY = 0.78;
+const LOGO_MAX_OUTPUT_CHARS = 350_000;
+
+/** Compress a store logo for offline IndexedDB + Supabase TEXT storage. */
+export async function fileToStoreLogoDataUrl(file: File): Promise<string> {
+  if (!file.type.startsWith('image/')) {
+    throw new Error('Please choose an image file (JPG, PNG, or WebP).');
+  }
+
+  if (file.size > 12 * 1024 * 1024) {
+    throw new Error('Image is too large. Please choose a photo under 12MB.');
+  }
+
+  const source = await loadImageElement(file);
+  const { width, height } = fitWithin(source.width, source.height, LOGO_MAX_DIMENSION);
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Could not process image on this device.');
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(source.element, 0, 0, width, height);
+  source.cleanup();
+
+  let quality = LOGO_JPEG_QUALITY;
+  let dataUrl = canvas.toDataURL('image/jpeg', quality);
+
+  while (dataUrl.length > LOGO_MAX_OUTPUT_CHARS && quality > 0.4) {
+    quality -= 0.1;
+    dataUrl = canvas.toDataURL('image/jpeg', quality);
+  }
+
+  if (dataUrl.length > LOGO_MAX_OUTPUT_CHARS) {
+    throw new Error('Could not compress this logo enough. Try a simpler image.');
+  }
+
+  return dataUrl;
+}
+
+export function hasStoreLogo(logoUrl?: string | null): boolean {
+  return Boolean(logoUrl && logoUrl.startsWith('data:image/'));
+}

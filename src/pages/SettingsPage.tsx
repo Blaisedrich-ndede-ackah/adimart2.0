@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Store, Shield, Percent, RefreshCcw,
   Save, Loader2, CheckCircle2, WifiOff, UserPlus,
-  Trash2, Users, Fingerprint, AlertCircle, Key, Smartphone, Ban
+  Trash2, Users, Fingerprint, AlertCircle, Key, Smartphone, Ban, ImagePlus
 } from 'lucide-react';
 import ChangePinModal from '@/components/ChangePinModal';
 import ResetUserPinModal from '@/components/ResetUserPinModal';
@@ -25,13 +25,17 @@ import { isAutoSyncEnabled, setAutoSyncEnabled, startAutoSync, stopAutoSync } fr
 import { useAuthStore } from '@/store/useAuthStore';
 import { isBiometricAvailable, registerBiometric, hasBiometricRegistered, clearBiometricRegistration } from '@/lib/biometric';
 import { isSupabaseConfigured } from '@/lib/supabase';
+import { fileToStoreLogoDataUrl, hasStoreLogo } from '@/lib/productImage';
 
 export default function SettingsPage() {
   const { currentUser, currentStore, refreshStore } = useAuthStore();
+  const logoInputRef = useRef<HTMLInputElement>(null);
   
   const [storeName, setStoreName] = useState('');
   const [storeAddress, setStoreAddress] = useState('');
   const [supportNumber, setSupportNumber] = useState('');
+  const [logoUrl, setLogoUrl] = useState('');
+  const [logoBusy, setLogoBusy] = useState(false);
   const [discountCap, setDiscountCap] = useState('10');
   const [pinOnDiscount, setPinOnDiscount] = useState(true);
   const [allowPercentage, setAllowPercentage] = useState(true);
@@ -72,6 +76,7 @@ export default function SettingsPage() {
       setStoreName(currentStore.name);
       setStoreAddress(currentStore.address);
       setSupportNumber(currentStore.support_number);
+      setLogoUrl(currentStore.logo_url || '');
       setDiscountCap(String(currentStore.discount_cap_percentage));
       setPinOnDiscount(currentStore.pin_on_discount_enabled === 1);
       setAllowPercentage((currentStore.discount_allow_percentage ?? 1) === 1);
@@ -119,6 +124,7 @@ export default function SettingsPage() {
         name: storeName.trim(),
         address: storeAddress.trim(),
         support_number: supportNumber.trim(),
+        logo_url: logoUrl || '',
         discount_cap_percentage: Math.max(0, Math.min(100, parseInt(discountCap) || 10)),
         pin_on_discount_enabled: pinOnDiscount ? 1 : 0,
         discount_allow_percentage: allowPercentage ? 1 : 0,
@@ -139,6 +145,20 @@ export default function SettingsPage() {
     }
     
     setSaving(false);
+  };
+
+  const handleLogoPick = async (file: File | null) => {
+    if (!file) return;
+    setLogoBusy(true);
+    setSaveError('');
+    try {
+      const dataUrl = await fileToStoreLogoDataUrl(file);
+      setLogoUrl(dataUrl);
+    } catch (err: unknown) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to process logo');
+    }
+    setLogoBusy(false);
+    if (logoInputRef.current) logoInputRef.current.value = '';
   };
 
   const handleSync = async (mode: 'push' | 'pull' | 'full' = 'push') => {
@@ -290,6 +310,51 @@ export default function SettingsPage() {
           </div>
 
           <div className="space-y-3">
+            <div className="rounded-xl border border-gray-200 p-3">
+              <div className="flex items-center gap-3">
+                <div className="w-16 h-16 rounded-xl border border-gray-100 bg-gray-50 flex items-center justify-center overflow-hidden flex-shrink-0">
+                  {hasStoreLogo(logoUrl) ? (
+                    <img src={logoUrl} alt="Store logo" className="w-full h-full object-cover" />
+                  ) : (
+                    <Store className="w-7 h-7 text-gray-300" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900">Store logo</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    Shown at the top for you and your cashiers after login. Tap Save after changing.
+                  </p>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => logoInputRef.current?.click()}
+                      disabled={logoBusy}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 bg-primary/10 text-primary rounded-lg text-xs font-medium touch-target disabled:opacity-50"
+                    >
+                      <ImagePlus className="w-3.5 h-3.5" />
+                      {logoBusy ? 'Processing…' : hasStoreLogo(logoUrl) ? 'Change logo' : 'Upload logo'}
+                    </button>
+                    {hasStoreLogo(logoUrl) && (
+                      <button
+                        type="button"
+                        onClick={() => setLogoUrl('')}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 bg-red-50 text-red-600 rounded-lg text-xs font-medium touch-target"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <input
+                ref={logoInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => void handleLogoPick(e.target.files?.[0] || null)}
+              />
+            </div>
             <div>
               <label className="text-xs font-medium text-gray-600 mb-1 block">Store Name</label>
               <input

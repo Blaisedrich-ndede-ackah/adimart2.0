@@ -28,6 +28,8 @@ export interface LocalStore {
   subscription_expires_at?: string | null;
   /** Cumulative months granted by admin */
   subscription_months_granted?: number;
+  /** Optional compressed JPEG data URL for store logo */
+  logo_url?: string;
   created_at: string;
   synced: number;
 }
@@ -228,6 +230,7 @@ export async function createStoreWithOwner(
     subscription_started_at: null,
     subscription_expires_at: null,
     subscription_months_granted: 0,
+    logo_url: '',
     created_at: now,
     synced: 0,
   };
@@ -589,6 +592,7 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
           momo_account_name: store.momo_account_name || '',
           momo_number: store.momo_number || '',
           momo_network: store.momo_network || '',
+          logo_url: store.logo_url || '',
           created_at: store.created_at,
         }],
         async () => { await db.stores.update(storeId, { synced: 1 }); },
@@ -769,6 +773,7 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
           ? String(remoteStore.subscription_expires_at)
           : null,
         subscription_months_granted: Number(remoteStore.subscription_months_granted) || 0,
+        logo_url: remoteStore.logo_url || localStore?.logo_url || '',
         created_at: remoteStore.created_at,
         synced: localStore?.synced === 0 ? 0 : 1,
       });
