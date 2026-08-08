@@ -90,9 +90,27 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 
 # Paystack Configuration
 VITE_PAYSTACK_PUBLIC_KEY=pk_live_your-public-key
+
+# Administrator portal PIN (platform-wide)
+VITE_ADMIN_PIN=9999
 ```
 
-> **Note:** The app works fully offline without Supabase configured. Cloud sync features will be disabled until credentials are provided.
+> **Note:** The app works fully offline without Supabase configured. Cloud sync and the **Administrator portal** require Supabase credentials.
+
+### Administrator Portal
+
+Platform admins can open **Administrator portal** from the store login or first-launch screen, then sign in with `VITE_ADMIN_PIN`.
+
+The portal loads cloud data and shows:
+
+- All stores, users, and products
+- All-time revenue and Paystack (online) totals per store
+- Weekly Paystack collections with each store’s MoMo account name/number for remittance
+- **Mark sent** to record that a weekly payout was transferred
+
+Store owners set their preferred MoMo account under **Settings → Mobile Money Payout**, then sync to Supabase.
+
+If your Supabase project was created before this feature, run `supabase-migrate-admin.sql` in the SQL Editor (or re-apply the latest `supabase-init.sql`).
 
 ### First-Time Setup
 

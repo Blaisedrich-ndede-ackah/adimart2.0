@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Store, Shield, Percent, RefreshCcw,
   Save, Loader2, CheckCircle2, WifiOff, UserPlus,
-  Trash2, Users, Fingerprint, AlertCircle, Key
+  Trash2, Users, Fingerprint, AlertCircle, Key, Smartphone
 } from 'lucide-react';
 import ChangePinModal from '@/components/ChangePinModal';
 import ResetUserPinModal from '@/components/ResetUserPinModal';
@@ -32,6 +32,9 @@ export default function SettingsPage() {
   const [supportNumber, setSupportNumber] = useState('');
   const [discountCap, setDiscountCap] = useState('10');
   const [pinOnDiscount, setPinOnDiscount] = useState(true);
+  const [momoAccountName, setMomoAccountName] = useState('');
+  const [momoNumber, setMomoNumber] = useState('');
+  const [momoNetwork, setMomoNetwork] = useState('');
   
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -66,6 +69,9 @@ export default function SettingsPage() {
       setSupportNumber(currentStore.support_number);
       setDiscountCap(String(currentStore.discount_cap_percentage));
       setPinOnDiscount(currentStore.pin_on_discount_enabled === 1);
+      setMomoAccountName(currentStore.momo_account_name || '');
+      setMomoNumber(currentStore.momo_number || '');
+      setMomoNetwork(currentStore.momo_network || '');
     }
     
     const syncTime = await getLastSyncTime();
@@ -101,6 +107,9 @@ export default function SettingsPage() {
         support_number: supportNumber.trim(),
         discount_cap_percentage: Math.max(0, Math.min(100, parseInt(discountCap) || 10)),
         pin_on_discount_enabled: pinOnDiscount ? 1 : 0,
+        momo_account_name: momoAccountName.trim(),
+        momo_number: momoNumber.trim(),
+        momo_network: momoNetwork.trim(),
         synced: 0,
       });
       
@@ -270,6 +279,54 @@ export default function SettingsPage() {
                 placeholder="+233 XX XXX XXXX"
                 className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary focus:border-primary"
               />
+            </div>
+          </div>
+        </div>
+
+        {/* MoMo payout account — used by platform admin for weekly Paystack remittances */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">
+          <div className="flex items-center gap-2 mb-1">
+            <Smartphone className="w-5 h-5 text-emerald-600" />
+            <h3 className="font-bold text-gray-900">Mobile Money Payout</h3>
+          </div>
+          <p className="text-xs text-gray-500 mb-4">
+            Enter the MoMo account where Adimat should send your weekly Paystack (online) collections.
+          </p>
+
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-gray-600 mb-1 block">Account Name</label>
+              <input
+                type="text"
+                value={momoAccountName}
+                onChange={e => setMomoAccountName(e.target.value)}
+                placeholder="Name on MoMo wallet"
+                className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-600 mb-1 block">MoMo Number</label>
+              <input
+                type="tel"
+                value={momoNumber}
+                onChange={e => setMomoNumber(e.target.value)}
+                placeholder="024 XXX XXXX"
+                className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-600 mb-1 block">Network</label>
+              <select
+                value={momoNetwork}
+                onChange={e => setMomoNetwork(e.target.value)}
+                className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none bg-white focus:ring-2 focus:ring-primary focus:border-primary"
+              >
+                <option value="">Select network</option>
+                <option value="MTN">MTN</option>
+                <option value="Vodafone">Vodafone</option>
+                <option value="AirtelTigo">AirtelTigo</option>
+                <option value="Other">Other</option>
+              </select>
             </div>
           </div>
         </div>

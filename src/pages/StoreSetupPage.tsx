@@ -1,11 +1,15 @@
 import { useState } from 'react';
-import { Store, User, Lock, ArrowRight, Loader2, CloudDownload } from 'lucide-react';
+import { Store, User, Lock, ArrowRight, Loader2, CloudDownload, Shield } from 'lucide-react';
 import { createStoreWithOwner, restoreStoreFromCloud } from '@/lib/dexie';
 import { useAuthStore } from '@/store/useAuthStore';
 
 type SetupMode = 'choose' | 'new-store' | 'new-owner' | 'restore';
 
-export default function StoreSetupPage() {
+interface StoreSetupPageProps {
+  onOpenAdmin?: () => void;
+}
+
+export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
   const [mode, setMode] = useState<SetupMode>('choose');
   const [storeName, setStoreName] = useState('');
   const [ownerName, setOwnerName] = useState('');
@@ -119,6 +123,15 @@ export default function StoreSetupPage() {
             <p className="text-xs text-gray-500 text-center pt-2">
               Use restore if you already have a store synced to Supabase
             </p>
+            {onOpenAdmin && (
+              <button
+                onClick={onOpenAdmin}
+                className="w-full mt-2 py-3 text-primary text-sm font-medium flex items-center justify-center gap-2 touch-target"
+              >
+                <Shield className="w-4 h-4" />
+                Administrator portal
+              </button>
+            )}
           </div>
         )}
 

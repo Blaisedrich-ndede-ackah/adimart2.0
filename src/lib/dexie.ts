@@ -10,6 +10,12 @@ export interface LocalStore {
   support_number: string;
   discount_cap_percentage: number;
   pin_on_discount_enabled: number;
+  /** Preferred Mobile Money account name for Paystack payouts */
+  momo_account_name: string;
+  /** Preferred Mobile Money number (e.g. 024XXXXXXX) */
+  momo_number: string;
+  /** Network hint: MTN | Vodafone | AirtelTigo | Other */
+  momo_network: string;
   created_at: string;
   synced: number;
 }
@@ -201,6 +207,9 @@ export async function createStoreWithOwner(
     support_number: '',
     discount_cap_percentage: 10,
     pin_on_discount_enabled: 1,
+    momo_account_name: '',
+    momo_number: '',
+    momo_network: '',
     created_at: now,
     synced: 0,
   };
@@ -524,6 +533,9 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
           support_number: store.support_number,
           discount_cap_percentage: store.discount_cap_percentage,
           pin_on_discount_enabled: store.pin_on_discount_enabled === 1,
+          momo_account_name: store.momo_account_name || '',
+          momo_number: store.momo_number || '',
+          momo_network: store.momo_network || '',
           created_at: store.created_at,
         }],
         async () => { await db.stores.update(storeId, { synced: 1 }); },
@@ -691,6 +703,9 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
         support_number: remoteStore.support_number || '',
         discount_cap_percentage: remoteStore.discount_cap_percentage ?? 10,
         pin_on_discount_enabled: remoteStore.pin_on_discount_enabled ? 1 : 0,
+        momo_account_name: remoteStore.momo_account_name || '',
+        momo_number: remoteStore.momo_number || '',
+        momo_network: remoteStore.momo_network || '',
         created_at: remoteStore.created_at,
         synced: localStore?.synced === 0 ? 0 : 1,
       });

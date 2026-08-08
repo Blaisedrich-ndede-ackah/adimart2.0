@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { initAutoSync, stopAutoSync } from '@/lib/sync';
 import { autoReconnectPeripherals } from '@/lib/bluetoothPeripherals';
+import { isAdminSessionActive, clearAdminSession } from '@/lib/adminAuth';
 import PWAInstallBanner from '@/components/PWAInstallBanner';
 import BottomNav from '@/components/BottomNav';
 import StoreSetupPage from '@/pages/StoreSetupPage';
@@ -10,10 +11,17 @@ import POSPage from '@/pages/POSPage';
 import InventoryPage from '@/pages/InventoryPage';
 import ReportsPage from '@/pages/ReportsPage';
 import SettingsPage from '@/pages/SettingsPage';
+import AdminLoginPage from '@/pages/AdminLoginPage';
+import AdminDashboardPage from '@/pages/AdminDashboardPage';
+
+type AppMode = 'store' | 'admin-login' | 'admin';
 
 export default function App() {
   const { isAuthenticated, currentUser, isStoreSetup, isLoading, initialize } = useAuthStore();
   const [currentPage, setCurrentPage] = useState('pos');
+  const [appMode, setAppMode] = useState<AppMode>(() =>
+    isAdminSessionActive() ? 'admin' : 'store'
+  );
 
   useEffect(() => {
     initialize();
@@ -27,6 +35,26 @@ export default function App() {
       setCurrentPage('pos');
     }
   }, [currentUser]);
+
+  if (appMode === 'admin-login') {
+    return (
+      <AdminLoginPage
+        onSuccess={() => setAppMode('admin')}
+        onBack={() => setAppMode('store')}
+      />
+    );
+  }
+
+  if (appMode === 'admin') {
+    return (
+      <AdminDashboardPage
+        onLogout={() => {
+          clearAdminSession();
+          setAppMode('store');
+        }}
+      />
+    );
+  }
 
   // Show loading state
   if (isLoading) {
@@ -48,7 +76,7 @@ export default function App() {
       <div className="h-screen flex flex-col">
         <PWAInstallBanner />
         <div className="flex-1">
-          <StoreSetupPage />
+          <StoreSetupPage onOpenAdmin={() => setAppMode('admin-login')} />
         </div>
       </div>
     );
@@ -60,7 +88,7 @@ export default function App() {
       <div className="h-screen flex flex-col">
         <PWAInstallBanner />
         <div className="flex-1">
-          <LoginPage />
+          <LoginPage onOpenAdmin={() => setAppMode('admin-login')} />
         </div>
       </div>
     );

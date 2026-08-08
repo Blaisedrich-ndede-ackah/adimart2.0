@@ -1,10 +1,14 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Delete, Fingerprint } from 'lucide-react';
+import { Delete, Fingerprint, Shield } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { authenticateWithBiometric, isBiometricAvailable, hasBiometricRegistered } from '@/lib/biometric';
 import { db } from '@/lib/dexie';
 
-export default function LoginPage() {
+interface LoginPageProps {
+  onOpenAdmin?: () => void;
+}
+
+export default function LoginPage({ onOpenAdmin }: LoginPageProps) {
   const [pin, setPin] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [shake, setShake] = useState(false);
@@ -162,6 +166,16 @@ export default function LoginPage() {
           <p className="mt-1 text-emerald-400">Biometric login available</p>
         )}
       </div>
+
+      {onOpenAdmin && (
+        <button
+          onClick={onOpenAdmin}
+          className="mt-6 flex items-center gap-2 text-emerald-100/80 text-xs font-medium touch-target"
+        >
+          <Shield className="w-3.5 h-3.5" />
+          Administrator portal
+        </button>
+      )}
     </div>
   );
 }
