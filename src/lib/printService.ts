@@ -8,6 +8,7 @@ import {
   sendPrinterBytes,
   getConnectedPrinterName,
 } from './bluetoothPeripherals';
+import { buildEscPosLogoRaster } from './escPosImage';
 
 const ESC = 0x1b;
 const GS = 0x1d;
@@ -24,6 +25,8 @@ export interface EscPosReceiptData {
   storeName: string;
   storeAddress: string;
   supportNumber: string;
+  /** Optional JPEG/PNG data URL — printed above the store name when supported */
+  storeLogoUrl?: string;
   receiptNumber: string;
   cashierName: string;
   dateTime: string;
@@ -63,11 +66,19 @@ function line(char: string = '-', width: number = 32): string {
 /**
  * Build a complete ESC/POS byte stream for a sales receipt.
  */
-export function buildEscPosReceipt(data: EscPosReceiptData): Uint8Array {
+export async function buildEscPosReceipt(data: EscPosReceiptData): Promise<Uint8Array> {
   const bytes: number[] = [];
 
   // Initialize printer
   bytes.push(...cmd(ESC, 0x40));
+
+  // Optional store logo (centered raster)
+  if (data.storeLogoUrl) {
+    const logoBytes = await buildEscPosLogoRaster(data.storeLogoUrl);
+    if (logoBytes?.length) {
+      bytes.push(...logoBytes);
+    }
+  }
 
   // Center + bold store name
   bytes.push(...cmd(ESC, 0x61, 1));
@@ -214,7 +225,7 @@ export async function printReceipt(
   }
 
   try {
-    const receiptBytes = buildEscPosReceipt(data);
+    const receiptBytes = await buildEscPosReceipt(data);
     await sendPrinterBytes(receiptBytes);
     return { success: true };
   } catch (err: unknown) {

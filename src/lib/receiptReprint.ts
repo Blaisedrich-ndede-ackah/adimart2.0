@@ -22,6 +22,7 @@ export async function buildReceiptDataFromTransaction(
     storeName: store?.name || 'Store',
     storeAddress: store?.address || '',
     supportNumber: store?.support_number || '',
+    storeLogoUrl: store?.logo_url || '',
     receiptNumber: txn.receipt_number,
     cashierName: txn.cashier_name || '',
     dateTime: new Date(txn.created_at).toLocaleString('en-GH'),

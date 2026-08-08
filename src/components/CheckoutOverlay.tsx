@@ -87,6 +87,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
       storeName: currentStore?.name || 'Store',
       storeAddress: currentStore?.address || '',
       supportNumber: currentStore?.support_number || '',
+      storeLogoUrl: currentStore?.logo_url || '',
       receiptNumber: result.receiptNumber,
       cashierName: currentUser?.name || '',
       dateTime: new Date().toLocaleString('en-GH'),

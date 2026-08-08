@@ -4,6 +4,8 @@ export interface ReceiptData {
   storeName: string;
   storeAddress: string;
   supportNumber: string;
+  /** Optional JPEG/PNG data URL shown at the top of PDF receipts */
+  storeLogoUrl?: string;
   receiptNumber: string;
   cashierName: string;
   dateTime: string;
@@ -77,6 +79,19 @@ function generateReceiptPDF(data: ReceiptData): jsPDF {
   };
 
   // ===== HEADER =====
+  if (data.storeLogoUrl && data.storeLogoUrl.startsWith('data:image/')) {
+    const logoW = 22;
+    const logoH = 22;
+    const logoX = (pageWidth - logoW) / 2;
+    try {
+      const format = data.storeLogoUrl.startsWith('data:image/png') ? 'PNG' : 'JPEG';
+      doc.addImage(data.storeLogoUrl, format, logoX, y - 2, logoW, logoH);
+      y += logoH + 2;
+    } catch {
+      // Ignore logo render failures — text header still prints
+    }
+  }
+
   doc.setFont('helvetica', 'bold');
   centerText(data.storeName || 'STORE', y, 14);
   y += lineHeight + 1;
