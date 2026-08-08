@@ -227,7 +227,7 @@ export default function SettingsPage() {
       alert('Owner accounts cannot be blocked from here.');
       return;
     }
-    if (confirm(`Block ${user.name}? They will not be able to log in until unblocked.`)) {
+    if (confirm(`Block ${user.name}? They can still enter their PIN, but will only see a message to contact you until unblocked.`)) {
       await deactivateUser(user.id);
       await refreshUsers();
     }

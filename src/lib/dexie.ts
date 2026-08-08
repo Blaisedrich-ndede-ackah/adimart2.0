@@ -277,7 +277,11 @@ export async function getCurrentStoreUsersIncludingBlocked(): Promise<LocalUser[
   return getAllStoreUsers(storeId);
 }
 
-// Authenticate user by PIN within current store
+/**
+ * Authenticate user by PIN within current store.
+ * Blocked cashiers (is_active === 0) may still authenticate; the app
+ * routes them to a restricted “contact store owner” screen.
+ */
 export async function authenticateByPin(pin: string): Promise<LocalUser | null> {
   const storeId = await getCurrentStoreId();
   if (!storeId) return null;
@@ -286,7 +290,7 @@ export async function authenticateByPin(pin: string): Promise<LocalUser | null> 
   const users = await db.users
     .where('store_id')
     .equals(storeId)
-    .and(u => u.pin_hash === pinHash && u.is_active === 1)
+    .and(u => u.pin_hash === pinHash)
     .toArray();
   
   return users.length > 0 ? users[0] : null;
@@ -331,7 +335,7 @@ export async function addUserToStore(
   return user;
 }
 
-// Block a user (cannot log in until unblocked)
+// Block a cashier (can log in, but app shows a restricted contact-owner screen)
 export async function deactivateUser(userId: string): Promise<void> {
   await db.users.update(userId, { is_active: 0, synced: 0 });
 }

@@ -58,6 +58,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
   const cashierCanDiscount = (currentStore?.cashier_can_discount ?? 1) === 1;
   const isOwner = currentUser?.role === 'owner';
   const canApplyDiscount = isOwner || cashierCanDiscount;
+  const discountsEnabled = allowPercentage || allowFixed;
 
   useEffect(() => {
     if (isOpen) {
@@ -74,8 +75,12 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
       setDiscountMode(allowPercentage ? 'percentage' : 'fixed');
       setPendingDiscountKind('percentage');
       setPendingDiscountValue(0);
+      // Cashiers without discount permission cannot keep a leftover cart discount
+      if (!canApplyDiscount && cart.discountAmount > 0) {
+        cart.clearDiscount();
+      }
     }
-  }, [isOpen, allowPercentage]);
+  }, [isOpen, allowPercentage, canApplyDiscount]);
 
   function buildReceiptData(result: SaleResult, method: 'cash' | 'split' | 'paystack', cashAmt?: number, paystackAmt?: number, paystackRef?: string): PDFReceiptData {
     return {
@@ -108,6 +113,11 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
   }
 
   async function handleDiscountApply() {
+    if (!canApplyDiscount) {
+      setError('Discount is disabled for cashiers. Ask the store owner.');
+      setStep('method');
+      return;
+    }
     setError('');
     const value = parseFloat(discountInput);
     if (isNaN(value) || value < 0) {
@@ -180,6 +190,9 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
     paystackRef?: string
   ) {
     if (!currentUser) return;
+    if (!canApplyDiscount && cart.discountAmount > 0) {
+      cart.clearDiscount();
+    }
     setStep('processing');
     setError('');
 
@@ -403,9 +416,12 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
 
           {step === 'method' && (
             <div className="space-y-3">
-              {canApplyDiscount && (allowPercentage || allowFixed) && (
+              {discountsEnabled && (
                 <button
+                  type="button"
+                  disabled={!canApplyDiscount}
                   onClick={() => {
+                    if (!canApplyDiscount) return;
                     const mode = allowPercentage ? 'percentage' : 'fixed';
                     setDiscountMode(mode);
                     setDiscountInput(
@@ -415,19 +431,37 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
                     );
                     setStep('discount');
                   }}
-                  className="w-full flex items-center gap-3 p-4 rounded-xl border border-gray-200 hover:border-accent hover:bg-amber-50 transition touch-target"
+                  className={`w-full flex items-center gap-3 p-4 rounded-xl border transition touch-target ${
+                    canApplyDiscount
+                      ? 'border-gray-200 hover:border-accent hover:bg-amber-50'
+                      : 'border-gray-100 bg-gray-50 opacity-60 cursor-not-allowed'
+                  }`}
+                  aria-disabled={!canApplyDiscount}
+                  title={
+                    canApplyDiscount
+                      ? 'Apply discount'
+                      : 'Discount disabled for cashiers — contact the store owner'
+                  }
                 >
-                  <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
-                    <Percent className="w-5 h-5 text-accent" />
+                  <div
+                    className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                      canApplyDiscount ? 'bg-amber-100' : 'bg-gray-200'
+                    }`}
+                  >
+                    <Percent className={`w-5 h-5 ${canApplyDiscount ? 'text-accent' : 'text-gray-400'}`} />
                   </div>
                   <div className="text-left flex-1">
-                    <p className="font-semibold text-gray-900">Apply Discount</p>
+                    <p className={`font-semibold ${canApplyDiscount ? 'text-gray-900' : 'text-gray-500'}`}>
+                      Apply Discount
+                    </p>
                     <p className="text-xs text-gray-500">
-                      {cart.discountAmount > 0
-                        ? cart.discountKind === 'fixed'
-                          ? `GH₵${cart.discountAmount.toFixed(2)} off`
-                          : `${cart.discountPercent}% applied`
-                        : 'Percentage or fixed amount'}
+                      {!canApplyDiscount
+                        ? 'Disabled — only the store owner can apply discounts'
+                        : cart.discountAmount > 0
+                          ? cart.discountKind === 'fixed'
+                            ? `GH₵${cart.discountAmount.toFixed(2)} off`
+                            : `${cart.discountPercent}% applied`
+                          : 'Percentage or fixed amount'}
                     </p>
                   </div>
                 </button>
@@ -497,7 +531,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
             </div>
           )}
 
-          {step === 'discount' && (
+          {step === 'discount' && canApplyDiscount && (
             <div className="space-y-4">
               {allowPercentage && allowFixed && (
                 <div className="grid grid-cols-2 gap-2">
