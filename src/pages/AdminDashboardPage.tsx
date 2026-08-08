@@ -1,21 +1,27 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Building2, Users, Package, Wallet, RefreshCcw, LogOut, ChevronLeft, ChevronRight,
-  Smartphone, CheckCircle2, AlertCircle, Loader2, Store, CreditCard
+  Smartphone, CheckCircle2, AlertCircle, Loader2, Store, CreditCard, CalendarClock
 } from 'lucide-react';
 import {
   AdminDashboardData,
   StorePerformance,
+  StoreSubscriptionUsage,
   formatGhs,
   getWeekEnd,
   getWeekStart,
+  grantStoreSubscription,
   loadAdminDashboard,
   markWeeklyPayoutSent,
   shiftWeek,
 } from '@/lib/adminPortal';
 import { clearAdminSession } from '@/lib/adminAuth';
+import {
+  formatSubscriptionDate,
+  subscriptionStatusLabel,
+} from '@/lib/subscription';
 
-type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts';
+type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions';
 
 interface AdminDashboardPageProps {
   onLogout: () => void;
@@ -29,6 +35,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
   const [error, setError] = useState('');
   const [busyStoreId, setBusyStoreId] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState('');
+  const [grantMonths, setGrantMonths] = useState<Record<string, number>>({});
 
   const weekEnd = useMemo(() => getWeekEnd(weekStart), [weekStart]);
 
@@ -76,6 +83,30 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
     }
     setBusyStoreId(null);
     setTimeout(() => setStatusMsg(''), 5000);
+  };
+
+  const handleGrantSubscription = async (row: StoreSubscriptionUsage) => {
+    const months = grantMonths[row.store.id] || 1;
+    if (!confirm(`Grant ${months} month${months === 1 ? '' : 's'} subscription to ${row.store.name}?`)) {
+      return;
+    }
+
+    setBusyStoreId(row.store.id);
+    setStatusMsg('');
+    const result = await grantStoreSubscription(row.store, months);
+    if (!result.success) {
+      setStatusMsg(result.error || 'Failed to grant subscription');
+    } else {
+      const expiry = result.expiresAt ? formatSubscriptionDate(result.expiresAt) : '';
+      setStatusMsg(
+        result.error
+          ? result.error
+          : `Granted ${months} month${months === 1 ? '' : 's'} to ${row.store.name}${expiry ? ` (expires ${expiry})` : ''}`
+      );
+      await refresh();
+    }
+    setBusyStoreId(null);
+    setTimeout(() => setStatusMsg(''), 6000);
   };
 
   const storeName = (storeId: string) =>
@@ -131,6 +162,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       <nav className="bg-white border-b border-slate-200 px-2 py-2 flex gap-1 overflow-x-auto no-scrollbar flex-shrink-0">
         {([
           ['overview', 'Overview'],
+          ['subscriptions', 'Subscriptions'],
           ['payouts', 'Payouts'],
           ['stores', 'Stores'],
           ['users', 'Users'],
@@ -159,9 +191,9 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm mb-3">
             {error}
-            {(error.includes('momo_') || error.includes('payouts') || error.includes('column')) && (
+            {(error.includes('momo_') || error.includes('payouts') || error.includes('subscription') || error.includes('column')) && (
               <p className="text-xs mt-2">
-                Run <code>supabase-migrate-admin.sql</code> (or the latest <code>supabase-init.sql</code>) in your Supabase SQL Editor.
+                Run <code>supabase-migrate-admin.sql</code> / <code>supabase-migrate-subscriptions.sql</code> (or the latest <code>supabase-init.sql</code>) in your Supabase SQL Editor.
               </p>
             )}
           </div>
@@ -199,10 +231,167 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
               </p>
             </div>
 
+            <div className="bg-white rounded-2xl border border-slate-200 p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <CalendarClock className="w-4 h-4 text-slate-400" />
+                <p className="text-xs text-slate-500 font-medium">Subscriptions</p>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div>
+                  <p className="text-[11px] text-slate-500">Active</p>
+                  <p className="font-semibold text-emerald-700">{data.totals.subsActive}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-slate-500">Expiring ≤7 days</p>
+                  <p className="font-semibold text-amber-700">{data.totals.subsExpiringSoon}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-slate-500">Expired</p>
+                  <p className="font-semibold text-red-700">{data.totals.subsExpired}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-slate-500">No subscription</p>
+                  <p className="font-semibold text-slate-700">{data.totals.subsNone}</p>
+                </div>
+              </div>
+            </div>
+
             <h2 className="text-sm font-bold text-slate-800 pt-1">Stores by weekly Paystack</h2>
             {data.performance.slice(0, 8).map((row) => (
               <StoreRevenueCard key={row.store.id} row={row} compact />
             ))}
+          </div>
+        )}
+
+        {data && tab === 'subscriptions' && (
+          <div className="space-y-3">
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-700">
+              Grant monthly access to each store owner. When a subscription is within 7 days of expiry
+              (or already expired), the store app shows a warning to contact the system administrator to renew.
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <StatCard icon={<CheckCircle2 className="w-4 h-4" />} label="Active" value={String(data.totals.subsActive)} />
+              <StatCard icon={<AlertCircle className="w-4 h-4" />} label="Expiring soon" value={String(data.totals.subsExpiringSoon)} />
+              <StatCard icon={<AlertCircle className="w-4 h-4" />} label="Expired" value={String(data.totals.subsExpired)} />
+              <StatCard icon={<CalendarClock className="w-4 h-4" />} label="No subscription" value={String(data.totals.subsNone)} />
+            </div>
+
+            {data.subscriptions.length === 0 && (
+              <p className="text-sm text-slate-500 text-center py-10">No stores synced to the cloud yet.</p>
+            )}
+
+            {data.subscriptions.map((row) => {
+              const months = grantMonths[row.store.id] || 1;
+              const statusColor =
+                row.status === 'active'
+                  ? row.isExpiringSoon
+                    ? 'text-amber-700 bg-amber-50'
+                    : 'text-emerald-700 bg-emerald-50'
+                  : row.status === 'expired'
+                    ? 'text-red-700 bg-red-50'
+                    : 'text-slate-600 bg-slate-100';
+
+              return (
+                <div key={row.store.id} className="bg-white rounded-2xl border border-slate-200 p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-bold text-slate-900 truncate">{row.store.name}</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        {row.userCount} users · {row.productCount} products
+                      </p>
+                    </div>
+                    <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-lg ${statusColor}`}>
+                      {subscriptionStatusLabel(row.status)}
+                      {row.isExpiringSoon ? ' · soon' : ''}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 mt-3 text-[11px]">
+                    <div className="bg-slate-50 rounded-lg p-2">
+                      <p className="text-slate-500">Expires</p>
+                      <p className="font-semibold text-slate-900">
+                        {formatSubscriptionDate(row.store.subscription_expires_at)}
+                        {row.daysLeft != null && row.status === 'active' ? ` (${row.daysLeft}d)` : ''}
+                      </p>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg p-2">
+                      <p className="text-slate-500">Months granted</p>
+                      <p className="font-semibold text-slate-900">{row.monthsGranted}</p>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg p-2">
+                      <p className="text-slate-500">Period usage</p>
+                      <p className="font-semibold text-slate-900">
+                        {row.periodSales} sale{row.periodSales === 1 ? '' : 's'}
+                      </p>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg p-2">
+                      <p className="text-slate-500">Period revenue</p>
+                      <p className="font-semibold text-slate-900">{formatGhs(row.periodRevenue)}</p>
+                    </div>
+                  </div>
+
+                  {row.lastGrantedAt && (
+                    <p className="text-[11px] text-slate-500 mt-2">
+                      Last grant: {formatSubscriptionDate(row.lastGrantedAt)} · {row.grantCount} grant{row.grantCount === 1 ? '' : 's'}
+                    </p>
+                  )}
+
+                  <div className="mt-3 flex items-center gap-2">
+                    <label className="text-[11px] text-slate-500 whitespace-nowrap">Months</label>
+                    <select
+                      value={months}
+                      onChange={(e) =>
+                        setGrantMonths((prev) => ({
+                          ...prev,
+                          [row.store.id]: Number(e.target.value),
+                        }))
+                      }
+                      className="flex-1 rounded-xl border border-slate-200 bg-white px-2 py-2 text-sm"
+                    >
+                      {[1, 2, 3, 6, 12].map((m) => (
+                        <option key={m} value={m}>
+                          {m} month{m === 1 ? '' : 's'}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => void handleGrantSubscription(row)}
+                      disabled={busyStoreId === row.store.id}
+                      className="px-3 py-2 bg-slate-900 text-white rounded-xl text-xs font-semibold disabled:opacity-50 touch-target whitespace-nowrap"
+                    >
+                      {busyStoreId === row.store.id ? 'Saving…' : 'Grant'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+
+            {data.subscriptionGrants.length > 0 && (
+              <div className="pt-2">
+                <h2 className="text-sm font-bold text-slate-800 mb-2">Recent grants</h2>
+                <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+                  {data.subscriptionGrants.slice(0, 20).map((grant) => (
+                    <div key={grant.id} className="px-4 py-3 border-b border-slate-100 last:border-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-900 truncate">
+                            {storeName(grant.store_id)}
+                          </p>
+                          <p className="text-[11px] text-slate-500">
+                            {grant.months} month{grant.months === 1 ? '' : 's'} · until{' '}
+                            {formatSubscriptionDate(grant.period_end)}
+                          </p>
+                        </div>
+                        <p className="text-[11px] text-slate-500 flex-shrink-0">
+                          {formatSubscriptionDate(grant.granted_at)}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

@@ -22,6 +22,12 @@ export interface LocalStore {
   momo_number: string;
   /** Network hint: MTN | Vodafone | AirtelTigo | Other */
   momo_network: string;
+  /** Admin-managed subscription period start (ISO); pulled from cloud */
+  subscription_started_at?: string | null;
+  /** Admin-managed subscription expiry (ISO); pulled from cloud */
+  subscription_expires_at?: string | null;
+  /** Cumulative months granted by admin */
+  subscription_months_granted?: number;
   created_at: string;
   synced: number;
 }
@@ -219,6 +225,9 @@ export async function createStoreWithOwner(
     momo_account_name: '',
     momo_number: '',
     momo_network: '',
+    subscription_started_at: null,
+    subscription_expires_at: null,
+    subscription_months_granted: 0,
     created_at: now,
     synced: 0,
   };
@@ -749,6 +758,13 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
         momo_account_name: remoteStore.momo_account_name || '',
         momo_number: remoteStore.momo_number || '',
         momo_network: remoteStore.momo_network || '',
+        subscription_started_at: remoteStore.subscription_started_at
+          ? String(remoteStore.subscription_started_at)
+          : null,
+        subscription_expires_at: remoteStore.subscription_expires_at
+          ? String(remoteStore.subscription_expires_at)
+          : null,
+        subscription_months_granted: Number(remoteStore.subscription_months_granted) || 0,
         created_at: remoteStore.created_at,
         synced: localStore?.synced === 0 ? 0 : 1,
       });

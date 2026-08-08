@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS stores (
   momo_account_name VARCHAR(255) DEFAULT '',
   momo_number VARCHAR(50) DEFAULT '',
   momo_network VARCHAR(50) DEFAULT '',
+  subscription_started_at TIMESTAMPTZ,
+  subscription_expires_at TIMESTAMPTZ,
+  subscription_months_granted INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -198,6 +201,31 @@ CREATE POLICY "payouts_delete" ON payouts FOR DELETE USING (true);
 CREATE INDEX IF NOT EXISTS idx_payouts_store ON payouts(store_id);
 CREATE INDEX IF NOT EXISTS idx_payouts_week ON payouts(week_start);
 CREATE INDEX IF NOT EXISTS idx_payouts_status ON payouts(status);
+
+-- ============================================================
+-- SUBSCRIPTION GRANTS (admin grants monthly store access)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS subscription_grants (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  months INTEGER NOT NULL CHECK (months > 0),
+  period_start TIMESTAMPTZ NOT NULL,
+  period_end TIMESTAMPTZ NOT NULL,
+  notes TEXT DEFAULT '',
+  granted_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE subscription_grants ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "subscription_grants_select" ON subscription_grants FOR SELECT USING (true);
+CREATE POLICY "subscription_grants_insert" ON subscription_grants FOR INSERT WITH CHECK (true);
+CREATE POLICY "subscription_grants_update" ON subscription_grants FOR UPDATE USING (true);
+CREATE POLICY "subscription_grants_delete" ON subscription_grants FOR DELETE USING (true);
+
+CREATE INDEX IF NOT EXISTS idx_subscription_grants_store ON subscription_grants(store_id);
+CREATE INDEX IF NOT EXISTS idx_subscription_grants_granted_at ON subscription_grants(granted_at);
+CREATE INDEX IF NOT EXISTS idx_stores_subscription_expires ON stores(subscription_expires_at);
 
 -- ============================================================
 -- HELPER FUNCTIONS

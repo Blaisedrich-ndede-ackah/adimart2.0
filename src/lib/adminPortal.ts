@@ -5,6 +5,11 @@
 
 import { isSupabaseConfigured, supabase } from './supabase';
 import { generateId } from './dexie';
+import {
+  addMonthsIso,
+  getSubscriptionInfo,
+  type SubscriptionStatus,
+} from './subscription';
 
 export interface AdminStoreRow {
   id: string;
@@ -14,7 +19,36 @@ export interface AdminStoreRow {
   momo_account_name: string;
   momo_number: string;
   momo_network: string;
+  subscription_started_at: string | null;
+  subscription_expires_at: string | null;
+  subscription_months_granted: number;
   created_at: string;
+}
+
+export interface AdminSubscriptionGrantRow {
+  id: string;
+  store_id: string;
+  months: number;
+  period_start: string;
+  period_end: string;
+  notes: string;
+  granted_at: string;
+}
+
+export interface StoreSubscriptionUsage {
+  store: AdminStoreRow;
+  status: SubscriptionStatus;
+  daysLeft: number | null;
+  isExpiringSoon: boolean;
+  isExpired: boolean;
+  monthsGranted: number;
+  grantCount: number;
+  lastGrantedAt: string | null;
+  /** Completed sales during the current subscription window */
+  periodSales: number;
+  periodRevenue: number;
+  userCount: number;
+  productCount: number;
 }
 
 export interface AdminUserRow {
@@ -83,7 +117,9 @@ export interface AdminDashboardData {
   products: AdminProductRow[];
   transactions: AdminTransactionRow[];
   payouts: AdminPayoutRow[];
+  subscriptionGrants: AdminSubscriptionGrantRow[];
   performance: StorePerformance[];
+  subscriptions: StoreSubscriptionUsage[];
   totals: {
     stores: number;
     users: number;
@@ -93,6 +129,10 @@ export interface AdminDashboardData {
     paystack: number;
     weekPaystack: number;
     pendingPayouts: number;
+    subsActive: number;
+    subsExpiringSoon: number;
+    subsExpired: number;
+    subsNone: number;
   };
   weekStart: string;
   weekEnd: string;
@@ -166,12 +206,13 @@ export async function loadAdminDashboard(weekStart = getWeekStart()): Promise<Ad
 
   const weekEnd = getWeekEnd(weekStart);
 
-  const [storesRaw, usersRaw, productsRaw, txRaw, payoutsRaw] = await Promise.all([
+  const [storesRaw, usersRaw, productsRaw, txRaw, payoutsRaw, grantsRaw] = await Promise.all([
     fetchAllRows<Record<string, unknown>>('stores'),
     fetchAllRows<Record<string, unknown>>('users'),
     fetchAllRows<Record<string, unknown>>('products'),
     fetchAllRows<Record<string, unknown>>('transactions'),
     fetchAllRows<Record<string, unknown>>('payouts').catch(() => [] as Record<string, unknown>[]),
+    fetchAllRows<Record<string, unknown>>('subscription_grants').catch(() => [] as Record<string, unknown>[]),
   ]);
 
   const stores: AdminStoreRow[] = storesRaw.map((s) => ({
@@ -182,6 +223,9 @@ export async function loadAdminDashboard(weekStart = getWeekStart()): Promise<Ad
     momo_account_name: String(s.momo_account_name || ''),
     momo_number: String(s.momo_number || ''),
     momo_network: String(s.momo_network || ''),
+    subscription_started_at: s.subscription_started_at ? String(s.subscription_started_at) : null,
+    subscription_expires_at: s.subscription_expires_at ? String(s.subscription_expires_at) : null,
+    subscription_months_granted: Number(s.subscription_months_granted) || 0,
     created_at: String(s.created_at || ''),
   }));
 
@@ -233,6 +277,18 @@ export async function loadAdminDashboard(weekStart = getWeekStart()): Promise<Ad
     marked_at: p.marked_at ? String(p.marked_at) : null,
   }));
 
+  const subscriptionGrants: AdminSubscriptionGrantRow[] = grantsRaw
+    .map((g) => ({
+      id: String(g.id),
+      store_id: String(g.store_id),
+      months: Number(g.months) || 0,
+      period_start: String(g.period_start || ''),
+      period_end: String(g.period_end || ''),
+      notes: String(g.notes || ''),
+      granted_at: String(g.granted_at || g.created_at || ''),
+    }))
+    .sort((a, b) => b.granted_at.localeCompare(a.granted_at));
+
   const performance: StorePerformance[] = stores.map((store) => {
     const storeTx = transactions.filter((t) => t.store_id === store.id);
     const weekTx = storeTx.filter((t) => inWeek(t.created_at, weekStart, weekEnd));
@@ -266,13 +322,50 @@ export async function loadAdminDashboard(weekStart = getWeekStart()): Promise<Ad
 
   const weekPaystackTotal = performance.reduce((s, p) => s + p.weekPaystack, 0);
 
+  const subscriptions: StoreSubscriptionUsage[] = stores.map((store) => {
+    const info = getSubscriptionInfo(store.subscription_expires_at, store.subscription_started_at);
+    const storeGrants = subscriptionGrants.filter((g) => g.store_id === store.id);
+    const periodStart = store.subscription_started_at;
+    const periodEnd = store.subscription_expires_at;
+    const periodTx = transactions.filter((t) => {
+      if (t.store_id !== store.id) return false;
+      if (!periodStart) return false;
+      if (t.created_at < periodStart) return false;
+      if (periodEnd && t.created_at > periodEnd) return false;
+      return true;
+    });
+
+    return {
+      store,
+      status: info.status,
+      daysLeft: info.daysLeft,
+      isExpiringSoon: info.isExpiringSoon,
+      isExpired: info.isExpired,
+      monthsGranted: store.subscription_months_granted,
+      grantCount: storeGrants.length,
+      lastGrantedAt: storeGrants[0]?.granted_at || null,
+      periodSales: periodTx.length,
+      periodRevenue: periodTx.reduce((s, t) => s + t.total_amount, 0),
+      userCount: users.filter((u) => u.store_id === store.id).length,
+      productCount: products.filter((p) => p.store_id === store.id).length,
+    };
+  }).sort((a, b) => {
+    const rank = (s: SubscriptionStatus) => (s === 'expired' ? 0 : s === 'active' ? 1 : 2);
+    const rankDiff = rank(a.status) - rank(b.status);
+    if (rankDiff !== 0) return rankDiff;
+    if (a.daysLeft != null && b.daysLeft != null) return a.daysLeft - b.daysLeft;
+    return a.store.name.localeCompare(b.store.name);
+  });
+
   return {
     stores,
     users,
     products,
     transactions,
     payouts,
+    subscriptionGrants,
     performance,
+    subscriptions,
     totals: {
       stores: stores.length,
       users: users.length,
@@ -282,10 +375,87 @@ export async function loadAdminDashboard(weekStart = getWeekStart()): Promise<Ad
       paystack: transactions.reduce((s, t) => s + t.paystack_amount, 0),
       weekPaystack: weekPaystackTotal,
       pendingPayouts: performance.filter((p) => p.weekPaystack > 0 && p.payoutStatus !== 'sent').length,
+      subsActive: subscriptions.filter((s) => s.status === 'active').length,
+      subsExpiringSoon: subscriptions.filter((s) => s.isExpiringSoon).length,
+      subsExpired: subscriptions.filter((s) => s.status === 'expired').length,
+      subsNone: subscriptions.filter((s) => s.status === 'none').length,
     },
     weekStart,
     weekEnd,
   };
+}
+
+/**
+ * Grant (or extend) a store's monthly subscription.
+ * Extends from max(now, current expiry). History is recorded in subscription_grants.
+ */
+export async function grantStoreSubscription(
+  store: AdminStoreRow,
+  months: number,
+  notes = ''
+): Promise<{ success: boolean; error?: string; expiresAt?: string }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: 'Supabase not configured' };
+  }
+  if (!Number.isFinite(months) || months < 1 || months > 36) {
+    return { success: false, error: 'Months must be between 1 and 36' };
+  }
+
+  const nowIso = new Date().toISOString();
+  const info = getSubscriptionInfo(store.subscription_expires_at, store.subscription_started_at);
+
+  const baseIso =
+    info.status === 'active' && store.subscription_expires_at
+      ? store.subscription_expires_at
+      : nowIso;
+
+  const periodStart = baseIso;
+  const periodEnd = addMonthsIso(baseIso, months);
+  const startedAt =
+    info.status === 'active' && store.subscription_started_at
+      ? store.subscription_started_at
+      : nowIso;
+  const monthsGranted = (store.subscription_months_granted || 0) + months;
+
+  const { error: updateError } = await supabase
+    .from('stores')
+    .update({
+      subscription_started_at: startedAt,
+      subscription_expires_at: periodEnd,
+      subscription_months_granted: monthsGranted,
+    })
+    .eq('id', store.id);
+
+  if (updateError) {
+    return {
+      success: false,
+      error: updateError.message.includes('subscription_')
+        ? `${updateError.message} — run supabase-migrate-subscriptions.sql in Supabase.`
+        : updateError.message,
+    };
+  }
+
+  const grantPayload = {
+    id: generateId(),
+    store_id: store.id,
+    months,
+    period_start: periodStart,
+    period_end: periodEnd,
+    notes,
+    granted_at: nowIso,
+  };
+
+  const { error: grantError } = await supabase.from('subscription_grants').insert(grantPayload);
+  if (grantError) {
+    // Store was updated; surface grant-history failure but treat grant as applied
+    return {
+      success: true,
+      expiresAt: periodEnd,
+      error: `Subscription saved, but grant history failed: ${grantError.message}`,
+    };
+  }
+
+  return { success: true, expiresAt: periodEnd };
 }
 
 /**
