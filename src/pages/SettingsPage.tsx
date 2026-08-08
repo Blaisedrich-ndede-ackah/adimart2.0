@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Store, Shield, Percent, RefreshCcw,
   Save, Loader2, CheckCircle2, WifiOff, UserPlus,
-  Trash2, Users, Fingerprint, AlertCircle, Key, Smartphone
+  Trash2, Users, Fingerprint, AlertCircle, Key, Smartphone, Ban
 } from 'lucide-react';
 import ChangePinModal from '@/components/ChangePinModal';
 import ResetUserPinModal from '@/components/ResetUserPinModal';
@@ -15,9 +15,11 @@ import {
   syncBidirectional,
   getLastSyncTime, 
   getCurrentStoreId,
-  getCurrentStoreUsers,
+  getCurrentStoreUsersIncludingBlocked,
   addUserToStore,
-  deleteUser
+  deleteUser,
+  deactivateUser,
+  activateUser,
 } from '@/lib/dexie';
 import { isAutoSyncEnabled, setAutoSyncEnabled, startAutoSync, stopAutoSync } from '@/lib/sync';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -32,6 +34,9 @@ export default function SettingsPage() {
   const [supportNumber, setSupportNumber] = useState('');
   const [discountCap, setDiscountCap] = useState('10');
   const [pinOnDiscount, setPinOnDiscount] = useState(true);
+  const [allowPercentage, setAllowPercentage] = useState(true);
+  const [allowFixed, setAllowFixed] = useState(true);
+  const [cashierCanDiscount, setCashierCanDiscount] = useState(true);
   const [momoAccountName, setMomoAccountName] = useState('');
   const [momoNumber, setMomoNumber] = useState('');
   const [momoNetwork, setMomoNetwork] = useState('');
@@ -69,6 +74,9 @@ export default function SettingsPage() {
       setSupportNumber(currentStore.support_number);
       setDiscountCap(String(currentStore.discount_cap_percentage));
       setPinOnDiscount(currentStore.pin_on_discount_enabled === 1);
+      setAllowPercentage((currentStore.discount_allow_percentage ?? 1) === 1);
+      setAllowFixed((currentStore.discount_allow_fixed ?? 1) === 1);
+      setCashierCanDiscount((currentStore.cashier_can_discount ?? 1) === 1);
       setMomoAccountName(currentStore.momo_account_name || '');
       setMomoNumber(currentStore.momo_number || '');
       setMomoNetwork(currentStore.momo_network || '');
@@ -80,7 +88,7 @@ export default function SettingsPage() {
     setStoreId(await getCurrentStoreId());
     setAutoSync(isAutoSyncEnabled());
 
-    const storeUsers = await getCurrentStoreUsers();
+    const storeUsers = await getCurrentStoreUsersIncludingBlocked();
     setUsers(storeUsers);
 
     const bioAvailable = await isBiometricAvailable();
@@ -101,12 +109,21 @@ export default function SettingsPage() {
     setSaveSuccess(false);
     
     try {
+      if (!allowPercentage && !allowFixed) {
+        setSaveError('Enable at least one discount type (percentage or fixed).');
+        setSaving(false);
+        return;
+      }
+
       await db.stores.update(storeId, {
         name: storeName.trim(),
         address: storeAddress.trim(),
         support_number: supportNumber.trim(),
         discount_cap_percentage: Math.max(0, Math.min(100, parseInt(discountCap) || 10)),
         pin_on_discount_enabled: pinOnDiscount ? 1 : 0,
+        discount_allow_percentage: allowPercentage ? 1 : 0,
+        discount_allow_fixed: allowFixed ? 1 : 0,
+        cashier_can_discount: cashierCanDiscount ? 1 : 0,
         momo_account_name: momoAccountName.trim(),
         momo_number: momoNumber.trim(),
         momo_network: momoNetwork.trim(),
@@ -189,12 +206,36 @@ export default function SettingsPage() {
       setNewUserPin('');
       setShowAddUser(false);
       
-      const storeUsers = await getCurrentStoreUsers();
+      const storeUsers = await getCurrentStoreUsersIncludingBlocked();
       setUsers(storeUsers);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setAddUserError('Failed to add user: ' + msg);
     }
+  };
+
+  const refreshUsers = async () => {
+    setUsers(await getCurrentStoreUsersIncludingBlocked());
+  };
+
+  const handleBlockUser = async (user: LocalUser) => {
+    if (user.id === currentUser?.id) {
+      alert('You cannot block your own account while logged in.');
+      return;
+    }
+    if (user.role === 'owner') {
+      alert('Owner accounts cannot be blocked from here.');
+      return;
+    }
+    if (confirm(`Block ${user.name}? They will not be able to log in until unblocked.`)) {
+      await deactivateUser(user.id);
+      await refreshUsers();
+    }
+  };
+
+  const handleUnblockUser = async (user: LocalUser) => {
+    await activateUser(user.id);
+    await refreshUsers();
   };
 
   const handleDeleteUser = async (userId: string) => {
@@ -203,10 +244,9 @@ export default function SettingsPage() {
       return;
     }
     
-    if (confirm('Delete this user? This cannot be undone.')) {
+    if (confirm('Delete this user permanently? Prefer Block if you may need them later.')) {
       await deleteUser(userId);
-      const storeUsers = await getCurrentStoreUsers();
-      setUsers(storeUsers);
+      await refreshUsers();
     }
   };
 
@@ -341,6 +381,51 @@ export default function SettingsPage() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
+                <p className="text-sm font-medium text-gray-700">Allow percentage discounts</p>
+                <p className="text-xs text-gray-500">e.g. 10% off the cart</p>
+              </div>
+              <button
+                onClick={() => setAllowPercentage(!allowPercentage)}
+                className={`w-12 h-7 rounded-full transition-colors flex items-center px-0.5 touch-target ${
+                  allowPercentage ? 'bg-primary justify-end' : 'bg-gray-300 justify-start'
+                }`}
+              >
+                <div className="w-6 h-6 bg-white rounded-full shadow" />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-700">Allow fixed-amount discounts</p>
+                <p className="text-xs text-gray-500">e.g. GH₵5 off the cart</p>
+              </div>
+              <button
+                onClick={() => setAllowFixed(!allowFixed)}
+                className={`w-12 h-7 rounded-full transition-colors flex items-center px-0.5 touch-target ${
+                  allowFixed ? 'bg-primary justify-end' : 'bg-gray-300 justify-start'
+                }`}
+              >
+                <div className="w-6 h-6 bg-white rounded-full shadow" />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-700">Cashiers can apply discounts</p>
+                <p className="text-xs text-gray-500">Turn off to restrict discounts to owners</p>
+              </div>
+              <button
+                onClick={() => setCashierCanDiscount(!cashierCanDiscount)}
+                className={`w-12 h-7 rounded-full transition-colors flex items-center px-0.5 touch-target ${
+                  cashierCanDiscount ? 'bg-primary justify-end' : 'bg-gray-300 justify-start'
+                }`}
+              >
+                <div className="w-6 h-6 bg-white rounded-full shadow" />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div>
                 <p className="text-sm font-medium text-gray-700">Require PIN for High Discounts</p>
                 <p className="text-xs text-gray-500">Owner PIN needed when exceeding cap</p>
               </div>
@@ -367,7 +452,7 @@ export default function SettingsPage() {
                 className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary focus:border-primary"
               />
               <p className="text-[10px] text-gray-400 mt-1">
-                Cashiers can apply up to this % without owner PIN
+                Applies to percentage discounts and as a % of subtotal for fixed discounts
               </p>
             </div>
           </div>
@@ -510,12 +595,15 @@ export default function SettingsPage() {
               <p className="text-gray-500 text-sm text-center py-4">No staff members yet</p>
             ) : (
               users.map(user => (
-                <div key={user.id} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
+                <div key={user.id} className={`flex items-center justify-between py-2 border-b border-gray-50 last:border-0 ${user.is_active === 0 ? 'opacity-70' : ''}`}>
                   <div>
                     <p className="text-sm font-medium text-gray-900">
                       {user.name}
                       {user.id === currentUser?.id && (
                         <span className="ml-2 text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded">You</span>
+                      )}
+                      {user.is_active === 0 && (
+                        <span className="ml-2 text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded">Blocked</span>
                       )}
                     </p>
                     <p className="text-xs text-gray-500 capitalize">{user.role}</p>
@@ -530,6 +618,25 @@ export default function SettingsPage() {
                         >
                           <Key className="w-4 h-4 text-blue-500" />
                         </button>
+                        {user.role !== 'owner' && (
+                          user.is_active === 1 ? (
+                            <button
+                              onClick={() => void handleBlockUser(user)}
+                              className="p-1.5 rounded-lg hover:bg-amber-50 touch-target"
+                              title="Block cashier"
+                            >
+                              <Ban className="w-4 h-4 text-amber-600" />
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => void handleUnblockUser(user)}
+                              className="p-1.5 rounded-lg hover:bg-emerald-50 touch-target"
+                              title="Unblock cashier"
+                            >
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                            </button>
+                          )
+                        )}
                         <button
                           onClick={() => handleDeleteUser(user.id)}
                           className="p-1.5 rounded-lg hover:bg-red-50 touch-target"
@@ -546,7 +653,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Bluetooth Hardware (printer + scanner) */}
+        {/* Bluetooth also available under Devices for cashiers */}
         <BluetoothHardwareSettings />
 
         {/* Cloud Sync */}

@@ -13,9 +13,13 @@ export interface CartItem {
   image_url?: string;
 }
 
+export type CartDiscountKind = 'none' | 'percentage' | 'fixed';
+
 interface CartState {
   items: CartItem[];
+  discountKind: CartDiscountKind;
   discountPercent: number;
+  discountFixed: number;
   discountAmount: number;
   subtotal: number;
   total: number;
@@ -26,7 +30,11 @@ interface CartState {
   updateQuantity: (itemId: string, quantity: number) => { success: boolean; error?: string };
   incrementItem: (itemId: string) => { success: boolean; error?: string };
   decrementItem: (itemId: string) => void;
+  /** @deprecated Prefer setDiscountPercent — kept for call-site compatibility */
   setDiscount: (percent: number) => void;
+  setDiscountPercent: (percent: number) => void;
+  setDiscountFixed: (amount: number) => void;
+  clearDiscount: () => void;
   clearCart: () => void;
 
   completeSale: (
@@ -39,16 +47,50 @@ interface CartState {
   ) => Promise<{ receiptNumber: string; items: CartItem[]; subtotal: number; discount: number; total: number }>;
 }
 
-function recalculate(items: CartItem[], discountPercent: number) {
+function recalculate(
+  items: CartItem[],
+  discountKind: CartDiscountKind,
+  discountPercent: number,
+  discountFixed: number
+) {
   const subtotal = items.reduce((sum, i) => sum + i.subtotal, 0);
-  const discountAmount = Math.round((subtotal * discountPercent) / 100 * 100) / 100;
+  let kind = discountKind;
+  let percent = Math.max(0, Math.min(100, discountPercent));
+  let fixed = Math.max(0, discountFixed);
+  let discountAmount = 0;
+
+  if (kind === 'percentage') {
+    discountAmount = Math.round((subtotal * percent) / 100 * 100) / 100;
+  } else if (kind === 'fixed') {
+    discountAmount = Math.min(Math.round(fixed * 100) / 100, subtotal);
+    fixed = discountAmount;
+    percent = subtotal > 0 ? Math.round((discountAmount / subtotal) * 10000) / 100 : 0;
+  } else {
+    percent = 0;
+    fixed = 0;
+    discountAmount = 0;
+  }
+
   const total = Math.round((subtotal - discountAmount) * 100) / 100;
-  return { subtotal, discountAmount, total };
+  return {
+    subtotal,
+    discountAmount,
+    total,
+    discountKind: kind,
+    discountPercent: percent,
+    discountFixed: fixed,
+  };
+}
+
+function withDiscount(state: CartState, items: CartItem[]) {
+  return recalculate(items, state.discountKind, state.discountPercent, state.discountFixed);
 }
 
 export const useCartStore = create<CartState>((set, get) => ({
   items: [],
+  discountKind: 'none',
   discountPercent: 0,
+  discountFixed: 0,
   discountAmount: 0,
   subtotal: 0,
   total: 0,
@@ -62,7 +104,7 @@ export const useCartStore = create<CartState>((set, get) => ({
 
     const existingItem = get().items.find(i => i.product_id === product.id);
     const currentQtyInCart = existingItem?.quantity || 0;
-    
+
     if (product.stock_level <= 0) {
       return { success: false, error: `${product.name} is out of stock`, product };
     }
@@ -96,9 +138,9 @@ export const useCartStore = create<CartState>((set, get) => ({
     if (existing) {
       newItems = state.items.map(i =>
         i.product_id === product.id
-          ? { 
-              ...i, 
-              quantity: i.quantity + 1, 
+          ? {
+              ...i,
+              quantity: i.quantity + 1,
               subtotal: (i.quantity + 1) * i.unit_price,
               available_stock: product.stock_level,
               image_url: product.image_url || i.image_url || '',
@@ -121,16 +163,14 @@ export const useCartStore = create<CartState>((set, get) => ({
       ];
     }
 
-    const calcs = recalculate(newItems, state.discountPercent);
-    set({ items: newItems, ...calcs });
+    set({ items: newItems, ...withDiscount(state, newItems) });
     return { success: true };
   },
 
   removeItem: (itemId: string) => {
     set(state => {
       const newItems = state.items.filter(i => i.id !== itemId);
-      const calcs = recalculate(newItems, state.discountPercent);
-      return { items: newItems, ...calcs };
+      return { items: newItems, ...withDiscount(state, newItems) };
     });
   },
 
@@ -141,7 +181,7 @@ export const useCartStore = create<CartState>((set, get) => ({
 
     const state = get();
     const item = state.items.find(i => i.id === itemId);
-    
+
     if (!item) {
       return { success: false, error: 'Item not found' };
     }
@@ -155,15 +195,14 @@ export const useCartStore = create<CartState>((set, get) => ({
         ? { ...i, quantity, subtotal: quantity * i.unit_price }
         : i
     );
-    const calcs = recalculate(newItems, state.discountPercent);
-    set({ items: newItems, ...calcs });
+    set({ items: newItems, ...withDiscount(state, newItems) });
     return { success: true };
   },
 
   incrementItem: (itemId: string) => {
     const state = get();
     const item = state.items.find(i => i.id === itemId);
-    
+
     if (!item) {
       return { success: false, error: 'Item not found' };
     }
@@ -177,8 +216,7 @@ export const useCartStore = create<CartState>((set, get) => ({
         ? { ...i, quantity: i.quantity + 1, subtotal: (i.quantity + 1) * i.unit_price }
         : i
     );
-    const calcs = recalculate(newItems, state.discountPercent);
-    set({ items: newItems, ...calcs });
+    set({ items: newItems, ...withDiscount(state, newItems) });
     return { success: true };
   },
 
@@ -186,29 +224,47 @@ export const useCartStore = create<CartState>((set, get) => ({
     set(state => {
       const item = state.items.find(i => i.id === itemId);
       if (!item || item.quantity <= 1) return state;
-      
+
       const newItems = state.items.map(i =>
         i.id === itemId
           ? { ...i, quantity: i.quantity - 1, subtotal: (i.quantity - 1) * i.unit_price }
           : i
       );
-      const calcs = recalculate(newItems, state.discountPercent);
-      return { items: newItems, ...calcs };
+      return { items: newItems, ...withDiscount(state, newItems) };
     });
   },
 
   setDiscount: (percent: number) => {
+    get().setDiscountPercent(percent);
+  },
+
+  setDiscountPercent: (percent: number) => {
     set(state => {
-      const clampedPercent = Math.max(0, Math.min(100, percent));
-      const calcs = recalculate(state.items, clampedPercent);
-      return { discountPercent: clampedPercent, ...calcs };
+      const calcs = recalculate(state.items, 'percentage', percent, 0);
+      return calcs;
+    });
+  },
+
+  setDiscountFixed: (amount: number) => {
+    set(state => {
+      const calcs = recalculate(state.items, 'fixed', 0, amount);
+      return calcs;
+    });
+  },
+
+  clearDiscount: () => {
+    set(state => {
+      const calcs = recalculate(state.items, 'none', 0, 0);
+      return calcs;
     });
   },
 
   clearCart: () => {
     set({
       items: [],
+      discountKind: 'none',
       discountPercent: 0,
+      discountFixed: 0,
       discountAmount: 0,
       subtotal: 0,
       total: 0,
@@ -222,7 +278,6 @@ export const useCartStore = create<CartState>((set, get) => ({
     const storeId = await getCurrentStoreId();
     if (!storeId) throw new Error('No store selected');
 
-    // Verify stock is still available before completing sale
     for (const item of state.items) {
       const product = await db.products.get(item.product_id);
       if (!product) {
@@ -237,7 +292,6 @@ export const useCartStore = create<CartState>((set, get) => ({
     const receiptNumber = generateReceiptNumber();
     const now = new Date().toISOString();
 
-    // Save transaction
     await db.transactions.add({
       id: txnId,
       store_id: storeId,
@@ -255,7 +309,6 @@ export const useCartStore = create<CartState>((set, get) => ({
       synced: 0,
     });
 
-    // Save transaction items
     const txnItems = state.items.map(item => ({
       id: generateId(),
       store_id: storeId,
@@ -270,7 +323,6 @@ export const useCartStore = create<CartState>((set, get) => ({
 
     await db.transaction_items.bulkAdd(txnItems);
 
-    // DEDUCT STOCK
     for (const item of state.items) {
       const product = await db.products.get(item.product_id);
       if (product) {
@@ -283,7 +335,6 @@ export const useCartStore = create<CartState>((set, get) => ({
       }
     }
 
-    // Capture current state for receipt before clearing
     const saleData = {
       receiptNumber,
       items: [...state.items],
@@ -292,10 +343,11 @@ export const useCartStore = create<CartState>((set, get) => ({
       total: state.total,
     };
 
-    // Clear cart
     set({
       items: [],
+      discountKind: 'none',
       discountPercent: 0,
+      discountFixed: 0,
       discountAmount: 0,
       subtotal: 0,
       total: 0,

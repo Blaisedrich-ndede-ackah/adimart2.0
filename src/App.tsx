@@ -11,6 +11,8 @@ import POSPage from '@/pages/POSPage';
 import InventoryPage from '@/pages/InventoryPage';
 import ReportsPage from '@/pages/ReportsPage';
 import SettingsPage from '@/pages/SettingsPage';
+import DevicesPage from '@/pages/DevicesPage';
+import TransactionsPage from '@/pages/TransactionsPage';
 import AdminLoginPage from '@/pages/AdminLoginPage';
 import AdminDashboardPage from '@/pages/AdminDashboardPage';
 
@@ -31,10 +33,11 @@ export default function App() {
   }, [initialize]);
 
   useEffect(() => {
-    if (currentUser?.role === 'cashier') {
+    // Cashiers cannot stay on owner-only pages after switch/login
+    if (currentUser?.role === 'cashier' && ['inventory', 'reports', 'settings'].includes(currentPage)) {
       setCurrentPage('pos');
     }
-  }, [currentUser]);
+  }, [currentUser, currentPage]);
 
   if (appMode === 'admin-login') {
     return (
@@ -95,15 +98,20 @@ export default function App() {
   }
 
   const renderPage = () => {
+    const role = currentUser?.role;
     switch (currentPage) {
       case 'pos':
         return <POSPage />;
+      case 'transactions':
+        return <TransactionsPage />;
+      case 'devices':
+        return <DevicesPage />;
       case 'inventory':
-        return <InventoryPage />;
+        return role === 'owner' ? <InventoryPage /> : <POSPage />;
       case 'reports':
-        return <ReportsPage />;
+        return role === 'owner' ? <ReportsPage /> : <POSPage />;
       case 'settings':
-        return <SettingsPage />;
+        return role === 'owner' ? <SettingsPage /> : <POSPage />;
       default:
         return <POSPage />;
     }
