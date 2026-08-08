@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Package, AlertTriangle, TrendingDown, DollarSign,
   Plus, Search, ArrowUpDown, Edit, Trash2, ToggleLeft, ToggleRight,
-  PackagePlus, RefreshCw, Upload, Barcode
+  PackagePlus, RefreshCw, Upload, Barcode, Bluetooth
 } from 'lucide-react';
 import { db, LocalProduct, getCurrentStoreProducts } from '@/lib/dexie';
 import AddProduct from '@/components/AddProduct';
@@ -10,6 +10,8 @@ import StockAdjustment from '@/components/StockAdjustment';
 import CsvImportModal from '@/components/CsvImportModal';
 import { downloadBarcodeLabel, printBarcodeLabel } from '@/lib/barcodeLabels';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
+import { playScanBeep } from '@/lib/scanBeep';
 
 type SortMode = 'recent' | 'alpha' | 'stock-low' | 'stock-high';
 
@@ -28,6 +30,9 @@ export default function InventoryPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showCsvImport, setShowCsvImport] = useState(false);
   const [labelStatus, setLabelStatus] = useState('');
+  const [scanFeedback, setScanFeedback] = useState('');
+  const [scannedBarcodeForAdd, setScannedBarcodeForAdd] = useState<string | null>(null);
+  const [highlightedProductId, setHighlightedProductId] = useState<string | null>(null);
 
   const loadProducts = useCallback(async () => {
     const allProducts = await getCurrentStoreProducts();
@@ -35,6 +40,38 @@ export default function InventoryPage() {
     const cats = [...new Set(allProducts.map(p => p.category))].sort();
     setCategories(['All', ...cats]);
   }, []);
+
+  const handleInventoryScan = useCallback(async (barcode: string) => {
+    // While adding/editing a product, let AddProduct own the barcode field
+    if (showAddProduct || showCsvImport) return;
+
+    const all = await getCurrentStoreProducts();
+    const match = all.find((p) => p.barcode === barcode || p.barcode === barcode.trim());
+
+    if (match) {
+      setSearchQuery(barcode);
+      setSelectedCategory('All');
+      setHighlightedProductId(match.id);
+      setStockAdjustProduct(match);
+      setScanFeedback(`Found: ${match.name} — adjust stock`);
+      playScanBeep('success');
+    } else {
+      setScannedBarcodeForAdd(barcode);
+      setEditProduct(null);
+      setShowAddProduct(true);
+      setScanFeedback(`Unknown barcode ${barcode} — add product`);
+      playScanBeep('warning');
+    }
+    setTimeout(() => {
+      setScanFeedback('');
+      setHighlightedProductId(null);
+    }, 4000);
+  }, [showAddProduct, showCsvImport]);
+
+  useBluetoothBarcodeInput(
+    handleInventoryScan,
+    !showAddProduct && !showCsvImport && !stockAdjustProduct
+  );
 
   useEffect(() => {
     loadProducts();
@@ -125,7 +162,13 @@ export default function InventoryPage() {
       {/* Header */}
       <div className="bg-primary px-4 py-3 flex-shrink-0">
         <div className="flex items-center justify-between mb-3">
-          <h1 className="text-white font-bold text-lg">Inventory</h1>
+          <div>
+            <h1 className="text-white font-bold text-lg">Inventory</h1>
+            <p className="text-emerald-200 text-[10px] flex items-center gap-1 mt-0.5">
+              <Bluetooth className="w-3 h-3" />
+              Handheld scanner ready for stock logging
+            </p>
+          </div>
           <div className="flex items-center gap-2">
             <button
               onClick={handleRefresh}
@@ -142,7 +185,7 @@ export default function InventoryPage() {
               <Upload className="w-4 h-4 text-white" />
             </button>
             <button
-              onClick={() => { setEditProduct(null); setShowAddProduct(true); }}
+              onClick={() => { setEditProduct(null); setScannedBarcodeForAdd(null); setShowAddProduct(true); }}
               className="bg-white/20 p-2 rounded-xl touch-target flex items-center gap-1.5"
             >
               <Plus className="w-4 h-4 text-white" />
@@ -150,6 +193,9 @@ export default function InventoryPage() {
             </button>
           </div>
         </div>
+        {scanFeedback && (
+          <p className="text-emerald-100 text-xs text-center mb-2 animate-fade-in">{scanFeedback}</p>
+        )}
 
         {/* Dashboard Cards */}
         <div className="grid grid-cols-4 gap-2">
@@ -194,7 +240,8 @@ export default function InventoryPage() {
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Search products..."
+              placeholder="Search products or scan barcode..."
+              data-allow-typing="true"
               className="w-full pl-9 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary"
             />
           </div>
@@ -264,9 +311,11 @@ export default function InventoryPage() {
             {filteredProducts.map(product => (
               <div
                 key={product.id}
-                className={`bg-white rounded-xl p-3 shadow-sm border border-gray-100 ${
-                  product.is_active === 0 ? 'opacity-50' : ''
-                }`}
+                className={`bg-white rounded-xl p-3 shadow-sm border ${
+                  highlightedProductId === product.id
+                    ? 'border-primary ring-2 ring-primary/30'
+                    : 'border-gray-100'
+                } ${product.is_active === 0 ? 'opacity-50' : ''}`}
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
@@ -347,9 +396,10 @@ export default function InventoryPage() {
 
       <AddProduct
         isOpen={showAddProduct}
-        onClose={() => { setShowAddProduct(false); setEditProduct(null); }}
-        onSaved={loadProducts}
+        onClose={() => { setShowAddProduct(false); setEditProduct(null); setScannedBarcodeForAdd(null); }}
+        onSaved={() => { setScannedBarcodeForAdd(null); loadProducts(); }}
         editProduct={editProduct}
+        initialBarcode={scannedBarcodeForAdd}
       />
 
       <StockAdjustment

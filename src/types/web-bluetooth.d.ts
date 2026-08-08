@@ -64,6 +64,8 @@ interface RequestDeviceOptions {
 interface Bluetooth {
   getAvailability(): Promise<boolean>;
   requestDevice(options: RequestDeviceOptions): Promise<BluetoothDevice>;
+  /** Previously permitted devices (Chromium). Used for silent reconnect. */
+  getDevices?(): Promise<BluetoothDevice[]>;
   addEventListener(type: string, listener: EventListener): void;
   removeEventListener(type: string, listener: EventListener): void;
 }

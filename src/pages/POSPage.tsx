@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  ShoppingCart, Minus, Plus, Trash2, Search, ChevronRight, Package, AlertCircle
+  ShoppingCart, Minus, Plus, Trash2, Search, ChevronRight, Package, AlertCircle, Bluetooth
 } from 'lucide-react';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import CheckoutOverlay from '@/components/CheckoutOverlay';
@@ -8,6 +8,8 @@ import { useCartStore } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { LocalProduct, getCurrentStoreActiveProducts } from '@/lib/dexie';
 import { playScanBeep, primeScanBeep } from '@/lib/scanBeep';
+import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
+import { getBluetoothHardwareStatus, subscribeBluetoothStatus } from '@/lib/bluetoothPeripherals';
 
 export default function POSPage() {
   const cart = useCartStore();
@@ -19,6 +21,7 @@ export default function POSPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<LocalProduct[]>([]);
   const [stockError, setStockError] = useState<string | null>(null);
+  const [btStatus, setBtStatus] = useState(getBluetoothHardwareStatus());
 
   useEffect(() => {
     // iOS/Safari often blocks WebAudio until the first user gesture.
@@ -28,6 +31,11 @@ export default function POSPage() {
     };
     window.addEventListener('pointerdown', handler, { passive: true });
     return () => window.removeEventListener('pointerdown', handler);
+  }, []);
+
+  useEffect(() => {
+    setBtStatus(getBluetoothHardwareStatus());
+    return subscribeBluetoothStatus(() => setBtStatus(getBluetoothHardwareStatus()));
   }, []);
 
   const handleScan = useCallback(async (barcode: string) => {
@@ -48,6 +56,9 @@ export default function POSPage() {
     
     setTimeout(() => setScanFeedback(null), 3000);
   }, [cart]);
+
+  // Handheld Bluetooth / HID scanner → cart during checkout
+  useBluetoothBarcodeInput(handleScan, scannerActive && !showCheckout);
 
   useEffect(() => {
     if (searchQuery.length >= 1) {
@@ -112,12 +123,23 @@ export default function POSPage() {
           <h1 className="text-white font-bold text-lg">POS</h1>
           <p className="text-emerald-200 text-xs">Hi, {currentUser?.name}</p>
         </div>
-        <button
-          onClick={() => setShowProductSearch(!showProductSearch)}
-          className="bg-white/20 p-2.5 rounded-xl touch-target"
-        >
-          <Search className="w-5 h-5 text-white" />
-        </button>
+        <div className="flex items-center gap-2">
+          {(btStatus.hidScannerEnabled || btStatus.scannerConnected) && (
+            <div
+              className="bg-white/15 px-2 py-1 rounded-lg flex items-center gap-1"
+              title={btStatus.scannerConnected ? `BLE: ${btStatus.scannerName}` : 'HID scanner ready'}
+            >
+              <Bluetooth className="w-3.5 h-3.5 text-emerald-200" />
+              <span className="text-[10px] text-emerald-100 font-medium">Scanner</span>
+            </div>
+          )}
+          <button
+            onClick={() => setShowProductSearch(!showProductSearch)}
+            className="bg-white/20 p-2.5 rounded-xl touch-target"
+          >
+            <Search className="w-5 h-5 text-white" />
+          </button>
+        </div>
       </div>
 
       {/* Scan Feedback */}
@@ -152,6 +174,7 @@ export default function POSPage() {
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             placeholder="Search product name or barcode..."
+            data-allow-typing="true"
             className="w-full px-4 py-2.5 bg-gray-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary"
             autoFocus
           />

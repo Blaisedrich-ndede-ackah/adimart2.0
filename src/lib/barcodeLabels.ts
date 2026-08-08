@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf';
 import { LocalProduct } from './dexie';
-import { isPrinterConnected, sendRawBytes } from './bluetoothPrinter';
+import { isPrinterConnected, sendRawBytes } from './bluetoothPeripherals';
 
 export function ensureProductBarcode(product: LocalProduct): string {
   if (product.barcode?.trim()) return product.barcode.trim();

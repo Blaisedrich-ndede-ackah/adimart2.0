@@ -8,7 +8,8 @@ import { useCartStore, CartItem } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { LocalStore } from '@/lib/dexie';
 import { generatePaystackReference, initializePaystack, isPaystackConfigured, isValidPaystackEmail, resolvePaystackEmail } from '@/lib/paystack';
-import { printReceipt, isPrinterConnected, ReceiptData } from '@/lib/bluetoothPrinter';
+import { isPrinterConnected } from '@/lib/bluetoothPeripherals';
+import { printReceipt, type ReceiptData } from '@/lib/printService';
 import { shareReceipt, downloadReceipt, shareViaWhatsApp, PDFReceiptData } from '@/lib/receiptGenerator';
 
 interface CheckoutOverlayProps {
@@ -417,7 +418,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
           )}
 
           {step === 'pin-verify' && (
-            <div className="space-y-4">
+            <div className="space-y-4" data-block-scanner="true">
               <div className="text-center">
                 <Shield className="w-12 h-12 text-accent mx-auto mb-3" />
                 <p className="text-sm text-gray-600">

@@ -1,14 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Store, Shield, Percent, Bluetooth, RefreshCcw,
+  Store, Shield, Percent, RefreshCcw,
   Save, Loader2, CheckCircle2, WifiOff, UserPlus,
   Trash2, Users, Fingerprint, AlertCircle, Key
 } from 'lucide-react';
 import ChangePinModal from '@/components/ChangePinModal';
 import ResetUserPinModal from '@/components/ResetUserPinModal';
+import BluetoothHardwareSettings from '@/components/BluetoothHardwareSettings';
 import { 
   db, 
-  LocalStore,
   LocalUser,
   syncToSupabase,
   syncFromSupabase,
@@ -20,7 +20,6 @@ import {
   deleteUser
 } from '@/lib/dexie';
 import { isAutoSyncEnabled, setAutoSyncEnabled, startAutoSync, stopAutoSync } from '@/lib/sync';
-import { connectPrinter, isPrinterConnected, getConnectedPrinterName, disconnectPrinter } from '@/lib/bluetoothPrinter';
 import { useAuthStore } from '@/store/useAuthStore';
 import { isBiometricAvailable, registerBiometric, hasBiometricRegistered, clearBiometricRegistration } from '@/lib/biometric';
 import { isSupabaseConfigured } from '@/lib/supabase';
@@ -45,10 +44,6 @@ export default function SettingsPage() {
   const [autoSync, setAutoSync] = useState(isAutoSyncEnabled());
   const [storeId, setStoreId] = useState<string | null>(null);
   
-  const [printerName, setPrinterName] = useState<string | null>(null);
-  const [connectingPrinter, setConnectingPrinter] = useState(false);
-  const [printerError, setPrinterError] = useState('');
-
   const [users, setUsers] = useState<LocalUser[]>([]);
   const [showAddUser, setShowAddUser] = useState(false);
   const [newUserName, setNewUserName] = useState('');
@@ -75,7 +70,6 @@ export default function SettingsPage() {
     
     const syncTime = await getLastSyncTime();
     setLastSync(syncTime);
-    setPrinterName(getConnectedPrinterName());
     setSupabaseReady(isSupabaseConfigured());
     setStoreId(await getCurrentStoreId());
     setAutoSync(isAutoSyncEnabled());
@@ -166,30 +160,6 @@ export default function SettingsPage() {
       setSyncStatus('Auto-sync disabled');
     }
     setTimeout(() => setSyncStatus(''), 4000);
-  };
-
-  const handleConnectPrinter = async () => {
-    setConnectingPrinter(true);
-    setPrinterError('');
-    
-    try {
-      const result = await connectPrinter();
-      if (result.success) {
-        setPrinterName(result.deviceName);
-      } else {
-        setPrinterError(result.error || 'Connection failed');
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setPrinterError('Error: ' + msg);
-    }
-    
-    setConnectingPrinter(false);
-  };
-
-  const handleDisconnectPrinter = () => {
-    disconnectPrinter();
-    setPrinterName(null);
   };
 
   const handleAddUser = async () => {
@@ -519,57 +489,8 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Thermal Printer */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">
-          <div className="flex items-center gap-2 mb-4">
-            <Bluetooth className="w-5 h-5 text-blue-500" />
-            <h3 className="font-bold text-gray-900">Thermal Printer</h3>
-          </div>
-
-          {isPrinterConnected() && printerName ? (
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-green-700 flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4" />
-                  Connected
-                </p>
-                <p className="text-xs text-gray-500">{printerName}</p>
-              </div>
-              <button
-                onClick={handleDisconnectPrinter}
-                className="px-3 py-2 bg-red-50 text-red-600 rounded-lg text-xs font-medium touch-target"
-              >
-                Disconnect
-              </button>
-            </div>
-          ) : (
-            <div>
-              <button
-                onClick={handleConnectPrinter}
-                disabled={connectingPrinter}
-                className="w-full py-3 bg-blue-50 text-blue-700 rounded-xl font-medium text-sm flex items-center justify-center gap-2 touch-target disabled:opacity-50"
-              >
-                {connectingPrinter ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Searching for printers...
-                  </>
-                ) : (
-                  <>
-                    <Bluetooth className="w-4 h-4" />
-                    Connect Bluetooth Printer
-                  </>
-                )}
-              </button>
-              {printerError && (
-                <p className="text-red-500 text-xs mt-2">{printerError}</p>
-              )}
-              <p className="text-[10px] text-gray-400 mt-2 text-center">
-                Make sure your printer is on and in pairing mode
-              </p>
-            </div>
-          )}
-        </div>
+        {/* Bluetooth Hardware (printer + scanner) */}
+        <BluetoothHardwareSettings />
 
         {/* Cloud Sync */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">

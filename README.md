@@ -163,31 +163,44 @@ The built `dist/index.html` can be deployed to any static hosting service:
 
 ## Hardware Integration
 
-### Barcode Scanner
+### Bluetooth Hardware (Settings)
 
-The app uses the `@zxing/library` for reliable cross-browser barcode scanning. Supported formats:
+Go to **Settings → Bluetooth Hardware** to discover and pair peripherals in-app:
+
+| Device | How it works |
+|--------|----------------|
+| **Thermal printer** | Web Bluetooth pairing to ESC/POS BLE printers; receipts via `printService` |
+| **BLE barcode scanner** | Optional GATT pairing (Nordic UART / notify characteristics) |
+| **HID handheld scanner** | Pair in system Bluetooth settings, then enable **HID Scanner Input** (default on). Scans feed POS checkout and inventory stock logging |
+
+Saved pairings can be reconnected from Settings. The app also attempts silent reconnect on launch when the browser permits it.
+
+### Camera Barcode Scanner
+
+The app also uses `@zxing/library` for on-device camera scanning. Supported formats:
 - EAN-13, EAN-8
 - UPC-A, UPC-E
 - Code 128, Code 39, Code 93
 - QR Code, Data Matrix, Aztec
 - ITF, Codabar, RSS-14
 
-**Tips for reliable scanning:**
+**Tips for reliable camera scanning:**
 - Ensure good lighting
 - Hold the barcode steady within the scanning frame
 - Keep the barcode flat and not crumpled
 - The back camera is automatically selected when available
 
-### Thermal Printer
+### Thermal Printer (ESC/POS)
 
-Connect via Web Bluetooth to ESC/POS compatible thermal printers. Tested with:
+`src/lib/printService.ts` formats receipts with ESC/POS commands and transmits them over the connected Bluetooth printer. Tested with:
 - Generic 58mm Bluetooth thermal printers
 - Most printers using the `000018f0-0000-1000-8000-00805f9b34fb` service UUID
 
 To connect:
-1. Go to Settings → Thermal Printer
-2. Click "Connect Printer"
-3. Select your printer from the Bluetooth device list
+1. Go to Settings → Bluetooth Hardware
+2. Tap **Pair Bluetooth Printer**
+3. Select your printer from the system picker
+4. Optionally run **Test Print**
 
 ## Project Structure
 
@@ -199,25 +212,24 @@ src/
 │   ├── BottomNav.tsx
 │   ├── CheckoutOverlay.tsx
 │   └── PWAInstallBanner.tsx
-├── lib/                 # Core utilities
-│   ├── bluetoothPrinter.ts
+├── components/
+│   ├── BluetoothHardwareSettings.tsx  # Pair printer + scanner
+│   └── …
+├── hooks/
+│   └── useBluetoothBarcodeInput.ts    # Handheld scanner capture
+├── lib/
+│   ├── bluetoothPeripherals.ts        # Discover / pair / reconnect
+│   ├── barcodeScannerInput.ts         # HID + BLE scan fan-out
+│   ├── printService.ts                # ESC/POS receipt formatting
+│   ├── bluetoothPrinter.ts            # Compatibility façade
 │   ├── dexie.ts
 │   ├── paystack.ts
 │   └── supabase.ts
-├── pages/               # Page components
-│   ├── InventoryPage.tsx
-│   ├── LoginPage.tsx
-│   ├── POSPage.tsx
-│   ├── ReportsPage.tsx
-│   └── SettingsPage.tsx
-├── store/               # Zustand stores
-│   ├── useAuthStore.ts
-│   └── useCartStore.ts
-├── types/               # TypeScript declarations
-│   └── web-bluetooth.d.ts
-├── App.tsx              # Main application
-├── main.tsx             # Entry point
-└── index.css            # Global styles
+├── pages/               # POS, Inventory, Reports, Settings, …
+├── store/               # Zustand auth + cart
+├── App.tsx
+├── main.tsx
+└── index.css
 ```
 
 ## Receipt Format

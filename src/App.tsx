@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { initAutoSync, stopAutoSync } from '@/lib/sync';
+import { autoReconnectPeripherals } from '@/lib/bluetoothPeripherals';
 import PWAInstallBanner from '@/components/PWAInstallBanner';
 import BottomNav from '@/components/BottomNav';
 import StoreSetupPage from '@/pages/StoreSetupPage';
@@ -17,6 +18,7 @@ export default function App() {
   useEffect(() => {
     initialize();
     initAutoSync();
+    void autoReconnectPeripherals();
     return () => stopAutoSync();
   }, [initialize]);
 
