@@ -270,7 +270,7 @@ export default function POSPage() {
             <p className="text-[11px] text-gray-500 px-0.5">
               {loadingProducts
                 ? 'Loading products…'
-                : `${filteredProducts.length} product${filteredProducts.length === 1 ? '' : 's'} · tap to add to cart`}
+                : `${filteredProducts.length} product${filteredProducts.length === 1 ? '' : 's'}`}
             </p>
           </div>
 
@@ -291,44 +291,35 @@ export default function POSPage() {
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-2">
                 {filteredProducts.map((product) => {
                   const outOfStock = product.stock_level <= 0;
                   return (
-                    <button
+                    <div
                       key={product.id}
-                      type="button"
-                      onClick={() => handleAddProduct(product)}
-                      disabled={outOfStock}
-                      className={`text-left bg-white rounded-xl border p-2.5 shadow-sm touch-target transition active:scale-[0.98] ${
-                        outOfStock
-                          ? 'border-gray-100 opacity-55 cursor-not-allowed'
-                          : 'border-gray-100 hover:border-primary/40'
+                      className={`bg-white rounded-xl border border-gray-100 px-3 py-2.5 shadow-sm flex items-center gap-3 ${
+                        outOfStock ? 'opacity-55' : ''
                       }`}
                     >
-                      <div className="w-full h-24 rounded-lg overflow-hidden mb-2 bg-gray-50 flex items-center justify-center">
-                        <ProductImage
-                          src={product.image_url}
-                          alt={product.name}
-                          size="lg"
-                          className="w-full h-full max-w-none rounded-none"
-                        />
-                      </div>
-                      <p className="text-xs font-semibold text-gray-900 line-clamp-2 min-h-[2rem]">{product.name}</p>
-                      <p className="text-[10px] text-gray-500 mt-0.5 truncate">{product.category}</p>
-                      <div className="flex items-center justify-between mt-1.5 gap-1">
-                        <span className="text-sm font-bold text-primary">GH₵{product.selling_price.toFixed(2)}</span>
-                        {outOfStock ? (
-                          <span className="text-[9px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded">OUT</span>
-                        ) : product.stock_level < 5 ? (
-                          <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">
-                            {product.stock_level}
-                          </span>
-                        ) : (
-                          <span className="text-[10px] text-gray-500">{product.stock_level}</span>
+                      <ProductImage src={product.image_url} alt={product.name} size="md" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">{product.name}</p>
+                        <p className="text-sm font-semibold text-blue-600 mt-0.5">
+                          GHS {product.selling_price.toFixed(2)}
+                        </p>
+                        {outOfStock && (
+                          <p className="text-[10px] font-semibold text-red-600 mt-0.5">Out of stock</p>
                         )}
                       </div>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => handleAddProduct(product)}
+                        disabled={outOfStock}
+                        className="flex-shrink-0 px-3 py-2 rounded-lg border border-black bg-white text-black text-xs font-medium touch-target disabled:opacity-40 disabled:cursor-not-allowed active:bg-gray-50"
+                      >
+                        Add to cart
+                      </button>
+                    </div>
                   );
                 })}
               </div>
