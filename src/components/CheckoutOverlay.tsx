@@ -7,7 +7,6 @@ import {
 import { useCartStore, CartItem } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { generatePaystackReference, initializePaystack, isPaystackConfigured, isValidPaystackEmail, resolvePaystackEmail } from '@/lib/paystack';
-import { isPrinterConnected } from '@/lib/bluetoothPeripherals';
 import { printReceipt, type ReceiptData } from '@/lib/printService';
 import { shareReceipt, downloadReceipt, shareViaWhatsApp, PDFReceiptData } from '@/lib/receiptGenerator';
 import ProductImage from '@/components/ProductImage';
@@ -215,10 +214,6 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
       };
       setSaleResult(completed);
       setStep('success');
-
-      if (isPrinterConnected() && currentStore) {
-        await tryPrintReceipt(completed, method, cashAmt, paystackAmt);
-      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
