@@ -4,21 +4,31 @@ import {
 } from 'recharts';
 import {
   TrendingUp, Banknote, CreditCard, Calendar, ChevronDown, Receipt,
-  Download, FileText, PiggyBank, Package, Users, Tag, Plus, Trash2, Loader2
+  Download, FileText, PiggyBank, Package, Users, Tag, Plus, Trash2, Loader2,
+  Warehouse, Store, MapPin
 } from 'lucide-react';
 import {
-  db, LocalTransaction, LocalTransactionItem, LocalExpense, LocalStockBatch,
+  db, LocalTransaction, LocalTransactionItem, LocalExpense, LocalStockBatch, LocalLocation,
   getCurrentStoreTransactions, getCurrentStoreExpenses, getCurrentStoreId,
   addExpense, deleteExpense
 } from '@/lib/dexie';
 import { useAuthStore } from '@/store/useAuthStore';
 import {
-  buildReportSummary, exportReportCsv, exportReportPdf, getPeriodRange, ReportSummary
+  buildLocationReportSummary,
+  buildReportSummary,
+  exportLocationReportCsv,
+  exportLocationReportPdf,
+  exportReportCsv,
+  exportReportPdf,
+  getPeriodRange,
+  listReportLocations,
+  ReportSummary,
 } from '@/lib/reportAnalytics';
 import { getExpiringBatches } from '@/lib/warehouse';
+import FinancialDonutChart from '@/components/FinancialDonutChart';
 
 type Period = 'today' | 'week' | 'month';
-type ReportTab = 'overview' | 'products' | 'expenses';
+type ReportTab = 'overview' | 'products' | 'expenses' | 'locations';
 
 interface DayData {
   day: string;
@@ -46,6 +56,8 @@ export default function ReportsPage() {
   const [savingExpense, setSavingExpense] = useState(false);
   const [expiringBatches, setExpiringBatches] = useState<LocalStockBatch[]>([]);
   const [productNames, setProductNames] = useState<Record<string, string>>({});
+  const [locations, setLocations] = useState<LocalLocation[]>([]);
+  const [exportingLocationId, setExportingLocationId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     const storeId = await getCurrentStoreId();
@@ -60,6 +72,7 @@ export default function ReportsPage() {
     const names: Record<string, string> = {};
     products.forEach((p) => { names[p.id] = p.name; });
     setProductNames(names);
+    setLocations(await listReportLocations(storeId));
 
     const periodTxns = allTxns.filter(t => {
       const d = new Date(t.created_at);
@@ -119,6 +132,25 @@ export default function ReportsPage() {
   const handleExportPdf = () => {
     if (!summary || !currentStore) return;
     exportReportPdf(summary, periodLabel, currentStore.name);
+  };
+
+  const handleExportLocation = async (locationId: string, format: 'csv' | 'pdf') => {
+    const storeId = await getCurrentStoreId();
+    if (!storeId || !currentStore) return;
+    setExportingLocationId(locationId);
+    try {
+      const locSummary = await buildLocationReportSummary(
+        storeId,
+        locationId,
+        period,
+        currentStore.name
+      );
+      if (format === 'csv') exportLocationReportCsv(locSummary);
+      else exportLocationReportPdf(locSummary);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to export location report');
+    }
+    setExportingLocationId(null);
   };
 
   const handleAddExpense = async () => {
@@ -189,6 +221,7 @@ export default function ReportsPage() {
             { key: 'overview', label: 'Overview', icon: TrendingUp },
             { key: 'products', label: 'Products', icon: Package },
             { key: 'expenses', label: 'Expenses', icon: PiggyBank },
+            { key: 'locations', label: 'Locations', icon: MapPin },
           ] as const).map(item => {
             const Icon = item.icon;
             return (
@@ -250,6 +283,17 @@ export default function ReportsPage() {
                 <p className="text-xs text-gray-500">Expenses</p>
                 <p className="text-lg font-bold text-red-500">GH₵{summary.expenses.toFixed(2)}</p>
               </div>
+            </div>
+
+            <div className="mb-4 md:max-w-md md:mx-auto">
+              <FinancialDonutChart
+                title="Financial breakdown"
+                metrics={{
+                  costPrice: summary.costOfGoods,
+                  sellingPrice: summary.revenue,
+                  profitEstimate: summary.revenue - summary.costOfGoods,
+                }}
+              />
             </div>
 
             {expiringBatches.length > 0 && (
@@ -487,6 +531,71 @@ export default function ReportsPage() {
                   </div>
                 </div>
               ))
+            )}
+          </div>
+        )}
+
+        {tab === 'locations' && (
+          <div className="space-y-3 md:max-w-3xl md:mx-auto">
+            <p className="text-xs text-gray-500 leading-relaxed">
+              Export an individual report for each shop or warehouse. Uses the selected period (
+              {periodLabel}) for sales, plus on-hand stock valuation.
+            </p>
+            {locations.length === 0 ? (
+              <div className="bg-white rounded-xl p-8 text-center text-gray-400 text-sm">
+                No locations yet. Enable Warehouse and add shops/warehouses first.
+              </div>
+            ) : (
+              locations.map((loc) => {
+                const busy = exportingLocationId === loc.id;
+                return (
+                  <div
+                    key={loc.id}
+                    className="bg-white border border-emerald-50 rounded-xl px-4 py-3.5 flex items-center gap-3"
+                  >
+                    <div
+                      className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                        loc.location_type === 'warehouse'
+                          ? 'bg-amber-50 text-amber-700'
+                          : 'bg-emerald-50 text-primary'
+                      }`}
+                    >
+                      {loc.location_type === 'warehouse' ? (
+                        <Warehouse className="w-5 h-5" />
+                      ) : (
+                        <Store className="w-5 h-5" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{loc.name}</p>
+                      <p className="text-[11px] text-gray-500 capitalize mt-0.5">
+                        {loc.location_type}
+                        {loc.is_default === 1 ? ' · Default' : ''}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void handleExportLocation(loc.id, 'csv')}
+                        className="px-2.5 py-2 rounded-lg bg-emerald-50 text-primary text-xs font-semibold touch-target disabled:opacity-50"
+                        title="Export CSV"
+                      >
+                        {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void handleExportLocation(loc.id, 'pdf')}
+                        className="px-2.5 py-2 rounded-lg bg-slate-100 text-slate-700 text-xs font-semibold touch-target disabled:opacity-50"
+                        title="Export PDF"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
             )}
           </div>
         )}
