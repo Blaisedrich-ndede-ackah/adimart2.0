@@ -24,6 +24,7 @@ type PosTab = 'products' | 'cart';
 
 export default function POSPage() {
   const cart = useCartStore();
+  const setSaleContext = useCartStore((s) => s.setSaleContext);
   const { currentUser, currentStore } = useAuthStore();
   const [posTab, setPosTab] = useState<PosTab>('products');
   const [scannerActive, setScannerActive] = useState(true);
@@ -88,8 +89,8 @@ export default function POSPage() {
   }, [loadSaleContext]);
 
   useEffect(() => {
-    cart.setSaleContext(selectedLocationId || null, saleMode);
-  }, [selectedLocationId, saleMode, cart]);
+    setSaleContext(selectedLocationId || null, saleMode);
+  }, [selectedLocationId, saleMode, setSaleContext]);
 
   useEffect(() => {
     void loadProducts();
