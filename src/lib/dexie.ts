@@ -214,6 +214,16 @@ export interface AppConfig {
   current_user_id: string | null;
 }
 
+/** Tombstones so cloud sync cannot resurrect hard-deleted records */
+export interface LocalDeletedRecord {
+  id: string;
+  store_id: string;
+  table_name: 'products';
+  record_id: string;
+  deleted_at: string;
+  synced: number;
+}
+
 class AdimatDB extends Dexie {
   stores!: Table<LocalStore, string>;
   users!: Table<LocalUser, string>;
@@ -226,6 +236,7 @@ class AdimatDB extends Dexie {
   stock_movements!: Table<LocalStockMovement, string>;
   online_orders!: Table<LocalOnlineOrder, string>;
   online_order_items!: Table<LocalOnlineOrderItem, string>;
+  deleted_records!: Table<LocalDeletedRecord, string>;
   sync_meta!: Table<SyncMeta, string>;
   app_config!: Table<AppConfig, string>;
 
@@ -275,6 +286,22 @@ class AdimatDB extends Dexie {
       stock_movements: 'id, store_id, product_id, batch_id, movement_type, created_at, synced',
       online_orders: 'id, store_id, order_number, status, created_at, synced',
       online_order_items: 'id, store_id, order_id, product_id, synced',
+      sync_meta: 'id',
+      app_config: 'id',
+    });
+    this.version(6).stores({
+      stores: 'id, synced',
+      users: 'id, store_id, role, pin_hash, is_active, synced',
+      products: 'id, store_id, name, category, barcode, is_active, sell_online, synced, updated_at',
+      transactions: 'id, store_id, receipt_number, cashier_id, status, created_at, synced',
+      transaction_items: 'id, store_id, transaction_id, product_id, synced',
+      expenses: 'id, store_id, category, created_at, synced',
+      locations: 'id, store_id, location_type, is_default, is_active, synced',
+      stock_batches: 'id, store_id, product_id, location_id, expiry_date, synced, updated_at',
+      stock_movements: 'id, store_id, product_id, batch_id, movement_type, created_at, synced',
+      online_orders: 'id, store_id, order_number, status, created_at, synced',
+      online_order_items: 'id, store_id, order_id, product_id, synced',
+      deleted_records: 'id, store_id, table_name, record_id, synced, deleted_at',
       sync_meta: 'id',
       app_config: 'id',
     });
@@ -525,6 +552,79 @@ export async function getCurrentStoreProducts(): Promise<LocalProduct[]> {
   return db.products.where('store_id').equals(storeId).toArray();
 }
 
+/**
+ * Hard-delete a product everywhere: local catalog, warehouse batches/movements,
+ * cloud product row (CASCADE clears related stock), and a tombstone so sync
+ * cannot resurrect it. Historical sales/order lines keep product_name.
+ */
+export async function deleteProductCompletely(productId: string): Promise<void> {
+  const product = await db.products.get(productId);
+  if (!product) return;
+
+  const storeId = product.store_id;
+  const tombstoneId = `products:${productId}`;
+
+  await db.transaction(
+    'rw',
+    [
+      db.products,
+      db.stock_batches,
+      db.stock_movements,
+      db.online_order_items,
+      db.deleted_records,
+    ],
+    async () => {
+      const batches = await db.stock_batches.where('product_id').equals(productId).toArray();
+      await Promise.all(batches.map((b) => db.stock_batches.delete(b.id)));
+
+      const movements = await db.stock_movements.where('product_id').equals(productId).toArray();
+      await Promise.all(movements.map((m) => db.stock_movements.delete(m.id)));
+
+      const orderItems = await db.online_order_items
+        .where('product_id')
+        .equals(productId)
+        .toArray();
+      await Promise.all(
+        orderItems.map((item) =>
+          db.online_order_items.update(item.id, { product_id: null, synced: 0 })
+        )
+      );
+
+      await db.products.delete(productId);
+
+      await db.deleted_records.put({
+        id: tombstoneId,
+        store_id: storeId,
+        table_name: 'products',
+        record_id: productId,
+        deleted_at: new Date().toISOString(),
+        synced: 0,
+      });
+    }
+  );
+
+  if (isSupabaseConfigured()) {
+    try {
+      // Cloud CASCADE removes stock_batches / stock_movements; txn items SET NULL
+      const { error } = await supabase.from('products').delete().eq('id', productId);
+      if (!error) {
+        await db.deleted_records.update(tombstoneId, { synced: 1 });
+      }
+    } catch {
+      // Offline / network — tombstone synced=0 will push on next sync
+    }
+  }
+}
+
+async function getDeletedProductIds(storeId: string): Promise<Set<string>> {
+  const rows = await db.deleted_records
+    .where('store_id')
+    .equals(storeId)
+    .and((r) => r.table_name === 'products')
+    .toArray();
+  return new Set(rows.map((r) => r.record_id));
+}
+
 // Get active products for current store
 export async function getCurrentStoreActiveProducts(): Promise<LocalProduct[]> {
   const storeId = await getCurrentStoreId();
@@ -743,6 +843,28 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
   let syncedCount = 0;
 
   try {
+    // Push hard-deletes first so cloud rows (and CASCADE children) are removed
+    const pendingDeletes = await db.deleted_records
+      .where('store_id')
+      .equals(storeId)
+      .and((r) => r.synced === 0)
+      .toArray();
+
+    for (const del of pendingDeletes) {
+      if (del.table_name !== 'products') continue;
+      try {
+        const { error } = await supabase.from('products').delete().eq('id', del.record_id);
+        if (error) {
+          errors.push(formatSyncError('Product delete', error));
+        } else {
+          await db.deleted_records.update(del.id, { synced: 1 });
+          syncedCount += 1;
+        }
+      } catch (error) {
+        errors.push(formatSyncError('Product delete', error));
+      }
+    }
+
     const store = await db.stores.get(storeId);
     if (store && store.synced === 0) {
       syncedCount += await upsertToSupabase(
@@ -1034,6 +1156,7 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
 
   let pulledCount = 0;
   const errors: string[] = [];
+  const deletedProductIds = await getDeletedProductIds(storeId);
 
   try {
     const { data: remoteStore, error: storeError } = await supabase
@@ -1339,6 +1462,18 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
       for (const row of data || []) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const mapped = config.map(row) as any;
+
+        // Never resurrect hard-deleted products or their stock rows
+        if (config.table === 'products' && deletedProductIds.has(mapped.id as string)) {
+          continue;
+        }
+        if (
+          (config.table === 'stock_batches' || config.table === 'stock_movements') &&
+          deletedProductIds.has(mapped.product_id as string)
+        ) {
+          continue;
+        }
+
         const existing = await config.dbTable.get(mapped.id);
 
         let record = mapped;
@@ -1450,6 +1585,7 @@ export async function restoreStoreFromCloud(
       db.stock_movements,
       db.online_orders,
       db.online_order_items,
+      db.deleted_records,
       db.app_config,
     ],
     async () => {
@@ -1464,6 +1600,7 @@ export async function restoreStoreFromCloud(
       await db.stock_movements.clear();
       await db.online_orders.clear();
       await db.online_order_items.clear();
+      await db.deleted_records.clear();
     }
   );
 
