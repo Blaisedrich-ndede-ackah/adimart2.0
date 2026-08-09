@@ -18,11 +18,20 @@ import DevicesPage from '@/pages/DevicesPage';
 import TransactionsPage from '@/pages/TransactionsPage';
 import SubscriptionPage from '@/pages/SubscriptionPage';
 import WarehousePage from '@/pages/WarehousePage';
+import EcommercePage from '@/pages/EcommercePage';
+import PublicShopPage from '@/pages/PublicShopPage';
 import AdminLoginPage from '@/pages/AdminLoginPage';
 import AdminDashboardPage from '@/pages/AdminDashboardPage';
 import { checkAndSendSubscriptionExpirySms } from '@/lib/subscriptionReminders';
 
 type AppMode = 'store' | 'admin-login' | 'admin';
+
+function readPublicShopSlug(): string | null {
+  if (typeof window === 'undefined') return null;
+  const hash = window.location.hash.replace(/^#/, '');
+  const match = hash.match(/^\/?shop\/([^/?#]+)/i);
+  return match?.[1] ? decodeURIComponent(match[1]).trim().toLowerCase() : null;
+}
 
 export default function App() {
   const { isAuthenticated, currentUser, isStoreSetup, isLoading, initialize } = useAuthStore();
@@ -30,6 +39,13 @@ export default function App() {
   const [appMode, setAppMode] = useState<AppMode>(() =>
     isAdminSessionActive() ? 'admin' : 'store'
   );
+  const [publicShopSlug, setPublicShopSlug] = useState<string | null>(() => readPublicShopSlug());
+
+  useEffect(() => {
+    const onHashChange = () => setPublicShopSlug(readPublicShopSlug());
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
 
   useEffect(() => {
     initialize();
@@ -40,7 +56,10 @@ export default function App() {
 
   useEffect(() => {
     // Cashiers cannot stay on owner-only pages after switch/login
-    if (currentUser?.role === 'cashier' && ['inventory', 'reports', 'settings', 'warehouse'].includes(currentPage)) {
+    if (currentUser?.role !== 'cashier') return;
+    const ownerOnly = ['inventory', 'reports', 'settings', 'warehouse'];
+    const ecommerceOk = (currentUser.can_manage_ecommerce ?? 0) === 1;
+    if (ownerOnly.includes(currentPage) || (currentPage === 'ecommerce' && !ecommerceOk)) {
       setCurrentPage('pos');
     }
   }, [currentUser, currentPage]);
@@ -51,6 +70,10 @@ export default function App() {
     const timer = window.setInterval(() => void checkAndSendSubscriptionExpirySms(), 6 * 60 * 60 * 1000);
     return () => window.clearInterval(timer);
   }, [isAuthenticated]);
+
+  if (publicShopSlug) {
+    return <PublicShopPage slug={publicShopSlug} />;
+  }
 
   if (appMode === 'admin-login') {
     return (
@@ -133,6 +156,10 @@ export default function App() {
         return role === 'owner' ? <InventoryPage /> : <POSPage />;
       case 'warehouse':
         return role === 'owner' ? <WarehousePage /> : <POSPage />;
+      case 'ecommerce':
+        return role === 'owner' || (currentUser?.can_manage_ecommerce ?? 0) === 1
+          ? <EcommercePage />
+          : <POSPage />;
       case 'reports':
         return role === 'owner' ? <ReportsPage /> : <POSPage />;
       case 'settings':

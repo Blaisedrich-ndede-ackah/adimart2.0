@@ -1,6 +1,6 @@
 import {
   ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt,
-  CalendarClock, Warehouse
+  CalendarClock, Warehouse, ShoppingBag
 } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
 
@@ -13,6 +13,9 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const { currentUser, currentStore, switchUser } = useAuthStore();
   const isOwner = currentUser?.role === 'owner';
   const warehouseEnabled = (currentStore?.warehouse_enabled ?? 0) === 1;
+  const ecommerceEnabled = (currentStore?.ecommerce_enabled ?? 0) === 1;
+  const canManageEcommerce =
+    isOwner || (currentUser?.can_manage_ecommerce ?? 0) === 1;
 
   const navItems = [
     { id: 'pos', label: 'POS', icon: ScanBarcode, show: true },
@@ -21,6 +24,12 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
     { id: 'subscription', label: 'Plan', icon: CalendarClock, show: true },
     { id: 'inventory', label: 'Inventory', icon: Package, show: isOwner },
     { id: 'warehouse', label: 'Warehouse', icon: Warehouse, show: isOwner && warehouseEnabled },
+    {
+      id: 'ecommerce',
+      label: 'Online',
+      icon: ShoppingBag,
+      show: ecommerceEnabled && canManageEcommerce,
+    },
     { id: 'reports', label: 'Reports', icon: BarChart3, show: isOwner },
     { id: 'settings', label: 'Settings', icon: Settings, show: isOwner },
   ].filter((item) => item.show);

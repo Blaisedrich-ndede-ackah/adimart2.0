@@ -33,6 +33,11 @@ export interface LocalStore {
   warehouse_enabled?: number;
   max_shops?: number;
   max_warehouses?: number;
+  /** Admin-granted public e-commerce storefront */
+  ecommerce_enabled?: number;
+  /** Public URL slug: #/shop/{slug} */
+  ecommerce_slug?: string;
+  ecommerce_tagline?: string;
   created_at: string;
   synced: number;
 }
@@ -47,6 +52,8 @@ export interface LocalUser {
   assigned_location_id?: string | null;
   can_wholesale?: number;
   can_sell_from_warehouse?: number;
+  /** Staff may manage online catalog/orders when ecommerce is enabled */
+  can_manage_ecommerce?: number;
   created_at: string;
   synced: number;
 }
@@ -70,8 +77,41 @@ export interface LocalProduct {
   wholesale_pack_price?: number;
   wholesale_unit_price?: number;
   wholesale_tiers_json?: string;
+  /** List this product on the public e-commerce storefront */
+  sell_online?: number;
   created_at: string;
   updated_at: string;
+  synced: number;
+}
+
+export type OnlineOrderStatus = 'new' | 'confirmed' | 'fulfilled' | 'cancelled';
+
+export interface LocalOnlineOrder {
+  id: string;
+  store_id: string;
+  order_number: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_address: string;
+  notes: string;
+  status: OnlineOrderStatus;
+  payment_method: string;
+  total_amount: number;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export interface LocalOnlineOrderItem {
+  id: string;
+  store_id: string;
+  order_id: string;
+  product_id: string | null;
+  product_name: string;
+  unit_price: number;
+  quantity: number;
+  subtotal: number;
+  created_at: string;
   synced: number;
 }
 
@@ -184,6 +224,8 @@ class AdimatDB extends Dexie {
   locations!: Table<LocalLocation, string>;
   stock_batches!: Table<LocalStockBatch, string>;
   stock_movements!: Table<LocalStockMovement, string>;
+  online_orders!: Table<LocalOnlineOrder, string>;
+  online_order_items!: Table<LocalOnlineOrderItem, string>;
   sync_meta!: Table<SyncMeta, string>;
   app_config!: Table<AppConfig, string>;
 
@@ -218,6 +260,21 @@ class AdimatDB extends Dexie {
       locations: 'id, store_id, location_type, is_default, is_active, synced',
       stock_batches: 'id, store_id, product_id, location_id, expiry_date, synced, updated_at',
       stock_movements: 'id, store_id, product_id, batch_id, movement_type, created_at, synced',
+      sync_meta: 'id',
+      app_config: 'id',
+    });
+    this.version(5).stores({
+      stores: 'id, synced',
+      users: 'id, store_id, role, pin_hash, is_active, synced',
+      products: 'id, store_id, name, category, barcode, is_active, sell_online, synced, updated_at',
+      transactions: 'id, store_id, receipt_number, cashier_id, status, created_at, synced',
+      transaction_items: 'id, store_id, transaction_id, product_id, synced',
+      expenses: 'id, store_id, category, created_at, synced',
+      locations: 'id, store_id, location_type, is_default, is_active, synced',
+      stock_batches: 'id, store_id, product_id, location_id, expiry_date, synced, updated_at',
+      stock_movements: 'id, store_id, product_id, batch_id, movement_type, created_at, synced',
+      online_orders: 'id, store_id, order_number, status, created_at, synced',
+      online_order_items: 'id, store_id, order_id, product_id, synced',
       sync_meta: 'id',
       app_config: 'id',
     });
@@ -309,6 +366,9 @@ export async function createStoreWithOwner(
     warehouse_enabled: 0,
     max_shops: 1,
     max_warehouses: 0,
+    ecommerce_enabled: 0,
+    ecommerce_slug: '',
+    ecommerce_tagline: '',
     created_at: now,
     synced: 0,
   };
@@ -323,6 +383,7 @@ export async function createStoreWithOwner(
     assigned_location_id: null,
     can_wholesale: 1,
     can_sell_from_warehouse: 1,
+    can_manage_ecommerce: 1,
     created_at: now,
     synced: 0,
   };
@@ -414,6 +475,7 @@ export async function addUserToStore(
     assigned_location_id: null,
     can_wholesale: role === 'owner' ? 1 : 0,
     can_sell_from_warehouse: role === 'owner' ? 1 : 0,
+    can_manage_ecommerce: role === 'owner' ? 1 : 0,
     created_at: new Date().toISOString(),
     synced: 0,
   };
@@ -637,7 +699,9 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
     | 'expenses'
     | 'locations'
     | 'stock_batches'
-    | 'stock_movements',
+    | 'stock_movements'
+    | 'online_orders'
+    | 'online_order_items',
   rows: T[],
   markSynced: () => Promise<void>,
   errors: string[]
@@ -701,6 +765,9 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
           warehouse_enabled: (store.warehouse_enabled ?? 0) === 1,
           max_shops: store.max_shops ?? 1,
           max_warehouses: store.max_warehouses ?? 0,
+          ecommerce_enabled: (store.ecommerce_enabled ?? 0) === 1,
+          ecommerce_slug: store.ecommerce_slug || '',
+          ecommerce_tagline: store.ecommerce_tagline || '',
           created_at: store.created_at,
         }],
         async () => { await db.stores.update(storeId, { synced: 1 }); },
@@ -722,6 +789,7 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         assigned_location_id: u.assigned_location_id || null,
         can_wholesale: (u.can_wholesale ?? 0) === 1,
         can_sell_from_warehouse: (u.can_sell_from_warehouse ?? 0) === 1,
+        can_manage_ecommerce: (u.can_manage_ecommerce ?? (u.role === 'owner' ? 1 : 0)) === 1,
         created_at: u.created_at,
       })),
       async () => { await Promise.all(unsyncedUsers.map(u => db.users.update(u.id, { synced: 1 }))); },
@@ -750,6 +818,7 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         wholesale_pack_price: p.wholesale_pack_price ?? 0,
         wholesale_unit_price: p.wholesale_unit_price ?? 0,
         wholesale_tiers_json: p.wholesale_tiers_json || '[]',
+        sell_online: (p.sell_online ?? 0) === 1,
         created_at: p.created_at,
         updated_at: p.updated_at,
       })),
@@ -881,6 +950,47 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
       errors
     );
 
+    const unsyncedOrders = await db.online_orders.where('store_id').equals(storeId).and(o => o.synced === 0).toArray();
+    syncedCount += await upsertToSupabase(
+      'Online orders',
+      'online_orders',
+      unsyncedOrders.map(o => ({
+        id: o.id,
+        store_id: o.store_id,
+        order_number: o.order_number,
+        customer_name: o.customer_name,
+        customer_phone: o.customer_phone,
+        customer_address: o.customer_address,
+        notes: o.notes,
+        status: o.status,
+        payment_method: o.payment_method,
+        total_amount: o.total_amount,
+        created_at: o.created_at,
+        updated_at: o.updated_at,
+      })),
+      async () => { await Promise.all(unsyncedOrders.map(o => db.online_orders.update(o.id, { synced: 1 }))); },
+      errors
+    );
+
+    const unsyncedOrderItems = await db.online_order_items.where('store_id').equals(storeId).and(i => i.synced === 0).toArray();
+    syncedCount += await upsertToSupabase(
+      'Online order items',
+      'online_order_items',
+      unsyncedOrderItems.map(i => ({
+        id: i.id,
+        store_id: i.store_id,
+        order_id: i.order_id,
+        product_id: i.product_id,
+        product_name: i.product_name,
+        unit_price: i.unit_price,
+        quantity: i.quantity,
+        subtotal: i.subtotal,
+        created_at: i.created_at,
+      })),
+      async () => { await Promise.all(unsyncedOrderItems.map(i => db.online_order_items.update(i.id, { synced: 1 }))); },
+      errors
+    );
+
     if (errors.length > 0) {
       return { success: false, message: `Partial sync. Errors: ${errors.join('; ')}` };
     }
@@ -959,6 +1069,9 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
         warehouse_enabled: remoteStore.warehouse_enabled ? 1 : 0,
         max_shops: Number(remoteStore.max_shops) || 1,
         max_warehouses: Number(remoteStore.max_warehouses) || 0,
+        ecommerce_enabled: remoteStore.ecommerce_enabled ? 1 : 0,
+        ecommerce_slug: remoteStore.ecommerce_slug || localStore?.ecommerce_slug || '',
+        ecommerce_tagline: remoteStore.ecommerce_tagline || localStore?.ecommerce_tagline || '',
         created_at: remoteStore.created_at,
         synced: localStore?.synced === 0 ? 0 : 1,
       });
@@ -979,6 +1092,7 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
           assigned_location_id: (row.assigned_location_id as string) || null,
           can_wholesale: row.can_wholesale ? 1 : 0,
           can_sell_from_warehouse: row.can_sell_from_warehouse ? 1 : 0,
+          can_manage_ecommerce: (row.can_manage_ecommerce || row.role === 'owner') ? 1 : 0,
           created_at: row.created_at as string,
           synced: 1,
         }),
@@ -1007,6 +1121,7 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
             wholesale_pack_price: Number(local.wholesale_pack_price) || 0,
             wholesale_unit_price: Number(local.wholesale_unit_price) || 0,
             wholesale_tiers_json: (local.wholesale_tiers_json as string) || '[]',
+            sell_online: local.sell_online ? 1 : 0,
             created_at: local.created_at as string,
             updated_at: (local.updated_at as string) || (local.created_at as string),
             synced: 1,
@@ -1162,6 +1277,52 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
         }),
         dbTable: db.stock_movements,
       },
+      {
+        label: 'Online orders',
+        table: 'online_orders',
+        map: (row: Record<string, unknown>) => ({
+          id: row.id as string,
+          store_id: row.store_id as string,
+          order_number: row.order_number as string,
+          customer_name: (row.customer_name as string) || '',
+          customer_phone: (row.customer_phone as string) || '',
+          customer_address: (row.customer_address as string) || '',
+          notes: (row.notes as string) || '',
+          status: (row.status as LocalOnlineOrder['status']) || 'new',
+          payment_method: (row.payment_method as string) || 'pay_on_delivery',
+          total_amount: Number(row.total_amount) || 0,
+          created_at: row.created_at as string,
+          updated_at: (row.updated_at as string) || (row.created_at as string),
+          synced: 1,
+        }),
+        dbTable: db.online_orders,
+        merge: async (remote: LocalOnlineOrder, local: LocalOnlineOrder | undefined) => {
+          if (!local) return remote;
+          if (local.synced === 0) {
+            const remoteTime = new Date(remote.updated_at).getTime();
+            const localTime = new Date(local.updated_at).getTime();
+            return remoteTime >= localTime ? { ...remote, synced: 1 } : local;
+          }
+          return remote;
+        },
+      },
+      {
+        label: 'Online order items',
+        table: 'online_order_items',
+        map: (row: Record<string, unknown>) => ({
+          id: row.id as string,
+          store_id: row.store_id as string,
+          order_id: row.order_id as string,
+          product_id: (row.product_id as string) || null,
+          product_name: (row.product_name as string) || '',
+          unit_price: Number(row.unit_price) || 0,
+          quantity: Number(row.quantity) || 0,
+          subtotal: Number(row.subtotal) || 0,
+          created_at: row.created_at as string,
+          synced: 1,
+        }),
+        dbTable: db.online_order_items,
+      },
     ] as const;
 
     for (const config of tables) {
@@ -1287,6 +1448,8 @@ export async function restoreStoreFromCloud(
       db.locations,
       db.stock_batches,
       db.stock_movements,
+      db.online_orders,
+      db.online_order_items,
       db.app_config,
     ],
     async () => {
@@ -1299,6 +1462,8 @@ export async function restoreStoreFromCloud(
       await db.locations.clear();
       await db.stock_batches.clear();
       await db.stock_movements.clear();
+      await db.online_orders.clear();
+      await db.online_order_items.clear();
     }
   );
 

@@ -29,6 +29,9 @@ CREATE TABLE IF NOT EXISTS stores (
   warehouse_enabled BOOLEAN DEFAULT FALSE,
   max_shops INTEGER DEFAULT 1,
   max_warehouses INTEGER DEFAULT 0,
+  ecommerce_enabled BOOLEAN DEFAULT FALSE,
+  ecommerce_slug VARCHAR(80) DEFAULT '',
+  ecommerce_tagline TEXT DEFAULT '',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -52,6 +55,7 @@ CREATE TABLE IF NOT EXISTS users (
   assigned_location_id UUID,
   can_wholesale BOOLEAN DEFAULT FALSE,
   can_sell_from_warehouse BOOLEAN DEFAULT FALSE,
+  can_manage_ecommerce BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -87,6 +91,7 @@ CREATE TABLE IF NOT EXISTS products (
   wholesale_pack_price DECIMAL(12,2) DEFAULT 0,
   wholesale_unit_price DECIMAL(12,2) DEFAULT 0,
   wholesale_tiers_json TEXT DEFAULT '[]',
+  sell_online BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -395,6 +400,60 @@ CREATE TRIGGER update_payouts_updated_at
 
 CREATE TRIGGER update_platform_settings_updated_at
   BEFORE UPDATE ON platform_settings
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+-- ============================================================
+-- ONLINE ORDERS (public e-commerce storefront)
+-- ============================================================
+CREATE UNIQUE INDEX IF NOT EXISTS idx_stores_ecommerce_slug
+  ON stores (ecommerce_slug)
+  WHERE ecommerce_slug IS NOT NULL AND ecommerce_slug <> '';
+
+CREATE TABLE IF NOT EXISTS online_orders (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  order_number VARCHAR(40) NOT NULL,
+  customer_name VARCHAR(255) NOT NULL,
+  customer_phone VARCHAR(50) NOT NULL DEFAULT '',
+  customer_address TEXT DEFAULT '',
+  notes TEXT DEFAULT '',
+  status VARCHAR(20) NOT NULL DEFAULT 'new'
+    CHECK (status IN ('new', 'confirmed', 'fulfilled', 'cancelled')),
+  payment_method VARCHAR(40) NOT NULL DEFAULT 'pay_on_delivery',
+  total_amount DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (total_amount >= 0),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS online_order_items (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  order_id UUID NOT NULL REFERENCES online_orders(id) ON DELETE CASCADE,
+  product_id UUID,
+  product_name VARCHAR(255) NOT NULL,
+  unit_price DECIMAL(12,2) NOT NULL DEFAULT 0,
+  quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
+  subtotal DECIMAL(12,2) NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE online_orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE online_order_items ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "online_orders_select" ON online_orders FOR SELECT USING (true);
+CREATE POLICY "online_orders_insert" ON online_orders FOR INSERT WITH CHECK (true);
+CREATE POLICY "online_orders_update" ON online_orders FOR UPDATE USING (true);
+CREATE POLICY "online_order_items_select" ON online_order_items FOR SELECT USING (true);
+CREATE POLICY "online_order_items_insert" ON online_order_items FOR INSERT WITH CHECK (true);
+CREATE POLICY "online_order_items_update" ON online_order_items FOR UPDATE USING (true);
+
+CREATE INDEX IF NOT EXISTS idx_online_orders_store ON online_orders(store_id);
+CREATE INDEX IF NOT EXISTS idx_online_orders_status ON online_orders(store_id, status);
+CREATE INDEX IF NOT EXISTS idx_online_order_items_order ON online_order_items(order_id);
+
+CREATE TRIGGER update_online_orders_updated_at
+  BEFORE UPDATE ON online_orders
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 

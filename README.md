@@ -132,6 +132,18 @@ Products support pack size, expiry tracking, and owner-defined wholesale pricing
 
 If your Supabase project predates this feature, run `supabase-migrate-warehouse.sql` in the SQL Editor.
 
+### E-commerce storefront
+
+Platform admins can enable a public online shop per store (Admin → Subscriptions → **E-commerce storefront**) and set a slug used in `#/shop/{slug}`.
+
+1. Admin enables e-commerce and saves a slug  
+2. Store owner syncs, then opens **Online** to copy the share link and list products  
+3. Opt products in via Inventory → product → **Sell online**, or from the Online catalog tab  
+4. Customers browse the public link and place **pay on delivery** orders  
+5. Owner (or cashiers with **Can manage online shop**) fulfill orders from the Online inbox  
+
+If your Supabase project predates this feature, run `supabase-migrate-ecommerce.sql` in the SQL Editor.
+
 Store owners set their preferred MoMo account under **Settings → Mobile Money Payout**, then sync to Supabase.
 
 If your Supabase project was created before these features, run `supabase-migrate-admin.sql`, `supabase-migrate-subscriptions.sql`, and `supabase-migrate-platform-settings.sql` in the SQL Editor (or re-apply the latest `supabase-init.sql`).

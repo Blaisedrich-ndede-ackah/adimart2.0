@@ -14,6 +14,7 @@ import {
   loadAdminDashboard,
   markWeeklyPayoutSent,
   shiftWeek,
+  updateStoreEcommerce,
   updateStoreWarehouseLimits,
 } from '@/lib/adminPortal';
 import { clearAdminSession } from '@/lib/adminAuth';
@@ -45,6 +46,9 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
   const [warehouseDrafts, setWarehouseDrafts] = useState<
     Record<string, { warehouse_enabled: boolean; max_shops: number; max_warehouses: number }>
   >({});
+  const [ecommerceDrafts, setEcommerceDrafts] = useState<
+    Record<string, { ecommerce_enabled: boolean; ecommerce_slug: string }>
+  >({});
   const [platformSettings, setPlatformSettings] = useState<PlatformSettings | null>(null);
   const [contactWhatsapp, setContactWhatsapp] = useState('');
   const [contactEmail, setContactEmail] = useState('');
@@ -68,6 +72,17 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
               warehouse_enabled: store.warehouse_enabled,
               max_shops: store.max_shops,
               max_warehouses: store.max_warehouses,
+            },
+          ])
+        )
+      );
+      setEcommerceDrafts(
+        Object.fromEntries(
+          dashboard.stores.map((store) => [
+            store.id,
+            {
+              ecommerce_enabled: store.ecommerce_enabled,
+              ecommerce_slug: store.ecommerce_slug || '',
             },
           ])
         )
@@ -182,6 +197,42 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
           draft.warehouse_enabled ? 'enabled' : 'disabled'
         }, ${maxShops} shop${maxShops === 1 ? '' : 's'}, ${maxWarehouses} warehouse${
           maxWarehouses === 1 ? '' : 's'
+        }`
+      );
+      await refresh();
+    }
+    setBusyStoreId(null);
+    setTimeout(() => setStatusMsg(''), 5000);
+  };
+
+  const getEcommerceDraft = (
+    storeId: string,
+    fallback?: { ecommerce_enabled: boolean; ecommerce_slug: string }
+  ) =>
+    ecommerceDrafts[storeId] ||
+    fallback || {
+      ecommerce_enabled: false,
+      ecommerce_slug: '',
+    };
+
+  const handleSaveEcommerce = async (row: StoreSubscriptionUsage) => {
+    const draft = getEcommerceDraft(row.store.id, {
+      ecommerce_enabled: row.store.ecommerce_enabled,
+      ecommerce_slug: row.store.ecommerce_slug || '',
+    });
+
+    setBusyStoreId(row.store.id);
+    setStatusMsg('');
+    const result = await updateStoreEcommerce(row.store.id, {
+      ecommerce_enabled: draft.ecommerce_enabled,
+      ecommerce_slug: draft.ecommerce_slug,
+    });
+    if (!result.success) {
+      setStatusMsg(result.error || 'Failed to save e-commerce settings');
+    } else {
+      setStatusMsg(
+        `E-commerce for ${row.store.name}: ${
+          draft.ecommerce_enabled ? `enabled (#/shop/${result.slug || draft.ecommerce_slug})` : 'disabled'
         }`
       );
       await refresh();
@@ -398,6 +449,10 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                 max_shops: row.store.max_shops,
                 max_warehouses: row.store.max_warehouses,
               });
+              const ecommerceDraft = getEcommerceDraft(row.store.id, {
+                ecommerce_enabled: row.store.ecommerce_enabled,
+                ecommerce_slug: row.store.ecommerce_slug || '',
+              });
               const statusColor =
                 row.status === 'active'
                   ? row.isExpiringSoon
@@ -420,6 +475,10 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                         {row.store.max_shops} shop{row.store.max_shops === 1 ? '' : 's'} ·{' '}
                         {row.store.max_warehouses} warehouse
                         {row.store.max_warehouses === 1 ? '' : 's'}
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        E-commerce {row.store.ecommerce_enabled ? 'on' : 'off'}
+                        {row.store.ecommerce_slug ? ` · #/shop/${row.store.ecommerce_slug}` : ''}
                       </p>
                     </div>
                     <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-lg ${statusColor}`}>
@@ -551,6 +610,59 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                       className="w-full px-3 py-2 bg-slate-800 text-white rounded-xl text-xs font-semibold disabled:opacity-50 touch-target"
                     >
                       {busyStoreId === row.store.id ? 'Saving…' : 'Save warehouse limits'}
+                    </button>
+                  </div>
+
+                  <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+                    <p className="text-[11px] font-semibold text-slate-700">E-commerce storefront</p>
+                    <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                      <span className="text-xs text-slate-700">Public shop enabled</span>
+                      <input
+                        type="checkbox"
+                        checked={ecommerceDraft.ecommerce_enabled}
+                        onChange={(e) =>
+                          setEcommerceDrafts((prev) => ({
+                            ...prev,
+                            [row.store.id]: {
+                              ...ecommerceDraft,
+                              ecommerce_enabled: e.target.checked,
+                            },
+                          }))
+                        }
+                        className="h-4 w-4 rounded border-slate-300 text-slate-900"
+                      />
+                    </label>
+                    <div>
+                      <label className="text-[11px] text-slate-500 mb-1 block">
+                        Public slug (#/shop/…)
+                      </label>
+                      <input
+                        type="text"
+                        value={ecommerceDraft.ecommerce_slug}
+                        onChange={(e) =>
+                          setEcommerceDrafts((prev) => ({
+                            ...prev,
+                            [row.store.id]: {
+                              ...ecommerceDraft,
+                              ecommerce_slug: e.target.value
+                                .toLowerCase()
+                                .replace(/[^a-z0-9-]+/g, '-')
+                                .replace(/^-+|-+$/g, '')
+                                .slice(0, 60),
+                            },
+                          }))
+                        }
+                        placeholder="auto from store name if blank"
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-mono"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveEcommerce(row)}
+                      disabled={busyStoreId === row.store.id}
+                      className="w-full px-3 py-2 bg-emerald-700 text-white rounded-xl text-xs font-semibold disabled:opacity-50 touch-target"
+                    >
+                      {busyStoreId === row.store.id ? 'Saving…' : 'Save e-commerce'}
                     </button>
                   </div>
                 </div>
@@ -836,6 +948,10 @@ function StoreRevenueCard({ row, compact = false }: { row: StorePerformance; com
             Warehouse {row.store.warehouse_enabled ? 'on' : 'off'} · {row.store.max_shops} shop
             {row.store.max_shops === 1 ? '' : 's'} · {row.store.max_warehouses} warehouse
             {row.store.max_warehouses === 1 ? '' : 's'}
+          </p>
+          <p className="text-[11px] text-slate-500 mt-0.5">
+            E-commerce {row.store.ecommerce_enabled ? 'on' : 'off'}
+            {row.store.ecommerce_slug ? ` · #/shop/${row.store.ecommerce_slug}` : ''}
           </p>
         </div>
       </div>
