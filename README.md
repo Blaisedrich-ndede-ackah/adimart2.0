@@ -123,7 +123,10 @@ Store owners and cashiers open **Plan** to view subscription status and contact 
 Platform admins can enable warehouse features per store and set **max shops** / **max warehouses**. When enabled, owners get a **Warehouse** tab that works as a **separate location workspace** (not mixed into POS):
 
 1. Open **Warehouse** → choose a shop or warehouse location  
-2. Manage that location only: **Stock**, **Receive**, **Transfer** (in/out), **Expiry**, **Adjust**, and **History**
+2. Manage that location only: **Stock**, **Receive**, **Transfer** (in/out), **Expiry**, **Adjust**, **History**, and **Report**  
+3. Export individual shop/warehouse reports (CSV/PDF) from Warehouse or **Reports → Locations**
+
+Reports overview includes a donut chart for **Cost price** (blue), **Selling price** (green), and **Profit Estimate** (yellow = selling − cost), with Selling price shown in the center.
 
 Products support pack size, expiry tracking, and owner-defined wholesale pricing (`pack`, lower unit price, or quantity tiers). POS sells **retail or wholesale** from the cashier’s location (warehouse sales only if permitted). Stock deducts with **FEFO** when batches have expiry dates.
 
