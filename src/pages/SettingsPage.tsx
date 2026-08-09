@@ -266,7 +266,15 @@ export default function SettingsPage() {
 
   const updateCashierPerms = async (
     user: LocalUser,
-    patch: Partial<Pick<LocalUser, 'assigned_location_id' | 'can_wholesale' | 'can_sell_from_warehouse'>>
+    patch: Partial<
+      Pick<
+        LocalUser,
+        | 'assigned_location_id'
+        | 'can_wholesale'
+        | 'can_sell_from_warehouse'
+        | 'can_manage_ecommerce'
+      >
+    >
   ) => {
     await db.users.update(user.id, { ...patch, synced: 0 });
     await refreshUsers();
@@ -690,6 +698,7 @@ export default function SettingsPage() {
                         {user.role}
                         {user.role === 'cashier' && (user.can_wholesale === 1 ? ' · wholesale' : '')}
                         {user.role === 'cashier' && (user.can_sell_from_warehouse === 1 ? ' · warehouse sales' : '')}
+                        {user.role === 'cashier' && (user.can_manage_ecommerce === 1 ? ' · online shop' : '')}
                       </p>
                     </div>
                     <div className="flex items-center gap-1">
@@ -781,6 +790,20 @@ export default function SettingsPage() {
                             onChange={(e) =>
                               void updateCashierPerms(user, {
                                 can_sell_from_warehouse: e.target.checked ? 1 : 0,
+                              })
+                            }
+                          />
+                        </label>
+                      )}
+                      {(currentStore?.ecommerce_enabled ?? 0) === 1 && (
+                        <label className="flex items-center justify-between gap-2 py-1">
+                          <span className="text-gray-700 font-medium">Can manage online shop</span>
+                          <input
+                            type="checkbox"
+                            checked={(user.can_manage_ecommerce ?? 0) === 1}
+                            onChange={(e) =>
+                              void updateCashierPerms(user, {
+                                can_manage_ecommerce: e.target.checked ? 1 : 0,
                               })
                             }
                           />

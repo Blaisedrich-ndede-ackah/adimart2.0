@@ -27,6 +27,9 @@ export interface AdminStoreRow {
   warehouse_enabled: boolean;
   max_shops: number;
   max_warehouses: number;
+  /** Admin-managed public e-commerce storefront */
+  ecommerce_enabled: boolean;
+  ecommerce_slug: string;
   created_at: string;
 }
 
@@ -232,6 +235,8 @@ export async function loadAdminDashboard(weekStart = getWeekStart()): Promise<Ad
     subscription_expires_at: s.subscription_expires_at ? String(s.subscription_expires_at) : null,
     subscription_months_granted: Number(s.subscription_months_granted) || 0,
     warehouse_enabled: Boolean(s.warehouse_enabled),
+    ecommerce_enabled: Boolean(s.ecommerce_enabled),
+    ecommerce_slug: String(s.ecommerce_slug || ''),
     max_shops: Math.max(1, Number(s.max_shops) || 1),
     max_warehouses: Math.max(0, Number(s.max_warehouses) || 0),
     created_at: String(s.created_at || ''),
@@ -526,6 +531,67 @@ export async function updateStoreWarehouseLimits(
   }
 
   return { success: true };
+}
+
+/**
+ * Enable/disable public e-commerce for a store (admin only).
+ * Optionally set a public slug used in #/shop/{slug}.
+ */
+export async function updateStoreEcommerce(
+  storeId: string,
+  settings: {
+    ecommerce_enabled: boolean;
+    ecommerce_slug?: string;
+  }
+): Promise<{ success: boolean; error?: string; slug?: string }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: 'Supabase not configured' };
+  }
+
+  let slug = (settings.ecommerce_slug || '').trim().toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+
+  if (settings.ecommerce_enabled && !slug) {
+    const { data: store } = await supabase.from('stores').select('name').eq('id', storeId).maybeSingle();
+    slug = (store?.name || 'store')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || 'store';
+  }
+
+  if (settings.ecommerce_enabled && slug) {
+    const { data: clash } = await supabase
+      .from('stores')
+      .select('id')
+      .eq('ecommerce_slug', slug)
+      .neq('id', storeId)
+      .maybeSingle();
+    if (clash) {
+      slug = `${slug}-${storeId.slice(0, 6)}`;
+    }
+  }
+
+  const { error } = await supabase
+    .from('stores')
+    .update({
+      ecommerce_enabled: Boolean(settings.ecommerce_enabled),
+      ecommerce_slug: settings.ecommerce_enabled ? slug : '',
+    })
+    .eq('id', storeId);
+
+  if (error) {
+    return {
+      success: false,
+      error: error.message.includes('ecommerce_')
+        ? `${error.message} — run supabase-migrate-ecommerce.sql in Supabase.`
+        : error.message,
+    };
+  }
+
+  return { success: true, slug };
 }
 
 /**

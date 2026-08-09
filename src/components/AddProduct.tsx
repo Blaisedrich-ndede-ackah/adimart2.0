@@ -42,6 +42,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
   const [skuType, setSkuType] = useState('unit');
   const [packSize, setPackSize] = useState('1');
   const [trackExpiry, setTrackExpiry] = useState(false);
+  const [sellOnline, setSellOnline] = useState(false);
   const [wholesaleMode, setWholesaleMode] = useState<WholesaleMode>('none');
   const [wholesalePackPrice, setWholesalePackPrice] = useState('');
   const [wholesaleUnitPrice, setWholesaleUnitPrice] = useState('');
@@ -91,6 +92,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         setImageUrl(editProduct.image_url || '');
         setPackSize(String(editProduct.pack_size ?? 1));
         setTrackExpiry((editProduct.track_expiry ?? 0) === 1);
+        setSellOnline((editProduct.sell_online ?? 0) === 1);
         const mode = (editProduct.wholesale_mode || 'none') as WholesaleMode;
         setWholesaleMode(
           mode === 'pack' || mode === 'unit_discount' || mode === 'tiers' ? mode : 'none'
@@ -114,6 +116,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         setImageUrl('');
         setPackSize('1');
         setTrackExpiry(false);
+        setSellOnline(false);
         setWholesaleMode('none');
         setWholesalePackPrice('');
         setWholesaleUnitPrice('');
@@ -268,6 +271,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
       const wholesaleFields = {
         pack_size: packSizeNum,
         track_expiry: trackExpiry ? 1 : 0,
+        sell_online: sellOnline ? 1 : 0,
         wholesale_mode: wholesaleMode,
         wholesale_pack_price:
           wholesaleMode === 'pack' ? parseFloat(wholesalePackPrice) || 0 : 0,
@@ -599,6 +603,30 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
               <span
                 className={`absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${
                   trackExpiry ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 px-4 py-3 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-gray-900">Sell online</p>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                List on the public shop when e-commerce is enabled
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={sellOnline}
+              onClick={() => setSellOnline((v) => !v)}
+              className={`relative w-12 h-7 rounded-full transition-colors flex-shrink-0 touch-target ${
+                sellOnline ? 'bg-primary' : 'bg-gray-300'
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${
+                  sellOnline ? 'translate-x-5' : 'translate-x-0'
                 }`}
               />
             </button>
