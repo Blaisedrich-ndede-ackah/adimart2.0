@@ -143,9 +143,9 @@ export default function App() {
   };
 
   return (
-    <div className="app-frame md:flex-row md:h-[100dvh] md:overflow-hidden">
+    <div className="app-frame md:flex-row">
       <AppNav currentPage={currentPage} onNavigate={setCurrentPage} />
-      <div className="flex-1 flex flex-col min-w-0 min-h-0 md:h-[100dvh] md:overflow-hidden">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden h-full">
         <PWAInstallBanner />
         <SubscriptionWarningBanner onOpenPlan={() => setCurrentPage('subscription')} />
         <StoreBrandingBar />
