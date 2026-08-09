@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Package, AlertTriangle, TrendingDown, DollarSign,
+  Package, AlertTriangle, TrendingDown, DollarSign, Coins,
   Plus, Search, ArrowUpDown, Edit, Trash2, ToggleLeft, ToggleRight,
   PackagePlus, RefreshCw, Upload, Barcode, Bluetooth
 } from 'lucide-react';
-import { db, LocalProduct, getCurrentStoreProducts } from '@/lib/dexie';
+import { db, deleteProductCompletely, LocalProduct, getCurrentStoreProducts } from '@/lib/dexie';
 import AddProduct from '@/components/AddProduct';
 import StockAdjustment from '@/components/StockAdjustment';
 import CsvImportModal from '@/components/CsvImportModal';
@@ -123,17 +123,27 @@ export default function InventoryPage() {
     setFilteredProducts(result);
   }, [products, selectedCategory, searchQuery, sortMode]);
 
-  const totalSKUs = products.filter(p => p.is_active === 1).length;
-  const outOfStock = products.filter(p => p.stock_level === 0 && p.is_active === 1).length;
-  const lowStock = products.filter(p => p.stock_level > 0 && p.stock_level < 5 && p.is_active === 1).length;
-  const totalValue = products
-    .filter(p => p.is_active === 1)
-    .reduce((sum, p) => sum + p.stock_level * p.cost_price, 0);
+  const activeProducts = products.filter((p) => p.is_active === 1);
+  const totalSKUs = activeProducts.length;
+  const outOfStock = activeProducts.filter((p) => p.stock_level === 0).length;
+  const lowStock = activeProducts.filter((p) => p.stock_level > 0 && p.stock_level < 5).length;
+  const totalValue = activeProducts.reduce(
+    (sum, p) => sum + p.stock_level * p.selling_price,
+    0
+  );
+  const totalCostOfProduct = activeProducts.reduce(
+    (sum, p) => sum + p.stock_level * p.cost_price,
+    0
+  );
 
   const handleDelete = async (id: string) => {
-    if (confirm('Delete this product? This cannot be undone.')) {
-      await db.products.delete(id);
-      loadProducts();
+    if (
+      confirm(
+        'Delete this product permanently? It will be removed from inventory, warehouse stock, and the cloud catalog. Past sales keep the product name on the receipt.'
+      )
+    ) {
+      await deleteProductCompletely(id);
+      await loadProducts();
     }
   };
 
@@ -199,15 +209,15 @@ export default function InventoryPage() {
         )}
 
         {/* Dashboard Cards */}
-        <div className="grid grid-cols-4 gap-2">
-          <div className="bg-white/15 rounded-xl p-2.5 text-center">
+        <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
+          <div className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center">
             <Package className="w-4 h-4 text-white mx-auto mb-1" />
             <p className="text-white font-bold text-lg leading-none">{totalSKUs}</p>
             <p className="text-emerald-200 text-[9px] mt-0.5">Total SKUs</p>
           </div>
           <button 
             onClick={() => { setSelectedCategory('All'); setSortMode('stock-low'); }}
-            className="bg-white/15 rounded-xl p-2.5 text-center hover:bg-white/25 transition"
+            className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center hover:bg-white/25 transition"
           >
             <AlertTriangle className="w-4 h-4 text-red-300 mx-auto mb-1" />
             <p className="text-white font-bold text-lg leading-none">{outOfStock}</p>
@@ -215,16 +225,23 @@ export default function InventoryPage() {
           </button>
           <button
             onClick={() => { setSelectedCategory('All'); setSortMode('stock-low'); }}
-            className="bg-white/15 rounded-xl p-2.5 text-center hover:bg-white/25 transition"
+            className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center hover:bg-white/25 transition"
           >
             <TrendingDown className="w-4 h-4 text-yellow-300 mx-auto mb-1" />
             <p className="text-white font-bold text-lg leading-none">{lowStock}</p>
             <p className="text-emerald-200 text-[9px] mt-0.5">Low Stock</p>
           </button>
-          <div className="bg-white/15 rounded-xl p-2.5 text-center">
+          <div className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center">
             <DollarSign className="w-4 h-4 text-green-300 mx-auto mb-1" />
             <p className="text-white font-bold text-sm leading-none">GH₵{totalValue.toFixed(0)}</p>
             <p className="text-emerald-200 text-[9px] mt-0.5">Value</p>
+          </div>
+          <div className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center">
+            <Coins className="w-4 h-4 text-amber-200 mx-auto mb-1" />
+            <p className="text-white font-bold text-sm leading-none">GH₵{totalCostOfProduct.toFixed(0)}</p>
+            <p className="text-emerald-200 text-[8px] sm:text-[9px] mt-0.5 leading-tight">
+              Total Cost of Product
+            </p>
           </div>
         </div>
       </div>
