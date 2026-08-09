@@ -120,7 +120,10 @@ Store owners and cashiers open **Plan** to view subscription status and contact 
 
 ### Warehouse, bulk & expiry
 
-Platform admins can enable warehouse features per store and set **max shops** / **max warehouses**. When enabled, owners get a **Warehouse** tab to manage locations, receive stock (with batch/expiry), transfer between locations, and review expiry risk.
+Platform admins can enable warehouse features per store and set **max shops** / **max warehouses**. When enabled, owners get a **Warehouse** tab that works as a **separate location workspace** (not mixed into POS):
+
+1. Open **Warehouse** → choose a shop or warehouse location  
+2. Manage that location only: **Stock**, **Receive**, **Transfer** (in/out), **Expiry**, **Adjust**, and **History**
 
 Products support pack size, expiry tracking, and owner-defined wholesale pricing (`pack`, lower unit price, or quantity tiers). POS sells **retail or wholesale** from the cashier’s location (warehouse sales only if permitted). Stock deducts with **FEFO** when batches have expiry dates.
 
