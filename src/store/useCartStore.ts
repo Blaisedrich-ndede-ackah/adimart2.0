@@ -154,6 +154,8 @@ export const useCartStore = create<CartState>((set, get) => ({
   total: 0,
 
   setSaleContext: (locationId, saleMode) => {
+    const state = get();
+    if (state.locationId === locationId && state.saleMode === saleMode) return;
     set({ locationId, saleMode });
   },
 

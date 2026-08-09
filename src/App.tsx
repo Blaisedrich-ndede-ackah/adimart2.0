@@ -74,7 +74,7 @@ export default function App() {
 
   if (isLoading) {
     return (
-      <div className="min-h-[100dvh] bg-primary flex items-center justify-center">
+      <div className="min-h-screen bg-primary flex items-center justify-center">
         <div className="text-center animate-fade-in">
           <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
             <img src="/logo.png" alt="Adimat" className="w-10 h-10 object-contain" />
@@ -87,9 +87,9 @@ export default function App() {
 
   if (!isStoreSetup) {
     return (
-      <div className="h-[100dvh] flex flex-col bg-[var(--color-surface)]">
+      <div className="h-screen flex flex-col">
         <PWAInstallBanner />
-        <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto">
           <StoreSetupPage onOpenAdmin={() => setAppMode('admin-login')} />
         </div>
       </div>
@@ -98,9 +98,9 @@ export default function App() {
 
   if (!isAuthenticated) {
     return (
-      <div className="h-[100dvh] flex flex-col bg-[var(--color-surface)]">
+      <div className="h-screen flex flex-col">
         <PWAInstallBanner />
-        <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto">
           <LoginPage onOpenAdmin={() => setAppMode('admin-login')} />
         </div>
       </div>
@@ -109,9 +109,9 @@ export default function App() {
 
   if (currentUser?.role === 'cashier' && currentUser.is_active === 0) {
     return (
-      <div className="h-[100dvh] flex flex-col bg-[var(--color-surface)]">
+      <div className="h-screen flex flex-col">
         <PWAInstallBanner />
-        <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto">
           <CashierBlockedPage />
         </div>
       </div>
@@ -143,13 +143,13 @@ export default function App() {
   };
 
   return (
-    <div className="app-frame md:flex-row">
+    <div className="h-screen flex flex-col md:flex-row overflow-hidden bg-[var(--color-surface)] md:max-w-7xl md:mx-auto md:shadow-xl md:border-x md:border-emerald-100">
       <AppNav currentPage={currentPage} onNavigate={setCurrentPage} />
-      <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden h-full">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
         <PWAInstallBanner />
         <SubscriptionWarningBanner onOpenPlan={() => setCurrentPage('subscription')} />
         <StoreBrandingBar />
-        <div className="flex-1 min-h-0 overflow-hidden pb-[calc(4.25rem+env(safe-area-inset-bottom))] md:pb-0">
+        <div className="flex-1 min-h-0 overflow-hidden pb-16 md:pb-0">
           {renderPage()}
         </div>
       </div>
