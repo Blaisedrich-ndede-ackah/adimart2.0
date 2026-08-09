@@ -28,7 +28,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex md:w-56 lg:w-64 md:h-full flex-col flex-shrink-0 bg-primary text-white border-r border-primary-dark">
+      <aside className="hidden md:flex w-56 lg:w-64 shrink-0 flex-col self-stretch bg-primary text-white border-r border-primary-dark">
         <div className="px-4 py-5 border-b border-white/10">
           <p className="text-emerald-200 text-[10px] font-semibold uppercase tracking-[0.14em]">Adimat</p>
           <p className="font-bold text-xl tracking-tight truncate mt-1">{currentStore?.name || 'Store'}</p>
