@@ -1,5 +1,11 @@
 import jsPDF from 'jspdf';
-import { db, LocalExpense, LocalProduct, LocalTransaction, LocalTransactionItem } from './dexie';
+import {
+  db,
+  LocalExpense,
+  LocalLocation,
+  LocalTransaction,
+} from './dexie';
+import { getLocationInventory, listLocations } from './warehouse';
 
 export interface PeriodRange {
   start: Date;
@@ -272,4 +278,230 @@ export function exportReportPdf(
   });
 
   doc.save(`adimat-report-${periodLabel.toLowerCase().replace(/\s+/g, '-')}.pdf`);
+}
+
+export interface LocationReportSummary {
+  location: LocalLocation;
+  storeName: string;
+  period: 'today' | 'week' | 'month' | 'all';
+  periodLabel: string;
+  /** Sales at this location */
+  costPrice: number;
+  sellingPrice: number;
+  profitEstimate: number;
+  transactionCount: number;
+  topProducts: ProductSalesStat[];
+  /** On-hand inventory valuation at this location */
+  stockUnits: number;
+  stockSkuCount: number;
+  stockCostValue: number;
+  stockSellingValue: number;
+  stockProfitEstimate: number;
+}
+
+function periodLabelOf(period: 'today' | 'week' | 'month' | 'all'): string {
+  if (period === 'all') return 'All time';
+  if (period === 'today') return 'Today';
+  if (period === 'week') return 'This Week';
+  return 'This Month';
+}
+
+/**
+ * Build an individual shop/warehouse report:
+ * - sales metrics for transactions at this location
+ * - on-hand stock valuation (cost / selling / profit estimate)
+ */
+export async function buildLocationReportSummary(
+  storeId: string,
+  locationId: string,
+  period: 'today' | 'week' | 'month' | 'all' = 'month',
+  storeName = 'Store'
+): Promise<LocationReportSummary> {
+  const locations = await listLocations(storeId);
+  const location = locations.find((l) => l.id === locationId);
+  if (!location) throw new Error('Location not found');
+
+  const [transactions, items, products, inventory] = await Promise.all([
+    db.transactions.where('store_id').equals(storeId).toArray(),
+    db.transaction_items.where('store_id').equals(storeId).toArray(),
+    db.products.where('store_id').equals(storeId).toArray(),
+    getLocationInventory(storeId, locationId),
+  ]);
+
+  const productMap = new Map(products.map((p) => [p.id, p]));
+  let periodTxns = transactions.filter(
+    (t) => t.status === 'completed' && t.location_id === locationId
+  );
+
+  if (period !== 'all') {
+    const { start, end } = getPeriodRange(period);
+    periodTxns = periodTxns.filter((t) => {
+      const d = new Date(t.created_at);
+      return d >= start && d <= end;
+    });
+  }
+
+  const txnIds = new Set(periodTxns.map((t) => t.id));
+  const periodItems = items.filter((i) => txnIds.has(i.transaction_id));
+
+  const productStats = new Map<string, ProductSalesStat>();
+  for (const item of periodItems) {
+    const product = productMap.get(item.product_id);
+    const unitCost = product?.cost_price ?? 0;
+    const existing = productStats.get(item.product_id) || {
+      product_id: item.product_id,
+      product_name: item.product_name,
+      quantity: 0,
+      revenue: 0,
+      cost: 0,
+      profit: 0,
+    };
+    existing.quantity += item.quantity;
+    existing.revenue += item.subtotal;
+    existing.cost += unitCost * item.quantity;
+    existing.profit = existing.revenue - existing.cost;
+    productStats.set(item.product_id, existing);
+  }
+
+  const sellingPrice = periodItems.reduce((sum, i) => sum + i.subtotal, 0);
+  const costPrice = periodItems.reduce((sum, item) => {
+    const product = productMap.get(item.product_id);
+    return sum + (product?.cost_price ?? 0) * item.quantity;
+  }, 0);
+  const profitEstimate = sellingPrice - costPrice;
+
+  let stockUnits = 0;
+  let stockCostValue = 0;
+  let stockSellingValue = 0;
+  for (const row of inventory) {
+    stockUnits += row.quantity;
+    stockCostValue += (row.product.cost_price || 0) * row.quantity;
+    stockSellingValue += (row.product.selling_price || 0) * row.quantity;
+  }
+
+  return {
+    location,
+    storeName,
+    period,
+    periodLabel: periodLabelOf(period),
+    costPrice,
+    sellingPrice,
+    profitEstimate,
+    transactionCount: periodTxns.length,
+    topProducts: [...productStats.values()].sort((a, b) => b.revenue - a.revenue).slice(0, 8),
+    stockUnits,
+    stockSkuCount: inventory.length,
+    stockCostValue,
+    stockSellingValue,
+    stockProfitEstimate: stockSellingValue - stockCostValue,
+  };
+}
+
+export function exportLocationReportCsv(summary: LocationReportSummary): void {
+  const locLabel = `${summary.location.name} (${summary.location.location_type})`;
+  const lines: string[] = [
+    `Adimat Location Report - ${summary.storeName}`,
+    `Location,${locLabel}`,
+    `Period,${summary.periodLabel}`,
+    '',
+    'Sales financials',
+    `Cost price,${summary.costPrice.toFixed(2)}`,
+    `Selling price,${summary.sellingPrice.toFixed(2)}`,
+    `Profit Estimate,${summary.profitEstimate.toFixed(2)}`,
+    `Transactions,${summary.transactionCount}`,
+    '',
+    'Stock valuation (on hand)',
+    `SKUs,${summary.stockSkuCount}`,
+    `Units,${summary.stockUnits}`,
+    `Stock cost value,${summary.stockCostValue.toFixed(2)}`,
+    `Stock selling value,${summary.stockSellingValue.toFixed(2)}`,
+    `Stock profit estimate,${summary.stockProfitEstimate.toFixed(2)}`,
+    '',
+    'Top products at location,Quantity,Revenue,Cost,Profit',
+    ...summary.topProducts.map(
+      (p) =>
+        `"${p.product_name}",${p.quantity},${p.revenue.toFixed(2)},${p.cost.toFixed(2)},${p.profit.toFixed(2)}`
+    ),
+  ];
+
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  const safeName = summary.location.name.toLowerCase().replace(/\s+/g, '-');
+  link.download = `adimat-${summary.location.location_type}-${safeName}-${summary.periodLabel.toLowerCase().replace(/\s+/g, '-')}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+export function exportLocationReportPdf(summary: LocationReportSummary): void {
+  const doc = new jsPDF();
+  let y = 14;
+  const line = (left: string, right = '') => {
+    doc.setFontSize(10);
+    doc.text(left, 14, y);
+    if (right) doc.text(right, 196, y, { align: 'right' });
+    y += 6;
+  };
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.text('Adimat Location Report', 14, y);
+  y += 8;
+  doc.setFontSize(11);
+  doc.text(`${summary.storeName}`, 14, y);
+  y += 6;
+  doc.setFont('helvetica', 'normal');
+  doc.text(
+    `${summary.location.name} (${summary.location.location_type}) • ${summary.periodLabel}`,
+    14,
+    y
+  );
+  y += 10;
+
+  doc.setFont('helvetica', 'bold');
+  doc.text('Sales financials', 14, y);
+  y += 6;
+  doc.setFont('helvetica', 'normal');
+  line('Cost price', `GHS ${summary.costPrice.toFixed(2)}`);
+  line('Selling price', `GHS ${summary.sellingPrice.toFixed(2)}`);
+  line('Profit Estimate', `GHS ${summary.profitEstimate.toFixed(2)}`);
+  line('Transactions', String(summary.transactionCount));
+  y += 4;
+
+  doc.setFont('helvetica', 'bold');
+  doc.text('Stock valuation (on hand)', 14, y);
+  y += 6;
+  doc.setFont('helvetica', 'normal');
+  line('SKUs', String(summary.stockSkuCount));
+  line('Units', String(summary.stockUnits));
+  line('Stock cost value', `GHS ${summary.stockCostValue.toFixed(2)}`);
+  line('Stock selling value', `GHS ${summary.stockSellingValue.toFixed(2)}`);
+  line('Stock profit estimate', `GHS ${summary.stockProfitEstimate.toFixed(2)}`);
+  y += 4;
+
+  if (summary.topProducts.length > 0) {
+    doc.setFont('helvetica', 'bold');
+    doc.text('Top products', 14, y);
+    y += 6;
+    doc.setFont('helvetica', 'normal');
+    summary.topProducts.forEach((p) => {
+      line(`${p.product_name} (${p.quantity})`, `GHS ${p.revenue.toFixed(2)}`);
+      if (y > 280) {
+        doc.addPage();
+        y = 14;
+      }
+    });
+  }
+
+  const safeName = summary.location.name.toLowerCase().replace(/\s+/g, '-');
+  doc.save(
+    `adimat-${summary.location.location_type}-${safeName}-${summary.periodLabel.toLowerCase().replace(/\s+/g, '-')}.pdf`
+  );
+}
+
+export async function listReportLocations(storeId: string): Promise<LocalLocation[]> {
+  return listLocations(storeId);
 }

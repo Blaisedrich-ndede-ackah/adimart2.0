@@ -16,6 +16,9 @@ import {
   SlidersHorizontal,
   Boxes,
   Search,
+  FileBarChart2,
+  Download,
+  FileText,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
 import {
@@ -40,9 +43,16 @@ import {
   type LocationStats,
   type LocationStockRow,
 } from '@/lib/warehouse';
+import {
+  buildLocationReportSummary,
+  exportLocationReportCsv,
+  exportLocationReportPdf,
+  type LocationReportSummary,
+} from '@/lib/reportAnalytics';
+import FinancialDonutChart from '@/components/FinancialDonutChart';
 
 type HubMode = 'hub' | 'workspace';
-type WorkspaceTab = 'stock' | 'receive' | 'transfer' | 'expiry' | 'adjust' | 'history';
+type WorkspaceTab = 'stock' | 'receive' | 'transfer' | 'expiry' | 'adjust' | 'history' | 'report';
 
 const WORKSPACE_TABS: { id: WorkspaceTab; label: string; icon: typeof Warehouse }[] = [
   { id: 'stock', label: 'Stock', icon: Boxes },
@@ -51,6 +61,7 @@ const WORKSPACE_TABS: { id: WorkspaceTab; label: string; icon: typeof Warehouse 
   { id: 'expiry', label: 'Expiry', icon: CalendarClock },
   { id: 'adjust', label: 'Adjust', icon: SlidersHorizontal },
   { id: 'history', label: 'History', icon: History },
+  { id: 'report', label: 'Report', icon: FileBarChart2 },
 ];
 
 function daysUntilExpiry(expiryDate: string | null): number | null {
@@ -138,6 +149,11 @@ export default function WarehousePage() {
   const [adjQty, setAdjQty] = useState('');
   const [adjDirection, setAdjDirection] = useState<'in' | 'out'>('in');
   const [adjNote, setAdjNote] = useState('');
+
+  // Location report
+  const [locationReport, setLocationReport] = useState<LocationReportSummary | null>(null);
+  const [reportPeriod, setReportPeriod] = useState<'today' | 'week' | 'month' | 'all'>('month');
+  const [reportBusy, setReportBusy] = useState(false);
 
   const productMap = useMemo(() => {
     const map = new Map<string, LocalProduct>();
@@ -263,6 +279,33 @@ export default function WarehousePage() {
       void loadWorkspace();
     }
   }, [mode, activeLocationId, loadWorkspace]);
+
+  const loadLocationReport = useCallback(async () => {
+    if (!currentStore?.id || !activeLocationId) {
+      setLocationReport(null);
+      return;
+    }
+    setReportBusy(true);
+    try {
+      const report = await buildLocationReportSummary(
+        currentStore.id,
+        activeLocationId,
+        reportPeriod,
+        currentStore.name
+      );
+      setLocationReport(report);
+    } catch (err: unknown) {
+      flash(err instanceof Error ? err.message : 'Failed to build location report', true);
+      setLocationReport(null);
+    }
+    setReportBusy(false);
+  }, [currentStore?.id, currentStore?.name, activeLocationId, reportPeriod]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (mode === 'workspace' && tab === 'report' && activeLocationId) {
+      void loadLocationReport();
+    }
+  }, [mode, tab, activeLocationId, loadLocationReport]);
 
   const openLocation = (locationId: string) => {
     setActiveLocationId(locationId);
@@ -646,51 +689,84 @@ export default function WarehousePage() {
                 {locations.map((loc) => {
                   const stats = locationStats[loc.id];
                   return (
-                    <button
+                    <div
                       key={loc.id}
-                      type="button"
-                      onClick={() => openLocation(loc.id)}
-                      className="w-full text-left bg-white border border-emerald-100 rounded-xl px-4 py-3.5 flex items-center gap-3 hover:border-primary/40 hover:shadow-sm transition touch-target"
+                      className="bg-white border border-emerald-100 rounded-xl px-4 py-3.5 flex items-center gap-3"
                     >
-                      <div
-                        className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                          loc.location_type === 'warehouse'
-                            ? 'bg-amber-50 text-amber-700'
-                            : 'bg-emerald-50 text-primary'
-                        }`}
+                      <button
+                        type="button"
+                        onClick={() => openLocation(loc.id)}
+                        className="flex-1 min-w-0 text-left flex items-center gap-3 touch-target"
                       >
-                        {loc.location_type === 'warehouse' ? (
-                          <Warehouse className="w-6 h-6" />
-                        ) : (
-                          <Store className="w-6 h-6" />
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-gray-900 text-sm truncate">{loc.name}</p>
-                        <div className="flex items-center gap-2 mt-1 flex-wrap">
-                          <span
-                            className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md ${
-                              loc.location_type === 'warehouse'
-                                ? 'bg-amber-100 text-amber-800'
-                                : 'bg-emerald-100 text-emerald-800'
-                            }`}
-                          >
-                            {loc.location_type}
-                          </span>
-                          {loc.is_default === 1 && (
-                            <span className="text-[10px] text-gray-400 font-medium">Default</span>
+                        <div
+                          className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                            loc.location_type === 'warehouse'
+                              ? 'bg-amber-50 text-amber-700'
+                              : 'bg-emerald-50 text-primary'
+                          }`}
+                        >
+                          {loc.location_type === 'warehouse' ? (
+                            <Warehouse className="w-6 h-6" />
+                          ) : (
+                            <Store className="w-6 h-6" />
                           )}
                         </div>
-                        <p className="text-[11px] text-gray-500 mt-1.5">
-                          {stats
-                            ? `${stats.skuCount} SKUs · ${stats.totalUnits} units${
-                                stats.expiringSoon > 0 ? ` · ${stats.expiringSoon} expiring` : ''
-                              }`
-                            : 'Tap to manage'}
-                        </p>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-gray-900 text-sm truncate">{loc.name}</p>
+                          <div className="flex items-center gap-2 mt-1 flex-wrap">
+                            <span
+                              className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md ${
+                                loc.location_type === 'warehouse'
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-emerald-100 text-emerald-800'
+                              }`}
+                            >
+                              {loc.location_type}
+                            </span>
+                            {loc.is_default === 1 && (
+                              <span className="text-[10px] text-gray-400 font-medium">Default</span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-gray-500 mt-1.5">
+                            {stats
+                              ? `${stats.skuCount} SKUs · ${stats.totalUnits} units${
+                                  stats.expiringSoon > 0 ? ` · ${stats.expiringSoon} expiring` : ''
+                                }`
+                              : 'Tap to manage'}
+                          </p>
+                        </div>
+                      </button>
+                      <div className="flex flex-col gap-1 flex-shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => openLocation(loc.id)}
+                          className="text-primary text-xs font-semibold px-2 py-1"
+                        >
+                          Open
+                        </button>
+                        <button
+                          type="button"
+                          title="Export CSV report"
+                          onClick={async () => {
+                            if (!currentStore?.id) return;
+                            try {
+                              const report = await buildLocationReportSummary(
+                                currentStore.id,
+                                loc.id,
+                                'month',
+                                currentStore.name
+                              );
+                              exportLocationReportCsv(report);
+                            } catch (err: unknown) {
+                              flash(err instanceof Error ? err.message : 'Export failed', true);
+                            }
+                          }}
+                          className="p-1.5 rounded-lg bg-emerald-50 text-primary touch-target"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                        </button>
                       </div>
-                      <span className="text-primary text-xs font-semibold flex-shrink-0">Open</span>
-                    </button>
+                    </div>
                   );
                 })}
               </div>
@@ -1135,6 +1211,100 @@ export default function WarehousePage() {
                       </div>
                     );
                   })
+                )}
+              </div>
+            )}
+
+            {tab === 'report' && (
+              <div className="space-y-3 md:max-w-xl md:mx-auto">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-gray-500">
+                    Individual report for {activeLocation?.name}
+                  </p>
+                  <div className="flex gap-1.5">
+                    <button
+                      type="button"
+                      disabled={!locationReport || reportBusy}
+                      onClick={() => locationReport && exportLocationReportCsv(locationReport)}
+                      className="inline-flex items-center gap-1 px-2.5 py-2 rounded-lg bg-emerald-50 text-primary text-xs font-semibold touch-target disabled:opacity-40"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      CSV
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!locationReport || reportBusy}
+                      onClick={() => locationReport && exportLocationReportPdf(locationReport)}
+                      className="inline-flex items-center gap-1 px-2.5 py-2 rounded-lg bg-slate-100 text-slate-700 text-xs font-semibold touch-target disabled:opacity-40"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      PDF
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex gap-1 bg-white border border-emerald-50 rounded-xl p-1">
+                  {([
+                    { key: 'today', label: 'Today' },
+                    { key: 'week', label: 'Week' },
+                    { key: 'month', label: 'Month' },
+                    { key: 'all', label: 'All' },
+                  ] as const).map((p) => (
+                    <button
+                      key={p.key}
+                      type="button"
+                      onClick={() => setReportPeriod(p.key)}
+                      className={`flex-1 py-2 rounded-lg text-xs font-semibold touch-target ${
+                        reportPeriod === p.key
+                          ? 'bg-primary text-white'
+                          : 'text-gray-600'
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+
+                {reportBusy || !locationReport ? (
+                  <div className="flex items-center justify-center py-16 text-gray-400">
+                    <Loader2 className="w-6 h-6 animate-spin mr-2" />
+                    <span className="text-sm">Building report…</span>
+                  </div>
+                ) : (
+                  <>
+                    <FinancialDonutChart
+                      title={`Sales · ${locationReport.periodLabel}`}
+                      metrics={{
+                        costPrice: locationReport.costPrice,
+                        sellingPrice: locationReport.sellingPrice,
+                        profitEstimate: locationReport.profitEstimate,
+                      }}
+                    />
+
+                    <FinancialDonutChart
+                      title="Stock on hand valuation"
+                      metrics={{
+                        costPrice: locationReport.stockCostValue,
+                        sellingPrice: locationReport.stockSellingValue,
+                        profitEstimate: locationReport.stockProfitEstimate,
+                      }}
+                    />
+
+                    <div className="bg-white border border-emerald-50 rounded-xl p-4 text-sm space-y-2">
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Transactions</span>
+                        <span className="font-semibold">{locationReport.transactionCount}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Stock SKUs</span>
+                        <span className="font-semibold">{locationReport.stockSkuCount}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Stock units</span>
+                        <span className="font-semibold">{locationReport.stockUnits}</span>
+                      </div>
+                    </div>
+                  </>
                 )}
               </div>
             )}
