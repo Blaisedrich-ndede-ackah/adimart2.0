@@ -23,6 +23,10 @@ export interface AdminStoreRow {
   subscription_started_at: string | null;
   subscription_expires_at: string | null;
   subscription_months_granted: number;
+  /** Admin-managed warehouse / multi-location capability */
+  warehouse_enabled: boolean;
+  max_shops: number;
+  max_warehouses: number;
   created_at: string;
 }
 
@@ -227,6 +231,9 @@ export async function loadAdminDashboard(weekStart = getWeekStart()): Promise<Ad
     subscription_started_at: s.subscription_started_at ? String(s.subscription_started_at) : null,
     subscription_expires_at: s.subscription_expires_at ? String(s.subscription_expires_at) : null,
     subscription_months_granted: Number(s.subscription_months_granted) || 0,
+    warehouse_enabled: Boolean(s.warehouse_enabled),
+    max_shops: Math.max(1, Number(s.max_shops) || 1),
+    max_warehouses: Math.max(0, Number(s.max_warehouses) || 0),
     created_at: String(s.created_at || ''),
   }));
 
@@ -473,6 +480,52 @@ export async function grantStoreSubscription(
   });
 
   return { success: true, expiresAt: periodEnd };
+}
+
+/**
+ * Update admin-managed warehouse / multi-location limits for a store.
+ */
+export async function updateStoreWarehouseLimits(
+  storeId: string,
+  limits: {
+    warehouse_enabled: boolean;
+    max_shops: number;
+    max_warehouses: number;
+  }
+): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: 'Supabase not configured' };
+  }
+
+  const maxShops = Math.floor(Number(limits.max_shops));
+  const maxWarehouses = Math.floor(Number(limits.max_warehouses));
+
+  if (!Number.isFinite(maxShops) || maxShops < 1) {
+    return { success: false, error: 'Max shops must be at least 1' };
+  }
+  if (!Number.isFinite(maxWarehouses) || maxWarehouses < 0) {
+    return { success: false, error: 'Max warehouses must be 0 or more' };
+  }
+
+  const { error } = await supabase
+    .from('stores')
+    .update({
+      warehouse_enabled: Boolean(limits.warehouse_enabled),
+      max_shops: maxShops,
+      max_warehouses: maxWarehouses,
+    })
+    .eq('id', storeId);
+
+  if (error) {
+    return {
+      success: false,
+      error: error.message.includes('warehouse_') || error.message.includes('max_shops') || error.message.includes('max_warehouses')
+        ? `${error.message} — run supabase-migrate-warehouse.sql in Supabase.`
+        : error.message,
+    };
+  }
+
+  return { success: true };
 }
 
 /**
