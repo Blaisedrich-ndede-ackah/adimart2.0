@@ -11,6 +11,11 @@ import {
   Loader2,
   Package,
   Store,
+  ChevronLeft,
+  History,
+  SlidersHorizontal,
+  Boxes,
+  Search,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
 import {
@@ -18,23 +23,34 @@ import {
   type LocalLocation,
   type LocalProduct,
   type LocalStockBatch,
+  type LocalStockMovement,
 } from '@/lib/dexie';
 import {
+  adjustLocationStock,
   createLocation,
   ensureStoreLocations,
   getExpiringBatches,
+  getLocationInventory,
+  getLocationStats,
+  listLocationBatches,
+  listLocationMovements,
   listLocations,
   receiveStock,
   transferStock,
+  type LocationStats,
+  type LocationStockRow,
 } from '@/lib/warehouse';
 
-type TabId = 'locations' | 'receive' | 'transfer' | 'expiry';
+type HubMode = 'hub' | 'workspace';
+type WorkspaceTab = 'stock' | 'receive' | 'transfer' | 'expiry' | 'adjust' | 'history';
 
-const TABS: { id: TabId; label: string; icon: typeof Warehouse }[] = [
-  { id: 'locations', label: 'Locations', icon: MapPin },
+const WORKSPACE_TABS: { id: WorkspaceTab; label: string; icon: typeof Warehouse }[] = [
+  { id: 'stock', label: 'Stock', icon: Boxes },
   { id: 'receive', label: 'Receive', icon: ArrowDownToLine },
   { id: 'transfer', label: 'Transfer', icon: ArrowLeftRight },
   { id: 'expiry', label: 'Expiry', icon: CalendarClock },
+  { id: 'adjust', label: 'Adjust', icon: SlidersHorizontal },
+  { id: 'history', label: 'History', icon: History },
 ];
 
 function daysUntilExpiry(expiryDate: string | null): number | null {
@@ -61,38 +77,67 @@ function urgencyLabel(days: number | null): string {
   return `${days}d left`;
 }
 
+function formatWhen(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return iso.slice(0, 16);
+  }
+}
+
 export default function WarehousePage() {
   const { currentStore, currentUser } = useAuthStore();
   const warehouseEnabled = (currentStore?.warehouse_enabled ?? 0) === 1;
   const maxShops = currentStore?.max_shops ?? 1;
   const maxWarehouses = currentStore?.max_warehouses ?? 0;
 
-  const [tab, setTab] = useState<TabId>('locations');
+  const [mode, setMode] = useState<HubMode>('hub');
+  const [activeLocationId, setActiveLocationId] = useState<string | null>(null);
+  const [tab, setTab] = useState<WorkspaceTab>('stock');
+
   const [locations, setLocations] = useState<LocalLocation[]>([]);
+  const [locationStats, setLocationStats] = useState<Record<string, LocationStats>>({});
   const [products, setProducts] = useState<LocalProduct[]>([]);
+  const [inventory, setInventory] = useState<LocationStockRow[]>([]);
+  const [batches, setBatches] = useState<LocalStockBatch[]>([]);
   const [expiring, setExpiring] = useState<LocalStockBatch[]>([]);
+  const [movements, setMovements] = useState<LocalStockMovement[]>([]);
+  const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
+  const [stockQuery, setStockQuery] = useState('');
+
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // Add location form
+  // Add location (hub)
   const [showAddLocation, setShowAddLocation] = useState(false);
   const [newLocName, setNewLocName] = useState('');
-  const [newLocType, setNewLocType] = useState<'shop' | 'warehouse'>('shop');
+  const [newLocType, setNewLocType] = useState<'shop' | 'warehouse'>('warehouse');
 
-  // Receive form
+  // Receive (scoped to active location)
   const [recvProductId, setRecvProductId] = useState('');
-  const [recvLocationId, setRecvLocationId] = useState('');
   const [recvQty, setRecvQty] = useState('');
   const [recvBatch, setRecvBatch] = useState('');
   const [recvExpiry, setRecvExpiry] = useState('');
+  const [recvCost, setRecvCost] = useState('');
 
-  // Transfer form
-  const [xferFromId, setXferFromId] = useState('');
-  const [xferToId, setXferToId] = useState('');
+  // Transfer (from active location by default)
+  const [xferDirection, setXferDirection] = useState<'out' | 'in'>('out');
+  const [xferOtherId, setXferOtherId] = useState('');
   const [xferProductId, setXferProductId] = useState('');
   const [xferQty, setXferQty] = useState('');
+
+  // Adjust
+  const [adjProductId, setAdjProductId] = useState('');
+  const [adjQty, setAdjQty] = useState('');
+  const [adjDirection, setAdjDirection] = useState<'in' | 'out'>('in');
+  const [adjNote, setAdjNote] = useState('');
 
   const productMap = useMemo(() => {
     const map = new Map<string, LocalProduct>();
@@ -106,6 +151,9 @@ export default function WarehousePage() {
     return map;
   }, [locations]);
 
+  const activeLocation = activeLocationId ? locationMap.get(activeLocationId) || null : null;
+  const otherLocations = locations.filter((l) => l.id !== activeLocationId);
+
   const shopCount = locations.filter((l) => l.location_type === 'shop').length;
   const warehouseCount = locations.filter((l) => l.location_type === 'warehouse').length;
   const canAddShop = shopCount < maxShops;
@@ -113,6 +161,17 @@ export default function WarehousePage() {
 
   const selectedRecvProduct = productMap.get(recvProductId) || null;
   const trackExpiry = (selectedRecvProduct?.track_expiry ?? 0) === 1;
+
+  const filteredInventory = useMemo(() => {
+    const q = stockQuery.trim().toLowerCase();
+    if (!q) return inventory;
+    return inventory.filter(
+      (row) =>
+        row.product.name.toLowerCase().includes(q) ||
+        row.product.barcode.toLowerCase().includes(q) ||
+        row.product.category.toLowerCase().includes(q)
+    );
+  }, [inventory, stockQuery]);
 
   const flash = (msg: string, isError = false) => {
     if (isError) {
@@ -128,7 +187,7 @@ export default function WarehousePage() {
     }, 3500);
   };
 
-  const loadAll = useCallback(async () => {
+  const loadHub = useCallback(async () => {
     if (!currentStore?.id) {
       setLoading(false);
       return;
@@ -136,44 +195,89 @@ export default function WarehousePage() {
     setLoading(true);
     try {
       await ensureStoreLocations(currentStore.id);
-      const [locs, prods, batches] = await Promise.all([
-        listLocations(currentStore.id),
-        db.products
-          .where('store_id')
-          .equals(currentStore.id)
-          .and((p) => p.is_active === 1)
-          .toArray(),
-        getExpiringBatches(currentStore.id, 30),
-      ]);
+      const locs = await listLocations(currentStore.id);
       locs.sort((a, b) => {
         if (a.location_type !== b.location_type) {
-          return a.location_type === 'shop' ? -1 : 1;
+          return a.location_type === 'warehouse' ? -1 : 1;
         }
         return a.name.localeCompare(b.name);
       });
-      prods.sort((a, b) => a.name.localeCompare(b.name));
       setLocations(locs);
-      setProducts(prods);
-      setExpiring(batches);
 
-      if (!recvLocationId && locs[0]) setRecvLocationId(locs[0].id);
-      if (!xferFromId && locs[0]) setXferFromId(locs[0].id);
-      if (!xferToId && locs.length > 1) {
-        setXferToId(locs[1].id);
-      } else if (!xferToId && locs[0]) {
-        setXferToId(locs[0].id);
-      }
+      const statsEntries = await Promise.all(
+        locs.map(async (loc) => [loc.id, await getLocationStats(currentStore.id, loc.id)] as const)
+      );
+      setLocationStats(Object.fromEntries(statsEntries));
+
+      const prods = await db.products
+        .where('store_id')
+        .equals(currentStore.id)
+        .and((p) => p.is_active === 1)
+        .toArray();
+      prods.sort((a, b) => a.name.localeCompare(b.name));
+      setProducts(prods);
+
       if (!recvProductId && prods[0]) setRecvProductId(prods[0].id);
       if (!xferProductId && prods[0]) setXferProductId(prods[0].id);
+      if (!adjProductId && prods[0]) setAdjProductId(prods[0].id);
     } catch (err: unknown) {
       flash(err instanceof Error ? err.message : 'Failed to load warehouse data', true);
     }
     setLoading(false);
   }, [currentStore?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const loadWorkspace = useCallback(async () => {
+    if (!currentStore?.id || !activeLocationId) return;
+    setLoading(true);
+    try {
+      const [inv, batchList, exp, movs, stats] = await Promise.all([
+        getLocationInventory(currentStore.id, activeLocationId),
+        listLocationBatches(currentStore.id, activeLocationId),
+        getExpiringBatches(currentStore.id, 30, activeLocationId),
+        listLocationMovements(currentStore.id, activeLocationId),
+        getLocationStats(currentStore.id, activeLocationId),
+      ]);
+      setInventory(inv);
+      setBatches(batchList);
+      setExpiring(exp);
+      setMovements(movs);
+      setLocationStats((prev) => ({ ...prev, [activeLocationId]: stats }));
+
+      if (otherLocations.length > 0) {
+        setXferOtherId((prev) =>
+          prev && otherLocations.some((l) => l.id === prev) ? prev : otherLocations[0].id
+        );
+      }
+    } catch (err: unknown) {
+      flash(err instanceof Error ? err.message : 'Failed to load location data', true);
+    }
+    setLoading(false);
+  }, [currentStore?.id, activeLocationId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
-    void loadAll();
-  }, [loadAll]);
+    void loadHub();
+  }, [loadHub]);
+
+  useEffect(() => {
+    if (mode === 'workspace' && activeLocationId) {
+      void loadWorkspace();
+    }
+  }, [mode, activeLocationId, loadWorkspace]);
+
+  const openLocation = (locationId: string) => {
+    setActiveLocationId(locationId);
+    setTab('stock');
+    setMode('workspace');
+    setExpandedProductId(null);
+    setStockQuery('');
+  };
+
+  const backToHub = () => {
+    setMode('hub');
+    setActiveLocationId(null);
+    setTab('stock');
+    void loadHub();
+  };
 
   const handleAddLocation = async () => {
     if (!currentStore?.id) return;
@@ -200,7 +304,7 @@ export default function WarehousePage() {
 
     setBusy(true);
     try {
-      await createLocation({
+      const created = await createLocation({
         storeId: currentStore.id,
         name: newLocName.trim() || (type === 'warehouse' ? 'Warehouse' : 'Shop'),
         locationType: type,
@@ -208,7 +312,8 @@ export default function WarehousePage() {
       setNewLocName('');
       setShowAddLocation(false);
       flash(`${type === 'warehouse' ? 'Warehouse' : 'Shop'} added`);
-      await loadAll();
+      await loadHub();
+      openLocation(created.id);
     } catch (err: unknown) {
       flash(err instanceof Error ? err.message : 'Failed to add location', true);
     }
@@ -216,14 +321,10 @@ export default function WarehousePage() {
   };
 
   const handleReceive = async () => {
-    if (!currentStore?.id) return;
+    if (!currentStore?.id || !activeLocationId) return;
     const qty = parseInt(recvQty, 10);
     if (!recvProductId) {
       flash('Select a product', true);
-      return;
-    }
-    if (!recvLocationId) {
-      flash('Select a location', true);
       return;
     }
     if (!qty || qty <= 0) {
@@ -233,20 +334,24 @@ export default function WarehousePage() {
 
     setBusy(true);
     try {
+      const cost = recvCost.trim() ? Number(recvCost) : undefined;
       await receiveStock({
         storeId: currentStore.id,
         productId: recvProductId,
-        locationId: recvLocationId,
+        locationId: activeLocationId,
         quantity: qty,
         batchCode: recvBatch.trim() || undefined,
         expiryDate: trackExpiry && recvExpiry ? recvExpiry : null,
+        costPrice: Number.isFinite(cost) ? cost : undefined,
         userId: currentUser?.id || null,
+        note: `Received at ${activeLocation?.name || 'location'}`,
       });
       setRecvQty('');
       setRecvBatch('');
       setRecvExpiry('');
-      flash(`Received ${qty} units`);
-      await loadAll();
+      setRecvCost('');
+      flash(`Received ${qty} into ${activeLocation?.name || 'location'}`);
+      await loadWorkspace();
     } catch (err: unknown) {
       flash(err instanceof Error ? err.message : 'Receive failed', true);
     }
@@ -254,18 +359,52 @@ export default function WarehousePage() {
   };
 
   const handleTransfer = async () => {
-    if (!currentStore?.id) return;
+    if (!currentStore?.id || !activeLocationId) return;
     const qty = parseInt(xferQty, 10);
     if (!xferProductId) {
       flash('Select a product', true);
       return;
     }
-    if (!xferFromId || !xferToId) {
-      flash('Select from and to locations', true);
+    if (!xferOtherId) {
+      flash('Select the other location', true);
       return;
     }
-    if (xferFromId === xferToId) {
-      flash('Source and destination must differ', true);
+    if (!qty || qty <= 0) {
+      flash('Enter a valid quantity', true);
+      return;
+    }
+
+    const fromLocationId = xferDirection === 'out' ? activeLocationId : xferOtherId;
+    const toLocationId = xferDirection === 'out' ? xferOtherId : activeLocationId;
+
+    setBusy(true);
+    try {
+      await transferStock({
+        storeId: currentStore.id,
+        productId: xferProductId,
+        fromLocationId,
+        toLocationId,
+        quantity: qty,
+        userId: currentUser?.id || null,
+        note:
+          xferDirection === 'out'
+            ? `Transfer out from ${activeLocation?.name || 'location'}`
+            : `Transfer in to ${activeLocation?.name || 'location'}`,
+      });
+      setXferQty('');
+      flash(`Transferred ${qty} units`);
+      await loadWorkspace();
+    } catch (err: unknown) {
+      flash(err instanceof Error ? err.message : 'Transfer failed', true);
+    }
+    setBusy(false);
+  };
+
+  const handleAdjust = async () => {
+    if (!currentStore?.id || !activeLocationId) return;
+    const qty = parseInt(adjQty, 10);
+    if (!adjProductId) {
+      flash('Select a product', true);
       return;
     }
     if (!qty || qty <= 0) {
@@ -275,19 +414,24 @@ export default function WarehousePage() {
 
     setBusy(true);
     try {
-      await transferStock({
+      await adjustLocationStock({
         storeId: currentStore.id,
-        productId: xferProductId,
-        fromLocationId: xferFromId,
-        toLocationId: xferToId,
-        quantity: qty,
+        productId: adjProductId,
+        locationId: activeLocationId,
+        delta: adjDirection === 'in' ? qty : -qty,
+        note: adjNote.trim() || undefined,
         userId: currentUser?.id || null,
       });
-      setXferQty('');
-      flash(`Transferred ${qty} units`);
-      await loadAll();
+      setAdjQty('');
+      setAdjNote('');
+      flash(
+        adjDirection === 'in'
+          ? `Added ${qty} at ${activeLocation?.name || 'location'}`
+          : `Removed ${qty} from ${activeLocation?.name || 'location'}`
+      );
+      await loadWorkspace();
     } catch (err: unknown) {
-      flash(err instanceof Error ? err.message : 'Transfer failed', true);
+      flash(err instanceof Error ? err.message : 'Adjustment failed', true);
     }
     setBusy(false);
   };
@@ -316,43 +460,80 @@ export default function WarehousePage() {
     );
   }
 
+  const activeStats = activeLocationId ? locationStats[activeLocationId] : null;
+
   return (
     <div className="page-shell">
       <div className="page-header">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Warehouse className="w-5 h-5 text-white" />
-            <div>
-              <h1 className="text-white font-bold text-lg">Warehouse</h1>
-              <p className="text-emerald-200 text-[10px] mt-0.5">
-                {shopCount} shop{shopCount !== 1 ? 's' : ''} · {warehouseCount} warehouse
-                {warehouseCount !== 1 ? 's' : ''}
-              </p>
+        {mode === 'hub' ? (
+          <div className="mb-1">
+            <div className="flex items-center gap-2">
+              <Warehouse className="w-5 h-5 text-white" />
+              <h1 className="text-white font-bold text-lg">Warehouse System</h1>
+            </div>
+            <p className="text-emerald-200 text-[11px] mt-1 leading-snug">
+              Separate from POS — select a location to manage its stock, receiving, transfers, expiry,
+              adjustments, and history.
+            </p>
+            <p className="text-emerald-100/80 text-[10px] mt-1.5">
+              {shopCount} shop{shopCount !== 1 ? 's' : ''} · {warehouseCount} warehouse
+              {warehouseCount !== 1 ? 's' : ''} · limits {maxShops}/{maxWarehouses}
+            </p>
+          </div>
+        ) : (
+          <div>
+            <button
+              type="button"
+              onClick={backToHub}
+              className="inline-flex items-center gap-1 text-emerald-100 text-xs font-medium mb-2 touch-target"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              All locations
+            </button>
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  {activeLocation?.location_type === 'warehouse' ? (
+                    <Warehouse className="w-5 h-5 text-white flex-shrink-0" />
+                  ) : (
+                    <Store className="w-5 h-5 text-white flex-shrink-0" />
+                  )}
+                  <h1 className="text-white font-bold text-lg truncate">
+                    {activeLocation?.name || 'Location'}
+                  </h1>
+                </div>
+                <p className="text-emerald-200 text-[10px] mt-0.5 capitalize">
+                  {activeLocation?.location_type || 'location'} workspace
+                  {activeStats
+                    ? ` · ${activeStats.skuCount} SKUs · ${activeStats.totalUnits} units`
+                    : ''}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-1 bg-white/10 rounded-xl p-1 overflow-x-auto no-scrollbar">
+              {WORKSPACE_TABS.map((t) => {
+                const Icon = t.icon;
+                const active = tab === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setTab(t.id)}
+                    className={`flex-1 min-w-[4.5rem] flex flex-col items-center gap-0.5 py-2 rounded-lg touch-target transition-colors ${
+                      active ? 'bg-white text-primary shadow-sm' : 'text-emerald-100 hover:bg-white/10'
+                    }`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    <span className={`text-[10px] ${active ? 'font-bold' : 'font-medium'}`}>
+                      {t.label}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
-        </div>
-
-        <div className="flex gap-1 bg-white/10 rounded-xl p-1">
-          {TABS.map((t) => {
-            const Icon = t.icon;
-            const active = tab === t.id;
-            return (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setTab(t.id)}
-                className={`flex-1 flex flex-col items-center gap-0.5 py-2 rounded-lg touch-target transition-colors ${
-                  active ? 'bg-white text-primary shadow-sm' : 'text-emerald-100 hover:bg-white/10'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span className={`text-[10px] ${active ? 'font-bold' : 'font-medium'}`}>
-                  {t.label}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+        )}
       </div>
 
       <div className="page-body no-scrollbar">
@@ -378,106 +559,115 @@ export default function WarehousePage() {
             <Loader2 className="w-6 h-6 animate-spin mr-2" />
             <span className="text-sm">Loading…</span>
           </div>
-        ) : (
-          <>
-            {tab === 'locations' && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs text-gray-500">
-                    Limits: {maxShops} shop{maxShops !== 1 ? 's' : ''}, {maxWarehouses} warehouse
-                    {maxWarehouses !== 1 ? 's' : ''}
-                  </p>
-                  {(canAddShop || canAddWarehouse) && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowAddLocation((v) => !v);
-                        setNewLocType(canAddShop ? 'shop' : 'warehouse');
-                      }}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 bg-primary text-white rounded-lg text-xs font-medium touch-target"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      Add
-                    </button>
-                  )}
-                </div>
+        ) : mode === 'hub' ? (
+          <div className="space-y-3 md:max-w-3xl md:mx-auto">
+            <div className="bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3 text-xs text-emerald-900 leading-relaxed">
+              Choose a <span className="font-semibold">shop</span> or{' '}
+              <span className="font-semibold">warehouse</span> below. All warehouse activities then run
+              only for that location — so POS shop sales and warehouse stock stay clearly separated.
+            </div>
 
-                {showAddLocation && (
-                  <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3 animate-fade-in">
-                    <div>
-                      <label className="text-sm font-medium text-gray-700 mb-1.5 block">Name</label>
-                      <input
-                        type="text"
-                        value={newLocName}
-                        onChange={(e) => setNewLocName(e.target.value)}
-                        placeholder={newLocType === 'warehouse' ? 'e.g. Main Warehouse' : 'e.g. Front Shop'}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-gray-700 mb-1.5 block">Type</label>
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          disabled={!canAddShop}
-                          onClick={() => setNewLocType('shop')}
-                          className={`py-2.5 rounded-xl text-sm font-medium touch-target border ${
-                            newLocType === 'shop'
-                              ? 'bg-primary text-white border-primary'
-                              : 'bg-white text-gray-600 border-gray-200'
-                          } disabled:opacity-40`}
-                        >
-                          Shop
-                        </button>
-                        <button
-                          type="button"
-                          disabled={!canAddWarehouse}
-                          onClick={() => setNewLocType('warehouse')}
-                          className={`py-2.5 rounded-xl text-sm font-medium touch-target border ${
-                            newLocType === 'warehouse'
-                              ? 'bg-primary text-white border-primary'
-                              : 'bg-white text-gray-600 border-gray-200'
-                          } disabled:opacity-40`}
-                        >
-                          Warehouse
-                        </button>
-                      </div>
-                    </div>
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-gray-500 inline-flex items-center gap-1">
+                <MapPin className="w-3.5 h-3.5" />
+                Your locations
+              </p>
+              {(canAddShop || canAddWarehouse) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddLocation((v) => !v);
+                    setNewLocType(canAddWarehouse ? 'warehouse' : 'shop');
+                  }}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-primary text-white rounded-lg text-xs font-medium touch-target"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add location
+                </button>
+              )}
+            </div>
+
+            {showAddLocation && (
+              <div className="bg-white border border-emerald-100 rounded-xl p-4 space-y-3 animate-fade-in">
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-1.5 block">Name</label>
+                  <input
+                    type="text"
+                    value={newLocName}
+                    onChange={(e) => setNewLocName(e.target.value)}
+                    placeholder={newLocType === 'warehouse' ? 'e.g. Main Warehouse' : 'e.g. Front Shop'}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-1.5 block">Type</label>
+                  <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
-                      onClick={() => void handleAddLocation()}
-                      disabled={busy}
-                      className="w-full py-3 bg-primary text-white rounded-xl font-bold text-sm touch-target disabled:opacity-50"
+                      disabled={!canAddShop}
+                      onClick={() => setNewLocType('shop')}
+                      className={`py-2.5 rounded-xl text-sm font-medium touch-target border ${
+                        newLocType === 'shop'
+                          ? 'bg-primary text-white border-primary'
+                          : 'bg-white text-gray-600 border-gray-200'
+                      } disabled:opacity-40`}
                     >
-                      {busy ? 'Saving…' : 'Create location'}
+                      Shop
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!canAddWarehouse}
+                      onClick={() => setNewLocType('warehouse')}
+                      className={`py-2.5 rounded-xl text-sm font-medium touch-target border ${
+                        newLocType === 'warehouse'
+                          ? 'bg-primary text-white border-primary'
+                          : 'bg-white text-gray-600 border-gray-200'
+                      } disabled:opacity-40`}
+                    >
+                      Warehouse
                     </button>
                   </div>
-                )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleAddLocation()}
+                  disabled={busy}
+                  className="w-full py-3 bg-primary text-white rounded-xl font-bold text-sm touch-target disabled:opacity-50"
+                >
+                  {busy ? 'Saving…' : 'Create & open'}
+                </button>
+              </div>
+            )}
 
-                {locations.length === 0 ? (
-                  <div className="text-center py-12 text-gray-400 text-sm">No locations yet</div>
-                ) : (
-                  locations.map((loc) => (
-                    <div
+            {locations.length === 0 ? (
+              <div className="text-center py-12 text-gray-400 text-sm">No locations yet</div>
+            ) : (
+              <div className="space-y-2 md:grid md:grid-cols-2 md:gap-3 md:space-y-0">
+                {locations.map((loc) => {
+                  const stats = locationStats[loc.id];
+                  return (
+                    <button
                       key={loc.id}
-                      className="bg-white border border-gray-200 rounded-xl px-4 py-3.5 flex items-center gap-3"
+                      type="button"
+                      onClick={() => openLocation(loc.id)}
+                      className="w-full text-left bg-white border border-emerald-100 rounded-xl px-4 py-3.5 flex items-center gap-3 hover:border-primary/40 hover:shadow-sm transition touch-target"
                     >
                       <div
-                        className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                        className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${
                           loc.location_type === 'warehouse'
                             ? 'bg-amber-50 text-amber-700'
                             : 'bg-emerald-50 text-primary'
                         }`}
                       >
                         {loc.location_type === 'warehouse' ? (
-                          <Warehouse className="w-5 h-5" />
+                          <Warehouse className="w-6 h-6" />
                         ) : (
-                          <Store className="w-5 h-5" />
+                          <Store className="w-6 h-6" />
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-gray-900 text-sm truncate">{loc.name}</p>
-                        <div className="flex items-center gap-2 mt-1">
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
                           <span
                             className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md ${
                               loc.location_type === 'warehouse'
@@ -491,15 +681,119 @@ export default function WarehousePage() {
                             <span className="text-[10px] text-gray-400 font-medium">Default</span>
                           )}
                         </div>
+                        <p className="text-[11px] text-gray-500 mt-1.5">
+                          {stats
+                            ? `${stats.skuCount} SKUs · ${stats.totalUnits} units${
+                                stats.expiringSoon > 0 ? ` · ${stats.expiringSoon} expiring` : ''
+                              }`
+                            : 'Tap to manage'}
+                        </p>
                       </div>
-                    </div>
-                  ))
+                      <span className="text-primary text-xs font-semibold flex-shrink-0">Open</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            {tab === 'stock' && (
+              <div className="space-y-3 md:max-w-3xl md:mx-auto">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={stockQuery}
+                    onChange={(e) => setStockQuery(e.target.value)}
+                    placeholder="Search stock at this location…"
+                    className="w-full pl-9 pr-4 py-2.5 bg-white border border-emerald-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+
+                {filteredInventory.length === 0 ? (
+                  <div className="text-center py-12">
+                    <Package className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+                    <p className="text-sm text-gray-500 font-medium">No stock at this location</p>
+                    <p className="text-xs text-gray-400 mt-1 mb-4">Receive or transfer stock in to begin</p>
+                    <button
+                      type="button"
+                      onClick={() => setTab('receive')}
+                      className="px-4 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold touch-target"
+                    >
+                      Receive stock
+                    </button>
+                  </div>
+                ) : (
+                  filteredInventory.map((row) => {
+                    const open = expandedProductId === row.product.id;
+                    const productBatches = batches.filter((b) => b.product_id === row.product.id);
+                    return (
+                      <div
+                        key={row.product.id}
+                        className="bg-white border border-emerald-50 rounded-xl overflow-hidden"
+                      >
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedProductId((id) => (id === row.product.id ? null : row.product.id))
+                          }
+                          className="w-full px-4 py-3 flex items-center gap-3 text-left touch-target"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-gray-900 truncate">
+                              {row.product.name}
+                            </p>
+                            <p className="text-[11px] text-gray-500 mt-0.5">
+                              {row.batchCount} batch{row.batchCount !== 1 ? 'es' : ''}
+                              {row.product.track_expiry === 1 ? ' · Expiry tracked' : ''}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-lg font-bold text-primary">{row.quantity}</p>
+                            <p className="text-[10px] text-gray-400">units here</p>
+                          </div>
+                        </button>
+                        {open && (
+                          <div className="border-t border-emerald-50 px-4 py-3 bg-[var(--color-surface)] space-y-2">
+                            {productBatches.length === 0 ? (
+                              <p className="text-xs text-gray-400">No open batches</p>
+                            ) : (
+                              productBatches.map((batch) => {
+                                const days = daysUntilExpiry(batch.expiry_date);
+                                return (
+                                  <div
+                                    key={batch.id}
+                                    className="flex items-center justify-between gap-2 text-xs bg-white rounded-lg px-3 py-2 border border-gray-100"
+                                  >
+                                    <div className="min-w-0">
+                                      <p className="font-medium text-gray-800 truncate">
+                                        {batch.batch_code || 'No batch code'}
+                                      </p>
+                                      <p className="text-gray-500 mt-0.5">
+                                        Exp: {batch.expiry_date?.slice(0, 10) || '—'}
+                                        {days != null ? ` · ${urgencyLabel(days)}` : ''}
+                                      </p>
+                                    </div>
+                                    <span className="font-bold text-gray-900">{batch.quantity}</span>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
                 )}
               </div>
             )}
 
             {tab === 'receive' && (
-              <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-4">
+              <div className="bg-white border border-emerald-100 rounded-xl p-4 space-y-4 md:max-w-xl md:mx-auto">
+                <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
+                  Receiving into <span className="font-semibold">{activeLocation?.name}</span> only.
+                </p>
                 <div>
                   <label className="text-sm font-medium text-gray-700 mb-1.5 block">Product</label>
                   <select
@@ -510,21 +804,7 @@ export default function WarehousePage() {
                     {products.length === 0 && <option value="">No products</option>}
                     {products.map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.name} (stock {p.stock_level})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-1.5 block">Location</label>
-                  <select
-                    value={recvLocationId}
-                    onChange={(e) => setRecvLocationId(e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none bg-white"
-                  >
-                    {locations.map((l) => (
-                      <option key={l.id} value={l.id}>
-                        {l.name} ({l.location_type})
+                        {p.name}
                       </option>
                     ))}
                   </select>
@@ -552,6 +832,20 @@ export default function WarehousePage() {
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
                   />
                 </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-1.5 block">
+                    Cost / unit <span className="text-gray-400 font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={recvCost}
+                    onChange={(e) => setRecvCost(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
+                  />
+                </div>
                 {trackExpiry && (
                   <div>
                     <label className="text-sm font-medium text-gray-700 mb-1.5 block">Expiry date</label>
@@ -570,35 +864,52 @@ export default function WarehousePage() {
                   className="w-full py-3.5 bg-primary text-white rounded-xl font-bold flex items-center justify-center gap-2 touch-target disabled:opacity-50"
                 >
                   <ArrowDownToLine className="w-5 h-5" />
-                  {busy ? 'Receiving…' : 'Receive stock'}
+                  {busy ? 'Receiving…' : 'Receive stock here'}
                 </button>
               </div>
             )}
 
             {tab === 'transfer' && (
-              <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-4">
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-1.5 block">From</label>
-                  <select
-                    value={xferFromId}
-                    onChange={(e) => setXferFromId(e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none bg-white"
+              <div className="bg-white border border-emerald-100 rounded-xl p-4 space-y-4 md:max-w-xl md:mx-auto">
+                <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
+                  Working in <span className="font-semibold">{activeLocation?.name}</span>. Choose whether
+                  stock leaves or arrives at this location.
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setXferDirection('out')}
+                    className={`py-2.5 rounded-xl text-sm font-semibold touch-target border ${
+                      xferDirection === 'out'
+                        ? 'bg-primary text-white border-primary'
+                        : 'bg-white text-gray-600 border-gray-200'
+                    }`}
                   >
-                    {locations.map((l) => (
-                      <option key={l.id} value={l.id}>
-                        {l.name} ({l.location_type})
-                      </option>
-                    ))}
-                  </select>
+                    Transfer out
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setXferDirection('in')}
+                    className={`py-2.5 rounded-xl text-sm font-semibold touch-target border ${
+                      xferDirection === 'in'
+                        ? 'bg-primary text-white border-primary'
+                        : 'bg-white text-gray-600 border-gray-200'
+                    }`}
+                  >
+                    Transfer in
+                  </button>
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-gray-700 mb-1.5 block">To</label>
+                  <label className="text-sm font-medium text-gray-700 mb-1.5 block">
+                    {xferDirection === 'out' ? 'To location' : 'From location'}
+                  </label>
                   <select
-                    value={xferToId}
-                    onChange={(e) => setXferToId(e.target.value)}
+                    value={xferOtherId}
+                    onChange={(e) => setXferOtherId(e.target.value)}
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none bg-white"
                   >
-                    {locations.map((l) => (
+                    {otherLocations.length === 0 && <option value="">No other locations</option>}
+                    {otherLocations.map((l) => (
                       <option key={l.id} value={l.id}>
                         {l.name} ({l.location_type})
                       </option>
@@ -615,7 +926,7 @@ export default function WarehousePage() {
                     {products.length === 0 && <option value="">No products</option>}
                     {products.map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.name} (stock {p.stock_level})
+                        {p.name}
                       </option>
                     ))}
                   </select>
@@ -631,38 +942,37 @@ export default function WarehousePage() {
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
                   />
                 </div>
-                {locations.length < 2 && (
+                {otherLocations.length === 0 && (
                   <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                    Add at least two locations to transfer stock between them.
+                    Add another location from the hub to transfer stock.
                   </p>
                 )}
                 <button
                   type="button"
                   onClick={() => void handleTransfer()}
-                  disabled={busy || products.length === 0 || locations.length < 2}
+                  disabled={busy || products.length === 0 || otherLocations.length === 0}
                   className="w-full py-3.5 bg-primary text-white rounded-xl font-bold flex items-center justify-center gap-2 touch-target disabled:opacity-50"
                 >
                   <ArrowLeftRight className="w-5 h-5" />
-                  {busy ? 'Transferring…' : 'Transfer stock'}
+                  {busy ? 'Transferring…' : xferDirection === 'out' ? 'Send stock out' : 'Bring stock in'}
                 </button>
               </div>
             )}
 
             {tab === 'expiry' && (
-              <div className="space-y-3">
+              <div className="space-y-3 md:max-w-3xl md:mx-auto">
                 <p className="text-xs text-gray-500 px-0.5">
-                  Batches expiring within 30 days
+                  Batches at {activeLocation?.name} expiring within 30 days
                 </p>
                 {expiring.length === 0 ? (
                   <div className="text-center py-12">
                     <Package className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-                    <p className="text-sm text-gray-400">No expiring batches</p>
+                    <p className="text-sm text-gray-400">No expiring batches here</p>
                   </div>
                 ) : (
                   expiring.map((batch) => {
                     const days = daysUntilExpiry(batch.expiry_date);
                     const product = productMap.get(batch.product_id);
-                    const location = locationMap.get(batch.location_id);
                     return (
                       <div
                         key={batch.id}
@@ -674,8 +984,7 @@ export default function WarehousePage() {
                               {product?.name || 'Unknown product'}
                             </p>
                             <p className="text-xs mt-0.5 opacity-80">
-                              {location?.name || 'Unknown location'}
-                              {batch.batch_code ? ` · ${batch.batch_code}` : ''}
+                              {batch.batch_code ? batch.batch_code : 'No batch code'}
                             </p>
                           </div>
                           <span className="text-[10px] font-bold uppercase tracking-wide whitespace-nowrap">
@@ -685,6 +994,143 @@ export default function WarehousePage() {
                         <div className="flex items-center justify-between mt-2 text-xs">
                           <span>Qty: {batch.quantity}</span>
                           <span>Exp: {batch.expiry_date?.slice(0, 10) || '—'}</span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            )}
+
+            {tab === 'adjust' && (
+              <div className="bg-white border border-emerald-100 rounded-xl p-4 space-y-4 md:max-w-xl md:mx-auto">
+                <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
+                  Adjustments apply only to <span className="font-semibold">{activeLocation?.name}</span>.
+                  Removals use FEFO batch order.
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAdjDirection('in')}
+                    className={`py-2.5 rounded-xl text-sm font-semibold touch-target border ${
+                      adjDirection === 'in'
+                        ? 'bg-primary text-white border-primary'
+                        : 'bg-white text-gray-600 border-gray-200'
+                    }`}
+                  >
+                    Add stock
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAdjDirection('out')}
+                    className={`py-2.5 rounded-xl text-sm font-semibold touch-target border ${
+                      adjDirection === 'out'
+                        ? 'bg-amber-600 text-white border-amber-600'
+                        : 'bg-white text-gray-600 border-gray-200'
+                    }`}
+                  >
+                    Remove stock
+                  </button>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-1.5 block">Product</label>
+                  <select
+                    value={adjProductId}
+                    onChange={(e) => setAdjProductId(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none bg-white"
+                  >
+                    {products.length === 0 && <option value="">No products</option>}
+                    {products.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-1.5 block">Quantity</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={adjQty}
+                    onChange={(e) => setAdjQty(e.target.value)}
+                    placeholder="0"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-1.5 block">
+                    Note <span className="text-gray-400 font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={adjNote}
+                    onChange={(e) => setAdjNote(e.target.value)}
+                    placeholder="e.g. Count correction, damaged goods"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleAdjust()}
+                  disabled={busy || products.length === 0}
+                  className={`w-full py-3.5 text-white rounded-xl font-bold flex items-center justify-center gap-2 touch-target disabled:opacity-50 ${
+                    adjDirection === 'in' ? 'bg-primary' : 'bg-amber-600'
+                  }`}
+                >
+                  <SlidersHorizontal className="w-5 h-5" />
+                  {busy ? 'Saving…' : adjDirection === 'in' ? 'Add adjustment' : 'Remove adjustment'}
+                </button>
+              </div>
+            )}
+
+            {tab === 'history' && (
+              <div className="space-y-2 md:max-w-3xl md:mx-auto">
+                <p className="text-xs text-gray-500 px-0.5">
+                  Recent movements for {activeLocation?.name}
+                </p>
+                {movements.length === 0 ? (
+                  <div className="text-center py-12">
+                    <History className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+                    <p className="text-sm text-gray-400">No movements yet</p>
+                  </div>
+                ) : (
+                  movements.map((m) => {
+                    const product = productMap.get(m.product_id);
+                    const from = m.from_location_id
+                      ? locationMap.get(m.from_location_id)?.name
+                      : null;
+                    const to = m.to_location_id ? locationMap.get(m.to_location_id)?.name : null;
+                    const label =
+                      m.movement_type === 'receive'
+                        ? 'Received'
+                        : m.movement_type === 'transfer'
+                          ? 'Transfer'
+                          : m.movement_type === 'sale'
+                            ? 'Sale'
+                            : 'Adjustment';
+                    return (
+                      <div
+                        key={m.id}
+                        className="bg-white border border-emerald-50 rounded-xl px-4 py-3"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-gray-900 truncate">
+                              {product?.name || 'Product'}
+                            </p>
+                            <p className="text-[11px] text-gray-500 mt-0.5">
+                              {label}
+                              {from || to
+                                ? ` · ${from || '—'} → ${to || '—'}`
+                                : ''}
+                              {m.note ? ` · ${m.note}` : ''}
+                            </p>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <p className="text-sm font-bold text-gray-900">{m.quantity}</p>
+                            <p className="text-[10px] text-gray-400">{formatWhen(m.created_at)}</p>
+                          </div>
                         </div>
                       </div>
                     );

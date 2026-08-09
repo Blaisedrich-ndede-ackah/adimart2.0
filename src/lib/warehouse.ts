@@ -2,7 +2,9 @@ import {
   db,
   generateId,
   type LocalLocation,
+  type LocalProduct,
   type LocalStockBatch,
+  type LocalStockMovement,
   type LocalStore,
   type LocalUser,
 } from '@/lib/dexie';
@@ -400,7 +402,8 @@ export async function deductSaleStock(params: {
 
 export async function getExpiringBatches(
   storeId: string,
-  withinDays: number
+  withinDays: number,
+  locationId?: string
 ): Promise<LocalStockBatch[]> {
   const days = Math.max(0, Math.floor(Number(withinDays) || 0));
   const today = new Date();
@@ -412,10 +415,221 @@ export async function getExpiringBatches(
   const batches = await db.stock_batches
     .where('store_id')
     .equals(storeId)
-    .and((b) => !!b.expiry_date && b.quantity > 0 && b.expiry_date <= cutoffStr)
+    .and(
+      (b) =>
+        !!b.expiry_date &&
+        b.quantity > 0 &&
+        b.expiry_date <= cutoffStr &&
+        (!locationId || b.location_id === locationId)
+    )
     .toArray();
 
   return sortBatchesFefo(batches);
+}
+
+export interface LocationStockRow {
+  product: LocalProduct;
+  quantity: number;
+  batchCount: number;
+}
+
+export interface LocationStats {
+  skuCount: number;
+  totalUnits: number;
+  expiringSoon: number;
+  batchCount: number;
+}
+
+export async function getLocationInventory(
+  storeId: string,
+  locationId: string
+): Promise<LocationStockRow[]> {
+  const [products, batches] = await Promise.all([
+    db.products
+      .where('store_id')
+      .equals(storeId)
+      .and((p) => p.is_active === 1)
+      .toArray(),
+    db.stock_batches
+      .where('store_id')
+      .equals(storeId)
+      .and((b) => b.location_id === locationId && b.quantity > 0)
+      .toArray(),
+  ]);
+
+  const byProduct = new Map<string, { quantity: number; batchCount: number }>();
+  for (const batch of batches) {
+    const prev = byProduct.get(batch.product_id) || { quantity: 0, batchCount: 0 };
+    prev.quantity += batch.quantity;
+    prev.batchCount += 1;
+    byProduct.set(batch.product_id, prev);
+  }
+
+  const withStock = products
+    .map((product) => {
+      const stats = byProduct.get(product.id);
+      if (!stats || stats.quantity <= 0) return null;
+      return {
+        product,
+        quantity: stats.quantity,
+        batchCount: stats.batchCount,
+      };
+    })
+    .filter((row): row is LocationStockRow => row != null)
+    .sort((a, b) => {
+      if (b.quantity !== a.quantity) return b.quantity - a.quantity;
+      return a.product.name.localeCompare(b.product.name);
+    });
+
+  return withStock;
+}
+
+export async function getLocationStats(
+  storeId: string,
+  locationId: string
+): Promise<LocationStats> {
+  const batches = await db.stock_batches
+    .where('store_id')
+    .equals(storeId)
+    .and((b) => b.location_id === locationId && b.quantity > 0)
+    .toArray();
+
+  const productIds = new Set(batches.map((b) => b.product_id));
+  const expiring = await getExpiringBatches(storeId, 30, locationId);
+
+  return {
+    skuCount: productIds.size,
+    totalUnits: batches.reduce((sum, b) => sum + b.quantity, 0),
+    expiringSoon: expiring.length,
+    batchCount: batches.length,
+  };
+}
+
+export async function listLocationBatches(
+  storeId: string,
+  locationId: string,
+  productId?: string
+): Promise<LocalStockBatch[]> {
+  const batches = await db.stock_batches
+    .where('store_id')
+    .equals(storeId)
+    .and(
+      (b) =>
+        b.location_id === locationId &&
+        b.quantity > 0 &&
+        (!productId || b.product_id === productId)
+    )
+    .toArray();
+  return sortBatchesFefo(batches);
+}
+
+export async function listLocationMovements(
+  storeId: string,
+  locationId: string,
+  limit = 80
+): Promise<LocalStockMovement[]> {
+  const movements = await db.stock_movements
+    .where('store_id')
+    .equals(storeId)
+    .and(
+      (m) => m.from_location_id === locationId || m.to_location_id === locationId
+    )
+    .toArray();
+
+  movements.sort((a, b) => b.created_at.localeCompare(a.created_at));
+  return movements.slice(0, Math.max(1, limit));
+}
+
+/**
+ * Adjust stock at a specific location (warehouse-aware).
+ * Positive delta creates an adjustment batch; negative uses FEFO deduction.
+ */
+export async function adjustLocationStock(params: {
+  storeId: string;
+  productId: string;
+  locationId: string;
+  delta: number;
+  note?: string;
+  userId?: string | null;
+}): Promise<void> {
+  const delta = Math.trunc(Number(params.delta) || 0);
+  if (delta === 0) throw new Error('Adjustment quantity cannot be zero');
+
+  await ensureStoreLocations(params.storeId);
+  const [location, product] = await Promise.all([
+    db.locations.get(params.locationId),
+    db.products.get(params.productId),
+  ]);
+  if (!location || location.store_id !== params.storeId) {
+    throw new Error('Location not found');
+  }
+  if (!product || product.store_id !== params.storeId) {
+    throw new Error('Product not found');
+  }
+
+  const now = nowIso();
+  const note = (params.note || '').trim() || 'Stock adjustment';
+
+  if (delta > 0) {
+    const batch: LocalStockBatch = {
+      id: generateId(),
+      store_id: params.storeId,
+      product_id: params.productId,
+      location_id: params.locationId,
+      batch_code: 'ADJUST',
+      expiry_date: null,
+      quantity: delta,
+      cost_price: product.cost_price || 0,
+      created_at: now,
+      updated_at: now,
+      synced: 0,
+    };
+    await db.stock_batches.add(batch);
+    await db.stock_movements.add({
+      id: generateId(),
+      store_id: params.storeId,
+      product_id: params.productId,
+      batch_id: batch.id,
+      from_location_id: null,
+      to_location_id: params.locationId,
+      movement_type: 'adjust',
+      quantity: delta,
+      note,
+      user_id: params.userId || null,
+      created_at: now,
+      synced: 0,
+    });
+  } else {
+    const qty = Math.abs(delta);
+    const allocations = await allocateFefo(params.productId, params.locationId, qty);
+    for (const alloc of allocations) {
+      const batch = await db.stock_batches.get(alloc.batchId);
+      if (!batch || batch.quantity < alloc.qty) {
+        throw new Error('Insufficient stock at location');
+      }
+      await db.stock_batches.update(batch.id, {
+        quantity: batch.quantity - alloc.qty,
+        updated_at: now,
+        synced: 0,
+      });
+      await db.stock_movements.add({
+        id: generateId(),
+        store_id: params.storeId,
+        product_id: params.productId,
+        batch_id: batch.id,
+        from_location_id: params.locationId,
+        to_location_id: null,
+        movement_type: 'adjust',
+        quantity: alloc.qty,
+        note,
+        user_id: params.userId || null,
+        created_at: now,
+        synced: 0,
+      });
+    }
+  }
+
+  await syncProductStockLevel(params.productId);
 }
 
 export function canUserSellWholesale(user: LocalUser | null | undefined): boolean {
