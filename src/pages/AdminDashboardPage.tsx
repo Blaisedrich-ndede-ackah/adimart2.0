@@ -218,12 +218,12 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
     data?.stores.find((s) => s.id === storeId)?.name || 'Unknown store';
 
   return (
-    <div className="h-dvh bg-slate-100 flex flex-col overflow-hidden">
-      <header className="bg-slate-950 text-white px-4 py-3 flex-shrink-0">
+    <div className="h-dvh bg-[var(--color-surface)] flex flex-col overflow-hidden md:max-w-6xl md:mx-auto md:border-x md:border-emerald-100 md:shadow-xl">
+      <header className="bg-primary text-white px-4 md:px-6 py-3 flex-shrink-0">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-emerald-300 text-[10px] font-semibold uppercase tracking-wide">Adimat Admin</p>
-            <h1 className="text-lg font-bold">Platform Overview</h1>
+            <p className="text-emerald-200 text-[10px] font-semibold uppercase tracking-wide">Adimat Admin</p>
+            <h1 className="text-lg md:text-xl font-bold">Platform Overview</h1>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -264,7 +264,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         </div>
       </header>
 
-      <nav className="bg-white border-b border-slate-200 px-2 py-2 flex gap-1 overflow-x-auto no-scrollbar flex-shrink-0">
+      <nav className="bg-white border-b border-emerald-100 px-2 md:px-4 py-2 flex gap-1 overflow-x-auto no-scrollbar flex-shrink-0">
         {([
           ['overview', 'Overview'],
           ['subscriptions', 'Subscriptions'],
@@ -278,7 +278,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
             key={id}
             onClick={() => setTab(id)}
             className={`px-3 py-2 rounded-lg text-xs font-semibold whitespace-nowrap touch-target ${
-              tab === id ? 'bg-slate-900 text-white' : 'text-slate-600 bg-slate-50'
+              tab === id ? 'bg-primary text-white' : 'text-slate-600 bg-emerald-50/70'
             }`}
           >
             {label}
@@ -287,7 +287,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       </nav>
 
       <main
-        className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-3 pb-8"
+        className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 md:px-6 py-3 md:py-5 pb-8"
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
         {loading && !data && tab !== 'contact' && (

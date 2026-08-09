@@ -6,7 +6,7 @@ import { isAdminSessionActive, clearAdminSession } from '@/lib/adminAuth';
 import PWAInstallBanner from '@/components/PWAInstallBanner';
 import SubscriptionWarningBanner from '@/components/SubscriptionWarningBanner';
 import StoreBrandingBar from '@/components/StoreBrandingBar';
-import BottomNav from '@/components/BottomNav';
+import AppNav from '@/components/AppNav';
 import StoreSetupPage from '@/pages/StoreSetupPage';
 import LoginPage from '@/pages/LoginPage';
 import CashierBlockedPage from '@/pages/CashierBlockedPage';
@@ -72,50 +72,46 @@ export default function App() {
     );
   }
 
-  // Show loading state
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-primary flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 animate-pulse">
+      <div className="min-h-[100dvh] bg-primary flex items-center justify-center">
+        <div className="text-center animate-fade-in">
+          <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
             <img src="/logo.png" alt="Adimat" className="w-10 h-10 object-contain" />
           </div>
-          <p className="text-white font-medium">Loading Adimat...</p>
+          <p className="text-white font-medium tracking-wide">Loading Adimat…</p>
         </div>
       </div>
     );
   }
 
-  // Show store setup for first-time users
   if (!isStoreSetup) {
     return (
-      <div className="h-screen flex flex-col">
+      <div className="h-[100dvh] flex flex-col bg-[var(--color-surface)]">
         <PWAInstallBanner />
-        <div className="flex-1">
+        <div className="flex-1 min-h-0 overflow-y-auto">
           <StoreSetupPage onOpenAdmin={() => setAppMode('admin-login')} />
         </div>
       </div>
     );
   }
 
-  // Show login page
   if (!isAuthenticated) {
     return (
-      <div className="h-screen flex flex-col">
+      <div className="h-[100dvh] flex flex-col bg-[var(--color-surface)]">
         <PWAInstallBanner />
-        <div className="flex-1">
+        <div className="flex-1 min-h-0 overflow-y-auto">
           <LoginPage onOpenAdmin={() => setAppMode('admin-login')} />
         </div>
       </div>
     );
   }
 
-  // Blocked cashiers can authenticate but cannot use the POS
   if (currentUser?.role === 'cashier' && currentUser.is_active === 0) {
     return (
-      <div className="h-screen flex flex-col">
+      <div className="h-[100dvh] flex flex-col bg-[var(--color-surface)]">
         <PWAInstallBanner />
-        <div className="flex-1">
+        <div className="flex-1 min-h-0 overflow-y-auto">
           <CashierBlockedPage />
         </div>
       </div>
@@ -147,14 +143,16 @@ export default function App() {
   };
 
   return (
-    <div className="h-screen flex flex-col">
-      <PWAInstallBanner />
-      <SubscriptionWarningBanner onOpenPlan={() => setCurrentPage('subscription')} />
-      <StoreBrandingBar />
-      <div className="flex-1 overflow-hidden">
-        {renderPage()}
+    <div className="app-frame md:flex-row md:h-[100dvh] md:overflow-hidden">
+      <AppNav currentPage={currentPage} onNavigate={setCurrentPage} />
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 md:h-[100dvh] md:overflow-hidden">
+        <PWAInstallBanner />
+        <SubscriptionWarningBanner onOpenPlan={() => setCurrentPage('subscription')} />
+        <StoreBrandingBar />
+        <div className="flex-1 min-h-0 overflow-hidden pb-[calc(4.25rem+env(safe-area-inset-bottom))] md:pb-0">
+          {renderPage()}
+        </div>
       </div>
-      <BottomNav currentPage={currentPage} onNavigate={setCurrentPage} />
     </div>
   );
 }

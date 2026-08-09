@@ -152,8 +152,8 @@ export default function ReportsPage() {
     .reduce((s, t) => s + (t.paystack_amount || 0), 0);
 
   return (
-    <div className="flex flex-col h-full bg-gray-50">
-      <div className="bg-primary px-4 py-3 flex-shrink-0">
+    <div className="page-shell">
+      <div className="page-header">
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-white font-bold text-lg">Reports & Analytics</h1>
           <div className="flex gap-2">
@@ -207,11 +207,11 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 pt-3 pb-20 no-scrollbar">
+      <div className="page-body no-scrollbar">
         {tab === 'overview' && summary && (
           <>
-            <div className="grid grid-cols-2 gap-2 mb-4">
-              <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 col-span-2">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 mb-4">
+              <div className="bg-white rounded-xl p-3 shadow-sm border border-emerald-50 col-span-2 md:col-span-4">
                 <div className="flex items-center gap-2 mb-1">
                   <TrendingUp className="w-4 h-4 text-primary" />
                   <span className="text-xs text-gray-500 font-medium">Total Revenue</span>

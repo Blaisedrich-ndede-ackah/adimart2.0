@@ -52,23 +52,22 @@ export default function AdminLoginPage({ onSuccess, onBack }: AdminLoginPageProp
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col">
-      <div className="px-4 pt-4">
+    <div className="auth-shell">
+      <div className="w-full max-w-md">
         <button
           onClick={onBack}
-          className="flex items-center gap-2 text-slate-300 text-sm touch-target"
+          className="flex items-center gap-2 text-emerald-100 text-sm touch-target mb-8"
         >
           <ArrowLeft className="w-4 h-4" />
           Back to store login
         </button>
-      </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center px-6 pb-10">
-        <div className="w-16 h-16 rounded-2xl bg-emerald-500/20 flex items-center justify-center mb-4">
-          <Shield className="w-8 h-8 text-emerald-400" />
+        <div className="flex flex-col items-center">
+        <div className="w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-white/15 flex items-center justify-center mb-4 border border-white/20">
+          <Shield className="w-8 h-8 text-emerald-100" />
         </div>
-        <h1 className="text-white text-2xl font-bold">Administrator</h1>
-        <p className="text-slate-400 text-sm text-center mt-2 max-w-xs">
+        <h1 className="text-white text-3xl font-bold tracking-tight">Administrator</h1>
+        <p className="text-emerald-100/80 text-sm text-center mt-2 max-w-xs">
           View all stores, sales, and weekly Paystack remittances.
         </p>
 
@@ -96,16 +95,17 @@ export default function AdminLoginPage({ onSuccess, onBack }: AdminLoginPageProp
                 }
                 onKey(key);
               }}
-              className="h-14 rounded-2xl bg-slate-800 text-white text-xl font-semibold active:bg-slate-700 disabled:opacity-50"
+              className="h-14 md:h-16 rounded-2xl bg-white/15 text-white text-xl font-semibold active:bg-white/25 disabled:opacity-50"
             >
               {key === 'del' ? '⌫' : key === 'go' ? '→' : key}
             </button>
           ))}
         </div>
 
-        <p className="text-slate-500 text-[11px] text-center mt-6 max-w-sm">
-          Set <code className="text-slate-400">VITE_ADMIN_PIN</code> in your environment. Stores must sync to Supabase to appear here.
+        <p className="text-emerald-200/70 text-[11px] text-center mt-6 max-w-sm">
+          Set <code className="text-emerald-100">VITE_ADMIN_PIN</code> in your environment. Stores must sync to Supabase to appear here.
         </p>
+        </div>
       </div>
     </div>
   );

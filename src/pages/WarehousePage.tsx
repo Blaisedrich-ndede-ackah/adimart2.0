@@ -294,14 +294,14 @@ export default function WarehousePage() {
 
   if (!warehouseEnabled) {
     return (
-      <div className="flex flex-col h-full bg-gray-50">
-        <div className="bg-primary px-4 py-3 flex-shrink-0">
+      <div className="page-shell">
+        <div className="page-header">
           <div className="flex items-center gap-2">
             <Warehouse className="w-5 h-5 text-white" />
             <h1 className="text-white font-bold text-lg">Warehouse</h1>
           </div>
         </div>
-        <div className="flex-1 flex items-center justify-center px-6 pb-24">
+        <div className="flex-1 flex items-center justify-center px-6 pb-8">
           <div className="text-center max-w-sm">
             <div className="w-16 h-16 rounded-2xl bg-emerald-50 flex items-center justify-center mx-auto mb-4">
               <Warehouse className="w-8 h-8 text-primary" />
@@ -317,8 +317,8 @@ export default function WarehousePage() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-gray-50">
-      <div className="bg-primary px-4 py-3 flex-shrink-0">
+    <div className="page-shell">
+      <div className="page-header">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Warehouse className="w-5 h-5 text-white" />
@@ -355,7 +355,7 @@ export default function WarehousePage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 pt-3 pb-24 no-scrollbar">
+      <div className="page-body no-scrollbar">
         {(error || success) && (
           <div
             className={`mb-3 px-4 py-3 rounded-xl text-sm flex items-center gap-2 animate-fade-in ${

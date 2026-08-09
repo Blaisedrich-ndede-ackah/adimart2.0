@@ -309,13 +309,13 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-gray-50">
-      <div className="bg-primary px-4 py-3 flex-shrink-0">
+    <div className="page-shell">
+      <div className="page-header">
         <h1 className="text-white font-bold text-lg">Settings</h1>
         <p className="text-emerald-200 text-xs">Manage your store configuration</p>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 pt-3 pb-20 no-scrollbar">
+      <div className="page-body no-scrollbar">
         {/* Store Profile */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">
           <div className="flex items-center gap-2 mb-4">
