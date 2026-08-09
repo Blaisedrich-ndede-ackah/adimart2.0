@@ -1,23 +1,30 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   ShoppingCart, Minus, Plus, Trash2, Search, ChevronRight, Package, AlertCircle, Bluetooth,
-  ScanBarcode
+  ScanBarcode, MapPin
 } from 'lucide-react';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import CheckoutOverlay from '@/components/CheckoutOverlay';
 import { useCartStore } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
-import { LocalProduct, getCurrentStoreActiveProducts } from '@/lib/dexie';
+import { LocalProduct, LocalLocation, getCurrentStoreActiveProducts, getCurrentStoreId } from '@/lib/dexie';
 import { playScanBeep, primeScanBeep } from '@/lib/scanBeep';
 import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 import { getBluetoothHardwareStatus, subscribeBluetoothStatus } from '@/lib/bluetoothPeripherals';
 import ProductImage from '@/components/ProductImage';
+import { getAvailableSaleModes, type SaleMode, type UnitType } from '@/lib/bulkPricing';
+import {
+  canUserSellWholesale,
+  ensureStoreLocations,
+  getLocationStock,
+  resolveSaleLocations,
+} from '@/lib/warehouse';
 
 type PosTab = 'products' | 'cart';
 
 export default function POSPage() {
   const cart = useCartStore();
-  const { currentUser } = useAuthStore();
+  const { currentUser, currentStore } = useAuthStore();
   const [posTab, setPosTab] = useState<PosTab>('products');
   const [scannerActive, setScannerActive] = useState(true);
   const [showCameraScanner, setShowCameraScanner] = useState(false);
@@ -26,27 +33,69 @@ export default function POSPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [products, setProducts] = useState<LocalProduct[]>([]);
+  const [locationStock, setLocationStock] = useState<Record<string, number>>({});
+  const [saleLocations, setSaleLocations] = useState<LocalLocation[]>([]);
+  const [selectedLocationId, setSelectedLocationId] = useState<string>('');
+  const [saleMode, setSaleMode] = useState<SaleMode>('retail');
+  const [unitType, setUnitType] = useState<UnitType>('base');
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [stockError, setStockError] = useState<string | null>(null);
   const [btStatus, setBtStatus] = useState(getBluetoothHardwareStatus());
 
+  const canWholesale = canUserSellWholesale(currentUser);
+
+  const loadSaleContext = useCallback(async () => {
+    if (!currentStore || !currentUser) return;
+    await ensureStoreLocations(currentStore.id);
+    const locations = await resolveSaleLocations(currentStore, currentUser);
+    setSaleLocations(locations);
+    setSelectedLocationId((prev) => {
+      if (prev && locations.some((l) => l.id === prev)) return prev;
+      return (
+        locations.find((l) => l.id === currentUser.assigned_location_id)?.id ||
+        locations.find((l) => l.is_default === 1)?.id ||
+        locations[0]?.id ||
+        ''
+      );
+    });
+  }, [currentStore, currentUser]);
+
   const loadProducts = useCallback(async () => {
     setLoadingProducts(true);
     try {
+      const storeId = await getCurrentStoreId();
+      if (storeId) await ensureStoreLocations(storeId);
       const list = await getCurrentStoreActiveProducts();
       list.sort((a, b) => a.name.localeCompare(b.name));
       setProducts(list);
+
+      if (selectedLocationId) {
+        const stocks: Record<string, number> = {};
+        await Promise.all(
+          list.map(async (p) => {
+            stocks[p.id] = await getLocationStock(p.id, selectedLocationId);
+          })
+        );
+        setLocationStock(stocks);
+      }
     } finally {
       setLoadingProducts(false);
     }
-  }, []);
+  }, [selectedLocationId]);
+
+  useEffect(() => {
+    void loadSaleContext();
+  }, [loadSaleContext]);
+
+  useEffect(() => {
+    cart.setSaleContext(selectedLocationId || null, saleMode);
+  }, [selectedLocationId, saleMode, cart]);
 
   useEffect(() => {
     void loadProducts();
   }, [loadProducts]);
 
   useEffect(() => {
-    // Refresh catalog when returning to the Products tab (e.g. after inventory edits)
     if (posTab === 'products') {
       void loadProducts();
     }
@@ -114,8 +163,14 @@ export default function POSPage() {
   // Handheld Bluetooth / HID scanner → cart (active while not in checkout)
   useBluetoothBarcodeInput(handleScan, scannerActive && !showCheckout);
 
-  const handleAddProduct = (product: LocalProduct) => {
-    const result = cart.addItem(product);
+  const handleAddProduct = async (product: LocalProduct) => {
+    const modes = getAvailableSaleModes(product);
+    const mode = saleMode === 'wholesale' && modes.includes('wholesale') ? 'wholesale' : 'retail';
+    if (mode !== saleMode) cart.setSaleContext(selectedLocationId || null, mode);
+
+    const packSize = Math.max(1, Number(product.pack_size) || 1);
+    const usePack = unitType === 'pack' && packSize > 1;
+    const result = await cart.addItem(product, { unitType: usePack ? 'pack' : 'base' });
 
     if (result.success) {
       flashFeedback({ type: 'success', message: `Added: ${product.name}` }, 2000);
@@ -127,16 +182,16 @@ export default function POSPage() {
     }
   };
 
-  const handleIncrement = (itemId: string) => {
-    const result = cart.incrementItem(itemId);
+  const handleIncrement = async (itemId: string) => {
+    const result = await cart.incrementItem(itemId);
     if (!result.success && result.error) {
       setStockError(result.error);
       setTimeout(() => setStockError(null), 3000);
     }
   };
 
-  const handleUpdateQuantity = (itemId: string, newQty: number) => {
-    const result = cart.updateQuantity(itemId, newQty);
+  const handleUpdateQuantity = async (itemId: string, newQty: number) => {
+    const result = await cart.updateQuantity(itemId, newQty);
     if (!result.success && result.error) {
       setStockError(result.error);
       setTimeout(() => setStockError(null), 3000);
@@ -204,6 +259,69 @@ export default function POSPage() {
           <ShoppingCart className="w-4 h-4" />
           Cart{cartCount > 0 ? ` (${cartCount})` : ''}
         </button>
+      </div>
+
+      {/* Sale context: location + retail/wholesale + unit */}
+      <div className="bg-white border-b border-gray-100 px-3 py-2.5 flex-shrink-0 space-y-2">
+        <div className="flex items-center gap-2">
+          <MapPin className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+          <select
+            value={selectedLocationId}
+            onChange={(e) => {
+              if (cart.items.length > 0 && !confirm('Change location clears the cart. Continue?')) return;
+              cart.clearCart();
+              setSelectedLocationId(e.target.value);
+            }}
+            className="flex-1 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 outline-none"
+          >
+            {saleLocations.length === 0 && <option value="">No location</option>}
+            {saleLocations.map((loc) => (
+              <option key={loc.id} value={loc.id}>
+                {loc.name} ({loc.location_type})
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              if (cart.items.length > 0 && saleMode !== 'retail' && !confirm('Switching to retail clears the cart. Continue?')) return;
+              if (saleMode !== 'retail') cart.clearCart();
+              setSaleMode('retail');
+            }}
+            className={`flex-1 py-2 rounded-lg text-xs font-semibold touch-target ${
+              saleMode === 'retail' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'
+            }`}
+          >
+            Retail
+          </button>
+          <button
+            type="button"
+            disabled={!canWholesale}
+            onClick={() => {
+              if (!canWholesale) return;
+              if (cart.items.length > 0 && saleMode !== 'wholesale' && !confirm('Switching to wholesale clears the cart. Continue?')) return;
+              if (saleMode !== 'wholesale') cart.clearCart();
+              setSaleMode('wholesale');
+            }}
+            className={`flex-1 py-2 rounded-lg text-xs font-semibold touch-target disabled:opacity-40 ${
+              saleMode === 'wholesale' ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-600'
+            }`}
+            title={canWholesale ? 'Wholesale / bulk pricing' : 'Wholesale disabled for this cashier'}
+          >
+            Wholesale
+          </button>
+          <button
+            type="button"
+            onClick={() => setUnitType((u) => (u === 'base' ? 'pack' : 'base'))}
+            className={`px-3 py-2 rounded-lg text-xs font-semibold touch-target whitespace-nowrap ${
+              unitType === 'pack' ? 'bg-slate-800 text-white' : 'bg-gray-100 text-gray-600'
+            }`}
+          >
+            {unitType === 'pack' ? 'By pack' : 'By unit'}
+          </button>
+        </div>
       </div>
 
       {/* Scan Feedback */}
@@ -293,7 +411,11 @@ export default function POSPage() {
             ) : (
               <div className="space-y-2">
                 {filteredProducts.map((product) => {
-                  const outOfStock = product.stock_level <= 0;
+                  const stock = locationStock[product.id] ?? product.stock_level;
+                  const outOfStock = stock <= 0;
+                  const packSize = Math.max(1, Number(product.pack_size) || 1);
+                  const modes = getAvailableSaleModes(product);
+                  const wholesaleOk = saleMode === 'wholesale' && modes.includes('wholesale');
                   return (
                     <div
                       key={product.id}
@@ -306,6 +428,12 @@ export default function POSPage() {
                         <p className="text-sm font-medium text-gray-900 truncate">{product.name}</p>
                         <p className="text-sm font-semibold text-blue-600 mt-0.5">
                           GHS {product.selling_price.toFixed(2)}
+                          {packSize > 1 ? <span className="text-[10px] text-gray-400 font-medium"> / unit</span> : null}
+                        </p>
+                        <p className="text-[10px] text-gray-500 mt-0.5">
+                          Stock here: {stock}
+                          {product.track_expiry === 1 ? ' · Expiry tracked' : ''}
+                          {wholesaleOk ? ' · Wholesale ready' : ''}
                         </p>
                         {outOfStock && (
                           <p className="text-[10px] font-semibold text-red-600 mt-0.5">Out of stock</p>
@@ -313,7 +441,7 @@ export default function POSPage() {
                       </div>
                       <button
                         type="button"
-                        onClick={() => handleAddProduct(product)}
+                        onClick={() => void handleAddProduct(product)}
                         disabled={outOfStock}
                         className="flex-shrink-0 px-3 py-2 rounded-lg border border-black bg-white text-black text-xs font-medium touch-target disabled:opacity-40 disabled:cursor-not-allowed active:bg-gray-50"
                       >
@@ -367,9 +495,16 @@ export default function POSPage() {
                     <ProductImage src={item.image_url} alt={item.name} size="md" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <p className="text-xs text-gray-500">GH₵{item.unit_price.toFixed(2)} each</p>
-                        {item.quantity >= item.available_stock && (
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                        <p className="text-xs text-gray-500">
+                          GH₵{item.unit_price.toFixed(2)} / {item.unit_type === 'pack' ? 'pack' : 'unit'}
+                        </p>
+                        {item.sale_mode === 'wholesale' && (
+                          <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-medium">
+                            Wholesale
+                          </span>
+                        )}
+                        {item.base_quantity >= item.available_stock && (
                           <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">
                             Max stock
                           </span>
@@ -378,30 +513,28 @@ export default function POSPage() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => cart.decrementItem(item.id)}
-                        disabled={item.quantity <= 1}
-                        className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center touch-target disabled:opacity-40"
-                      >
-                        <Minus className="w-3.5 h-3.5 text-gray-600" />
-                      </button>
-                      <input
-                        type="number"
-                        value={item.quantity}
-                        onChange={(e) => handleUpdateQuantity(item.id, parseInt(e.target.value) || 1)}
-                        className="w-10 text-sm font-bold text-center bg-transparent border-b border-gray-200 focus:border-primary outline-none"
-                        min="1"
-                        max={item.available_stock}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleIncrement(item.id)}
-                        disabled={item.quantity >= item.available_stock}
-                        className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center touch-target disabled:opacity-40"
-                      >
-                        <Plus className="w-3.5 h-3.5 text-primary" />
-                      </button>
+                    <button
+                      type="button"
+                      onClick={() => cart.decrementItem(item.id)}
+                      disabled={item.quantity <= 1}
+                      className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center touch-target disabled:opacity-40"
+                    >
+                      <Minus className="w-3.5 h-3.5 text-gray-600" />
+                    </button>
+                    <input
+                      type="number"
+                      value={item.quantity}
+                      onChange={(e) => void handleUpdateQuantity(item.id, parseInt(e.target.value) || 1)}
+                      className="w-10 text-sm font-bold text-center bg-transparent border-b border-gray-200 focus:border-primary outline-none"
+                      min="1"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleIncrement(item.id)}
+                      className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center touch-target disabled:opacity-40"
+                    >
+                      <Plus className="w-3.5 h-3.5 text-primary" />
+                    </button>
                     </div>
 
                     <div className="text-right min-w-[70px]">

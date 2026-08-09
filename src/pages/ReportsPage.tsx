@@ -7,7 +7,7 @@ import {
   Download, FileText, PiggyBank, Package, Users, Tag, Plus, Trash2, Loader2
 } from 'lucide-react';
 import {
-  db, LocalTransaction, LocalTransactionItem, LocalExpense,
+  db, LocalTransaction, LocalTransactionItem, LocalExpense, LocalStockBatch,
   getCurrentStoreTransactions, getCurrentStoreExpenses, getCurrentStoreId,
   addExpense, deleteExpense
 } from '@/lib/dexie';
@@ -15,6 +15,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import {
   buildReportSummary, exportReportCsv, exportReportPdf, getPeriodRange, ReportSummary
 } from '@/lib/reportAnalytics';
+import { getExpiringBatches } from '@/lib/warehouse';
 
 type Period = 'today' | 'week' | 'month';
 type ReportTab = 'overview' | 'products' | 'expenses';
@@ -43,6 +44,8 @@ export default function ReportsPage() {
   const [expenseCategory, setExpenseCategory] = useState('Other');
   const [expenseNotes, setExpenseNotes] = useState('');
   const [savingExpense, setSavingExpense] = useState(false);
+  const [expiringBatches, setExpiringBatches] = useState<LocalStockBatch[]>([]);
+  const [productNames, setProductNames] = useState<Record<string, string>>({});
 
   const loadData = useCallback(async () => {
     const storeId = await getCurrentStoreId();
@@ -51,6 +54,12 @@ export default function ReportsPage() {
     const { start, end } = getPeriodRange(period);
     const allTxns = (await getCurrentStoreTransactions()).filter(t => t.status === 'completed');
     const allExpenses = await getCurrentStoreExpenses();
+    const expiring = await getExpiringBatches(storeId, 30);
+    setExpiringBatches(expiring.slice(0, 8));
+    const products = await db.products.where('store_id').equals(storeId).toArray();
+    const names: Record<string, string> = {};
+    products.forEach((p) => { names[p.id] = p.name; });
+    setProductNames(names);
 
     const periodTxns = allTxns.filter(t => {
       const d = new Date(t.created_at);
@@ -242,6 +251,28 @@ export default function ReportsPage() {
                 <p className="text-lg font-bold text-red-500">GH₵{summary.expenses.toFixed(2)}</p>
               </div>
             </div>
+
+            {expiringBatches.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
+                <h3 className="text-sm font-bold text-amber-900 mb-2 flex items-center gap-2">
+                  <Package className="w-4 h-4" />
+                  Expiring within 30 days
+                </h3>
+                <div className="space-y-1.5">
+                  {expiringBatches.map((b) => (
+                    <div key={b.id} className="flex items-center justify-between text-xs">
+                      <span className="text-amber-950 font-medium truncate mr-2">
+                        {productNames[b.product_id] || 'Product'}
+                        {b.batch_code ? ` · ${b.batch_code}` : ''}
+                      </span>
+                      <span className="text-amber-800 flex-shrink-0">
+                        {b.quantity} pcs · {b.expiry_date}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 mb-4">
               <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
