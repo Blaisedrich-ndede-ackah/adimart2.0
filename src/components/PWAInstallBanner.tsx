@@ -136,8 +136,8 @@ export default function PWAInstallBanner() {
 
       {/* iOS Instructions Modal */}
       {showIOSInstructions && (
-        <div className="fixed inset-0 bg-black/70 z-[100] flex items-end justify-center animate-fade-in">
-          <div className="bg-white rounded-t-3xl w-full max-w-lg p-6 animate-slide-up">
+        <div className="sheet-backdrop animate-fade-in" style={{ zIndex: 100, background: 'rgba(15,23,42,0.7)' }}>
+          <div className="sheet-panel p-6 animate-slide-up">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-bold text-gray-900">Install Adimat</h2>
               <button 

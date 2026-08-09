@@ -54,8 +54,8 @@ export default function CsvImportModal({ isOpen, onClose, onImported }: CsvImpor
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-end justify-center">
-      <div className="bg-white rounded-t-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+    <div className="sheet-backdrop">
+      <div className="sheet-panel">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 sticky top-0 bg-white">
           <h2 className="text-lg font-bold text-gray-900">Import Products (CSV)</h2>
           <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100">

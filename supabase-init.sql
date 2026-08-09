@@ -26,6 +26,9 @@ CREATE TABLE IF NOT EXISTS stores (
   subscription_expires_at TIMESTAMPTZ,
   subscription_months_granted INTEGER DEFAULT 0,
   logo_url TEXT DEFAULT '',
+  warehouse_enabled BOOLEAN DEFAULT FALSE,
+  max_shops INTEGER DEFAULT 1,
+  max_warehouses INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -46,6 +49,9 @@ CREATE TABLE IF NOT EXISTS users (
   role VARCHAR(20) NOT NULL CHECK (role IN ('owner', 'cashier')),
   pin_hash VARCHAR(255) NOT NULL,
   is_active BOOLEAN DEFAULT TRUE,
+  assigned_location_id UUID,
+  can_wholesale BOOLEAN DEFAULT FALSE,
+  can_sell_from_warehouse BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -75,6 +81,12 @@ CREATE TABLE IF NOT EXISTS products (
   stock_level INTEGER NOT NULL DEFAULT 0 CHECK (stock_level >= 0),
   is_active BOOLEAN DEFAULT TRUE,
   image_url TEXT DEFAULT '',
+  pack_size INTEGER DEFAULT 1,
+  track_expiry BOOLEAN DEFAULT FALSE,
+  wholesale_mode VARCHAR(20) DEFAULT 'none',
+  wholesale_pack_price DECIMAL(12,2) DEFAULT 0,
+  wholesale_unit_price DECIMAL(12,2) DEFAULT 0,
+  wholesale_tiers_json TEXT DEFAULT '[]',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -107,6 +119,8 @@ CREATE TABLE IF NOT EXISTS transactions (
   paystack_amount DECIMAL(12,2) DEFAULT 0,
   paystack_reference VARCHAR(100) DEFAULT '',
   status VARCHAR(20) NOT NULL DEFAULT 'completed' CHECK (status IN ('completed', 'pending')),
+  location_id UUID,
+  sale_mode VARCHAR(20) DEFAULT 'retail',
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -136,6 +150,10 @@ CREATE TABLE IF NOT EXISTS transaction_items (
   quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
   unit_price DECIMAL(12,2) NOT NULL DEFAULT 0,
   subtotal DECIMAL(12,2) NOT NULL DEFAULT 0,
+  unit_type VARCHAR(20) DEFAULT 'base',
+  pack_size INTEGER DEFAULT 1,
+  base_quantity INTEGER DEFAULT 0,
+  batch_id UUID,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -171,6 +189,82 @@ CREATE POLICY "expenses_delete" ON expenses FOR DELETE USING (true);
 CREATE INDEX IF NOT EXISTS idx_expenses_store ON expenses(store_id);
 CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(store_id, category);
 CREATE INDEX IF NOT EXISTS idx_expenses_created_at ON expenses(store_id, created_at);
+
+-- ============================================================
+-- LOCATIONS (shops / warehouses per store)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS locations (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  name VARCHAR(255) NOT NULL,
+  location_type VARCHAR(20) NOT NULL CHECK (location_type IN ('shop', 'warehouse')),
+  is_default BOOLEAN DEFAULT FALSE,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE locations ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "locations_select" ON locations FOR SELECT USING (true);
+CREATE POLICY "locations_insert" ON locations FOR INSERT WITH CHECK (true);
+CREATE POLICY "locations_update" ON locations FOR UPDATE USING (true);
+CREATE POLICY "locations_delete" ON locations FOR DELETE USING (true);
+
+CREATE INDEX IF NOT EXISTS idx_locations_store ON locations(store_id);
+
+-- ============================================================
+-- STOCK BATCHES (expiry-tracked inventory per location)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS stock_batches (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  location_id UUID NOT NULL REFERENCES locations(id) ON DELETE CASCADE,
+  batch_code VARCHAR(100) DEFAULT '',
+  expiry_date DATE,
+  quantity INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+  cost_price DECIMAL(12,2) DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE stock_batches ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "stock_batches_select" ON stock_batches FOR SELECT USING (true);
+CREATE POLICY "stock_batches_insert" ON stock_batches FOR INSERT WITH CHECK (true);
+CREATE POLICY "stock_batches_update" ON stock_batches FOR UPDATE USING (true);
+CREATE POLICY "stock_batches_delete" ON stock_batches FOR DELETE USING (true);
+
+CREATE INDEX IF NOT EXISTS idx_stock_batches_store ON stock_batches(store_id);
+CREATE INDEX IF NOT EXISTS idx_stock_batches_product ON stock_batches(product_id);
+CREATE INDEX IF NOT EXISTS idx_stock_batches_location ON stock_batches(location_id);
+CREATE INDEX IF NOT EXISTS idx_stock_batches_expiry ON stock_batches(expiry_date);
+
+-- ============================================================
+-- STOCK MOVEMENTS (receive / transfer / sale / adjust)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS stock_movements (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  batch_id UUID REFERENCES stock_batches(id) ON DELETE SET NULL,
+  from_location_id UUID REFERENCES locations(id) ON DELETE SET NULL,
+  to_location_id UUID REFERENCES locations(id) ON DELETE SET NULL,
+  movement_type VARCHAR(20) NOT NULL CHECK (movement_type IN ('receive', 'transfer', 'sale', 'adjust')),
+  quantity INTEGER NOT NULL,
+  note TEXT DEFAULT '',
+  user_id UUID,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE stock_movements ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "stock_movements_select" ON stock_movements FOR SELECT USING (true);
+CREATE POLICY "stock_movements_insert" ON stock_movements FOR INSERT WITH CHECK (true);
+
+CREATE INDEX IF NOT EXISTS idx_stock_movements_store ON stock_movements(store_id);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id);
 
 -- ============================================================
 -- WEEKLY PAYOUTS (admin marks Paystack remittances to stores)
@@ -281,6 +375,16 @@ CREATE TRIGGER update_products_updated_at
 
 CREATE TRIGGER update_expenses_updated_at
   BEFORE UPDATE ON expenses
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_locations_updated_at
+  BEFORE UPDATE ON locations
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_stock_batches_updated_at
+  BEFORE UPDATE ON stock_batches
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 

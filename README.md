@@ -118,6 +118,14 @@ The portal loads cloud data and shows:
 
 Store owners and cashiers open **Plan** to view subscription status and contact the administrator (WhatsApp / email loaded from Admin → Contact). SMS alerts via mNotify notify the store’s Support Phone when a subscription is activated and once when it is within 7 days of expiry.
 
+### Warehouse, bulk & expiry
+
+Platform admins can enable warehouse features per store and set **max shops** / **max warehouses**. When enabled, owners get a **Warehouse** tab to manage locations, receive stock (with batch/expiry), transfer between locations, and review expiry risk.
+
+Products support pack size, expiry tracking, and owner-defined wholesale pricing (`pack`, lower unit price, or quantity tiers). POS sells **retail or wholesale** from the cashier’s location (warehouse sales only if permitted). Stock deducts with **FEFO** when batches have expiry dates.
+
+If your Supabase project predates this feature, run `supabase-migrate-warehouse.sql` in the SQL Editor.
+
 Store owners set their preferred MoMo account under **Settings → Mobile Money Payout**, then sync to Supabase.
 
 If your Supabase project was created before these features, run `supabase-migrate-admin.sql`, `supabase-migrate-subscriptions.sql`, and `supabase-migrate-platform-settings.sql` in the SQL Editor (or re-apply the latest `supabase-init.sql`).

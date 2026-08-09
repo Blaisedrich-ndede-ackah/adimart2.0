@@ -72,8 +72,8 @@ export default function TransactionsPage() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-gray-50">
-      <div className="bg-primary px-4 py-3 flex-shrink-0">
+    <div className="page-shell">
+      <div className="page-header">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-white font-bold text-lg">
@@ -95,7 +95,7 @@ export default function TransactionsPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 pt-3 pb-24 no-scrollbar">
+      <div className="page-body no-scrollbar">
         {status && (
           <div className={`mb-3 rounded-xl px-3 py-2 text-xs flex items-center gap-2 ${
             status.includes('fail') || status.includes('No printer')

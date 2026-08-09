@@ -58,8 +58,8 @@ export default function StockAdjustment({ isOpen, product, onClose, onSaved }: S
   const newStock = calculateNewStock();
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-end justify-center animate-fade-in">
-      <div className="bg-white rounded-t-3xl w-full max-w-lg animate-slide-up" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+    <div className="sheet-backdrop animate-fade-in">
+      <div className="sheet-panel animate-slide-up">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <h2 className="text-lg font-bold text-gray-900">Adjust Stock</h2>
           <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100 touch-target">

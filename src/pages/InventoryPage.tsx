@@ -159,9 +159,9 @@ export default function InventoryPage() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-gray-50">
+    <div className="page-shell">
       {/* Header */}
-      <div className="bg-primary px-4 py-3 flex-shrink-0">
+      <div className="page-header">
         <div className="flex items-center justify-between mb-3">
           <div>
             <h1 className="text-white font-bold text-lg">Inventory</h1>
@@ -295,7 +295,7 @@ export default function InventoryPage() {
       </div>
 
       {/* Product List */}
-      <div className="flex-1 overflow-y-auto px-3 pt-2 pb-20 no-scrollbar">
+      <div className="page-body no-scrollbar">
         {filteredProducts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-gray-400">
             <Package className="w-12 h-12 mb-3" />

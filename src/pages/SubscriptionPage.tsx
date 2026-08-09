@@ -83,8 +83,8 @@ export default function SubscriptionPage() {
         : 'bg-slate-50 text-slate-700 border-slate-200';
 
   return (
-    <div className="flex flex-col h-full bg-gray-50">
-      <div className="bg-primary px-4 py-3 flex items-center justify-between flex-shrink-0">
+    <div className="page-shell">
+      <div className="page-header flex items-center justify-between">
         <div>
           <h1 className="text-white font-bold text-lg">Subscription</h1>
           <p className="text-emerald-200 text-xs">Manage and renew your Adimat plan</p>
@@ -99,7 +99,7 @@ export default function SubscriptionPage() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 pt-3 pb-24 no-scrollbar space-y-3">
+      <div className="page-body no-scrollbar space-y-3 md:max-w-3xl md:mx-auto md:w-full">
         {statusMsg && (
           <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl px-3 py-2 text-xs">
             {statusMsg}

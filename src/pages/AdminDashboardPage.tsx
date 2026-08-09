@@ -14,6 +14,7 @@ import {
   loadAdminDashboard,
   markWeeklyPayoutSent,
   shiftWeek,
+  updateStoreWarehouseLimits,
 } from '@/lib/adminPortal';
 import { clearAdminSession } from '@/lib/adminAuth';
 import {
@@ -41,6 +42,9 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
   const [busyStoreId, setBusyStoreId] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState('');
   const [grantMonths, setGrantMonths] = useState<Record<string, number>>({});
+  const [warehouseDrafts, setWarehouseDrafts] = useState<
+    Record<string, { warehouse_enabled: boolean; max_shops: number; max_warehouses: number }>
+  >({});
   const [platformSettings, setPlatformSettings] = useState<PlatformSettings | null>(null);
   const [contactWhatsapp, setContactWhatsapp] = useState('');
   const [contactEmail, setContactEmail] = useState('');
@@ -56,6 +60,18 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
     try {
       const dashboard = await loadAdminDashboard(weekStart);
       setData(dashboard);
+      setWarehouseDrafts(
+        Object.fromEntries(
+          dashboard.stores.map((store) => [
+            store.id,
+            {
+              warehouse_enabled: store.warehouse_enabled,
+              max_shops: store.max_shops,
+              max_warehouses: store.max_warehouses,
+            },
+          ])
+        )
+      );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
@@ -130,6 +146,50 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
     setTimeout(() => setStatusMsg(''), 5000);
   };
 
+  const getWarehouseDraft = (storeId: string, fallback?: {
+    warehouse_enabled: boolean;
+    max_shops: number;
+    max_warehouses: number;
+  }) =>
+    warehouseDrafts[storeId] ||
+    fallback || {
+      warehouse_enabled: false,
+      max_shops: 1,
+      max_warehouses: 0,
+    };
+
+  const handleSaveWarehouseLimits = async (row: StoreSubscriptionUsage) => {
+    const draft = getWarehouseDraft(row.store.id, {
+      warehouse_enabled: row.store.warehouse_enabled,
+      max_shops: row.store.max_shops,
+      max_warehouses: row.store.max_warehouses,
+    });
+    const maxShops = Math.max(1, Math.floor(Number(draft.max_shops) || 1));
+    const maxWarehouses = Math.max(0, Math.floor(Number(draft.max_warehouses) || 0));
+
+    setBusyStoreId(row.store.id);
+    setStatusMsg('');
+    const result = await updateStoreWarehouseLimits(row.store.id, {
+      warehouse_enabled: draft.warehouse_enabled,
+      max_shops: maxShops,
+      max_warehouses: maxWarehouses,
+    });
+    if (!result.success) {
+      setStatusMsg(result.error || 'Failed to save warehouse limits');
+    } else {
+      setStatusMsg(
+        `Updated warehouse limits for ${row.store.name}: ${
+          draft.warehouse_enabled ? 'enabled' : 'disabled'
+        }, ${maxShops} shop${maxShops === 1 ? '' : 's'}, ${maxWarehouses} warehouse${
+          maxWarehouses === 1 ? '' : 's'
+        }`
+      );
+      await refresh();
+    }
+    setBusyStoreId(null);
+    setTimeout(() => setStatusMsg(''), 5000);
+  };
+
   const handleGrantSubscription = async (row: StoreSubscriptionUsage) => {
     const months = grantMonths[row.store.id] || 1;
     if (!confirm(`Grant ${months} month${months === 1 ? '' : 's'} subscription to ${row.store.name}?`)) {
@@ -158,12 +218,12 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
     data?.stores.find((s) => s.id === storeId)?.name || 'Unknown store';
 
   return (
-    <div className="h-dvh bg-slate-100 flex flex-col overflow-hidden">
-      <header className="bg-slate-950 text-white px-4 py-3 flex-shrink-0">
+    <div className="h-dvh bg-[var(--color-surface)] flex flex-col overflow-hidden md:max-w-6xl md:mx-auto md:border-x md:border-emerald-100 md:shadow-xl">
+      <header className="bg-primary text-white px-4 md:px-6 py-3 flex-shrink-0">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-emerald-300 text-[10px] font-semibold uppercase tracking-wide">Adimat Admin</p>
-            <h1 className="text-lg font-bold">Platform Overview</h1>
+            <p className="text-emerald-200 text-[10px] font-semibold uppercase tracking-wide">Adimat Admin</p>
+            <h1 className="text-lg md:text-xl font-bold">Platform Overview</h1>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -204,7 +264,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         </div>
       </header>
 
-      <nav className="bg-white border-b border-slate-200 px-2 py-2 flex gap-1 overflow-x-auto no-scrollbar flex-shrink-0">
+      <nav className="bg-white border-b border-emerald-100 px-2 md:px-4 py-2 flex gap-1 overflow-x-auto no-scrollbar flex-shrink-0">
         {([
           ['overview', 'Overview'],
           ['subscriptions', 'Subscriptions'],
@@ -218,7 +278,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
             key={id}
             onClick={() => setTab(id)}
             className={`px-3 py-2 rounded-lg text-xs font-semibold whitespace-nowrap touch-target ${
-              tab === id ? 'bg-slate-900 text-white' : 'text-slate-600 bg-slate-50'
+              tab === id ? 'bg-primary text-white' : 'text-slate-600 bg-emerald-50/70'
             }`}
           >
             {label}
@@ -227,7 +287,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       </nav>
 
       <main
-        className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-3 pb-8"
+        className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 md:px-6 py-3 md:py-5 pb-8"
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
         {loading && !data && tab !== 'contact' && (
@@ -333,6 +393,11 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
 
             {data.subscriptions.map((row) => {
               const months = grantMonths[row.store.id] || 1;
+              const warehouseDraft = getWarehouseDraft(row.store.id, {
+                warehouse_enabled: row.store.warehouse_enabled,
+                max_shops: row.store.max_shops,
+                max_warehouses: row.store.max_warehouses,
+              });
               const statusColor =
                 row.status === 'active'
                   ? row.isExpiringSoon
@@ -349,6 +414,12 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                       <p className="font-bold text-slate-900 truncate">{row.store.name}</p>
                       <p className="text-[11px] text-slate-500 mt-0.5">
                         {row.userCount} users · {row.productCount} products
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Warehouse {row.store.warehouse_enabled ? 'on' : 'off'} ·{' '}
+                        {row.store.max_shops} shop{row.store.max_shops === 1 ? '' : 's'} ·{' '}
+                        {row.store.max_warehouses} warehouse
+                        {row.store.max_warehouses === 1 ? '' : 's'}
                       </p>
                     </div>
                     <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-lg ${statusColor}`}>
@@ -411,6 +482,75 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                       className="px-3 py-2 bg-slate-900 text-white rounded-xl text-xs font-semibold disabled:opacity-50 touch-target whitespace-nowrap"
                     >
                       {busyStoreId === row.store.id ? 'Saving…' : 'Grant'}
+                    </button>
+                  </div>
+
+                  <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+                    <p className="text-[11px] font-semibold text-slate-700">Warehouse / locations</p>
+                    <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                      <span className="text-xs text-slate-700">Warehouse enabled</span>
+                      <input
+                        type="checkbox"
+                        checked={warehouseDraft.warehouse_enabled}
+                        onChange={(e) =>
+                          setWarehouseDrafts((prev) => ({
+                            ...prev,
+                            [row.store.id]: {
+                              ...warehouseDraft,
+                              warehouse_enabled: e.target.checked,
+                            },
+                          }))
+                        }
+                        className="h-4 w-4 rounded border-slate-300 text-slate-900"
+                      />
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[11px] text-slate-500 mb-1 block">Max shops</label>
+                        <input
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={warehouseDraft.max_shops}
+                          onChange={(e) =>
+                            setWarehouseDrafts((prev) => ({
+                              ...prev,
+                              [row.store.id]: {
+                                ...warehouseDraft,
+                                max_shops: Math.max(1, Math.floor(Number(e.target.value) || 1)),
+                              },
+                            }))
+                          }
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-slate-500 mb-1 block">Max warehouses</label>
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={warehouseDraft.max_warehouses}
+                          onChange={(e) =>
+                            setWarehouseDrafts((prev) => ({
+                              ...prev,
+                              [row.store.id]: {
+                                ...warehouseDraft,
+                                max_warehouses: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                              },
+                            }))
+                          }
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                        />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveWarehouseLimits(row)}
+                      disabled={busyStoreId === row.store.id}
+                      className="w-full px-3 py-2 bg-slate-800 text-white rounded-xl text-xs font-semibold disabled:opacity-50 touch-target"
+                    >
+                      {busyStoreId === row.store.id ? 'Saving…' : 'Save warehouse limits'}
                     </button>
                   </div>
                 </div>
@@ -692,6 +832,11 @@ function StoreRevenueCard({ row, compact = false }: { row: StorePerformance; com
             <span>{row.productCount} products</span>
             <span>{row.saleCount} sales</span>
           </div>
+          <p className="text-[11px] text-slate-500 mt-1">
+            Warehouse {row.store.warehouse_enabled ? 'on' : 'off'} · {row.store.max_shops} shop
+            {row.store.max_shops === 1 ? '' : 's'} · {row.store.max_warehouses} warehouse
+            {row.store.max_warehouses === 1 ? '' : 's'}
+          </p>
         </div>
       </div>
       <div className="grid grid-cols-3 gap-2 mt-3 text-center">

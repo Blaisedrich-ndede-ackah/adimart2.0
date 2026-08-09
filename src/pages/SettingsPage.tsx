@@ -10,6 +10,7 @@ import BluetoothHardwareSettings from '@/components/BluetoothHardwareSettings';
 import { 
   db, 
   LocalUser,
+  LocalLocation,
   syncToSupabase,
   syncFromSupabase,
   syncBidirectional,
@@ -21,6 +22,7 @@ import {
   deactivateUser,
   activateUser,
 } from '@/lib/dexie';
+import { ensureStoreLocations, listLocations } from '@/lib/warehouse';
 import { isAutoSyncEnabled, setAutoSyncEnabled, startAutoSync, stopAutoSync } from '@/lib/sync';
 import { useAuthStore } from '@/store/useAuthStore';
 import { isBiometricAvailable, registerBiometric, hasBiometricRegistered, clearBiometricRegistration } from '@/lib/biometric';
@@ -70,6 +72,8 @@ export default function SettingsPage() {
   
   const [showChangePinModal, setShowChangePinModal] = useState(false);
   const [resetPinUser, setResetPinUser] = useState<LocalUser | null>(null);
+  const [locations, setLocations] = useState<LocalLocation[]>([]);
+  const [permUserId, setPermUserId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     if (currentStore) {
@@ -85,6 +89,8 @@ export default function SettingsPage() {
       setMomoAccountName(currentStore.momo_account_name || '');
       setMomoNumber(currentStore.momo_number || '');
       setMomoNetwork(currentStore.momo_network || '');
+      await ensureStoreLocations(currentStore.id);
+      setLocations(await listLocations(currentStore.id));
     }
     
     const syncTime = await getLastSyncTime();
@@ -258,6 +264,14 @@ export default function SettingsPage() {
     await refreshUsers();
   };
 
+  const updateCashierPerms = async (
+    user: LocalUser,
+    patch: Partial<Pick<LocalUser, 'assigned_location_id' | 'can_wholesale' | 'can_sell_from_warehouse'>>
+  ) => {
+    await db.users.update(user.id, { ...patch, synced: 0 });
+    await refreshUsers();
+  };
+
   const handleDeleteUser = async (userId: string) => {
     if (userId === currentUser?.id) {
       alert('You cannot delete your own account while logged in.');
@@ -295,13 +309,13 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-gray-50">
-      <div className="bg-primary px-4 py-3 flex-shrink-0">
+    <div className="page-shell">
+      <div className="page-header">
         <h1 className="text-white font-bold text-lg">Settings</h1>
         <p className="text-emerald-200 text-xs">Manage your store configuration</p>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 pt-3 pb-20 no-scrollbar">
+      <div className="page-body no-scrollbar">
         {/* Store Profile */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">
           <div className="flex items-center gap-2 mb-4">
@@ -660,58 +674,120 @@ export default function SettingsPage() {
               <p className="text-gray-500 text-sm text-center py-4">No staff members yet</p>
             ) : (
               users.map(user => (
-                <div key={user.id} className={`flex items-center justify-between py-2 border-b border-gray-50 last:border-0 ${user.is_active === 0 ? 'opacity-70' : ''}`}>
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">
-                      {user.name}
-                      {user.id === currentUser?.id && (
-                        <span className="ml-2 text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded">You</span>
-                      )}
-                      {user.is_active === 0 && (
-                        <span className="ml-2 text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded">Blocked</span>
-                      )}
-                    </p>
-                    <p className="text-xs text-gray-500 capitalize">{user.role}</p>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    {user.id !== currentUser?.id && (
-                      <>
-                        <button
-                          onClick={() => setResetPinUser(user)}
-                          className="p-1.5 rounded-lg hover:bg-blue-50 touch-target"
-                          title="Reset PIN"
-                        >
-                          <Key className="w-4 h-4 text-blue-500" />
-                        </button>
-                        {user.role !== 'owner' && (
-                          user.is_active === 1 ? (
-                            <button
-                              onClick={() => void handleBlockUser(user)}
-                              className="p-1.5 rounded-lg hover:bg-amber-50 touch-target"
-                              title="Block cashier"
-                            >
-                              <Ban className="w-4 h-4 text-amber-600" />
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => void handleUnblockUser(user)}
-                              className="p-1.5 rounded-lg hover:bg-emerald-50 touch-target"
-                              title="Unblock cashier"
-                            >
-                              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                            </button>
-                          )
+                <div key={user.id} className={`py-2 border-b border-gray-50 last:border-0 ${user.is_active === 0 ? 'opacity-70' : ''}`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">
+                        {user.name}
+                        {user.id === currentUser?.id && (
+                          <span className="ml-2 text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded">You</span>
                         )}
+                        {user.is_active === 0 && (
+                          <span className="ml-2 text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded">Blocked</span>
+                        )}
+                      </p>
+                      <p className="text-xs text-gray-500 capitalize">
+                        {user.role}
+                        {user.role === 'cashier' && (user.can_wholesale === 1 ? ' · wholesale' : '')}
+                        {user.role === 'cashier' && (user.can_sell_from_warehouse === 1 ? ' · warehouse sales' : '')}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {user.role === 'cashier' && (
                         <button
-                          onClick={() => handleDeleteUser(user.id)}
-                          className="p-1.5 rounded-lg hover:bg-red-50 touch-target"
-                          title="Delete User"
+                          type="button"
+                          onClick={() => setPermUserId(permUserId === user.id ? null : user.id)}
+                          className="px-2 py-1 text-[10px] font-semibold rounded-lg bg-slate-100 text-slate-700 touch-target"
                         >
-                          <Trash2 className="w-4 h-4 text-red-400" />
+                          Perms
                         </button>
-                      </>
-                    )}
+                      )}
+                      {user.id !== currentUser?.id && (
+                        <>
+                          <button
+                            onClick={() => setResetPinUser(user)}
+                            className="p-1.5 rounded-lg hover:bg-blue-50 touch-target"
+                            title="Reset PIN"
+                          >
+                            <Key className="w-4 h-4 text-blue-500" />
+                          </button>
+                          {user.role !== 'owner' && (
+                            user.is_active === 1 ? (
+                              <button
+                                onClick={() => void handleBlockUser(user)}
+                                className="p-1.5 rounded-lg hover:bg-amber-50 touch-target"
+                                title="Block cashier"
+                              >
+                                <Ban className="w-4 h-4 text-amber-600" />
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => void handleUnblockUser(user)}
+                                className="p-1.5 rounded-lg hover:bg-emerald-50 touch-target"
+                                title="Unblock cashier"
+                              >
+                                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                              </button>
+                            )
+                          )}
+                          <button
+                            onClick={() => handleDeleteUser(user.id)}
+                            className="p-1.5 rounded-lg hover:bg-red-50 touch-target"
+                            title="Delete User"
+                          >
+                            <Trash2 className="w-4 h-4 text-red-400" />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
+                  {permUserId === user.id && user.role === 'cashier' && (
+                    <div className="mt-2 bg-slate-50 rounded-xl p-3 space-y-2 text-xs">
+                      <div>
+                        <label className="text-gray-500 font-medium block mb-1">Assigned location</label>
+                        <select
+                          value={user.assigned_location_id || ''}
+                          onChange={(e) =>
+                            void updateCashierPerms(user, {
+                              assigned_location_id: e.target.value || null,
+                            })
+                          }
+                          className="w-full px-2 py-2 border border-gray-200 rounded-lg bg-white"
+                        >
+                          <option value="">Default shop</option>
+                          {locations.map((loc) => (
+                            <option key={loc.id} value={loc.id}>
+                              {loc.name} ({loc.location_type})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <label className="flex items-center justify-between gap-2 py-1">
+                        <span className="text-gray-700 font-medium">Can sell wholesale</span>
+                        <input
+                          type="checkbox"
+                          checked={(user.can_wholesale ?? 0) === 1}
+                          onChange={(e) =>
+                            void updateCashierPerms(user, { can_wholesale: e.target.checked ? 1 : 0 })
+                          }
+                        />
+                      </label>
+                      {(currentStore?.warehouse_enabled ?? 0) === 1 && (
+                        <label className="flex items-center justify-between gap-2 py-1">
+                          <span className="text-gray-700 font-medium">Can sell from warehouse</span>
+                          <input
+                            type="checkbox"
+                            checked={(user.can_sell_from_warehouse ?? 0) === 1}
+                            onChange={(e) =>
+                              void updateCashierPerms(user, {
+                                can_sell_from_warehouse: e.target.checked ? 1 : 0,
+                              })
+                            }
+                          />
+                        </label>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))
             )}
