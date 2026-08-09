@@ -1,4 +1,4 @@
-import { ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, CalendarClock } from 'lucide-react';
+import { ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, CalendarClock, Warehouse } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
 
 interface BottomNavProps {
@@ -7,8 +7,9 @@ interface BottomNavProps {
 }
 
 export default function BottomNav({ currentPage, onNavigate }: BottomNavProps) {
-  const { currentUser, switchUser } = useAuthStore();
+  const { currentUser, currentStore, switchUser } = useAuthStore();
   const isOwner = currentUser?.role === 'owner';
+  const warehouseEnabled = (currentStore?.warehouse_enabled ?? 0) === 1;
 
   const navItems = [
     { id: 'pos', label: 'POS', icon: ScanBarcode, show: true },
@@ -16,6 +17,7 @@ export default function BottomNav({ currentPage, onNavigate }: BottomNavProps) {
     { id: 'devices', label: 'Devices', icon: Bluetooth, show: true },
     { id: 'subscription', label: 'Plan', icon: CalendarClock, show: true },
     { id: 'inventory', label: 'Inventory', icon: Package, show: isOwner },
+    { id: 'warehouse', label: 'Warehouse', icon: Warehouse, show: isOwner && warehouseEnabled },
     { id: 'reports', label: 'Reports', icon: BarChart3, show: isOwner },
     { id: 'settings', label: 'Settings', icon: Settings, show: isOwner },
   ].filter(item => item.show);

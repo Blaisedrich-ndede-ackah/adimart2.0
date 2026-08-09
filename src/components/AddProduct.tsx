@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { X, Camera, Save, AlertTriangle, StopCircle, ScanBarcode, Bluetooth, ImagePlus, Trash2 } from 'lucide-react';
+import { X, Camera, Save, AlertTriangle, StopCircle, ScanBarcode, Bluetooth, ImagePlus, Trash2, Plus } from 'lucide-react';
 import { BrowserMultiFormatReader, NotFoundException } from '@zxing/library';
 import { db, generateId, LocalProduct, getCurrentStoreId } from '@/lib/dexie';
 import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
@@ -7,6 +7,12 @@ import { playScanBeep } from '@/lib/scanBeep';
 import { getBluetoothHardwareStatus } from '@/lib/bluetoothPeripherals';
 import { fileToProductImageDataUrl } from '@/lib/productImage';
 import ProductImage from '@/components/ProductImage';
+import {
+  parseTiers,
+  serializeTiers,
+  type WholesaleMode,
+  type WholesaleTier,
+} from '@/lib/bulkPricing';
 
 interface AddProductProps {
   isOpen: boolean;
@@ -19,6 +25,13 @@ interface AddProductProps {
 
 const CATEGORIES = ['Food', 'Beverages', 'Dairy', 'Household', 'Electronics', 'Clothing', 'Health', 'Accessories', 'Other'];
 
+const WHOLESALE_MODES: { value: WholesaleMode; label: string }[] = [
+  { value: 'none', label: 'None (retail only)' },
+  { value: 'pack', label: 'Pack price' },
+  { value: 'unit_discount', label: 'Unit discount' },
+  { value: 'tiers', label: 'Quantity tiers' },
+];
+
 export default function AddProduct({ isOpen, onClose, onSaved, editProduct, initialBarcode }: AddProductProps) {
   const [name, setName] = useState('');
   const [category, setCategory] = useState('Food');
@@ -27,6 +40,12 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
   const [sellingPrice, setSellingPrice] = useState('');
   const [stockLevel, setStockLevel] = useState('');
   const [skuType, setSkuType] = useState('unit');
+  const [packSize, setPackSize] = useState('1');
+  const [trackExpiry, setTrackExpiry] = useState(false);
+  const [wholesaleMode, setWholesaleMode] = useState<WholesaleMode>('none');
+  const [wholesalePackPrice, setWholesalePackPrice] = useState('');
+  const [wholesaleUnitPrice, setWholesaleUnitPrice] = useState('');
+  const [tiers, setTiers] = useState<WholesaleTier[]>([{ min_qty: 10, unit_price: 0 }]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [showCameraScanner, setShowCameraScanner] = useState(false);
@@ -70,6 +89,20 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         setStockLevel(editProduct.stock_level.toString());
         setSkuType(editProduct.sku_type);
         setImageUrl(editProduct.image_url || '');
+        setPackSize(String(editProduct.pack_size ?? 1));
+        setTrackExpiry((editProduct.track_expiry ?? 0) === 1);
+        const mode = (editProduct.wholesale_mode || 'none') as WholesaleMode;
+        setWholesaleMode(
+          mode === 'pack' || mode === 'unit_discount' || mode === 'tiers' ? mode : 'none'
+        );
+        setWholesalePackPrice(
+          editProduct.wholesale_pack_price != null ? String(editProduct.wholesale_pack_price) : ''
+        );
+        setWholesaleUnitPrice(
+          editProduct.wholesale_unit_price != null ? String(editProduct.wholesale_unit_price) : ''
+        );
+        const existingTiers = parseTiers(editProduct.wholesale_tiers_json);
+        setTiers(existingTiers.length > 0 ? existingTiers : [{ min_qty: 10, unit_price: 0 }]);
       } else {
         setName('');
         setCategory('Food');
@@ -79,6 +112,12 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         setStockLevel('');
         setSkuType('unit');
         setImageUrl('');
+        setPackSize('1');
+        setTrackExpiry(false);
+        setWholesaleMode('none');
+        setWholesalePackPrice('');
+        setWholesaleUnitPrice('');
+        setTiers([{ min_qty: 10, unit_price: 0 }]);
       }
       setError('');
       setScanPulse(Boolean(initialBarcode?.trim()));
@@ -200,6 +239,23 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
       return;
     }
 
+    const packSizeNum = Math.max(1, Math.floor(Number(packSize) || 1));
+    if (wholesaleMode === 'pack' && !(parseFloat(wholesalePackPrice) > 0)) {
+      setError('Enter a wholesale pack price');
+      return;
+    }
+    if (wholesaleMode === 'unit_discount' && !(parseFloat(wholesaleUnitPrice) >= 0)) {
+      setError('Enter a wholesale unit price');
+      return;
+    }
+    if (wholesaleMode === 'tiers') {
+      const validTiers = tiers.filter((t) => t.min_qty > 0 && t.unit_price >= 0);
+      if (validTiers.length === 0) {
+        setError('Add at least one wholesale tier (min qty + price)');
+        return;
+      }
+    }
+
     setSaving(true);
 
     try {
@@ -209,6 +265,17 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
       }
 
       const now = new Date().toISOString();
+      const wholesaleFields = {
+        pack_size: packSizeNum,
+        track_expiry: trackExpiry ? 1 : 0,
+        wholesale_mode: wholesaleMode,
+        wholesale_pack_price:
+          wholesaleMode === 'pack' ? parseFloat(wholesalePackPrice) || 0 : 0,
+        wholesale_unit_price:
+          wholesaleMode === 'unit_discount' ? parseFloat(wholesaleUnitPrice) || 0 : 0,
+        wholesale_tiers_json:
+          wholesaleMode === 'tiers' ? serializeTiers(tiers) : serializeTiers([]),
+      };
 
       if (editProduct) {
         await db.products.update(editProduct.id, {
@@ -220,6 +287,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           stock_level: parseInt(stockLevel),
           sku_type: skuType,
           image_url: imageUrl || '',
+          ...wholesaleFields,
           updated_at: now,
           synced: 0,
         });
@@ -236,6 +304,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           stock_level: parseInt(stockLevel),
           is_active: 1,
           image_url: imageUrl || '',
+          ...wholesaleFields,
           created_at: now,
           updated_at: now,
           synced: 0,
@@ -485,16 +554,176 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
             </div>
           )}
 
-          <div>
-            <label className="text-sm font-medium text-gray-700 mb-1.5 block">Stock Level *</label>
-            <input
-              type="number"
-              value={stockLevel}
-              onChange={e => setStockLevel(e.target.value)}
-              placeholder="0"
-              min="0"
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-sm font-medium text-gray-700 mb-1.5 block">Stock Level *</label>
+              <input
+                type="number"
+                value={stockLevel}
+                onChange={e => setStockLevel(e.target.value)}
+                placeholder="0"
+                min="0"
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-700 mb-1.5 block">Pack size</label>
+              <input
+                type="number"
+                value={packSize}
+                onChange={e => setPackSize(e.target.value)}
+                placeholder="1"
+                min="1"
+                step="1"
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 px-4 py-3 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-gray-900">Track expiry</p>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                Ask for batch expiry when receiving stock
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={trackExpiry}
+              onClick={() => setTrackExpiry((v) => !v)}
+              className={`relative w-12 h-7 rounded-full transition-colors flex-shrink-0 touch-target ${
+                trackExpiry ? 'bg-primary' : 'bg-gray-300'
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${
+                  trackExpiry ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 p-4 space-y-3">
+            <div>
+              <label className="text-sm font-medium text-gray-700 mb-1.5 block">Wholesale pricing</label>
+              <select
+                value={wholesaleMode}
+                onChange={(e) => setWholesaleMode(e.target.value as WholesaleMode)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none bg-white"
+              >
+                {WHOLESALE_MODES.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+            </div>
+
+            {wholesaleMode === 'pack' && (
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1.5 block">
+                  Wholesale pack price (GH₵)
+                </label>
+                <input
+                  type="number"
+                  value={wholesalePackPrice}
+                  onChange={(e) => setWholesalePackPrice(e.target.value)}
+                  placeholder="0.00"
+                  min="0"
+                  step="0.01"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
+                />
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Price for one pack of {Math.max(1, Math.floor(Number(packSize) || 1))} units
+                </p>
+              </div>
+            )}
+
+            {wholesaleMode === 'unit_discount' && (
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1.5 block">
+                  Wholesale unit price (GH₵)
+                </label>
+                <input
+                  type="number"
+                  value={wholesaleUnitPrice}
+                  onChange={(e) => setWholesaleUnitPrice(e.target.value)}
+                  placeholder="0.00"
+                  min="0"
+                  step="0.01"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
+                />
+              </div>
+            )}
+
+            {wholesaleMode === 'tiers' && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-gray-700">Quantity tiers</label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setTiers((prev) => [...prev, { min_qty: 0, unit_price: 0 }])
+                    }
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-primary/10 text-primary rounded-lg text-xs font-medium touch-target"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add tier
+                  </button>
+                </div>
+                <div className="grid grid-cols-[1fr_1fr_auto] gap-2 text-[11px] text-gray-500 px-0.5">
+                  <span>Min qty</span>
+                  <span>Unit price</span>
+                  <span className="w-9" />
+                </div>
+                {tiers.map((tier, index) => (
+                  <div key={index} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
+                    <input
+                      type="number"
+                      min="1"
+                      value={tier.min_qty || ''}
+                      onChange={(e) => {
+                        const value = Math.floor(Number(e.target.value) || 0);
+                        setTiers((prev) =>
+                          prev.map((t, i) => (i === index ? { ...t, min_qty: value } : t))
+                        );
+                      }}
+                      placeholder="10"
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={tier.unit_price || ''}
+                      onChange={(e) => {
+                        const value = Number(e.target.value) || 0;
+                        setTiers((prev) =>
+                          prev.map((t, i) => (i === index ? { ...t, unit_price: value } : t))
+                        );
+                      }}
+                      placeholder="0.00"
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setTiers((prev) =>
+                          prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)
+                        )
+                      }
+                      disabled={tiers.length <= 1}
+                      className="w-9 h-9 flex items-center justify-center rounded-xl text-red-500 hover:bg-red-50 touch-target disabled:opacity-30"
+                      title="Remove tier"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+                <p className="text-[11px] text-gray-500">
+                  Best matching tier applies when base quantity reaches the minimum.
+                </p>
+              </div>
+            )}
           </div>
 
           <button

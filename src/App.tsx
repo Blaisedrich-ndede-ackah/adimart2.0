@@ -17,6 +17,7 @@ import SettingsPage from '@/pages/SettingsPage';
 import DevicesPage from '@/pages/DevicesPage';
 import TransactionsPage from '@/pages/TransactionsPage';
 import SubscriptionPage from '@/pages/SubscriptionPage';
+import WarehousePage from '@/pages/WarehousePage';
 import AdminLoginPage from '@/pages/AdminLoginPage';
 import AdminDashboardPage from '@/pages/AdminDashboardPage';
 import { checkAndSendSubscriptionExpirySms } from '@/lib/subscriptionReminders';
@@ -39,7 +40,7 @@ export default function App() {
 
   useEffect(() => {
     // Cashiers cannot stay on owner-only pages after switch/login
-    if (currentUser?.role === 'cashier' && ['inventory', 'reports', 'settings'].includes(currentPage)) {
+    if (currentUser?.role === 'cashier' && ['inventory', 'reports', 'settings', 'warehouse'].includes(currentPage)) {
       setCurrentPage('pos');
     }
   }, [currentUser, currentPage]);
@@ -134,6 +135,8 @@ export default function App() {
         return <SubscriptionPage />;
       case 'inventory':
         return role === 'owner' ? <InventoryPage /> : <POSPage />;
+      case 'warehouse':
+        return role === 'owner' ? <WarehousePage /> : <POSPage />;
       case 'reports':
         return role === 'owner' ? <ReportsPage /> : <POSPage />;
       case 'settings':
