@@ -30,6 +30,9 @@ export interface LocalStore {
   subscription_months_granted?: number;
   /** Optional compressed JPEG data URL for store logo */
   logo_url?: string;
+  warehouse_enabled?: number;
+  max_shops?: number;
+  max_warehouses?: number;
   created_at: string;
   synced: number;
 }
@@ -41,6 +44,9 @@ export interface LocalUser {
   role: 'owner' | 'cashier';
   pin_hash: string;
   is_active: number;
+  assigned_location_id?: string | null;
+  can_wholesale?: number;
+  can_sell_from_warehouse?: number;
   created_at: string;
   synced: number;
 }
@@ -58,6 +64,12 @@ export interface LocalProduct {
   is_active: number;
   /** Optional compressed JPEG data URL for product photo */
   image_url?: string;
+  pack_size?: number;
+  track_expiry?: number;
+  wholesale_mode?: string;
+  wholesale_pack_price?: number;
+  wholesale_unit_price?: number;
+  wholesale_tiers_json?: string;
   created_at: string;
   updated_at: string;
   synced: number;
@@ -76,6 +88,8 @@ export interface LocalTransaction {
   paystack_amount: number;
   paystack_reference: string;
   status: 'completed' | 'pending';
+  location_id?: string;
+  sale_mode?: 'retail' | 'wholesale';
   created_at: string;
   synced: number;
 }
@@ -89,6 +103,51 @@ export interface LocalTransactionItem {
   quantity: number;
   unit_price: number;
   subtotal: number;
+  unit_type?: string;
+  pack_size?: number;
+  base_quantity?: number;
+  batch_id?: string;
+  synced: number;
+}
+
+export interface LocalLocation {
+  id: string;
+  store_id: string;
+  name: string;
+  location_type: 'shop' | 'warehouse';
+  is_default: number;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export interface LocalStockBatch {
+  id: string;
+  store_id: string;
+  product_id: string;
+  location_id: string;
+  batch_code: string;
+  expiry_date: string | null;
+  quantity: number;
+  cost_price: number;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export interface LocalStockMovement {
+  id: string;
+  store_id: string;
+  product_id: string;
+  batch_id: string | null;
+  from_location_id: string | null;
+  to_location_id: string | null;
+  movement_type: 'receive' | 'transfer' | 'sale' | 'adjust';
+  quantity: number;
+  note: string;
+  user_id: string | null;
+  created_at: string;
   synced: number;
 }
 
@@ -122,6 +181,9 @@ class AdimatDB extends Dexie {
   transactions!: Table<LocalTransaction, string>;
   transaction_items!: Table<LocalTransactionItem, string>;
   expenses!: Table<LocalExpense, string>;
+  locations!: Table<LocalLocation, string>;
+  stock_batches!: Table<LocalStockBatch, string>;
+  stock_movements!: Table<LocalStockMovement, string>;
   sync_meta!: Table<SyncMeta, string>;
   app_config!: Table<AppConfig, string>;
 
@@ -143,6 +205,19 @@ class AdimatDB extends Dexie {
       transactions: 'id, store_id, receipt_number, cashier_id, status, created_at, synced',
       transaction_items: 'id, store_id, transaction_id, product_id, synced',
       expenses: 'id, store_id, category, created_at, synced',
+      sync_meta: 'id',
+      app_config: 'id',
+    });
+    this.version(4).stores({
+      stores: 'id, synced',
+      users: 'id, store_id, role, pin_hash, is_active, synced',
+      products: 'id, store_id, name, category, barcode, is_active, synced, updated_at',
+      transactions: 'id, store_id, receipt_number, cashier_id, status, created_at, synced',
+      transaction_items: 'id, store_id, transaction_id, product_id, synced',
+      expenses: 'id, store_id, category, created_at, synced',
+      locations: 'id, store_id, location_type, is_default, is_active, synced',
+      stock_batches: 'id, store_id, product_id, location_id, expiry_date, synced, updated_at',
+      stock_movements: 'id, store_id, product_id, batch_id, movement_type, created_at, synced',
       sync_meta: 'id',
       app_config: 'id',
     });
@@ -231,6 +306,9 @@ export async function createStoreWithOwner(
     subscription_expires_at: null,
     subscription_months_granted: 0,
     logo_url: '',
+    warehouse_enabled: 0,
+    max_shops: 1,
+    max_warehouses: 0,
     created_at: now,
     synced: 0,
   };
@@ -242,6 +320,9 @@ export async function createStoreWithOwner(
     role: 'owner',
     pin_hash: hashPin(ownerPin),
     is_active: 1,
+    assigned_location_id: null,
+    can_wholesale: 1,
+    can_sell_from_warehouse: 1,
     created_at: now,
     synced: 0,
   };
@@ -330,6 +411,9 @@ export async function addUserToStore(
     role,
     pin_hash: hashPin(pin),
     is_active: 1,
+    assigned_location_id: null,
+    can_wholesale: role === 'owner' ? 1 : 0,
+    can_sell_from_warehouse: role === 'owner' ? 1 : 0,
     created_at: new Date().toISOString(),
     synced: 0,
   };
@@ -399,6 +483,12 @@ export async function addProductToStore(product: Omit<LocalProduct, 'id' | 'stor
   const newProduct: LocalProduct = {
     id: generateId(),
     store_id: storeId,
+    pack_size: 1,
+    track_expiry: 0,
+    wholesale_mode: 'none',
+    wholesale_pack_price: 0,
+    wholesale_unit_price: 0,
+    wholesale_tiers_json: '[]',
     ...product,
     created_at: now,
     updated_at: now,
@@ -512,6 +602,12 @@ export async function importProductsFromRows(
       stock_level: row.stock_level,
       is_active: 1,
       image_url: '',
+      pack_size: 1,
+      track_expiry: 0,
+      wholesale_mode: 'none',
+      wholesale_pack_price: 0,
+      wholesale_unit_price: 0,
+      wholesale_tiers_json: '[]',
       created_at: now,
       updated_at: now,
       synced: 0,
@@ -532,7 +628,16 @@ function formatSyncError(label: string, error: unknown): string {
 
 async function upsertToSupabase<T extends Record<string, unknown>>(
   label: string,
-  table: 'stores' | 'users' | 'products' | 'transactions' | 'transaction_items' | 'expenses',
+  table:
+    | 'stores'
+    | 'users'
+    | 'products'
+    | 'transactions'
+    | 'transaction_items'
+    | 'expenses'
+    | 'locations'
+    | 'stock_batches'
+    | 'stock_movements',
   rows: T[],
   markSynced: () => Promise<void>,
   errors: string[]
@@ -540,7 +645,7 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
   if (rows.length === 0) return 0;
 
   try {
-    const { error } = await supabase.from(table).upsert(rows, { onConflict: 'id' });
+    const { error } = await supabase.from(table).upsert(rows as Record<string, unknown>[], { onConflict: 'id' });
     if (error) {
       errors.push(formatSyncError(label, error));
       return 0;
@@ -593,6 +698,9 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
           momo_number: store.momo_number || '',
           momo_network: store.momo_network || '',
           logo_url: store.logo_url || '',
+          warehouse_enabled: (store.warehouse_enabled ?? 0) === 1,
+          max_shops: store.max_shops ?? 1,
+          max_warehouses: store.max_warehouses ?? 0,
           created_at: store.created_at,
         }],
         async () => { await db.stores.update(storeId, { synced: 1 }); },
@@ -611,6 +719,9 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         role: u.role,
         pin_hash: u.pin_hash,
         is_active: u.is_active === 1,
+        assigned_location_id: u.assigned_location_id || null,
+        can_wholesale: (u.can_wholesale ?? 0) === 1,
+        can_sell_from_warehouse: (u.can_sell_from_warehouse ?? 0) === 1,
         created_at: u.created_at,
       })),
       async () => { await Promise.all(unsyncedUsers.map(u => db.users.update(u.id, { synced: 1 }))); },
@@ -633,6 +744,12 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         stock_level: p.stock_level,
         is_active: p.is_active === 1,
         image_url: p.image_url || '',
+        pack_size: p.pack_size ?? 1,
+        track_expiry: (p.track_expiry ?? 0) === 1,
+        wholesale_mode: p.wholesale_mode || 'none',
+        wholesale_pack_price: p.wholesale_pack_price ?? 0,
+        wholesale_unit_price: p.wholesale_unit_price ?? 0,
+        wholesale_tiers_json: p.wholesale_tiers_json || '[]',
         created_at: p.created_at,
         updated_at: p.updated_at,
       })),
@@ -657,6 +774,8 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         paystack_amount: t.paystack_amount,
         paystack_reference: t.paystack_reference,
         status: t.status,
+        location_id: t.location_id || null,
+        sale_mode: t.sale_mode || 'retail',
         created_at: t.created_at,
       })),
       async () => { await Promise.all(unsyncedTxns.map(t => db.transactions.update(t.id, { synced: 1 }))); },
@@ -676,6 +795,10 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         quantity: i.quantity,
         unit_price: i.unit_price,
         subtotal: i.subtotal,
+        unit_type: i.unit_type || 'base',
+        pack_size: i.pack_size ?? 1,
+        base_quantity: i.base_quantity ?? i.quantity,
+        batch_id: i.batch_id || null,
       })),
       async () => { await Promise.all(unsyncedItems.map(i => db.transaction_items.update(i.id, { synced: 1 }))); },
       errors
@@ -696,6 +819,65 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         updated_at: e.updated_at,
       })),
       async () => { await Promise.all(unsyncedExpenses.map(e => db.expenses.update(e.id, { synced: 1 }))); },
+      errors
+    );
+
+    const unsyncedLocations = await db.locations.where('store_id').equals(storeId).and(l => l.synced === 0).toArray();
+    syncedCount += await upsertToSupabase(
+      'Locations',
+      'locations',
+      unsyncedLocations.map(l => ({
+        id: l.id,
+        store_id: l.store_id,
+        name: l.name,
+        location_type: l.location_type,
+        is_default: l.is_default === 1,
+        is_active: l.is_active === 1,
+        created_at: l.created_at,
+        updated_at: l.updated_at,
+      })),
+      async () => { await Promise.all(unsyncedLocations.map(l => db.locations.update(l.id, { synced: 1 }))); },
+      errors
+    );
+
+    const unsyncedBatches = await db.stock_batches.where('store_id').equals(storeId).and(b => b.synced === 0).toArray();
+    syncedCount += await upsertToSupabase(
+      'Stock batches',
+      'stock_batches',
+      unsyncedBatches.map(b => ({
+        id: b.id,
+        store_id: b.store_id,
+        product_id: b.product_id,
+        location_id: b.location_id,
+        batch_code: b.batch_code || '',
+        expiry_date: b.expiry_date,
+        quantity: b.quantity,
+        cost_price: b.cost_price,
+        created_at: b.created_at,
+        updated_at: b.updated_at,
+      })),
+      async () => { await Promise.all(unsyncedBatches.map(b => db.stock_batches.update(b.id, { synced: 1 }))); },
+      errors
+    );
+
+    const unsyncedMovements = await db.stock_movements.where('store_id').equals(storeId).and(m => m.synced === 0).toArray();
+    syncedCount += await upsertToSupabase(
+      'Stock movements',
+      'stock_movements',
+      unsyncedMovements.map(m => ({
+        id: m.id,
+        store_id: m.store_id,
+        product_id: m.product_id,
+        batch_id: m.batch_id,
+        from_location_id: m.from_location_id,
+        to_location_id: m.to_location_id,
+        movement_type: m.movement_type,
+        quantity: m.quantity,
+        note: m.note || '',
+        user_id: m.user_id,
+        created_at: m.created_at,
+      })),
+      async () => { await Promise.all(unsyncedMovements.map(m => db.stock_movements.update(m.id, { synced: 1 }))); },
       errors
     );
 
@@ -774,6 +956,9 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
           : null,
         subscription_months_granted: Number(remoteStore.subscription_months_granted) || 0,
         logo_url: remoteStore.logo_url || localStore?.logo_url || '',
+        warehouse_enabled: remoteStore.warehouse_enabled ? 1 : 0,
+        max_shops: Number(remoteStore.max_shops) || 1,
+        max_warehouses: Number(remoteStore.max_warehouses) || 0,
         created_at: remoteStore.created_at,
         synced: localStore?.synced === 0 ? 0 : 1,
       });
@@ -791,6 +976,9 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
           role: row.role as 'owner' | 'cashier',
           pin_hash: row.pin_hash as string,
           is_active: row.is_active ? 1 : 0,
+          assigned_location_id: (row.assigned_location_id as string) || null,
+          can_wholesale: row.can_wholesale ? 1 : 0,
+          can_sell_from_warehouse: row.can_sell_from_warehouse ? 1 : 0,
           created_at: row.created_at as string,
           synced: 1,
         }),
@@ -813,6 +1001,12 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
             stock_level: Number(local.stock_level) || 0,
             is_active: local.is_active ? 1 : 0,
             image_url: (local.image_url as string) || '',
+            pack_size: Number(local.pack_size) || 1,
+            track_expiry: local.track_expiry ? 1 : 0,
+            wholesale_mode: (local.wholesale_mode as string) || 'none',
+            wholesale_pack_price: Number(local.wholesale_pack_price) || 0,
+            wholesale_unit_price: Number(local.wholesale_unit_price) || 0,
+            wholesale_tiers_json: (local.wholesale_tiers_json as string) || '[]',
             created_at: local.created_at as string,
             updated_at: (local.updated_at as string) || (local.created_at as string),
             synced: 1,
@@ -845,6 +1039,8 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
           paystack_amount: Number(row.paystack_amount) || 0,
           paystack_reference: (row.paystack_reference as string) || '',
           status: row.status as 'completed' | 'pending',
+          location_id: (row.location_id as string) || undefined,
+          sale_mode: ((row.sale_mode as 'retail' | 'wholesale') || 'retail'),
           created_at: row.created_at as string,
           synced: 1,
         }),
@@ -862,6 +1058,10 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
           quantity: Number(row.quantity) || 0,
           unit_price: Number(row.unit_price) || 0,
           subtotal: Number(row.subtotal) || 0,
+          unit_type: (row.unit_type as string) || 'base',
+          pack_size: Number(row.pack_size) || 1,
+          base_quantity: Number(row.base_quantity) || Number(row.quantity) || 0,
+          batch_id: (row.batch_id as string) || undefined,
           synced: 1,
         }),
         dbTable: db.transaction_items,
@@ -891,6 +1091,77 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
           return remote;
         },
       },
+      {
+        label: 'Locations',
+        table: 'locations',
+        map: (row: Record<string, unknown>) => ({
+          id: row.id as string,
+          store_id: row.store_id as string,
+          name: (row.name as string) || '',
+          location_type: (row.location_type as 'shop' | 'warehouse') || 'shop',
+          is_default: row.is_default ? 1 : 0,
+          is_active: row.is_active === false ? 0 : 1,
+          created_at: row.created_at as string,
+          updated_at: (row.updated_at as string) || (row.created_at as string),
+          synced: 1,
+        }),
+        dbTable: db.locations,
+        merge: async (remote: LocalLocation, local: LocalLocation | undefined) => {
+          if (!local) return remote;
+          if (local.synced === 0) {
+            const remoteTime = new Date(remote.updated_at).getTime();
+            const localTime = new Date(local.updated_at).getTime();
+            return remoteTime >= localTime ? { ...remote, synced: 1 } : local;
+          }
+          return remote;
+        },
+      },
+      {
+        label: 'Stock batches',
+        table: 'stock_batches',
+        map: (row: Record<string, unknown>) => ({
+          id: row.id as string,
+          store_id: row.store_id as string,
+          product_id: row.product_id as string,
+          location_id: row.location_id as string,
+          batch_code: (row.batch_code as string) || '',
+          expiry_date: (row.expiry_date as string) || null,
+          quantity: Number(row.quantity) || 0,
+          cost_price: Number(row.cost_price) || 0,
+          created_at: row.created_at as string,
+          updated_at: (row.updated_at as string) || (row.created_at as string),
+          synced: 1,
+        }),
+        dbTable: db.stock_batches,
+        merge: async (remote: LocalStockBatch, local: LocalStockBatch | undefined) => {
+          if (!local) return remote;
+          if (local.synced === 0) {
+            const remoteTime = new Date(remote.updated_at).getTime();
+            const localTime = new Date(local.updated_at).getTime();
+            return remoteTime >= localTime ? { ...remote, synced: 1 } : local;
+          }
+          return remote;
+        },
+      },
+      {
+        label: 'Stock movements',
+        table: 'stock_movements',
+        map: (row: Record<string, unknown>) => ({
+          id: row.id as string,
+          store_id: row.store_id as string,
+          product_id: row.product_id as string,
+          batch_id: (row.batch_id as string) || null,
+          from_location_id: (row.from_location_id as string) || null,
+          to_location_id: (row.to_location_id as string) || null,
+          movement_type: row.movement_type as LocalStockMovement['movement_type'],
+          quantity: Number(row.quantity) || 0,
+          note: (row.note as string) || '',
+          user_id: (row.user_id as string) || null,
+          created_at: row.created_at as string,
+          synced: 1,
+        }),
+        dbTable: db.stock_movements,
+      },
     ] as const;
 
     for (const config of tables) {
@@ -905,12 +1176,14 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
       }
 
       for (const row of data || []) {
-        const mapped = config.map(row) as LocalUser & LocalProduct & LocalTransaction & LocalTransactionItem & LocalExpense;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const mapped = config.map(row) as any;
         const existing = await config.dbTable.get(mapped.id);
 
         let record = mapped;
         if ('merge' in config && config.merge) {
-          record = await (config.merge as (r: typeof mapped, l: typeof existing) => Promise<typeof mapped>)(mapped, existing);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          record = await (config.merge as any)(mapped, existing);
         }
 
         if (!existing || existing.id === record.id) {
@@ -1002,14 +1275,32 @@ export async function restoreStoreFromCloud(
     return { success: false, message: 'Invalid owner PIN for this store.' };
   }
 
-  await db.transaction('rw', [db.stores, db.users, db.products, db.transactions, db.transaction_items, db.expenses, db.app_config], async () => {
-    await db.stores.clear();
-    await db.users.clear();
-    await db.products.clear();
-    await db.transactions.clear();
-    await db.transaction_items.clear();
-    await db.expenses.clear();
-  });
+  await db.transaction(
+    'rw',
+    [
+      db.stores,
+      db.users,
+      db.products,
+      db.transactions,
+      db.transaction_items,
+      db.expenses,
+      db.locations,
+      db.stock_batches,
+      db.stock_movements,
+      db.app_config,
+    ],
+    async () => {
+      await db.stores.clear();
+      await db.users.clear();
+      await db.products.clear();
+      await db.transactions.clear();
+      await db.transaction_items.clear();
+      await db.expenses.clear();
+      await db.locations.clear();
+      await db.stock_batches.clear();
+      await db.stock_movements.clear();
+    }
+  );
 
   await setCurrentStoreId(storeId);
   const pull = await syncFromSupabase();
