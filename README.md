@@ -152,22 +152,21 @@ If your Supabase project was created before these features, run `supabase-migrat
 
 On first launch, you'll be guided through a setup wizard:
 
-1. **Enter your store name** (e.g., "Kofi's Mini Mart")
-2. **Create owner account** with your name and a 4-digit PIN
-3. You're ready to go!
+1. **Enter store profile** — name, address, and support phone (all required)
+2. **Create owner account** with your name and a 4-digit PIN you choose
+3. You're ready to go — sign in with the PIN you created
 
 Each store has its own isolated data - products, users, and transactions are all scoped to your store.
 
 ### Setting Up Your Store
 
-1. Login with the default PIN (1234)
-2. Go to **Settings**
-3. Fill in your store profile (name, address, phone)
-4. Configure discount controls
-5. Add staff members with their own PINs
-6. Optionally set up biometric login
-7. Connect a Bluetooth thermal printer
-8. Go to **Inventory** and add your products
+1. Login with the owner PIN you created at setup
+2. Go to **Settings** (store name, address, and phone remain required)
+3. Configure discount controls
+4. Add staff members with their own PINs
+5. Optionally set up biometric login
+6. Connect a Bluetooth thermal printer under **Devices** / **More**
+7. Go to **Inventory** and add your products
 
 ## Database Setup (Supabase)
 

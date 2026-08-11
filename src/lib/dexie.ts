@@ -367,7 +367,8 @@ export async function hasAnyStore(): Promise<boolean> {
 export async function createStoreWithOwner(
   storeName: string,
   ownerName: string,
-  ownerPin: string
+  ownerPin: string,
+  profile?: { address?: string; supportNumber?: string }
 ): Promise<{ store: LocalStore; owner: LocalUser }> {
   const storeId = generateId();
   const ownerId = generateId();
@@ -376,8 +377,8 @@ export async function createStoreWithOwner(
   const store: LocalStore = {
     id: storeId,
     name: storeName,
-    address: '',
-    support_number: '',
+    address: (profile?.address || '').trim(),
+    support_number: (profile?.supportNumber || '').trim(),
     discount_cap_percentage: 10,
     pin_on_discount_enabled: 1,
     discount_allow_percentage: 1,

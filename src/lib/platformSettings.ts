@@ -156,3 +156,9 @@ export function normalizeGhanaPhone(raw: string): string {
   if (digits.length === 9) return `233${digits}`;
   return digits;
 }
+
+/** Accept local 0XXXXXXXXX, +233XXXXXXXXX, or 233XXXXXXXXX mobile numbers. */
+export function isValidGhanaPhone(raw: string): boolean {
+  const normalized = normalizeGhanaPhone(raw);
+  return /^233[2-9]\d{8}$/.test(normalized);
+}

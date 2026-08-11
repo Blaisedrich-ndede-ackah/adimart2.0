@@ -1,6 +1,9 @@
 import { useState } from 'react';
-import { Store, User, Lock, ArrowRight, Loader2, CloudDownload, Shield } from 'lucide-react';
+import {
+  Store, User, Lock, ArrowRight, Loader2, CloudDownload, Shield, MapPin, Phone,
+} from 'lucide-react';
 import { createStoreWithOwner, restoreStoreFromCloud } from '@/lib/dexie';
+import { isValidGhanaPhone } from '@/lib/platformSettings';
 import { useAuthStore } from '@/store/useAuthStore';
 
 type SetupMode = 'choose' | 'new-store' | 'new-owner' | 'restore';
@@ -12,6 +15,8 @@ interface StoreSetupPageProps {
 export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
   const [mode, setMode] = useState<SetupMode>('choose');
   const [storeName, setStoreName] = useState('');
+  const [storeAddress, setStoreAddress] = useState('');
+  const [supportNumber, setSupportNumber] = useState('');
   const [ownerName, setOwnerName] = useState('');
   const [ownerPin, setOwnerPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
@@ -24,6 +29,18 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
   const handleStoreNext = () => {
     if (!storeName.trim()) {
       setError('Please enter your store name');
+      return;
+    }
+    if (!storeAddress.trim()) {
+      setError('Please enter your store address');
+      return;
+    }
+    if (!supportNumber.trim()) {
+      setError('Please enter a support phone number');
+      return;
+    }
+    if (!isValidGhanaPhone(supportNumber)) {
+      setError('Enter a valid Ghana phone number (e.g. 024XXXXXXX or +23324XXXXXXX)');
       return;
     }
     setError('');
@@ -48,10 +65,20 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
       return;
     }
 
+    // Re-validate profile in case user navigated back/forward
+    if (!storeName.trim() || !storeAddress.trim() || !isValidGhanaPhone(supportNumber)) {
+      setError('Complete store profile details first');
+      setMode('new-store');
+      return;
+    }
+
     setIsCreating(true);
 
     try {
-      await createStoreWithOwner(storeName.trim(), ownerName.trim(), ownerPin);
+      await createStoreWithOwner(storeName.trim(), ownerName.trim(), ownerPin, {
+        address: storeAddress.trim(),
+        supportNumber: supportNumber.trim(),
+      });
       setStoreSetup(true);
       await initialize();
     } catch (err: unknown) {
@@ -181,14 +208,14 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
                 <Store className="w-5 h-5 text-primary" />
               </div>
               <div>
-                <h2 className="font-bold text-gray-900">Store Details</h2>
-                <p className="text-xs text-gray-500">What's your business called?</p>
+                <h2 className="font-bold text-gray-900">Store Profile</h2>
+                <p className="text-xs text-gray-500">All fields are required</p>
               </div>
             </div>
 
             <div className="space-y-4">
               <div>
-                <label className="text-sm font-medium text-gray-700 mb-2 block">Store Name</label>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">Store Name *</label>
                 <input
                   type="text"
                   value={storeName}
@@ -197,6 +224,38 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
                   className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary focus:border-primary outline-none"
                   autoFocus
                 />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">
+                  <MapPin className="w-3.5 h-3.5 inline mr-1" />
+                  Store Address *
+                </label>
+                <input
+                  type="text"
+                  value={storeAddress}
+                  onChange={e => setStoreAddress(e.target.value)}
+                  placeholder="Street, area, city"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary focus:border-primary outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">
+                  <Phone className="w-3.5 h-3.5 inline mr-1" />
+                  Support Phone *
+                </label>
+                <input
+                  type="tel"
+                  inputMode="tel"
+                  value={supportNumber}
+                  onChange={e => setSupportNumber(e.target.value)}
+                  placeholder="024 XXX XXXX"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary focus:border-primary outline-none"
+                />
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Used for receipts, subscriptions SMS, and customer contact
+                </p>
               </div>
 
               {error && <p className="text-red-500 text-sm">{error}</p>}
@@ -227,9 +286,15 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
               </div>
             </div>
 
+            <div className="mb-4 rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2 text-xs text-emerald-900">
+              <p className="font-semibold truncate">{storeName}</p>
+              <p className="truncate text-emerald-800/80">{storeAddress}</p>
+              <p className="truncate text-emerald-800/80">{supportNumber}</p>
+            </div>
+
             <div className="space-y-4">
               <div>
-                <label className="text-sm font-medium text-gray-700 mb-2 block">Your Name</label>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">Your Name *</label>
                 <input
                   type="text"
                   value={ownerName}
@@ -243,7 +308,7 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
               <div>
                 <label className="text-sm font-medium text-gray-700 mb-2 block">
                   <Lock className="w-3.5 h-3.5 inline mr-1" />
-                  Create 4-Digit PIN
+                  Create 4-Digit PIN *
                 </label>
                 <input
                   type="password"
@@ -254,10 +319,11 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
                   placeholder="••••"
                   className="w-full px-4 py-3 border border-gray-300 rounded-xl text-lg font-semibold text-center tracking-[0.5em] focus:ring-2 focus:ring-primary outline-none"
                 />
+                <p className="text-[11px] text-gray-500 mt-1">Choose a PIN only you know — you will use it to sign in</p>
               </div>
 
               <div>
-                <label className="text-sm font-medium text-gray-700 mb-2 block">Confirm PIN</label>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">Confirm PIN *</label>
                 <input
                   type="password"
                   inputMode="numeric"

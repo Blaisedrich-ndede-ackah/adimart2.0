@@ -172,12 +172,11 @@ export default function LoginPage({ onOpenAdmin }: LoginPageProps) {
           })}
         </div>
 
-        <div className="mt-8 text-emerald-200/90 text-xs text-center">
-          <p>Default Owner PIN: 1234</p>
-          {biometricAvailable && (
-            <p className="mt-1 text-emerald-100">Biometric login available</p>
-          )}
-        </div>
+        {biometricAvailable && (
+          <p className="mt-8 text-emerald-100 text-xs text-center">
+            Biometric login available
+          </p>
+        )}
 
         {onOpenAdmin && (
           <button

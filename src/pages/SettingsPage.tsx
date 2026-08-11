@@ -27,6 +27,7 @@ import { isAutoSyncEnabled, setAutoSyncEnabled, startAutoSync, stopAutoSync } fr
 import { useAuthStore } from '@/store/useAuthStore';
 import { isBiometricAvailable, registerBiometric, hasBiometricRegistered, clearBiometricRegistration } from '@/lib/biometric';
 import { isSupabaseConfigured } from '@/lib/supabase';
+import { isValidGhanaPhone } from '@/lib/platformSettings';
 import { fileToStoreLogoDataUrl, hasStoreLogo } from '@/lib/productImage';
 
 export default function SettingsPage() {
@@ -120,6 +121,26 @@ export default function SettingsPage() {
     setSaveSuccess(false);
     
     try {
+      if (!storeName.trim()) {
+        setSaveError('Store name is required.');
+        setSaving(false);
+        return;
+      }
+      if (!storeAddress.trim()) {
+        setSaveError('Store address is required.');
+        setSaving(false);
+        return;
+      }
+      if (!supportNumber.trim()) {
+        setSaveError('Support phone number is required.');
+        setSaving(false);
+        return;
+      }
+      if (!isValidGhanaPhone(supportNumber)) {
+        setSaveError('Enter a valid Ghana phone number (e.g. 024XXXXXXX or +23324XXXXXXX).');
+        setSaving(false);
+        return;
+      }
       if (!allowPercentage && !allowFixed) {
         setSaveError('Enable at least one discount type (percentage or fixed).');
         setSaving(false);
@@ -378,7 +399,7 @@ export default function SettingsPage() {
               />
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-600 mb-1 block">Store Name</label>
+              <label className="text-xs font-medium text-gray-600 mb-1 block">Store Name *</label>
               <input
                 type="text"
                 value={storeName}
@@ -388,7 +409,7 @@ export default function SettingsPage() {
               />
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-600 mb-1 block">Address</label>
+              <label className="text-xs font-medium text-gray-600 mb-1 block">Address *</label>
               <input
                 type="text"
                 value={storeAddress}
@@ -398,12 +419,12 @@ export default function SettingsPage() {
               />
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-600 mb-1 block">Support Phone</label>
+              <label className="text-xs font-medium text-gray-600 mb-1 block">Support Phone *</label>
               <input
                 type="tel"
                 value={supportNumber}
                 onChange={e => setSupportNumber(e.target.value)}
-                placeholder="+233 XX XXX XXXX"
+                placeholder="024 XXX XXXX or +23324XXXXXXX"
                 className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary focus:border-primary"
               />
             </div>
