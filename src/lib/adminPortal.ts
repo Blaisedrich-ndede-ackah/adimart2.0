@@ -27,6 +27,8 @@ export interface AdminStoreRow {
   warehouse_enabled: boolean;
   max_shops: number;
   max_warehouses: number;
+  /** Admin-managed cap on how many business stores the owner may create */
+  max_stores: number;
   /** Admin-managed public e-commerce storefront */
   ecommerce_enabled: boolean;
   ecommerce_slug: string;
@@ -240,6 +242,7 @@ export async function loadAdminDashboard(weekStart = getWeekStart()): Promise<Ad
     ecommerce_slug: String(s.ecommerce_slug || ''),
     max_shops: Math.max(1, Number(s.max_shops) || 1),
     max_warehouses: Math.max(0, Number(s.max_warehouses) || 0),
+    max_stores: Math.max(1, Number(s.max_stores) || 1),
     created_at: String(s.created_at || ''),
   }));
 
@@ -498,6 +501,7 @@ export async function updateStoreWarehouseLimits(
     warehouse_enabled: boolean;
     max_shops: number;
     max_warehouses: number;
+    max_stores: number;
   }
 ): Promise<{ success: boolean; error?: string }> {
   if (!isSupabaseConfigured()) {
@@ -506,12 +510,16 @@ export async function updateStoreWarehouseLimits(
 
   const maxShops = Math.floor(Number(limits.max_shops));
   const maxWarehouses = Math.floor(Number(limits.max_warehouses));
+  const maxStores = Math.floor(Number(limits.max_stores));
 
   if (!Number.isFinite(maxShops) || maxShops < 1) {
     return { success: false, error: 'Max shops must be at least 1' };
   }
   if (!Number.isFinite(maxWarehouses) || maxWarehouses < 0) {
     return { success: false, error: 'Max warehouses must be 0 or more' };
+  }
+  if (!Number.isFinite(maxStores) || maxStores < 1) {
+    return { success: false, error: 'Max stores must be at least 1' };
   }
 
   const { error } = await supabase
@@ -520,15 +528,20 @@ export async function updateStoreWarehouseLimits(
       warehouse_enabled: Boolean(limits.warehouse_enabled),
       max_shops: maxShops,
       max_warehouses: maxWarehouses,
+      max_stores: maxStores,
     })
     .eq('id', storeId);
 
   if (error) {
     return {
       success: false,
-      error: error.message.includes('warehouse_') || error.message.includes('max_shops') || error.message.includes('max_warehouses')
-        ? `${error.message} — run supabase-migrate-warehouse.sql in Supabase.`
-        : error.message,
+      error:
+        error.message.includes('warehouse_') ||
+        error.message.includes('max_shops') ||
+        error.message.includes('max_warehouses') ||
+        error.message.includes('max_stores')
+          ? `${error.message} — run supabase-migrate-max-stores-warehouse-pin.sql in Supabase.`
+          : error.message,
     };
   }
 

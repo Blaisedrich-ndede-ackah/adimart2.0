@@ -30,8 +30,13 @@ import { isSupabaseConfigured } from '@/lib/supabase';
 import { isValidGhanaPhone } from '@/lib/platformSettings';
 import { fileToStoreLogoDataUrl, hasStoreLogo } from '@/lib/productImage';
 import StoresPortalSection from '@/components/StoresPortalSection';
+import WarehousePortalSection from '@/components/WarehousePortalSection';
 
-export default function SettingsPage() {
+interface SettingsPageProps {
+  onNavigate?: (page: string) => void;
+}
+
+export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const { currentUser, currentStore, refreshStore } = useAuthStore();
   const logoInputRef = useRef<HTMLInputElement>(null);
   
@@ -354,6 +359,11 @@ export default function SettingsPage() {
 
       <div className="page-body no-scrollbar">
         <StoresPortalSection />
+        <WarehousePortalSection
+          onOpenWarehouse={() => {
+            onNavigate?.('warehouse');
+          }}
+        />
 
         {/* Store Profile */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">

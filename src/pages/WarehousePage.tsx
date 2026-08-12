@@ -50,9 +50,17 @@ import {
   type LocationReportSummary,
 } from '@/lib/reportAnalytics';
 import FinancialDonutChart from '@/components/FinancialDonutChart';
+import {
+  clearWarehouseUnlock,
+  getUnlockedWarehouseLocationId,
+} from '@/lib/warehouseAccess';
 
 type HubMode = 'hub' | 'workspace';
 type WorkspaceTab = 'stock' | 'receive' | 'transfer' | 'expiry' | 'adjust' | 'history' | 'report';
+
+interface WarehousePageProps {
+  onBackToSettings?: () => void;
+}
 
 const WORKSPACE_TABS: { id: WorkspaceTab; label: string; icon: typeof Warehouse }[] = [
   { id: 'stock', label: 'Stock', icon: Boxes },
@@ -101,7 +109,7 @@ function formatWhen(iso: string): string {
   }
 }
 
-export default function WarehousePage() {
+export default function WarehousePage({ onBackToSettings }: WarehousePageProps) {
   const { currentStore, currentUser } = useAuthStore();
   const warehouseEnabled = (currentStore?.warehouse_enabled ?? 0) === 1;
   const maxShops = currentStore?.max_shops ?? 1;
@@ -110,6 +118,7 @@ export default function WarehousePage() {
   const [mode, setMode] = useState<HubMode>('hub');
   const [activeLocationId, setActiveLocationId] = useState<string | null>(null);
   const [tab, setTab] = useState<WorkspaceTab>('stock');
+  const [unlockRequired, setUnlockRequired] = useState(false);
 
   const [locations, setLocations] = useState<LocalLocation[]>([]);
   const [locationStats, setLocationStats] = useState<Record<string, LocationStats>>({});
@@ -126,10 +135,9 @@ export default function WarehousePage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // Add location (hub)
+  // Add shop location only (warehouses are created from Settings)
   const [showAddLocation, setShowAddLocation] = useState(false);
   const [newLocName, setNewLocName] = useState('');
-  const [newLocType, setNewLocType] = useState<'shop' | 'warehouse'>('warehouse');
 
   // Receive (scoped to active location)
   const [recvProductId, setRecvProductId] = useState('');
@@ -173,7 +181,6 @@ export default function WarehousePage() {
   const shopCount = locations.filter((l) => l.location_type === 'shop').length;
   const warehouseCount = locations.filter((l) => l.location_type === 'warehouse').length;
   const canAddShop = shopCount < maxShops;
-  const canAddWarehouse = warehouseEnabled && warehouseCount < maxWarehouses;
 
   const selectedRecvProduct = productMap.get(recvProductId) || null;
   const trackExpiry = (selectedRecvProduct?.track_expiry ?? 0) === 1;
@@ -271,8 +278,24 @@ export default function WarehousePage() {
   }, [currentStore?.id, activeLocationId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    void loadHub();
-  }, [loadHub]);
+    void (async () => {
+      await loadHub();
+      if (!currentStore?.id) return;
+      const unlockedId = getUnlockedWarehouseLocationId(currentStore.id);
+      if (unlockedId) {
+        setUnlockRequired(false);
+        setActiveLocationId(unlockedId);
+        setTab('stock');
+        setMode('workspace');
+        setExpandedProductId(null);
+        setStockQuery('');
+      } else {
+        setUnlockRequired(true);
+        setMode('hub');
+        setActiveLocationId(null);
+      }
+    })();
+  }, [loadHub, currentStore?.id]);
 
   useEffect(() => {
     if (mode === 'workspace' && activeLocationId) {
@@ -308,6 +331,7 @@ export default function WarehousePage() {
   }, [mode, tab, activeLocationId, loadLocationReport]);
 
   const openLocation = (locationId: string) => {
+    setUnlockRequired(false);
     setActiveLocationId(locationId);
     setTab('stock');
     setMode('workspace');
@@ -316,32 +340,19 @@ export default function WarehousePage() {
   };
 
   const backToHub = () => {
+    clearWarehouseUnlock();
     setMode('hub');
     setActiveLocationId(null);
     setTab('stock');
+    setUnlockRequired(true);
     void loadHub();
+    onBackToSettings?.();
   };
 
   const handleAddLocation = async () => {
     if (!currentStore?.id) return;
-    if (!canAddShop && !canAddWarehouse) {
-      flash('Location limits reached', true);
-      return;
-    }
-    const type =
-      newLocType === 'warehouse'
-        ? canAddWarehouse
-          ? 'warehouse'
-          : 'shop'
-        : canAddShop
-          ? 'shop'
-          : 'warehouse';
-    if (type === 'warehouse' && !canAddWarehouse) {
-      flash(`Maximum warehouses reached (${maxWarehouses})`, true);
-      return;
-    }
-    if (type === 'shop' && !canAddShop) {
-      flash(`Maximum shops reached (${maxShops})`, true);
+    if (!canAddShop) {
+      flash('Shop location limit reached', true);
       return;
     }
 
@@ -349,12 +360,12 @@ export default function WarehousePage() {
     try {
       const created = await createLocation({
         storeId: currentStore.id,
-        name: newLocName.trim() || (type === 'warehouse' ? 'Warehouse' : 'Shop'),
-        locationType: type,
+        name: newLocName.trim() || 'Shop',
+        locationType: 'shop',
       });
       setNewLocName('');
       setShowAddLocation(false);
-      flash(`${type === 'warehouse' ? 'Warehouse' : 'Shop'} added`);
+      flash('Shop added');
       await loadHub();
       openLocation(created.id);
     } catch (err: unknown) {
@@ -497,6 +508,53 @@ export default function WarehousePage() {
             <p className="text-sm text-gray-500 leading-relaxed">
               Warehouse not enabled — contact administrator
             </p>
+            {onBackToSettings && (
+              <button
+                type="button"
+                onClick={onBackToSettings}
+                className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-primary"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                Back to Settings
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (unlockRequired && mode === 'hub') {
+    return (
+      <div className="page-shell">
+        <div className="page-header">
+          <div className="flex items-center gap-2">
+            <Warehouse className="w-5 h-5 text-white" />
+            <h1 className="text-white font-bold text-lg">Warehouse</h1>
+          </div>
+        </div>
+        <div className="flex-1 flex items-center justify-center px-6 pb-8">
+          <div className="text-center max-w-sm">
+            <div className="w-16 h-16 rounded-2xl bg-amber-50 flex items-center justify-center mx-auto mb-4">
+              <Warehouse className="w-8 h-8 text-amber-700" />
+            </div>
+            <h2 className="text-lg font-bold text-gray-900 mb-2">Unlock from Settings</h2>
+            <p className="text-sm text-gray-500 leading-relaxed mb-4">
+              Warehouses are managed from Settings → My Warehouses. Create or enter that warehouse&apos;s
+              PIN to open it here.
+            </p>
+            <p className="text-[11px] text-gray-400 mb-4">
+              {warehouseCount} warehouse{warehouseCount !== 1 ? 's' : ''} · limit {maxWarehouses}
+            </p>
+            {onBackToSettings && (
+              <button
+                type="button"
+                onClick={onBackToSettings}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-bold text-white touch-target"
+              >
+                Go to Settings
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -531,7 +589,7 @@ export default function WarehousePage() {
               className="inline-flex items-center gap-1 text-emerald-100 text-xs font-medium mb-2 touch-target"
             >
               <ChevronLeft className="w-4 h-4" />
-              All locations
+              Back to Settings
             </button>
             <div className="flex items-start justify-between gap-3 mb-3">
               <div className="min-w-0">
@@ -605,9 +663,8 @@ export default function WarehousePage() {
         ) : mode === 'hub' ? (
           <div className="space-y-3 md:max-w-3xl md:mx-auto">
             <div className="bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3 text-xs text-emerald-900 leading-relaxed">
-              Choose a <span className="font-semibold">shop</span> or{' '}
-              <span className="font-semibold">warehouse</span> below. All warehouse activities then run
-              only for that location — so POS shop sales and warehouse stock stay clearly separated.
+              Create and unlock warehouses from <span className="font-semibold">Settings → My Warehouses</span>.
+              You can still add extra shop locations here if your admin raised the shop limit.
             </div>
 
             <div className="flex items-center justify-between">
@@ -615,17 +672,16 @@ export default function WarehousePage() {
                 <MapPin className="w-3.5 h-3.5" />
                 Your locations
               </p>
-              {(canAddShop || canAddWarehouse) && (
+              {canAddShop && (
                 <button
                   type="button"
                   onClick={() => {
                     setShowAddLocation((v) => !v);
-                    setNewLocType(canAddWarehouse ? 'warehouse' : 'shop');
                   }}
                   className="inline-flex items-center gap-1 px-3 py-1.5 bg-primary text-white rounded-lg text-xs font-medium touch-target"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  Add location
+                  Add shop
                 </button>
               )}
             </div>
@@ -633,43 +689,14 @@ export default function WarehousePage() {
             {showAddLocation && (
               <div className="bg-white border border-emerald-100 rounded-xl p-4 space-y-3 animate-fade-in">
                 <div>
-                  <label className="text-sm font-medium text-gray-700 mb-1.5 block">Name</label>
+                  <label className="text-sm font-medium text-gray-700 mb-1.5 block">Shop name</label>
                   <input
                     type="text"
                     value={newLocName}
                     onChange={(e) => setNewLocName(e.target.value)}
-                    placeholder={newLocType === 'warehouse' ? 'e.g. Main Warehouse' : 'e.g. Front Shop'}
+                    placeholder="e.g. Front Shop"
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
                   />
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-1.5 block">Type</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      disabled={!canAddShop}
-                      onClick={() => setNewLocType('shop')}
-                      className={`py-2.5 rounded-xl text-sm font-medium touch-target border ${
-                        newLocType === 'shop'
-                          ? 'bg-primary text-white border-primary'
-                          : 'bg-white text-gray-600 border-gray-200'
-                      } disabled:opacity-40`}
-                    >
-                      Shop
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!canAddWarehouse}
-                      onClick={() => setNewLocType('warehouse')}
-                      className={`py-2.5 rounded-xl text-sm font-medium touch-target border ${
-                        newLocType === 'warehouse'
-                          ? 'bg-primary text-white border-primary'
-                          : 'bg-white text-gray-600 border-gray-200'
-                      } disabled:opacity-40`}
-                    >
-                      Warehouse
-                    </button>
-                  </div>
                 </div>
                 <button
                   type="button"
@@ -677,7 +704,7 @@ export default function WarehousePage() {
                   disabled={busy}
                   className="w-full py-3 bg-primary text-white rounded-xl font-bold text-sm touch-target disabled:opacity-50"
                 >
-                  {busy ? 'Saving…' : 'Create & open'}
+                  {busy ? 'Saving…' : 'Create shop'}
                 </button>
               </div>
             )}

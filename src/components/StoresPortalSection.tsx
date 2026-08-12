@@ -4,7 +4,9 @@ import {
 } from 'lucide-react';
 import {
   addStoreFromCloud,
+  assertCanCreateAdditionalStore,
   createStoreWithOwner,
+  getAdditionalStoreQuota,
   listLocalStores,
   type LocalStore,
 } from '@/lib/dexie';
@@ -24,6 +26,8 @@ export default function StoresPortalSection() {
   const [error, setError] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [showAddCloud, setShowAddCloud] = useState(false);
+  const [quotaLabel, setQuotaLabel] = useState('');
+  const [canCreateStore, setCanCreateStore] = useState(true);
 
   const [newName, setNewName] = useState('');
   const [newAddress, setNewAddress] = useState('');
@@ -37,7 +41,12 @@ export default function StoresPortalSection() {
 
   const refresh = useCallback(async () => {
     setStores(await listLocalStores());
-  }, []);
+    const phoneHint =
+      currentUser?.phone || currentStore?.support_number || newPhone || '';
+    const quota = await getAdditionalStoreQuota(phoneHint);
+    setCanCreateStore(quota.canCreate);
+    setQuotaLabel(`${quota.ownedCount}/${quota.maxStores} stores allowed`);
+  }, [currentStore?.support_number, currentUser?.phone, newPhone]);
 
   useEffect(() => {
     void refresh();
@@ -91,6 +100,7 @@ export default function StoresPortalSection() {
     }
     setBusy(true);
     try {
+      await assertCanCreateAdditionalStore(newPhone.trim());
       const { store } = await createStoreWithOwner(
         newName.trim(),
         ownerName.trim(),
@@ -142,7 +152,8 @@ export default function StoresPortalSection() {
       </div>
       <p className="text-xs text-gray-500 mb-3">
         Open a store to manage that store&apos;s inventory and staff. Switching signs you out so you
-        log in under the selected store.
+        log in under the selected store. Creating more stores requires admin permission
+        {quotaLabel ? ` (${quotaLabel})` : ''}.
       </p>
 
       <div className="space-y-2 mb-3">
@@ -186,15 +197,21 @@ export default function StoresPortalSection() {
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
+          disabled={!canCreateStore}
           onClick={() => {
             setShowCreate((v) => !v);
             setShowAddCloud(false);
           }}
-          className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 touch-target"
+          className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 touch-target disabled:opacity-40"
         >
           <Plus className="w-3.5 h-3.5" />
           Create store
         </button>
+        {!canCreateStore && (
+          <p className="w-full text-[11px] text-amber-800">
+            Store limit reached. Ask your administrator to allow more stores.
+          </p>
+        )}
         {isSupabaseConfigured() && (
           <button
             type="button"
@@ -210,7 +227,7 @@ export default function StoresPortalSection() {
         )}
       </div>
 
-      {showCreate && (
+      {showCreate && canCreateStore && (
         <div className="mt-3 space-y-2 rounded-xl border border-emerald-100 bg-emerald-50/50 p-3">
           <p className="text-xs font-semibold text-gray-800">New store profile</p>
           <input

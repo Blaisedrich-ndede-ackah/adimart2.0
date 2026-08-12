@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS stores (
   warehouse_enabled BOOLEAN DEFAULT FALSE,
   max_shops INTEGER DEFAULT 1,
   max_warehouses INTEGER DEFAULT 0,
+  /** How many business stores this owner may create (admin-managed) */
+  max_stores INTEGER DEFAULT 1,
   ecommerce_enabled BOOLEAN DEFAULT FALSE,
   ecommerce_slug VARCHAR(80) DEFAULT '',
   ecommerce_tagline TEXT DEFAULT '',
@@ -207,6 +209,8 @@ CREATE TABLE IF NOT EXISTS locations (
   location_type VARCHAR(20) NOT NULL CHECK (location_type IN ('shop', 'warehouse')),
   is_default BOOLEAN DEFAULT FALSE,
   is_active BOOLEAN DEFAULT TRUE,
+  /** Optional PIN hash to open/manage this warehouse from Settings */
+  access_pin_hash TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );

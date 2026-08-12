@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt,
-  CalendarClock, Warehouse, ShoppingBag, MoreHorizontal, X,
+  CalendarClock, ShoppingBag, MoreHorizontal, X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -22,7 +22,6 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const { currentUser, currentStore, switchUser } = useAuthStore();
   const [moreOpen, setMoreOpen] = useState(false);
   const isOwner = currentUser?.role === 'owner';
-  const warehouseEnabled = (currentStore?.warehouse_enabled ?? 0) === 1;
   const ecommerceEnabled = (currentStore?.ecommerce_enabled ?? 0) === 1;
   const canManageEcommerce =
     isOwner || (currentUser?.can_manage_ecommerce ?? 0) === 1;
@@ -35,7 +34,6 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         { id: 'devices', label: 'Devices', icon: Bluetooth, show: true },
         { id: 'subscription', label: 'Plan', icon: CalendarClock, show: true },
         { id: 'inventory', label: 'Inventory', icon: Package, show: isOwner },
-        { id: 'warehouse', label: 'Warehouse', icon: Warehouse, show: isOwner && warehouseEnabled },
         {
           id: 'ecommerce',
           label: 'Online',
@@ -45,7 +43,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         { id: 'reports', label: 'Reports', icon: BarChart3, show: isOwner },
         { id: 'settings', label: 'Settings', icon: Settings, show: isOwner },
       ].filter((item) => item.show),
-    [isOwner, warehouseEnabled, ecommerceEnabled, canManageEcommerce]
+    [isOwner, ecommerceEnabled, canManageEcommerce]
   );
 
   // Keep bottom bar to a few primary destinations; rest live under More
