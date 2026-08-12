@@ -161,7 +161,7 @@ export async function notifySubscriptionExpiringSoon(opts: {
     `Adimat POS: Your subscription for ${opts.storeName} expires ` +
     `${opts.daysLeft <= 0 ? 'today' : `in ${opts.daysLeft} day${opts.daysLeft === 1 ? '' : 's'}`} ` +
     `(${formatSubscriptionDate(opts.expiresAt)}). ` +
-    `Open the Plan tab to contact the administrator and renew.`;
+    `Open the Plan tab and pay with Paystack to renew instantly.`;
 
   const result = await sendSmsViaMnotify(opts.ownerPhone, message);
   if (result.success) markSent(key);
