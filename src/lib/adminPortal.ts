@@ -11,6 +11,12 @@ import {
   type SubscriptionStatus,
 } from './subscription';
 import { notifySubscriptionActivated, resolveStoreOwnerPhone } from './mnotify';
+import {
+  loadAllStoreQuotas,
+  normalizeStoreQuota,
+  saveStoreQuotas,
+  type StoreQuotaLimits,
+} from './storeQuotas';
 
 export interface AdminStoreRow {
   id: string;
@@ -217,34 +223,48 @@ export async function loadAdminDashboard(weekStart = getWeekStart()): Promise<Ad
 
   const weekEnd = getWeekEnd(weekStart);
 
-  const [storesRaw, usersRaw, productsRaw, txRaw, payoutsRaw, grantsRaw] = await Promise.all([
-    fetchAllRows<Record<string, unknown>>('stores'),
-    fetchAllRows<Record<string, unknown>>('users'),
-    fetchAllRows<Record<string, unknown>>('products'),
-    fetchAllRows<Record<string, unknown>>('transactions'),
-    fetchAllRows<Record<string, unknown>>('payouts').catch(() => [] as Record<string, unknown>[]),
-    fetchAllRows<Record<string, unknown>>('subscription_grants').catch(() => [] as Record<string, unknown>[]),
-  ]);
+  const [storesRaw, usersRaw, productsRaw, txRaw, payoutsRaw, grantsRaw, quotasByStore] =
+    await Promise.all([
+      fetchAllRows<Record<string, unknown>>('stores'),
+      fetchAllRows<Record<string, unknown>>('users'),
+      fetchAllRows<Record<string, unknown>>('products'),
+      fetchAllRows<Record<string, unknown>>('transactions'),
+      fetchAllRows<Record<string, unknown>>('payouts').catch(() => [] as Record<string, unknown>[]),
+      fetchAllRows<Record<string, unknown>>('subscription_grants').catch(
+        () => [] as Record<string, unknown>[]
+      ),
+      loadAllStoreQuotas(),
+    ]);
 
-  const stores: AdminStoreRow[] = storesRaw.map((s) => ({
-    id: String(s.id),
-    name: String(s.name || 'Unnamed store'),
-    address: String(s.address || ''),
-    support_number: String(s.support_number || ''),
-    momo_account_name: String(s.momo_account_name || ''),
-    momo_number: String(s.momo_number || ''),
-    momo_network: String(s.momo_network || ''),
-    subscription_started_at: s.subscription_started_at ? String(s.subscription_started_at) : null,
-    subscription_expires_at: s.subscription_expires_at ? String(s.subscription_expires_at) : null,
-    subscription_months_granted: Number(s.subscription_months_granted) || 0,
-    warehouse_enabled: Boolean(s.warehouse_enabled),
-    ecommerce_enabled: Boolean(s.ecommerce_enabled),
-    ecommerce_slug: String(s.ecommerce_slug || ''),
-    max_shops: Math.max(1, Number(s.max_shops) || 1),
-    max_warehouses: Math.max(0, Number(s.max_warehouses) || 0),
-    max_stores: Math.max(1, Number(s.max_stores) || 1),
-    created_at: String(s.created_at || ''),
-  }));
+  const stores: AdminStoreRow[] = storesRaw.map((s) => {
+    const id = String(s.id);
+    const fromStores = normalizeStoreQuota({
+      warehouse_enabled: Boolean(s.warehouse_enabled),
+      max_shops: Number(s.max_shops) || 1,
+      max_warehouses: Number(s.max_warehouses) || 0,
+      max_stores: Number(s.max_stores) || 1,
+    });
+    const quota = quotasByStore[id] || fromStores;
+    return {
+      id,
+      name: String(s.name || 'Unnamed store'),
+      address: String(s.address || ''),
+      support_number: String(s.support_number || ''),
+      momo_account_name: String(s.momo_account_name || ''),
+      momo_number: String(s.momo_number || ''),
+      momo_network: String(s.momo_network || ''),
+      subscription_started_at: s.subscription_started_at ? String(s.subscription_started_at) : null,
+      subscription_expires_at: s.subscription_expires_at ? String(s.subscription_expires_at) : null,
+      subscription_months_granted: Number(s.subscription_months_granted) || 0,
+      warehouse_enabled: quota.warehouse_enabled,
+      ecommerce_enabled: Boolean(s.ecommerce_enabled),
+      ecommerce_slug: String(s.ecommerce_slug || ''),
+      max_shops: quota.max_shops,
+      max_warehouses: quota.max_warehouses,
+      max_stores: quota.max_stores,
+      created_at: String(s.created_at || ''),
+    };
+  });
 
   const users: AdminUserRow[] = usersRaw.map((u) => ({
     id: String(u.id),
@@ -493,59 +513,26 @@ export async function grantStoreSubscription(
 }
 
 /**
- * Update admin-managed warehouse / multi-location limits for a store.
+ * Update admin-managed store / warehouse limits.
+ * Writes the canonical `store_quotas` table and verifies the save.
  */
 export async function updateStoreWarehouseLimits(
   storeId: string,
-  limits: {
-    warehouse_enabled: boolean;
-    max_shops: number;
-    max_warehouses: number;
-    max_stores: number;
-  }
-): Promise<{ success: boolean; error?: string }> {
-  if (!isSupabaseConfigured()) {
-    return { success: false, error: 'Supabase not configured' };
-  }
-
-  const maxShops = Math.floor(Number(limits.max_shops));
-  const maxWarehouses = Math.floor(Number(limits.max_warehouses));
-  const maxStores = Math.floor(Number(limits.max_stores));
-
-  if (!Number.isFinite(maxShops) || maxShops < 1) {
-    return { success: false, error: 'Max shops must be at least 1' };
-  }
-  if (!Number.isFinite(maxWarehouses) || maxWarehouses < 0) {
-    return { success: false, error: 'Max warehouses must be 0 or more' };
-  }
-  if (!Number.isFinite(maxStores) || maxStores < 1) {
-    return { success: false, error: 'Max stores must be at least 1' };
-  }
-
-  const { error } = await supabase
-    .from('stores')
-    .update({
-      warehouse_enabled: Boolean(limits.warehouse_enabled),
-      max_shops: maxShops,
-      max_warehouses: maxWarehouses,
-      max_stores: maxStores,
-    })
-    .eq('id', storeId);
-
-  if (error) {
+  limits: StoreQuotaLimits
+): Promise<{ success: boolean; error?: string; limits?: StoreQuotaLimits }> {
+  const result = await saveStoreQuotas(storeId, limits);
+  if (!result.success) {
     return {
       success: false,
-      error:
-        error.message.includes('warehouse_') ||
-        error.message.includes('max_shops') ||
-        error.message.includes('max_warehouses') ||
-        error.message.includes('max_stores')
-          ? `${error.message} — run supabase-migrate-max-stores-warehouse-pin.sql in Supabase.`
-          : error.message,
+      error: result.error || 'Failed to save store quotas',
     };
   }
-
-  return { success: true };
+  // Soft warning (saved on stores only) still counts as success for the UI
+  return {
+    success: true,
+    error: result.error,
+    limits: result.limits,
+  };
 }
 
 /**

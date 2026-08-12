@@ -479,7 +479,7 @@ export async function createStoreWithOwner(
 
 /**
  * Pull admin-managed store limits from cloud into local IndexedDB.
- * Prevents stale max_stores / warehouse caps after the admin raises them.
+ * Prefers canonical `store_quotas`, then falls back to `stores` columns.
  */
 export async function pullAdminStoreLimits(storeId: string): Promise<LocalStore | null> {
   const local = await db.stores.get(storeId);
@@ -487,6 +487,9 @@ export async function pullAdminStoreLimits(storeId: string): Promise<LocalStore 
   if (!isSupabaseConfigured()) return local;
 
   try {
+    const { loadStoreQuota } = await import('./storeQuotas');
+    const quota = await loadStoreQuota(storeId);
+
     const { data, error } = await supabase
       .from('stores')
       .select(
@@ -495,25 +498,45 @@ export async function pullAdminStoreLimits(storeId: string): Promise<LocalStore 
       .eq('id', storeId)
       .maybeSingle();
 
-    if (error || !data) return local;
+    if (error && !quota) return local;
+
+    const fromStore = data
+      ? {
+          warehouse_enabled: data.warehouse_enabled ? 1 : 0,
+          max_shops: Math.max(1, Number(data.max_shops) || 1),
+          max_warehouses: Math.max(0, Number(data.max_warehouses) || 0),
+          max_stores: Math.max(1, Number(data.max_stores) || 1),
+        }
+      : {
+          warehouse_enabled: local.warehouse_enabled ?? 0,
+          max_shops: local.max_shops ?? 1,
+          max_warehouses: local.max_warehouses ?? 0,
+          max_stores: local.max_stores ?? 1,
+        };
+
+    const limits = quota
+      ? {
+          warehouse_enabled: quota.warehouse_enabled ? 1 : 0,
+          max_shops: quota.max_shops,
+          max_warehouses: quota.max_warehouses,
+          max_stores: quota.max_stores,
+        }
+      : fromStore;
 
     const updated: LocalStore = {
       ...local,
-      warehouse_enabled: data.warehouse_enabled ? 1 : 0,
-      max_shops: Math.max(1, Number(data.max_shops) || 1),
-      max_warehouses: Math.max(0, Number(data.max_warehouses) || 0),
-      max_stores: Math.max(1, Number(data.max_stores) || 1),
-      ecommerce_enabled: data.ecommerce_enabled ? 1 : 0,
-      ecommerce_slug: String(data.ecommerce_slug || local.ecommerce_slug || ''),
-      ecommerce_tagline: String(data.ecommerce_tagline || local.ecommerce_tagline || ''),
-      subscription_started_at: data.subscription_started_at
+      ...limits,
+      ecommerce_enabled: data?.ecommerce_enabled ? 1 : local.ecommerce_enabled ?? 0,
+      ecommerce_slug: String(data?.ecommerce_slug || local.ecommerce_slug || ''),
+      ecommerce_tagline: String(data?.ecommerce_tagline || local.ecommerce_tagline || ''),
+      subscription_started_at: data?.subscription_started_at
         ? String(data.subscription_started_at)
         : local.subscription_started_at ?? null,
-      subscription_expires_at: data.subscription_expires_at
+      subscription_expires_at: data?.subscription_expires_at
         ? String(data.subscription_expires_at)
         : local.subscription_expires_at ?? null,
       subscription_months_granted:
-        Number(data.subscription_months_granted) || local.subscription_months_granted || 0,
+        Number(data?.subscription_months_granted) || local.subscription_months_granted || 0,
     };
     await db.stores.put(updated);
     return updated;
@@ -595,6 +618,12 @@ export async function getAdditionalStoreQuota(ownerPhone?: string): Promise<{
     }
     if (isSupabaseConfigured()) {
       try {
+        const { loadStoreQuota } = await import('./storeQuotas');
+        const quota = await loadStoreQuota(storeId);
+        if (quota) {
+          maxStores = Math.max(maxStores, quota.max_stores);
+          continue;
+        }
         const { data } = await supabase
           .from('stores')
           .select('max_stores')
@@ -1426,6 +1455,8 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
     if (storeError) errors.push(formatSyncError('Store', storeError));
     else if (remoteStore) {
       const localStore = await db.stores.get(storeId);
+      const { loadStoreQuota } = await import('./storeQuotas');
+      const quota = await loadStoreQuota(storeId);
       await db.stores.put({
         id: storeId,
         name: remoteStore.name,
@@ -1447,10 +1478,16 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
           : null,
         subscription_months_granted: Number(remoteStore.subscription_months_granted) || 0,
         logo_url: remoteStore.logo_url || localStore?.logo_url || '',
-        warehouse_enabled: remoteStore.warehouse_enabled ? 1 : 0,
-        max_shops: Number(remoteStore.max_shops) || 1,
-        max_warehouses: Number(remoteStore.max_warehouses) || 0,
-        max_stores: Math.max(1, Number(remoteStore.max_stores) || 1),
+        warehouse_enabled: quota
+          ? quota.warehouse_enabled
+            ? 1
+            : 0
+          : remoteStore.warehouse_enabled
+            ? 1
+            : 0,
+        max_shops: quota?.max_shops ?? (Number(remoteStore.max_shops) || 1),
+        max_warehouses: quota?.max_warehouses ?? (Number(remoteStore.max_warehouses) || 0),
+        max_stores: quota?.max_stores ?? Math.max(1, Number(remoteStore.max_stores) || 1),
         ecommerce_enabled: remoteStore.ecommerce_enabled ? 1 : 0,
         ecommerce_slug: remoteStore.ecommerce_slug || localStore?.ecommerce_slug || '',
         ecommerce_tagline: remoteStore.ecommerce_tagline || localStore?.ecommerce_tagline || '',

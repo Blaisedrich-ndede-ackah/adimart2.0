@@ -207,12 +207,28 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
     if (!result.success) {
       setStatusMsg(result.error || 'Failed to save warehouse limits');
     } else {
+      const saved = result.limits;
+      setWarehouseDrafts((prev) => ({
+        ...prev,
+        [row.store.id]: {
+          warehouse_enabled: saved?.warehouse_enabled ?? draft.warehouse_enabled,
+          max_shops: saved?.max_shops ?? maxShops,
+          max_warehouses: saved?.max_warehouses ?? maxWarehouses,
+          max_stores: saved?.max_stores ?? maxStores,
+        },
+      }));
       setStatusMsg(
-        `Updated limits for ${row.store.name}: ${
-          draft.warehouse_enabled ? 'warehouse on' : 'warehouse off'
-        }, ${maxStores} store${maxStores === 1 ? '' : 's'}, ${maxShops} shop${
-          maxShops === 1 ? '' : 's'
-        }, ${maxWarehouses} warehouse${maxWarehouses === 1 ? '' : 's'}`
+        result.error
+          ? `Saved with warning: ${result.error}`
+          : `Updated limits for ${row.store.name}: ${
+              draft.warehouse_enabled ? 'warehouse on' : 'warehouse off'
+            }, ${saved?.max_stores ?? maxStores} store${
+              (saved?.max_stores ?? maxStores) === 1 ? '' : 's'
+            }, ${saved?.max_shops ?? maxShops} shop${
+              (saved?.max_shops ?? maxShops) === 1 ? '' : 's'
+            }, ${saved?.max_warehouses ?? maxWarehouses} warehouse${
+              (saved?.max_warehouses ?? maxWarehouses) === 1 ? '' : 's'
+            }`
       );
       await refresh();
     }

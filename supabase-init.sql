@@ -225,6 +225,25 @@ CREATE POLICY "locations_delete" ON locations FOR DELETE USING (true);
 CREATE INDEX IF NOT EXISTS idx_locations_store ON locations(store_id);
 
 -- ============================================================
+-- STORE QUOTAS (admin-managed caps — source of truth for limits)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS store_quotas (
+  store_id UUID PRIMARY KEY REFERENCES stores(id) ON DELETE CASCADE,
+  warehouse_enabled BOOLEAN DEFAULT FALSE,
+  max_shops INTEGER NOT NULL DEFAULT 1,
+  max_warehouses INTEGER NOT NULL DEFAULT 0,
+  max_stores INTEGER NOT NULL DEFAULT 1,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE store_quotas ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "store_quotas_select" ON store_quotas FOR SELECT USING (true);
+CREATE POLICY "store_quotas_insert" ON store_quotas FOR INSERT WITH CHECK (true);
+CREATE POLICY "store_quotas_update" ON store_quotas FOR UPDATE USING (true);
+CREATE POLICY "store_quotas_delete" ON store_quotas FOR DELETE USING (true);
+
+-- ============================================================
 -- STOCK BATCHES (expiry-tracked inventory per location)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS stock_batches (
