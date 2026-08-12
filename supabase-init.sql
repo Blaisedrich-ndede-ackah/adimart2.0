@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS stores (
   warehouse_enabled BOOLEAN DEFAULT FALSE,
   max_shops INTEGER DEFAULT 1,
   max_warehouses INTEGER DEFAULT 0,
+  /** How many business stores this owner may create (admin-managed) */
+  max_stores INTEGER DEFAULT 1,
   ecommerce_enabled BOOLEAN DEFAULT FALSE,
   ecommerce_slug VARCHAR(80) DEFAULT '',
   ecommerce_tagline TEXT DEFAULT '',
@@ -52,6 +54,7 @@ CREATE TABLE IF NOT EXISTS users (
   role VARCHAR(20) NOT NULL CHECK (role IN ('owner', 'cashier')),
   pin_hash VARCHAR(255) NOT NULL,
   is_active BOOLEAN DEFAULT TRUE,
+  phone VARCHAR(50) DEFAULT '',
   assigned_location_id UUID,
   can_wholesale BOOLEAN DEFAULT FALSE,
   can_sell_from_warehouse BOOLEAN DEFAULT FALSE,
@@ -69,6 +72,7 @@ CREATE POLICY "users_delete" ON users FOR DELETE USING (true);
 
 CREATE INDEX IF NOT EXISTS idx_users_store ON users(store_id);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
 
 -- ============================================================
 -- PRODUCTS TABLE (linked to stores)
@@ -205,6 +209,8 @@ CREATE TABLE IF NOT EXISTS locations (
   location_type VARCHAR(20) NOT NULL CHECK (location_type IN ('shop', 'warehouse')),
   is_default BOOLEAN DEFAULT FALSE,
   is_active BOOLEAN DEFAULT TRUE,
+  /** Optional PIN hash to open/manage this warehouse from Settings */
+  access_pin_hash TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -336,6 +342,7 @@ CREATE TABLE IF NOT EXISTS platform_settings (
   contact_email VARCHAR(255) DEFAULT '',
   mnotify_api_key TEXT DEFAULT '',
   mnotify_sender_id VARCHAR(11) DEFAULT 'Adimat',
+  admin_phone VARCHAR(50) DEFAULT '',
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 

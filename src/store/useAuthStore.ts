@@ -7,7 +7,9 @@ import {
   getCurrentStoreUsers,
   getCurrentStore,
   getCurrentStoreId,
-  hasAnyStore
+  hasAnyStore,
+  listLocalStores,
+  switchToStore,
 } from '@/lib/dexie';
 
 interface AuthState {
@@ -22,6 +24,9 @@ interface AuthState {
   login: (pin: string) => Promise<boolean>;
   logout: () => void;
   switchUser: () => void;
+  /** Switch active store and require a fresh login for that store. */
+  switchStore: (storeId: string) => Promise<void>;
+  listStores: () => Promise<LocalStore[]>;
   verifyOwnerPin: (pin: string) => Promise<boolean>;
   getAllUsers: () => Promise<LocalUser[]>;
   refreshStore: () => Promise<void>;
@@ -41,7 +46,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     
     const hasStore = await hasAnyStore();
     if (!hasStore) {
-      set({ isStoreSetup: false, isLoading: false });
+      set({ isStoreSetup: false, isLoading: false, currentStore: null });
       return;
     }
     
@@ -83,6 +88,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   switchUser: () => {
     set({ currentUser: null, isAuthenticated: false, loginError: '' });
   },
+
+  switchStore: async (storeId: string) => {
+    const store = await switchToStore(storeId);
+    set({
+      currentStore: store,
+      currentUser: null,
+      isAuthenticated: false,
+      isStoreSetup: true,
+      loginError: '',
+    });
+  },
+
+  listStores: async () => listLocalStores(),
 
   verifyOwnerPin: async (pin: string) => {
     return dbVerifyOwnerPin(pin);

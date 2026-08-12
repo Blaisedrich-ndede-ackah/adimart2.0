@@ -33,6 +33,8 @@ export interface LocalStore {
   warehouse_enabled?: number;
   max_shops?: number;
   max_warehouses?: number;
+  /** Admin-managed cap on how many business stores this owner may create */
+  max_stores?: number;
   /** Admin-granted public e-commerce storefront */
   ecommerce_enabled?: number;
   /** Public URL slug: #/shop/{slug} */
@@ -49,6 +51,8 @@ export interface LocalUser {
   role: 'owner' | 'cashier';
   pin_hash: string;
   is_active: number;
+  /** Ghana phone for SMS PIN reset / multi-store identity */
+  phone?: string;
   assigned_location_id?: string | null;
   can_wholesale?: number;
   can_sell_from_warehouse?: number;
@@ -157,6 +161,8 @@ export interface LocalLocation {
   location_type: 'shop' | 'warehouse';
   is_default: number;
   is_active: number;
+  /** PIN hash required to open/manage warehouse from Settings */
+  access_pin_hash?: string | null;
   created_at: string;
   updated_at: string;
   synced: number;
@@ -363,21 +369,41 @@ export async function hasAnyStore(): Promise<boolean> {
   return count > 0;
 }
 
+/** All stores present on this device (multi-store support). */
+export async function listLocalStores(): Promise<LocalStore[]> {
+  const stores = await db.stores.toArray();
+  stores.sort((a, b) => a.name.localeCompare(b.name));
+  return stores;
+}
+
+/**
+ * Switch the active store on this device. Caller should clear the logged-in user
+ * so staff sign in under the selected store.
+ */
+export async function switchToStore(storeId: string): Promise<LocalStore> {
+  const store = await db.stores.get(storeId);
+  if (!store) throw new Error('Store not found on this device');
+  await setCurrentStoreId(storeId);
+  return store;
+}
+
 // Create a new store with owner
 export async function createStoreWithOwner(
   storeName: string,
   ownerName: string,
-  ownerPin: string
+  ownerPin: string,
+  profile?: { address?: string; supportNumber?: string; ownerPhone?: string }
 ): Promise<{ store: LocalStore; owner: LocalUser }> {
   const storeId = generateId();
   const ownerId = generateId();
   const now = new Date().toISOString();
+  const ownerPhone = (profile?.ownerPhone || profile?.supportNumber || '').trim();
 
   const store: LocalStore = {
     id: storeId,
     name: storeName,
-    address: '',
-    support_number: '',
+    address: (profile?.address || '').trim(),
+    support_number: (profile?.supportNumber || '').trim(),
     discount_cap_percentage: 10,
     pin_on_discount_enabled: 1,
     discount_allow_percentage: 1,
@@ -393,6 +419,7 @@ export async function createStoreWithOwner(
     warehouse_enabled: 0,
     max_shops: 1,
     max_warehouses: 0,
+    max_stores: 1,
     ecommerce_enabled: 0,
     ecommerce_slug: '',
     ecommerce_tagline: '',
@@ -407,6 +434,7 @@ export async function createStoreWithOwner(
     role: 'owner',
     pin_hash: hashPin(ownerPin),
     is_active: 1,
+    phone: ownerPhone,
     assigned_location_id: null,
     can_wholesale: 1,
     can_sell_from_warehouse: 1,
@@ -420,6 +448,90 @@ export async function createStoreWithOwner(
   await setCurrentStoreId(storeId);
 
   return { store, owner };
+}
+
+/**
+ * How many business stores this owner may create, based on admin max_stores
+ * across stores they already own (matched by owner phone when available).
+ */
+export async function getAdditionalStoreQuota(ownerPhone?: string): Promise<{
+  ownedCount: number;
+  maxStores: number;
+  canCreate: boolean;
+}> {
+  const { normalizeGhanaPhone } = await import('./platformSettings');
+  const phone = ownerPhone ? normalizeGhanaPhone(ownerPhone) : '';
+  const localStores = await listLocalStores();
+  const ownedStoreIds = new Set<string>(localStores.map((s) => s.id));
+
+  if (phone) {
+    const localOwners = await db.users
+      .filter((u) => u.role === 'owner' && u.is_active === 1)
+      .toArray();
+    for (const owner of localOwners) {
+      const ownerPhoneNorm = owner.phone ? normalizeGhanaPhone(owner.phone) : '';
+      if (ownerPhoneNorm && ownerPhoneNorm === phone) {
+        ownedStoreIds.add(owner.store_id);
+      }
+    }
+
+    if (isSupabaseConfigured()) {
+      try {
+        const { data } = await supabase
+          .from('users')
+          .select('store_id, phone')
+          .eq('role', 'owner')
+          .eq('is_active', true);
+        for (const row of data || []) {
+          const rowPhone = row.phone ? normalizeGhanaPhone(String(row.phone)) : '';
+          if (rowPhone && rowPhone === phone && row.store_id) {
+            ownedStoreIds.add(String(row.store_id));
+          }
+        }
+      } catch {
+        // Offline / schema — fall back to local count
+      }
+    }
+  }
+
+  let maxStores = 1;
+  for (const storeId of ownedStoreIds) {
+    const local = await db.stores.get(storeId);
+    if (local) {
+      maxStores = Math.max(maxStores, local.max_stores ?? 1);
+      continue;
+    }
+    if (isSupabaseConfigured()) {
+      try {
+        const { data } = await supabase
+          .from('stores')
+          .select('max_stores')
+          .eq('id', storeId)
+          .maybeSingle();
+        if (data) {
+          maxStores = Math.max(maxStores, Math.max(1, Number(data.max_stores) || 1));
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  const ownedCount = ownedStoreIds.size;
+  return {
+    ownedCount,
+    maxStores,
+    canCreate: ownedCount < maxStores,
+  };
+}
+
+export async function assertCanCreateAdditionalStore(ownerPhone?: string): Promise<void> {
+  const quota = await getAdditionalStoreQuota(ownerPhone);
+  if (!quota.canCreate) {
+    throw new Error(
+      `Store limit reached (${quota.ownedCount}/${quota.maxStores}). Ask your administrator to allow more stores.`
+    );
+  }
 }
 
 // Get active users for a store
@@ -487,7 +599,8 @@ export async function verifyOwnerPin(pin: string): Promise<boolean> {
 export async function addUserToStore(
   name: string,
   pin: string,
-  role: 'owner' | 'cashier'
+  role: 'owner' | 'cashier',
+  phone = ''
 ): Promise<LocalUser> {
   const storeId = await getCurrentStoreId();
   if (!storeId) throw new Error('No store selected');
@@ -499,6 +612,7 @@ export async function addUserToStore(
     role,
     pin_hash: hashPin(pin),
     is_active: 1,
+    phone: phone.trim(),
     assigned_location_id: null,
     can_wholesale: role === 'owner' ? 1 : 0,
     can_sell_from_warehouse: role === 'owner' ? 1 : 0,
@@ -509,6 +623,16 @@ export async function addUserToStore(
   
   await db.users.add(user);
   return user;
+}
+
+export async function updateUserPin(userId: string, newPin: string): Promise<void> {
+  await db.users.update(userId, {
+    pin_hash: hashPin(newPin),
+    synced: 0,
+  });
+  if (isSupabaseConfigured()) {
+    await supabase.from('users').update({ pin_hash: hashPin(newPin) }).eq('id', userId);
+  }
 }
 
 // Block a cashier (can log in, but app shows a restricted contact-owner screen)
@@ -887,6 +1011,7 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
           warehouse_enabled: (store.warehouse_enabled ?? 0) === 1,
           max_shops: store.max_shops ?? 1,
           max_warehouses: store.max_warehouses ?? 0,
+          max_stores: store.max_stores ?? 1,
           ecommerce_enabled: (store.ecommerce_enabled ?? 0) === 1,
           ecommerce_slug: store.ecommerce_slug || '',
           ecommerce_tagline: store.ecommerce_tagline || '',
@@ -908,6 +1033,7 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         role: u.role,
         pin_hash: u.pin_hash,
         is_active: u.is_active === 1,
+        phone: u.phone || '',
         assigned_location_id: u.assigned_location_id || null,
         can_wholesale: (u.can_wholesale ?? 0) === 1,
         can_sell_from_warehouse: (u.can_sell_from_warehouse ?? 0) === 1,
@@ -1024,6 +1150,7 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         location_type: l.location_type,
         is_default: l.is_default === 1,
         is_active: l.is_active === 1,
+        access_pin_hash: l.access_pin_hash || null,
         created_at: l.created_at,
         updated_at: l.updated_at,
       })),
@@ -1192,6 +1319,7 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
         warehouse_enabled: remoteStore.warehouse_enabled ? 1 : 0,
         max_shops: Number(remoteStore.max_shops) || 1,
         max_warehouses: Number(remoteStore.max_warehouses) || 0,
+        max_stores: Math.max(1, Number(remoteStore.max_stores) || 1),
         ecommerce_enabled: remoteStore.ecommerce_enabled ? 1 : 0,
         ecommerce_slug: remoteStore.ecommerce_slug || localStore?.ecommerce_slug || '',
         ecommerce_tagline: remoteStore.ecommerce_tagline || localStore?.ecommerce_tagline || '',
@@ -1212,6 +1340,7 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
           role: row.role as 'owner' | 'cashier',
           pin_hash: row.pin_hash as string,
           is_active: row.is_active ? 1 : 0,
+          phone: String(row.phone || ''),
           assigned_location_id: (row.assigned_location_id as string) || null,
           can_wholesale: row.can_wholesale ? 1 : 0,
           can_sell_from_warehouse: row.can_sell_from_warehouse ? 1 : 0,
@@ -1339,6 +1468,7 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
           location_type: (row.location_type as 'shop' | 'warehouse') || 'shop',
           is_default: row.is_default ? 1 : 0,
           is_active: row.is_active === false ? 0 : 1,
+          access_pin_hash: (row.access_pin_hash as string) || null,
           created_at: row.created_at as string,
           updated_at: (row.updated_at as string) || (row.created_at as string),
           synced: 1,
@@ -1614,6 +1744,67 @@ export async function restoreStoreFromCloud(
   return {
     success: true,
     message: `Restored "${remoteStore.name}" from cloud. ${pull.message}`,
+  };
+}
+
+/**
+ * Add / refresh another cloud store on this device without wiping existing stores.
+ * Verifies owner PIN, pulls that store's data, and switches to it.
+ */
+export async function addStoreFromCloud(
+  storeId: string,
+  ownerPin: string
+): Promise<{ success: boolean; message: string }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, message: 'Supabase not configured.' };
+  }
+
+  const connection = await testSupabaseConnection();
+  if (!connection.ok) {
+    return { success: false, message: connection.error || 'Could not connect to Supabase.' };
+  }
+
+  const cleanId = storeId.trim();
+  if (!cleanId) {
+    return { success: false, message: 'Enter a Store ID.' };
+  }
+
+  const { data: remoteStore, error: storeError } = await supabase
+    .from('stores')
+    .select('*')
+    .eq('id', cleanId)
+    .maybeSingle();
+
+  if (storeError || !remoteStore) {
+    return { success: false, message: 'Store not found in cloud. Check your Store ID.' };
+  }
+
+  const { data: owners, error: ownerError } = await supabase
+    .from('users')
+    .select('*')
+    .eq('store_id', cleanId)
+    .eq('role', 'owner')
+    .eq('is_active', true);
+
+  if (ownerError || !owners?.length) {
+    return { success: false, message: 'No owner account found for this store.' };
+  }
+
+  const pinHash = hashPin(ownerPin);
+  const ownerMatch = owners.find((o) => o.pin_hash === pinHash);
+  if (!ownerMatch) {
+    return { success: false, message: 'Invalid owner PIN for this store.' };
+  }
+
+  await setCurrentStoreId(cleanId);
+  const pull = await syncFromSupabase();
+  if (!pull.success) {
+    return { success: false, message: pull.message };
+  }
+
+  return {
+    success: true,
+    message: `Opened "${remoteStore.name}" on this device. ${pull.message}`,
   };
 }
 

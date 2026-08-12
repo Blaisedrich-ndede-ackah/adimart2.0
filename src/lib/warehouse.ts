@@ -1,6 +1,7 @@
 import {
   db,
   generateId,
+  hashPin,
   type LocalLocation,
   type LocalProduct,
   type LocalStockBatch,
@@ -111,6 +112,7 @@ export async function createLocation(params: {
   storeId: string;
   name: string;
   locationType: 'shop' | 'warehouse';
+  accessPin?: string;
 }): Promise<LocalLocation> {
   const store = await db.stores.get(params.storeId);
   if (!store) throw new Error('Store not found');
@@ -126,10 +128,13 @@ export async function createLocation(params: {
 
   if (params.locationType === 'warehouse') {
     if ((store.warehouse_enabled ?? 0) !== 1) {
-      throw new Error('Warehouse feature is not enabled for this store');
+      throw new Error('Warehouse not enabled — contact administrator');
     }
     if (activeOfType.length >= maxWarehouses) {
-      throw new Error(`Maximum warehouses reached (${maxWarehouses})`);
+      throw new Error(`Maximum warehouses reached (${maxWarehouses}). Ask admin to raise your limit.`);
+    }
+    if (!params.accessPin || params.accessPin.length !== 4) {
+      throw new Error('Create a 4-digit PIN to open and manage this warehouse');
     }
   } else if (activeOfType.length >= maxShops) {
     throw new Error(`Maximum shops reached (${maxShops})`);
@@ -143,12 +148,50 @@ export async function createLocation(params: {
     location_type: params.locationType,
     is_default: 0,
     is_active: 1,
+    access_pin_hash:
+      params.locationType === 'warehouse' && params.accessPin
+        ? hashPin(params.accessPin)
+        : null,
     created_at: now,
     updated_at: now,
     synced: 0,
   };
   await db.locations.add(location);
   return location;
+}
+
+export async function setLocationAccessPin(
+  locationId: string,
+  pin: string
+): Promise<void> {
+  if (!/^\d{4}$/.test(pin)) {
+    throw new Error('PIN must be 4 digits');
+  }
+  const location = await db.locations.get(locationId);
+  if (!location) throw new Error('Location not found');
+  if (location.location_type !== 'warehouse') {
+    throw new Error('Only warehouses use an access PIN');
+  }
+  const now = nowIso();
+  await db.locations.update(locationId, {
+    access_pin_hash: hashPin(pin),
+    updated_at: now,
+    synced: 0,
+  });
+}
+
+export async function verifyLocationAccessPin(
+  locationId: string,
+  pin: string
+): Promise<boolean> {
+  const location = await db.locations.get(locationId);
+  if (!location?.access_pin_hash) return false;
+  return location.access_pin_hash === hashPin(pin);
+}
+
+export async function locationHasAccessPin(locationId: string): Promise<boolean> {
+  const location = await db.locations.get(locationId);
+  return Boolean(location?.access_pin_hash);
 }
 
 export async function getLocationStock(productId: string, locationId: string): Promise<number> {

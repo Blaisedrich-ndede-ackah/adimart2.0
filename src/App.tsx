@@ -155,7 +155,11 @@ export default function App() {
       case 'inventory':
         return role === 'owner' ? <InventoryPage /> : <POSPage />;
       case 'warehouse':
-        return role === 'owner' ? <WarehousePage /> : <POSPage />;
+        return role === 'owner' ? (
+          <WarehousePage onBackToSettings={() => setCurrentPage('settings')} />
+        ) : (
+          <POSPage />
+        );
       case 'ecommerce':
         return role === 'owner' || (currentUser?.can_manage_ecommerce ?? 0) === 1
           ? <EcommercePage />
@@ -163,7 +167,11 @@ export default function App() {
       case 'reports':
         return role === 'owner' ? <ReportsPage /> : <POSPage />;
       case 'settings':
-        return role === 'owner' ? <SettingsPage /> : <POSPage />;
+        return role === 'owner' ? (
+          <SettingsPage onNavigate={setCurrentPage} />
+        ) : (
+          <POSPage />
+        );
       default:
         return <POSPage />;
     }

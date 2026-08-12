@@ -96,7 +96,8 @@ VITE_PAYSTACK_PUBLIC_KEY=pk_live_your-public-key
 # Administrator portal PIN (platform-wide)
 VITE_ADMIN_PIN=9999
 
-# Optional mNotify SMS fallbacks (prefer Admin → Contact in the portal)
+# Optional admin phone for SMS login OTP (also configurable in Admin → Contact)
+# VITE_ADMIN_PHONE=024XXXXXXX
 # VITE_MNOTIFY_API_KEY=
 # VITE_MNOTIFY_SENDER_ID=Adimat
 ```
@@ -131,6 +132,7 @@ Reports overview includes a donut chart for **Cost price** (blue), **Selling pri
 Products support pack size, expiry tracking, and owner-defined wholesale pricing (`pack`, lower unit price, or quantity tiers). POS sells **retail or wholesale** from the cashier’s location (warehouse sales only if permitted). Stock deducts with **FEFO** when batches have expiry dates.
 
 If your Supabase project predates this feature, run `supabase-migrate-warehouse.sql` in the SQL Editor.
+For store quotas + warehouse PINs, also run `supabase-migrate-max-stores-warehouse-pin.sql`.
 
 ### E-commerce storefront
 
@@ -148,26 +150,32 @@ Store owners set their preferred MoMo account under **Settings → Mobile Money 
 
 If your Supabase project was created before these features, run `supabase-migrate-admin.sql`, `supabase-migrate-subscriptions.sql`, and `supabase-migrate-platform-settings.sql` in the SQL Editor (or re-apply the latest `supabase-init.sql`).
 
-### First-Time Setup
+### Multi-store on one device
 
-On first launch, you'll be guided through a setup wizard:
+Store owners can keep **multiple stores** on the same phone/tablet:
 
-1. **Enter your store name** (e.g., "Kofi's Mini Mart")
-2. **Create owner account** with your name and a 4-digit PIN
-3. You're ready to go!
+1. **Settings → My Stores** — create another store or open one from cloud (Store ID + owner PIN) without wiping existing stores  
+2. **Login store picker** — when more than one store is on the device, choose which store to open, then enter that store’s PIN  
+3. After opening a store, **Inventory** and **Settings → Staff** apply only to that store  
+
+Platform admins can also **Admin → Stores → tap a store** to view that store’s inventory and manage its staff in the portal.
+
+
+1. **Enter store profile** — name, address, and support phone (all required)
+2. **Create owner account** with your name and a 4-digit PIN you choose
+3. You're ready to go — sign in with the PIN you created
 
 Each store has its own isolated data - products, users, and transactions are all scoped to your store.
 
 ### Setting Up Your Store
 
-1. Login with the default PIN (1234)
-2. Go to **Settings**
-3. Fill in your store profile (name, address, phone)
-4. Configure discount controls
-5. Add staff members with their own PINs
-6. Optionally set up biometric login
-7. Connect a Bluetooth thermal printer
-8. Go to **Inventory** and add your products
+1. Login with the owner PIN you created at setup
+2. Go to **Settings** (store name, address, and phone remain required)
+3. Configure discount controls
+4. Add staff members with their own PINs
+5. Optionally set up biometric login
+6. Connect a Bluetooth thermal printer under **Devices** / **More**
+7. Go to **Inventory** and add your products
 
 ## Database Setup (Supabase)
 

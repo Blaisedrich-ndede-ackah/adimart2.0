@@ -27,9 +27,16 @@ import { isAutoSyncEnabled, setAutoSyncEnabled, startAutoSync, stopAutoSync } fr
 import { useAuthStore } from '@/store/useAuthStore';
 import { isBiometricAvailable, registerBiometric, hasBiometricRegistered, clearBiometricRegistration } from '@/lib/biometric';
 import { isSupabaseConfigured } from '@/lib/supabase';
+import { isValidGhanaPhone } from '@/lib/platformSettings';
 import { fileToStoreLogoDataUrl, hasStoreLogo } from '@/lib/productImage';
+import StoresPortalSection from '@/components/StoresPortalSection';
+import WarehousePortalSection from '@/components/WarehousePortalSection';
 
-export default function SettingsPage() {
+interface SettingsPageProps {
+  onNavigate?: (page: string) => void;
+}
+
+export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const { currentUser, currentStore, refreshStore } = useAuthStore();
   const logoInputRef = useRef<HTMLInputElement>(null);
   
@@ -61,6 +68,7 @@ export default function SettingsPage() {
   const [users, setUsers] = useState<LocalUser[]>([]);
   const [showAddUser, setShowAddUser] = useState(false);
   const [newUserName, setNewUserName] = useState('');
+  const [newUserPhone, setNewUserPhone] = useState('');
   const [newUserPin, setNewUserPin] = useState('');
   const [newUserRole, setNewUserRole] = useState<'cashier' | 'owner'>('cashier');
   const [addUserError, setAddUserError] = useState('');
@@ -120,6 +128,26 @@ export default function SettingsPage() {
     setSaveSuccess(false);
     
     try {
+      if (!storeName.trim()) {
+        setSaveError('Store name is required.');
+        setSaving(false);
+        return;
+      }
+      if (!storeAddress.trim()) {
+        setSaveError('Store address is required.');
+        setSaving(false);
+        return;
+      }
+      if (!supportNumber.trim()) {
+        setSaveError('Support phone number is required.');
+        setSaving(false);
+        return;
+      }
+      if (!isValidGhanaPhone(supportNumber)) {
+        setSaveError('Enter a valid Ghana phone number (e.g. 024XXXXXXX or +23324XXXXXXX).');
+        setSaving(false);
+        return;
+      }
       if (!allowPercentage && !allowFixed) {
         setSaveError('Enable at least one discount type (percentage or fixed).');
         setSaving(false);
@@ -221,14 +249,19 @@ export default function SettingsPage() {
       setAddUserError('Name is required');
       return;
     }
+    if (!isValidGhanaPhone(newUserPhone)) {
+      setAddUserError('Valid Ghana phone is required for PIN reset');
+      return;
+    }
     if (newUserPin.length !== 4) {
       setAddUserError('PIN must be 4 digits');
       return;
     }
 
     try {
-      await addUserToStore(newUserName.trim(), newUserPin, newUserRole);
+      await addUserToStore(newUserName.trim(), newUserPin, newUserRole, newUserPhone.trim());
       setNewUserName('');
+      setNewUserPhone('');
       setNewUserPin('');
       setShowAddUser(false);
       
@@ -273,6 +306,7 @@ export default function SettingsPage() {
         | 'can_wholesale'
         | 'can_sell_from_warehouse'
         | 'can_manage_ecommerce'
+        | 'phone'
       >
     >
   ) => {
@@ -324,6 +358,13 @@ export default function SettingsPage() {
       </div>
 
       <div className="page-body no-scrollbar">
+        <StoresPortalSection />
+        <WarehousePortalSection
+          onOpenWarehouse={() => {
+            onNavigate?.('warehouse');
+          }}
+        />
+
         {/* Store Profile */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">
           <div className="flex items-center gap-2 mb-4">
@@ -378,7 +419,7 @@ export default function SettingsPage() {
               />
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-600 mb-1 block">Store Name</label>
+              <label className="text-xs font-medium text-gray-600 mb-1 block">Store Name *</label>
               <input
                 type="text"
                 value={storeName}
@@ -388,7 +429,7 @@ export default function SettingsPage() {
               />
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-600 mb-1 block">Address</label>
+              <label className="text-xs font-medium text-gray-600 mb-1 block">Address *</label>
               <input
                 type="text"
                 value={storeAddress}
@@ -398,12 +439,12 @@ export default function SettingsPage() {
               />
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-600 mb-1 block">Support Phone</label>
+              <label className="text-xs font-medium text-gray-600 mb-1 block">Support Phone *</label>
               <input
                 type="tel"
                 value={supportNumber}
                 onChange={e => setSupportNumber(e.target.value)}
-                placeholder="+233 XX XXX XXXX"
+                placeholder="024 XXX XXXX or +23324XXXXXXX"
                 className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary focus:border-primary"
               />
             </div>
@@ -645,7 +686,14 @@ export default function SettingsPage() {
                 type="text"
                 value={newUserName}
                 onChange={e => setNewUserName(e.target.value)}
-                placeholder="Staff name"
+                placeholder="Staff name *"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
+              />
+              <input
+                type="tel"
+                value={newUserPhone}
+                onChange={e => setNewUserPhone(e.target.value)}
+                placeholder="Phone * (024…) — for PIN reset"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
               />
               <input
@@ -654,7 +702,7 @@ export default function SettingsPage() {
                 maxLength={4}
                 value={newUserPin}
                 onChange={e => setNewUserPin(e.target.value.replace(/\D/g, ''))}
-                placeholder="4-digit PIN"
+                placeholder="4-digit PIN *"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
               />
               <select
@@ -696,6 +744,7 @@ export default function SettingsPage() {
                       </p>
                       <p className="text-xs text-gray-500 capitalize">
                         {user.role}
+                        {user.phone ? ` · ${user.phone}` : ' · no phone'}
                         {user.role === 'cashier' && (user.can_wholesale === 1 ? ' · wholesale' : '')}
                         {user.role === 'cashier' && (user.can_sell_from_warehouse === 1 ? ' · warehouse sales' : '')}
                         {user.role === 'cashier' && (user.can_manage_ecommerce === 1 ? ' · online shop' : '')}
@@ -752,6 +801,23 @@ export default function SettingsPage() {
                   </div>
                   {permUserId === user.id && user.role === 'cashier' && (
                     <div className="mt-2 bg-slate-50 rounded-xl p-3 space-y-2 text-xs">
+                      <div>
+                        <label className="text-gray-500 font-medium block mb-1">Phone (PIN reset)</label>
+                        <input
+                          type="tel"
+                          defaultValue={user.phone || ''}
+                          onBlur={(e) => {
+                            const value = e.target.value.trim();
+                            if (value && !isValidGhanaPhone(value)) {
+                              alert('Enter a valid Ghana phone number');
+                              return;
+                            }
+                            void updateCashierPerms(user, { phone: value });
+                          }}
+                          placeholder="024 XXX XXXX"
+                          className="w-full px-2 py-2 border border-gray-200 rounded-lg bg-white"
+                        />
+                      </div>
                       <div>
                         <label className="text-gray-500 font-medium block mb-1">Assigned location</label>
                         <select
@@ -837,7 +903,9 @@ export default function SettingsPage() {
 
           {storeId && (
             <div className="bg-gray-50 rounded-lg p-3 mb-3">
-              <p className="text-[10px] text-gray-500 mb-1">Store ID (for restore on new device)</p>
+              <p className="text-[10px] text-gray-500 mb-1">
+                Store ID (open this store on another device via My Stores / Restore)
+              </p>
               <p className="text-xs font-mono text-gray-800 break-all">{storeId}</p>
             </div>
           )}

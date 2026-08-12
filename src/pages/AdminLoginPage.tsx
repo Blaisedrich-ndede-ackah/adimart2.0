@@ -1,6 +1,13 @@
 import { useState } from 'react';
 import { Shield, ArrowLeft, Loader2 } from 'lucide-react';
-import { verifyAdminPin, startAdminSession, getConfiguredAdminPin } from '@/lib/adminAuth';
+import {
+  verifyAdminPin,
+  startAdminSession,
+  getConfiguredAdminPin,
+  beginAdminSmsChallenge,
+  verifyAdminSmsOtp,
+  clearAdminSmsChallenge,
+} from '@/lib/adminAuth';
 import { isSupabaseConfigured } from '@/lib/supabase';
 
 interface AdminLoginPageProps {
@@ -8,16 +15,29 @@ interface AdminLoginPageProps {
   onBack: () => void;
 }
 
+type Step = 'pin' | 'otp';
+
 export default function AdminLoginPage({ onSuccess, onBack }: AdminLoginPageProps) {
+  const [step, setStep] = useState<Step>('pin');
   const [pin, setPin] = useState('');
+  const [otp, setOtp] = useState('');
+  const [maskedPhone, setMaskedPhone] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const pinLength = Math.min(8, Math.max(4, getConfiguredAdminPin().length));
+  const activeValue = step === 'pin' ? pin : otp;
+  const activeLen = step === 'pin' ? pinLength : 4;
 
-  const submit = async (value: string) => {
+  const finishLogin = () => {
+    startAdminSession();
+    setLoading(false);
+    onSuccess();
+  };
+
+  const submitPin = async (value: string) => {
     setLoading(true);
     setError('');
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 150));
 
     if (!verifyAdminPin(value)) {
       setError('Invalid administrator PIN');
@@ -32,79 +52,167 @@ export default function AdminLoginPage({ onSuccess, onBack }: AdminLoginPageProp
       return;
     }
 
-    startAdminSession();
+    const challenge = await beginAdminSmsChallenge();
+    if (!challenge.success) {
+      setError(challenge.error || 'Could not send SMS code');
+      setLoading(false);
+      return;
+    }
+
+    setMaskedPhone(challenge.maskedPhone || '');
+    setStep('otp');
+    setOtp('');
     setLoading(false);
-    onSuccess();
+  };
+
+  const submitOtp = async (value: string) => {
+    setLoading(true);
+    setError('');
+    const result = verifyAdminSmsOtp(value);
+    if (!result.success) {
+      setError(result.error || 'Invalid code');
+      setOtp('');
+      setLoading(false);
+      if (result.error?.includes('expired')) {
+        setStep('pin');
+        setPin('');
+      }
+      return;
+    }
+    finishLogin();
   };
 
   const onKey = (key: string) => {
     if (loading) return;
     setError('');
     if (key === 'del') {
-      setPin((p) => p.slice(0, -1));
+      if (step === 'pin') setPin((p) => p.slice(0, -1));
+      else setOtp((p) => p.slice(0, -1));
       return;
     }
-    const next = (pin + key).slice(0, pinLength);
-    setPin(next);
-    if (next.length === pinLength) {
-      void submit(next);
+    if (step === 'pin') {
+      const next = (pin + key).slice(0, pinLength);
+      setPin(next);
+      if (next.length === pinLength) void submitPin(next);
+    } else {
+      const next = (otp + key).slice(0, 4);
+      setOtp(next);
+      if (next.length === 4) void submitOtp(next);
     }
+  };
+
+  const resendOtp = async () => {
+    setLoading(true);
+    setError('');
+    const challenge = await beginAdminSmsChallenge();
+    if (!challenge.success) {
+      setError(challenge.error || 'Could not resend code');
+    } else {
+      setMaskedPhone(challenge.maskedPhone || '');
+      setOtp('');
+    }
+    setLoading(false);
   };
 
   return (
     <div className="auth-shell">
-      <div className="w-full max-w-md">
+      <div className="w-full max-w-md px-1">
         <button
-          onClick={onBack}
-          className="flex items-center gap-2 text-emerald-100 text-sm touch-target mb-8"
+          onClick={() => {
+            clearAdminSmsChallenge();
+            onBack();
+          }}
+          className="flex items-center gap-2 text-emerald-100 text-sm touch-target mb-6"
         >
           <ArrowLeft className="w-4 h-4" />
           Back to store login
         </button>
 
         <div className="flex flex-col items-center">
-        <div className="w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-white/15 flex items-center justify-center mb-4 border border-white/20">
-          <Shield className="w-8 h-8 text-emerald-100" />
-        </div>
-        <h1 className="text-white text-3xl font-bold tracking-tight">Administrator</h1>
-        <p className="text-emerald-100/80 text-sm text-center mt-2 max-w-xs">
-          View all stores, sales, and weekly Paystack remittances.
-        </p>
+          <div className="w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-white/15 flex items-center justify-center mb-4 border border-white/20">
+            <Shield className="w-8 h-8 text-emerald-100" />
+          </div>
+          <h1 className="text-white text-2xl md:text-3xl font-bold tracking-tight text-center">
+            {step === 'pin' ? 'Administrator' : 'SMS verification'}
+          </h1>
+          <p className="text-emerald-100/80 text-sm text-center mt-2 max-w-xs">
+            {step === 'pin'
+              ? 'Enter your admin PIN, then confirm with an SMS code.'
+              : `Enter the 4-digit code sent to ${maskedPhone || 'your admin phone'}.`}
+          </p>
 
-        <div className="mt-8 mb-4 tracking-[0.5em] text-2xl font-mono text-white min-h-[2rem]">
-          {loading ? (
-            <Loader2 className="w-6 h-6 animate-spin text-emerald-400 mx-auto" />
-          ) : (
-            '•'.repeat(pin.length) || <span className="text-slate-600 tracking-normal text-sm">Enter admin PIN</span>
+          <div className="mt-6 mb-2 flex gap-2">
+            <span className={`h-1.5 w-10 rounded-full ${step === 'pin' ? 'bg-white' : 'bg-white/30'}`} />
+            <span className={`h-1.5 w-10 rounded-full ${step === 'otp' ? 'bg-white' : 'bg-white/30'}`} />
+          </div>
+
+          <div className="mt-4 mb-4 tracking-[0.5em] text-2xl font-mono text-white min-h-[2rem]">
+            {loading ? (
+              <Loader2 className="w-6 h-6 animate-spin text-emerald-400 mx-auto" />
+            ) : (
+              '•'.repeat(activeValue.length) || (
+                <span className="text-emerald-200/60 tracking-normal text-sm">
+                  {step === 'pin' ? 'Enter admin PIN' : 'Enter SMS code'}
+                </span>
+              )
+            )}
+          </div>
+
+          {error && (
+            <p className="text-red-300 text-xs text-center mb-4 max-w-sm px-2">{error}</p>
           )}
-        </div>
 
-        {error && (
-          <p className="text-red-400 text-xs text-center mb-4 max-w-sm">{error}</p>
-        )}
+          <div className="grid grid-cols-3 gap-2.5 sm:gap-3 w-full max-w-xs">
+            {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'del', '0', 'go'].map((key) => (
+              <button
+                key={key}
+                disabled={loading}
+                onClick={() => {
+                  if (key === 'go') {
+                    if (step === 'pin' && pin.length >= 4) void submitPin(pin);
+                    if (step === 'otp' && otp.length === 4) void submitOtp(otp);
+                    return;
+                  }
+                  onKey(key);
+                }}
+                className="h-14 sm:h-16 rounded-2xl bg-white/15 text-white text-xl font-semibold active:bg-white/25 disabled:opacity-50 touch-target"
+              >
+                {key === 'del' ? '⌫' : key === 'go' ? '→' : key}
+              </button>
+            ))}
+          </div>
 
-        <div className="grid grid-cols-3 gap-3 w-full max-w-xs">
-          {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'del', '0', 'go'].map((key) => (
-            <button
-              key={key}
-              disabled={loading}
-              onClick={() => {
-                if (key === 'go') {
-                  if (pin.length >= 4) void submit(pin);
-                  return;
-                }
-                onKey(key);
-              }}
-              className="h-14 md:h-16 rounded-2xl bg-white/15 text-white text-xl font-semibold active:bg-white/25 disabled:opacity-50"
-            >
-              {key === 'del' ? '⌫' : key === 'go' ? '→' : key}
-            </button>
-          ))}
-        </div>
+          {step === 'otp' && (
+            <div className="mt-5 flex flex-col items-center gap-2">
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => void resendOtp()}
+                className="text-emerald-100 text-xs font-semibold touch-target"
+              >
+                Resend SMS code
+              </button>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  clearAdminSmsChallenge();
+                  setStep('pin');
+                  setPin('');
+                  setOtp('');
+                  setError('');
+                }}
+                className="text-emerald-200/80 text-xs touch-target"
+              >
+                Back to PIN
+              </button>
+            </div>
+          )}
 
-        <p className="text-emerald-200/70 text-[11px] text-center mt-6 max-w-sm">
-          Set <code className="text-emerald-100">VITE_ADMIN_PIN</code> in your environment. Stores must sync to Supabase to appear here.
-        </p>
+          <p className="text-emerald-200/70 text-[11px] text-center mt-6 max-w-sm px-2">
+            Set <code className="text-emerald-100">VITE_ADMIN_PIN</code> and admin phone in Contact
+            (or <code className="text-emerald-100">VITE_ADMIN_PHONE</code>).
+          </p>
         </div>
       </div>
     </div>

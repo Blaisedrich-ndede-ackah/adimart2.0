@@ -4,7 +4,7 @@
  */
 
 import { isSupabaseConfigured, supabase } from './supabase';
-import { generateId } from './dexie';
+import { generateId, hashPin } from './dexie';
 import {
   addMonthsIso,
   getSubscriptionInfo,
@@ -27,6 +27,8 @@ export interface AdminStoreRow {
   warehouse_enabled: boolean;
   max_shops: number;
   max_warehouses: number;
+  /** Admin-managed cap on how many business stores the owner may create */
+  max_stores: number;
   /** Admin-managed public e-commerce storefront */
   ecommerce_enabled: boolean;
   ecommerce_slug: string;
@@ -65,6 +67,7 @@ export interface AdminUserRow {
   name: string;
   role: 'owner' | 'cashier';
   is_active: boolean;
+  phone: string;
   created_at: string;
 }
 
@@ -239,6 +242,7 @@ export async function loadAdminDashboard(weekStart = getWeekStart()): Promise<Ad
     ecommerce_slug: String(s.ecommerce_slug || ''),
     max_shops: Math.max(1, Number(s.max_shops) || 1),
     max_warehouses: Math.max(0, Number(s.max_warehouses) || 0),
+    max_stores: Math.max(1, Number(s.max_stores) || 1),
     created_at: String(s.created_at || ''),
   }));
 
@@ -248,6 +252,7 @@ export async function loadAdminDashboard(weekStart = getWeekStart()): Promise<Ad
     name: String(u.name || ''),
     role: (u.role === 'cashier' ? 'cashier' : 'owner') as 'owner' | 'cashier',
     is_active: Boolean(u.is_active),
+    phone: String(u.phone || ''),
     created_at: String(u.created_at || ''),
   }));
 
@@ -496,6 +501,7 @@ export async function updateStoreWarehouseLimits(
     warehouse_enabled: boolean;
     max_shops: number;
     max_warehouses: number;
+    max_stores: number;
   }
 ): Promise<{ success: boolean; error?: string }> {
   if (!isSupabaseConfigured()) {
@@ -504,12 +510,16 @@ export async function updateStoreWarehouseLimits(
 
   const maxShops = Math.floor(Number(limits.max_shops));
   const maxWarehouses = Math.floor(Number(limits.max_warehouses));
+  const maxStores = Math.floor(Number(limits.max_stores));
 
   if (!Number.isFinite(maxShops) || maxShops < 1) {
     return { success: false, error: 'Max shops must be at least 1' };
   }
   if (!Number.isFinite(maxWarehouses) || maxWarehouses < 0) {
     return { success: false, error: 'Max warehouses must be 0 or more' };
+  }
+  if (!Number.isFinite(maxStores) || maxStores < 1) {
+    return { success: false, error: 'Max stores must be at least 1' };
   }
 
   const { error } = await supabase
@@ -518,15 +528,20 @@ export async function updateStoreWarehouseLimits(
       warehouse_enabled: Boolean(limits.warehouse_enabled),
       max_shops: maxShops,
       max_warehouses: maxWarehouses,
+      max_stores: maxStores,
     })
     .eq('id', storeId);
 
   if (error) {
     return {
       success: false,
-      error: error.message.includes('warehouse_') || error.message.includes('max_shops') || error.message.includes('max_warehouses')
-        ? `${error.message} — run supabase-migrate-warehouse.sql in Supabase.`
-        : error.message,
+      error:
+        error.message.includes('warehouse_') ||
+        error.message.includes('max_shops') ||
+        error.message.includes('max_warehouses') ||
+        error.message.includes('max_stores')
+          ? `${error.message} — run supabase-migrate-max-stores-warehouse-pin.sql in Supabase.`
+          : error.message,
     };
   }
 
@@ -662,4 +677,165 @@ export async function markWeeklyPayoutSent(
 
 export function formatGhs(amount: number): string {
   return `GH₵${amount.toFixed(2)}`;
+}
+
+export interface LinkedUserStores {
+  phone: string;
+  displayName: string;
+  roles: string[];
+  storeIds: string[];
+  storeNames: string[];
+  userCount: number;
+}
+
+function normalizePhoneDigits(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('233')) return digits;
+  if (digits.startsWith('0') && digits.length === 10) return `233${digits.slice(1)}`;
+  if (digits.length === 9) return `233${digits}`;
+  return digits;
+}
+
+/** Group users by phone to show which additional stores the same person opened. */
+export function buildLinkedUserStores(
+  users: AdminUserRow[],
+  stores: AdminStoreRow[]
+): LinkedUserStores[] {
+  const nameOf = (id: string) => stores.find((s) => s.id === id)?.name || 'Unknown';
+  const byPhone = new Map<string, AdminUserRow[]>();
+
+  for (const user of users) {
+    const phone = normalizePhoneDigits(user.phone || '');
+    if (!phone) continue;
+    const list = byPhone.get(phone) || [];
+    list.push(user);
+    byPhone.set(phone, list);
+  }
+
+  return Array.from(byPhone.entries())
+    .map(([phone, rows]) => {
+      const storeIds = [...new Set(rows.map((r) => r.store_id))];
+      const names = [...new Set(rows.map((r) => r.name.trim()).filter(Boolean))];
+      return {
+        phone,
+        displayName: names[0] || 'User',
+        roles: [...new Set(rows.map((r) => r.role))],
+        storeIds,
+        storeNames: storeIds.map(nameOf),
+        userCount: rows.length,
+      };
+    })
+    .sort(
+      (a, b) =>
+        b.storeIds.length - a.storeIds.length || a.displayName.localeCompare(b.displayName)
+    );
+}
+
+/** Admin: set staff active/blocked for a store. */
+export async function setAdminUserActive(
+  userId: string,
+  isActive: boolean
+): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: 'Supabase not configured' };
+  }
+  const { error } = await supabase
+    .from('users')
+    .update({ is_active: isActive })
+    .eq('id', userId);
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
+/** Admin: add a cashier to a store. */
+export async function addAdminStoreCashier(
+  storeId: string,
+  name: string,
+  pin: string,
+  phone = ''
+): Promise<{ success: boolean; error?: string; user?: AdminUserRow }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: 'Supabase not configured' };
+  }
+  if (!name.trim()) return { success: false, error: 'Enter staff name' };
+  if (!/^\d{4}$/.test(pin)) return { success: false, error: 'PIN must be 4 digits' };
+
+  const id = generateId();
+  const now = new Date().toISOString();
+  const row = {
+    id,
+    store_id: storeId,
+    name: name.trim(),
+    role: 'cashier',
+    pin_hash: hashPin(pin),
+    is_active: true,
+    phone: phone.trim(),
+    assigned_location_id: null,
+    can_wholesale: false,
+    can_sell_from_warehouse: false,
+    can_manage_ecommerce: false,
+    created_at: now,
+  };
+
+  const { error } = await supabase.from('users').insert(row);
+  if (error) {
+    return {
+      success: false,
+      error: error.message.includes('phone')
+        ? `${error.message} — run supabase-migrate-user-phone-admin-otp.sql`
+        : error.message,
+    };
+  }
+
+  return {
+    success: true,
+    user: {
+      id,
+      store_id: storeId,
+      name: row.name,
+      role: 'cashier',
+      is_active: true,
+      phone: row.phone,
+      created_at: now,
+    },
+  };
+}
+
+/** Admin: reset a staff PIN. */
+export async function resetAdminUserPin(
+  userId: string,
+  pin: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: 'Supabase not configured' };
+  }
+  if (!/^\d{4}$/.test(pin)) return { success: false, error: 'PIN must be 4 digits' };
+  const { error } = await supabase
+    .from('users')
+    .update({ pin_hash: hashPin(pin) })
+    .eq('id', userId);
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
+/** Admin: update product active flag / stock for a store inventory row. */
+export async function updateAdminProduct(
+  productId: string,
+  patch: { is_active?: boolean; stock_level?: number }
+): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: 'Supabase not configured' };
+  }
+  const payload: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+  if (patch.is_active !== undefined) payload.is_active = patch.is_active;
+  if (patch.stock_level !== undefined) {
+    const stock = Math.max(0, Math.floor(Number(patch.stock_level) || 0));
+    payload.stock_level = stock;
+  }
+  const { error } = await supabase.from('products').update(payload).eq('id', productId);
+  if (error) return { success: false, error: error.message };
+  return { success: true };
 }
