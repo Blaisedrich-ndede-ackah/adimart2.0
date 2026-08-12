@@ -16,6 +16,7 @@ import CashierBlockedPage from '@/pages/CashierBlockedPage';
 import POSPage from '@/pages/POSPage';
 import InventoryPage from '@/pages/InventoryPage';
 import ReportsPage from '@/pages/ReportsPage';
+import ExpensesPage from '@/pages/ExpensesPage';
 import SettingsPage from '@/pages/SettingsPage';
 import DevicesPage from '@/pages/DevicesPage';
 import TransactionsPage from '@/pages/TransactionsPage';
@@ -193,6 +194,8 @@ export default function App() {
           : <POSPage />;
       case 'reports':
         return role === 'owner' ? <ReportsPage /> : <POSPage />;
+      case 'expenses':
+        return <ExpensesPage />;
       case 'settings':
         return role === 'owner' ? (
           <SettingsPage onNavigate={setCurrentPage} />

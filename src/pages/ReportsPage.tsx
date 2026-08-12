@@ -39,7 +39,7 @@ interface DayData {
 const EXPENSE_CATEGORIES = ['Rent', 'Utilities', 'Supplier', 'Salaries', 'Transport', 'Other'];
 
 export default function ReportsPage() {
-  const { currentStore } = useAuthStore();
+  const { currentStore, currentUser } = useAuthStore();
   const [period, setPeriod] = useState<Period>('today');
   const [tab, setTab] = useState<ReportTab>('overview');
   const [transactions, setTransactions] = useState<LocalTransaction[]>([]);
@@ -157,11 +157,16 @@ export default function ReportsPage() {
     const amount = parseFloat(expenseAmount);
     if (!expenseDesc.trim() || isNaN(amount) || amount <= 0) return;
     setSavingExpense(true);
+    const recordedBy = currentUser?.name?.trim();
+    const noteParts = [
+      expenseNotes.trim(),
+      recordedBy ? `Recorded by ${recordedBy}` : '',
+    ].filter(Boolean);
     await addExpense({
       description: expenseDesc.trim(),
       category: expenseCategory,
       amount,
-      notes: expenseNotes.trim(),
+      notes: noteParts.join(' · '),
     });
     setExpenseDesc('');
     setExpenseAmount('');
