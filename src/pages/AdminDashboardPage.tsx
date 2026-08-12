@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Building2, Users, Package, Wallet, RefreshCcw, LogOut, ChevronLeft, ChevronRight,
-  Smartphone, CheckCircle2, AlertCircle, Loader2, Store, CreditCard, CalendarClock, Mail
+  Smartphone, CheckCircle2, AlertCircle, Loader2, Store, CreditCard, CalendarClock, Mail,
+  FileBarChart, Download, FileText
 } from 'lucide-react';
 import {
   AdminDashboardData,
@@ -18,6 +19,12 @@ import {
   updateStoreWarehouseLimits,
   buildLinkedUserStores,
 } from '@/lib/adminPortal';
+import {
+  AdminSystemReport,
+  buildAdminSystemReport,
+  exportAdminSystemReportCsv,
+  exportAdminSystemReportPdf,
+} from '@/lib/adminReports';
 import { clearAdminSession } from '@/lib/adminAuth';
 import {
   formatSubscriptionDate,
@@ -30,7 +37,17 @@ import {
 } from '@/lib/platformSettings';
 import AdminStoreWorkspace from '@/components/AdminStoreWorkspace';
 
-type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'contact';
+type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact';
+
+function defaultReportFromDate(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+}
+
+function defaultReportToDate(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 interface AdminDashboardPageProps {
   onLogout: () => void;
@@ -62,6 +79,11 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
   const [mnotifyApiKey, setMnotifyApiKey] = useState('');
   const [mnotifySenderId, setMnotifySenderId] = useState('Adimat');
   const [savingContact, setSavingContact] = useState(false);
+  const [reportFrom, setReportFrom] = useState(defaultReportFromDate);
+  const [reportTo, setReportTo] = useState(defaultReportToDate);
+  const [systemReport, setSystemReport] = useState<AdminSystemReport | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState('');
 
   const weekEnd = useMemo(() => getWeekEnd(weekStart), [weekStart]);
 
@@ -304,6 +326,20 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
     [data]
   );
 
+  const generateSystemReport = async () => {
+    setReportLoading(true);
+    setReportError('');
+    try {
+      const report = await buildAdminSystemReport(reportFrom, reportTo);
+      setSystemReport(report);
+      setStatusMsg(`System report ready for ${reportFrom} → ${reportTo}`);
+    } catch (err: unknown) {
+      setSystemReport(null);
+      setReportError(err instanceof Error ? err.message : String(err));
+    }
+    setReportLoading(false);
+  };
+
   const tabs = (
     [
       ['overview', 'Overview'],
@@ -312,6 +348,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       ['subscriptions', 'Subs'],
       ['payouts', 'Payouts'],
       ['products', 'Products'],
+      ['reports', 'Reports'],
       ['contact', 'Contact'],
     ] as const
   );
@@ -387,7 +424,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 md:px-6 py-3 md:py-5 pb-24 sm:pb-8"
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
-        {loading && !data && tab !== 'contact' && (
+        {loading && !data && tab !== 'contact' && tab !== 'reports' && (
           <div className="flex flex-col items-center justify-center py-20 text-slate-500">
             <Loader2 className="w-8 h-8 animate-spin mb-3" />
             <p className="text-sm">Loading cloud data…</p>
@@ -1080,6 +1117,172 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
             )}
           </div>
         )}
+
+        {tab === 'reports' && (
+          <div className="space-y-3">
+            <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
+              <div className="flex items-start gap-2">
+                <FileBarChart className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-bold text-slate-900">Whole-system report</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Choose a From and To date to aggregate sales and expenses across every store.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">From</span>
+                  <input
+                    type="date"
+                    value={reportFrom}
+                    max={reportTo}
+                    onChange={(e) => setReportFrom(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">To</span>
+                  <input
+                    type="date"
+                    value={reportTo}
+                    min={reportFrom}
+                    max={defaultReportToDate()}
+                    onChange={(e) => setReportTo(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                  />
+                </label>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => void generateSystemReport()}
+                disabled={reportLoading}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-white px-4 py-2.5 text-sm font-semibold touch-target disabled:opacity-60"
+              >
+                {reportLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileBarChart className="w-4 h-4" />}
+                Generate report
+              </button>
+
+              {reportError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-3 py-2 text-xs">
+                  {reportError}
+                </div>
+              )}
+            </div>
+
+            {reportLoading && !systemReport && (
+              <div className="flex flex-col items-center justify-center py-12 text-slate-500">
+                <Loader2 className="w-7 h-7 animate-spin mb-2" />
+                <p className="text-sm">Building system report…</p>
+              </div>
+            )}
+
+            {systemReport && (
+              <div className="space-y-3">
+                <div className="bg-white rounded-2xl border border-slate-200 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                    <div>
+                      <p className="text-xs text-slate-500 font-medium">Report period</p>
+                      <p className="text-sm font-bold text-slate-900">
+                        {systemReport.fromDate} → {systemReport.toDate}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => exportAdminSystemReportCsv(systemReport)}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 touch-target"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        CSV
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => exportAdminSystemReportPdf(systemReport)}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 touch-target"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        PDF
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    <StatCard
+                      icon={<Store className="w-4 h-4" />}
+                      label="Stores (active)"
+                      value={`${systemReport.totals.storesWithActivity}/${systemReport.totals.stores}`}
+                    />
+                    <StatCard
+                      icon={<Wallet className="w-4 h-4" />}
+                      label="Sales"
+                      value={String(systemReport.totals.sales)}
+                    />
+                    <StatCard
+                      icon={<CreditCard className="w-4 h-4" />}
+                      label="Revenue"
+                      value={formatGhs(systemReport.totals.revenue)}
+                    />
+                    <StatCard
+                      icon={<Wallet className="w-4 h-4" />}
+                      label="Cash"
+                      value={formatGhs(systemReport.totals.cashRevenue)}
+                    />
+                    <StatCard
+                      icon={<CreditCard className="w-4 h-4" />}
+                      label="Paystack"
+                      value={formatGhs(systemReport.totals.paystackRevenue)}
+                    />
+                    <StatCard
+                      icon={<Package className="w-4 h-4" />}
+                      label="Expenses"
+                      value={formatGhs(systemReport.totals.expenses)}
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-3">
+                    Snapshot: {systemReport.totals.users} users · {systemReport.totals.products} products ·{' '}
+                    {systemReport.totals.expenseCount} expense entries
+                  </p>
+                </div>
+
+                <h2 className="text-sm font-bold text-slate-800 pt-1">By store</h2>
+                {systemReport.byStore.filter((s) => s.sales > 0 || s.expenseCount > 0).length === 0 ? (
+                  <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">
+                    No sales or expenses in this date range.
+                  </div>
+                ) : (
+                  systemReport.byStore
+                    .filter((s) => s.sales > 0 || s.expenseCount > 0)
+                    .map((row) => (
+                      <div key={row.storeId} className="bg-white rounded-2xl border border-slate-200 p-4">
+                        <p className="font-bold text-slate-900 truncate">{row.storeName}</p>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 text-center">
+                          <div className="bg-slate-50 rounded-lg py-2">
+                            <p className="text-[10px] text-slate-500">Sales</p>
+                            <p className="text-xs font-bold text-slate-900">{row.sales}</p>
+                          </div>
+                          <div className="bg-slate-50 rounded-lg py-2">
+                            <p className="text-[10px] text-slate-500">Revenue</p>
+                            <p className="text-xs font-bold text-slate-900">{formatGhs(row.revenue)}</p>
+                          </div>
+                          <div className="bg-emerald-50 rounded-lg py-2">
+                            <p className="text-[10px] text-emerald-700">Paystack</p>
+                            <p className="text-xs font-bold text-emerald-800">{formatGhs(row.paystackRevenue)}</p>
+                          </div>
+                          <div className="bg-rose-50 rounded-lg py-2">
+                            <p className="text-[10px] text-rose-700">Expenses</p>
+                            <p className="text-xs font-bold text-rose-800">{formatGhs(row.expenses)}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </main>
 
       {/* Mobile bottom tabs */}
@@ -1104,7 +1307,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
             </button>
           ))}
         </div>
-        <div className="grid grid-cols-3 gap-0.5 px-1 pb-1">
+        <div className="grid grid-cols-4 gap-0.5 px-1 pb-1">
           {tabs.slice(4).map(([id, label]) => (
             <button
               key={id}
