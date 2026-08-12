@@ -1,60 +1,166 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Delete, Fingerprint, Shield, Store, ChevronDown } from 'lucide-react';
+import { Delete, Fingerprint, Shield, Store, ChevronDown, Warehouse } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { authenticateWithBiometric, isBiometricAvailable, hasBiometricRegistered } from '@/lib/biometric';
-import { db, listLocalStores, type LocalStore } from '@/lib/dexie';
+import { db, listLocalStores, type LocalLocation, type LocalStore } from '@/lib/dexie';
 import { hasStoreLogo } from '@/lib/productImage';
 import { confirmPinResetWithOtp, requestPinResetOtp } from '@/lib/pinReset';
+import { listLocations, verifyLocationAccessPin } from '@/lib/warehouse';
+import {
+  clearPendingWarehouseLogin,
+  getPendingWarehouseLogin,
+  setPendingWarehouseLogin,
+  unlockWarehouseLocation,
+  type PendingWarehouseLogin,
+} from '@/lib/warehouseAccess';
 
 interface LoginPageProps {
   onOpenAdmin?: () => void;
+  /** Called after a successful warehouse PIN login so the app can open the warehouse page. */
+  onWarehouseLoginSuccess?: () => void;
 }
 
-export default function LoginPage({ onOpenAdmin }: LoginPageProps) {
+export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: LoginPageProps) {
   const [pin, setPin] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [shake, setShake] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricError, setBiometricError] = useState('');
   const [stores, setStores] = useState<LocalStore[]>([]);
+  const [warehouses, setWarehouses] = useState<LocalLocation[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const { login, loginError, currentStore, switchStore } = useAuthStore();
+  const [pendingWarehouse, setPendingWarehouse] = useState<PendingWarehouseLogin | null>(
+    () => getPendingWarehouseLogin()
+  );
+  const { login, loginAsStoreOwner, loginError, currentStore, switchStore } = useAuthStore();
   const storeLogo = currentStore?.logo_url;
   const storeName = currentStore?.name?.trim();
+  const warehouseMode = Boolean(pendingWarehouse);
 
   useEffect(() => {
     async function checkBiometric() {
+      if (warehouseMode) {
+        setBiometricAvailable(false);
+        return;
+      }
       const available = await isBiometricAvailable();
       const registered = hasBiometricRegistered();
       setBiometricAvailable(available && registered);
     }
     void checkBiometric();
-  }, [currentStore?.id]);
+  }, [currentStore?.id, warehouseMode]);
 
   useEffect(() => {
     void listLocalStores().then(setStores);
   }, [currentStore?.id]);
 
+  useEffect(() => {
+    void (async () => {
+      if (!currentStore?.id) {
+        setWarehouses([]);
+        return;
+      }
+      const locs = await listLocations(currentStore.id);
+      setWarehouses(
+        locs.filter((l) => l.location_type === 'warehouse' && Boolean(l.access_pin_hash))
+      );
+    })();
+  }, [currentStore?.id]);
+
+  useEffect(() => {
+    setPendingWarehouse(getPendingWarehouseLogin());
+  }, [currentStore?.id]);
+
   const handleSelectStore = async (storeId: string) => {
-    if (storeId === currentStore?.id) {
-      setPickerOpen(false);
-      return;
-    }
+    clearPendingWarehouseLogin();
+    setPendingWarehouse(null);
     setPin('');
     setBiometricError('');
-    await switchStore(storeId);
+    if (storeId !== currentStore?.id) {
+      await switchStore(storeId);
+    }
     setPickerOpen(false);
+  };
+
+  const handleSelectWarehouse = (loc: LocalLocation) => {
+    if (!currentStore?.id) return;
+    const pending = {
+      storeId: currentStore.id,
+      locationId: loc.id,
+      name: loc.name,
+    };
+    setPendingWarehouseLogin(pending);
+    setPendingWarehouse(pending);
+    setPin('');
+    setBiometricError('');
+    setPickerOpen(false);
+  };
+
+  const handleWarehousePin = async (fullPin: string) => {
+    if (!pendingWarehouse) return;
+    setIsLoading(true);
+    const ok = await verifyLocationAccessPin(pendingWarehouse.locationId, fullPin);
+    if (!ok) {
+      setIsLoading(false);
+      useAuthStore.setState({ loginError: 'Invalid warehouse PIN. Please try again.' });
+      setShake(true);
+      setTimeout(() => {
+        setShake(false);
+        setPin('');
+      }, 600);
+      return;
+    }
+    unlockWarehouseLocation(pendingWarehouse.storeId, pendingWarehouse.locationId);
+    const success = await loginAsStoreOwner();
+    setIsLoading(false);
+    if (!success) {
+      setShake(true);
+      setTimeout(() => {
+        setShake(false);
+        setPin('');
+      }, 600);
+      return;
+    }
+    setPendingWarehouse(null);
+    onWarehouseLoginSuccess?.();
+  };
+
+  const handleBiometricLogin = async () => {
+    setBiometricError('');
+    setIsLoading(true);
+
+    const result = await authenticateWithBiometric();
+
+    if (result.success && result.userId) {
+      const user = await db.users.get(result.userId);
+      if (user && (!currentStore || user.store_id === currentStore.id)) {
+        clearPendingWarehouseLogin();
+        useAuthStore.setState({
+          currentUser: user,
+          isAuthenticated: true,
+          loginError: '',
+        });
+      } else {
+        setBiometricError('User not found for this store. Please login with PIN.');
+      }
+    } else {
+      setBiometricError(result.error || 'Biometric login failed');
+    }
+
+    setIsLoading(false);
   };
 
   const handleKeyPress = useCallback(async (key: string) => {
     setBiometricError('');
-    
+    useAuthStore.setState({ loginError: '' });
+
     if (key === 'delete') {
       setPin(prev => prev.slice(0, -1));
       return;
     }
 
     if (key === 'biometric') {
+      if (warehouseMode) return;
       void handleBiometricLogin();
       return;
     }
@@ -65,6 +171,10 @@ export default function LoginPage({ onOpenAdmin }: LoginPageProps) {
     setPin(newPin);
 
     if (newPin.length === 4) {
+      if (warehouseMode) {
+        await handleWarehousePin(newPin);
+        return;
+      }
       setIsLoading(true);
       const success = await login(newPin);
       setIsLoading(false);
@@ -76,33 +186,10 @@ export default function LoginPage({ onOpenAdmin }: LoginPageProps) {
         }, 600);
       }
     }
-  }, [pin, login]);
-
-  const handleBiometricLogin = async () => {
-    setBiometricError('');
-    setIsLoading(true);
-
-    const result = await authenticateWithBiometric();
-    
-    if (result.success && result.userId) {
-      const user = await db.users.get(result.userId);
-      if (user && (!currentStore || user.store_id === currentStore.id)) {
-        useAuthStore.setState({ 
-          currentUser: user, 
-          isAuthenticated: true, 
-          loginError: '' 
-        });
-      } else {
-        setBiometricError('User not found for this store. Please login with PIN.');
-      }
-    } else {
-      setBiometricError(result.error || 'Biometric login failed');
-    }
-    
-    setIsLoading(false);
-  };
+  }, [pin, login, warehouseMode, pendingWarehouse]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'biometric', '0', 'delete'];
+  const showPicker = stores.length > 1 || warehouses.length > 0;
 
   return (
     <div className="auth-shell">
@@ -116,13 +203,19 @@ export default function LoginPage({ onOpenAdmin }: LoginPageProps) {
             )}
           </div>
           <h1 className="text-3xl md:text-4xl font-bold text-white tracking-tight">
-            {hasStoreLogo(storeLogo) && storeName ? storeName : 'Adimat'}
+            {warehouseMode
+              ? pendingWarehouse?.name || 'Warehouse'
+              : hasStoreLogo(storeLogo) && storeName
+                ? storeName
+                : 'Adimat'}
           </h1>
           <p className="text-emerald-100/90 text-sm mt-2">
-            Enter your PIN to continue
+            {warehouseMode
+              ? 'Enter warehouse PIN to open and manage'
+              : 'Enter your PIN to continue'}
           </p>
 
-          {stores.length > 1 && (
+          {showPicker && (
             <div className="relative mt-4 w-full max-w-[280px] md:max-w-[300px]">
               <button
                 type="button"
@@ -130,36 +223,78 @@ export default function LoginPage({ onOpenAdmin }: LoginPageProps) {
                 className="w-full flex items-center justify-between gap-2 rounded-2xl bg-white/15 border border-white/20 px-4 py-3 text-left text-white touch-target"
               >
                 <span className="flex items-center gap-2 min-w-0">
-                  <Store className="w-4 h-4 flex-shrink-0 text-emerald-200" />
+                  {warehouseMode ? (
+                    <Warehouse className="w-4 h-4 flex-shrink-0 text-amber-200" />
+                  ) : (
+                    <Store className="w-4 h-4 flex-shrink-0 text-emerald-200" />
+                  )}
                   <span className="truncate text-sm font-semibold">
-                    {currentStore?.name || 'Select store'}
+                    {warehouseMode
+                      ? pendingWarehouse?.name || 'Warehouse'
+                      : currentStore?.name || 'Select store'}
                   </span>
                 </span>
                 <ChevronDown className={`w-4 h-4 flex-shrink-0 transition-transform ${pickerOpen ? 'rotate-180' : ''}`} />
               </button>
               {pickerOpen && (
-                <div className="absolute z-20 mt-2 w-full rounded-2xl bg-white shadow-xl overflow-hidden border border-emerald-100">
+                <div className="absolute z-20 mt-2 w-full rounded-2xl bg-white shadow-xl overflow-hidden border border-emerald-100 max-h-64 overflow-y-auto">
                   {stores.map((store) => {
-                    const active = store.id === currentStore?.id;
+                    const active = !warehouseMode && store.id === currentStore?.id;
                     return (
                       <button
                         key={store.id}
                         type="button"
                         onClick={() => void handleSelectStore(store.id)}
-                        className={`w-full text-left px-4 py-3 text-sm touch-target border-b border-slate-100 last:border-0 ${
+                        className={`w-full text-left px-4 py-3 text-sm touch-target border-b border-slate-100 ${
                           active ? 'bg-emerald-50 text-primary font-bold' : 'text-slate-800 hover:bg-slate-50'
                         }`}
                       >
-                        <p className="truncate">{store.name}</p>
+                        <p className="truncate flex items-center gap-1.5">
+                          <Store className="w-3.5 h-3.5 shrink-0 opacity-60" />
+                          {store.name}
+                        </p>
                         {store.address ? (
-                          <p className="text-[11px] text-slate-500 truncate mt-0.5">{store.address}</p>
+                          <p className="text-[11px] text-slate-500 truncate mt-0.5 pl-5">{store.address}</p>
                         ) : null}
+                      </button>
+                    );
+                  })}
+                  {warehouses.map((loc) => {
+                    const active = warehouseMode && pendingWarehouse?.locationId === loc.id;
+                    return (
+                      <button
+                        key={loc.id}
+                        type="button"
+                        onClick={() => handleSelectWarehouse(loc)}
+                        className={`w-full text-left px-4 py-3 text-sm touch-target border-b border-slate-100 last:border-0 ${
+                          active ? 'bg-amber-50 text-amber-900 font-bold' : 'text-slate-800 hover:bg-slate-50'
+                        }`}
+                      >
+                        <p className="truncate flex items-center gap-1.5">
+                          <Warehouse className="w-3.5 h-3.5 shrink-0 opacity-60" />
+                          {loc.name}
+                        </p>
+                        <p className="text-[11px] text-slate-500 truncate mt-0.5 pl-5">Warehouse PIN</p>
                       </button>
                     );
                   })}
                 </div>
               )}
             </div>
+          )}
+
+          {warehouseMode && (
+            <button
+              type="button"
+              onClick={() => {
+                clearPendingWarehouseLogin();
+                setPendingWarehouse(null);
+                setPin('');
+              }}
+              className="mt-3 text-xs text-emerald-100/90 font-medium underline-offset-2 touch-target"
+            >
+              Back to store login
+            </button>
           )}
         </div>
 
@@ -193,15 +328,15 @@ export default function LoginPage({ onOpenAdmin }: LoginPageProps) {
                 <button
                   key={key}
                   onClick={() => void handleKeyPress(key)}
-                  disabled={!biometricAvailable}
+                  disabled={!biometricAvailable || warehouseMode}
                   className={`h-16 md:h-[4.5rem] rounded-2xl flex items-center justify-center touch-target transition-colors ${
-                    biometricAvailable
+                    biometricAvailable && !warehouseMode
                       ? 'bg-white/20 active:bg-white/30'
                       : 'bg-white/5 opacity-40'
                   }`}
                   title={biometricAvailable ? 'Login with biometrics' : 'Biometrics not set up'}
                 >
-                  <Fingerprint className={`w-6 h-6 ${biometricAvailable ? 'text-emerald-200' : 'text-gray-400'}`} />
+                  <Fingerprint className={`w-6 h-6 ${biometricAvailable && !warehouseMode ? 'text-emerald-200' : 'text-gray-400'}`} />
                 </button>
               );
             }
@@ -229,13 +364,13 @@ export default function LoginPage({ onOpenAdmin }: LoginPageProps) {
           })}
         </div>
 
-        {biometricAvailable && (
+        {biometricAvailable && !warehouseMode && (
           <p className="mt-6 text-emerald-100 text-xs text-center">
             Biometric login available
           </p>
         )}
 
-        <ForgotPinSection />
+        {!warehouseMode && <ForgotPinSection />}
 
         {onOpenAdmin && (
           <button

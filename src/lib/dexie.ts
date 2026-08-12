@@ -635,6 +635,40 @@ export async function updateUserPin(userId: string, newPin: string): Promise<voi
   }
 }
 
+/** Attach / update a user's Ghana phone (self-serve or owner edit). */
+export async function updateUserPhone(userId: string, phoneRaw: string): Promise<void> {
+  const { isValidGhanaPhone, normalizeGhanaPhone } = await import('./platformSettings');
+  if (!isValidGhanaPhone(phoneRaw)) {
+    throw new Error('Enter a valid Ghana mobile number (e.g. 024XXXXXXX).');
+  }
+  const phone = normalizeGhanaPhone(phoneRaw);
+  const display =
+    phone.startsWith('233') && phone.length === 12 ? `0${phone.slice(3)}` : phoneRaw.trim();
+  await db.users.update(userId, {
+    phone: display,
+    synced: 0,
+  });
+  if (isSupabaseConfigured()) {
+    try {
+      await supabase.from('users').update({ phone: display }).eq('id', userId);
+    } catch {
+      // offline — local remains unsynced
+    }
+  }
+}
+
+/** Active owner for the current (or given) store — used after warehouse PIN login. */
+export async function getActiveStoreOwner(storeId?: string): Promise<LocalUser | null> {
+  const id = storeId || (await getCurrentStoreId());
+  if (!id) return null;
+  const owners = await db.users
+    .where('store_id')
+    .equals(id)
+    .and((u) => u.role === 'owner' && u.is_active === 1)
+    .toArray();
+  return owners[0] || null;
+}
+
 // Block a cashier (can log in, but app shows a restricted contact-owner screen)
 export async function deactivateUser(userId: string): Promise<void> {
   await db.users.update(userId, { is_active: 0, synced: 0 });

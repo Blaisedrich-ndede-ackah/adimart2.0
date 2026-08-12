@@ -3,10 +3,13 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { initAutoSync, stopAutoSync } from '@/lib/sync';
 import { autoReconnectPeripherals } from '@/lib/bluetoothPeripherals';
 import { isAdminSessionActive, clearAdminSession } from '@/lib/adminAuth';
+import { normalizeGhanaPhone } from '@/lib/platformSettings';
+import { getUnlockedWarehouseLocationId } from '@/lib/warehouseAccess';
 import PWAInstallBanner from '@/components/PWAInstallBanner';
 import SubscriptionWarningBanner from '@/components/SubscriptionWarningBanner';
 import StoreBrandingBar from '@/components/StoreBrandingBar';
 import AppNav from '@/components/AppNav';
+import AddPhonePrompt from '@/components/AddPhonePrompt';
 import StoreSetupPage from '@/pages/StoreSetupPage';
 import LoginPage from '@/pages/LoginPage';
 import CashierBlockedPage from '@/pages/CashierBlockedPage';
@@ -33,8 +36,14 @@ function readPublicShopSlug(): string | null {
   return match?.[1] ? decodeURIComponent(match[1]).trim().toLowerCase() : null;
 }
 
+function userNeedsPhone(user: { phone?: string | null } | null | undefined): boolean {
+  if (!user) return false;
+  return !normalizeGhanaPhone(user.phone || '');
+}
+
 export default function App() {
-  const { isAuthenticated, currentUser, isStoreSetup, isLoading, initialize } = useAuthStore();
+  const { isAuthenticated, currentUser, currentStore, isStoreSetup, isLoading, initialize, switchUser } =
+    useAuthStore();
   const [currentPage, setCurrentPage] = useState('pos');
   const [appMode, setAppMode] = useState<AppMode>(() =>
     isAdminSessionActive() ? 'admin' : 'store'
@@ -63,6 +72,14 @@ export default function App() {
       setCurrentPage('pos');
     }
   }, [currentUser, currentPage]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentStore?.id) return;
+    const unlocked = getUnlockedWarehouseLocationId(currentStore.id);
+    if (unlocked) {
+      setCurrentPage('warehouse');
+    }
+  }, [isAuthenticated, currentStore?.id, currentUser?.id]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -124,7 +141,10 @@ export default function App() {
       <div className="h-screen flex flex-col">
         <PWAInstallBanner />
         <div className="flex-1 overflow-y-auto">
-          <LoginPage onOpenAdmin={() => setAppMode('admin-login')} />
+          <LoginPage
+            onOpenAdmin={() => setAppMode('admin-login')}
+            onWarehouseLoginSuccess={() => setCurrentPage('warehouse')}
+          />
         </div>
       </div>
     );
@@ -141,6 +161,13 @@ export default function App() {
     );
   }
 
+  const needsPhone = userNeedsPhone(currentUser);
+
+  const leaveWarehouse = () => {
+    // Same idea as switching away from a store — sign out and pick store/warehouse again
+    switchUser();
+  };
+
   const renderPage = () => {
     const role = currentUser?.role;
     switch (currentPage) {
@@ -156,7 +183,7 @@ export default function App() {
         return role === 'owner' ? <InventoryPage /> : <POSPage />;
       case 'warehouse':
         return role === 'owner' ? (
-          <WarehousePage onBackToSettings={() => setCurrentPage('settings')} />
+          <WarehousePage onBackToSettings={leaveWarehouse} />
         ) : (
           <POSPage />
         );
@@ -188,6 +215,7 @@ export default function App() {
           {renderPage()}
         </div>
       </div>
+      {needsPhone && <AddPhonePrompt />}
     </div>
   );
 }

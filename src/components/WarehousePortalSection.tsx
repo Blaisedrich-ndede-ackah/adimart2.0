@@ -1,29 +1,25 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Warehouse, Loader2, Plus, KeyRound, Lock, Unlock, CheckCircle2,
+  Warehouse, Loader2, Plus, KeyRound, Lock, CheckCircle2, ArrowRightLeft,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
 import {
   createLocation,
   listLocations,
   setLocationAccessPin,
-  verifyLocationAccessPin,
 } from '@/lib/warehouse';
 import {
   clearWarehouseUnlock,
-  unlockWarehouseLocation,
+  setPendingWarehouseLogin,
 } from '@/lib/warehouseAccess';
 import type { LocalLocation } from '@/lib/dexie';
 
-interface WarehousePortalSectionProps {
-  onOpenWarehouse: () => void;
-}
-
 /**
- * Settings portal for warehouses: create (admin-limited) and set/open with a unique PIN.
+ * Settings portal for warehouses: create (admin-limited), set PIN,
+ * and open (signs out — enter warehouse PIN on the login screen, like store switch).
  */
-export default function WarehousePortalSection({ onOpenWarehouse }: WarehousePortalSectionProps) {
-  const { currentStore, refreshStore } = useAuthStore();
+export default function WarehousePortalSection() {
+  const { currentStore, refreshStore, switchUser } = useAuthStore();
   const warehouseEnabled = (currentStore?.warehouse_enabled ?? 0) === 1;
   const maxWarehouses = currentStore?.max_warehouses ?? 0;
 
@@ -37,7 +33,7 @@ export default function WarehousePortalSection({ onOpenWarehouse }: WarehousePor
   const [confirmPin, setConfirmPin] = useState('');
 
   const [pinTargetId, setPinTargetId] = useState<string | null>(null);
-  const [pinMode, setPinMode] = useState<'set' | 'open' | 'change'>('set');
+  const [pinMode, setPinMode] = useState<'set' | 'change'>('set');
   const [pinValue, setPinValue] = useState('');
   const [pinConfirm, setPinConfirm] = useState('');
 
@@ -71,6 +67,24 @@ export default function WarehousePortalSection({ onOpenWarehouse }: WarehousePor
 
   const canAdd = warehouseEnabled && warehouses.length < maxWarehouses;
 
+  const beginWarehouseSwitch = (loc: LocalLocation) => {
+    if (!currentStore?.id) return;
+    if (
+      !confirm(
+        `Switch to warehouse “${loc.name}”? You will sign out and must enter this warehouse’s PIN to open and manage it.`
+      )
+    ) {
+      return;
+    }
+    clearWarehouseUnlock();
+    setPendingWarehouseLogin({
+      storeId: currentStore.id,
+      locationId: loc.id,
+      name: loc.name,
+    });
+    switchUser();
+  };
+
   const handleCreate = async () => {
     if (!currentStore?.id) return;
     if (!newName.trim()) {
@@ -89,20 +103,24 @@ export default function WarehousePortalSection({ onOpenWarehouse }: WarehousePor
         locationType: 'warehouse',
         accessPin: newPin,
       });
-      unlockWarehouseLocation(currentStore.id, location.id);
+      clearWarehouseUnlock();
+      setPendingWarehouseLogin({
+        storeId: currentStore.id,
+        locationId: location.id,
+        name: location.name,
+      });
       setShowCreate(false);
       setNewName('');
       setNewPin('');
       setConfirmPin('');
-      await refresh();
-      onOpenWarehouse();
+      switchUser();
     } catch (e) {
       flash(e instanceof Error ? e.message : 'Could not create warehouse', true);
+      setBusy(false);
     }
-    setBusy(false);
   };
 
-  const startPinFlow = (loc: LocalLocation, mode: 'set' | 'open' | 'change') => {
+  const startPinFlow = (loc: LocalLocation, mode: 'set' | 'change') => {
     setPinTargetId(loc.id);
     setPinMode(mode);
     setPinValue('');
@@ -111,34 +129,17 @@ export default function WarehousePortalSection({ onOpenWarehouse }: WarehousePor
   };
 
   const handlePinSubmit = async () => {
-    if (!currentStore?.id || !pinTargetId) return;
-    if (pinValue.length !== 4) {
-      flash('Enter a 4-digit PIN.', true);
+    if (!pinTargetId) return;
+    if (pinValue.length !== 4 || pinValue !== pinConfirm) {
+      flash('Enter matching 4-digit PINs.', true);
       return;
     }
     setBusy(true);
     try {
-      if (pinMode === 'set' || pinMode === 'change') {
-        if (pinValue !== pinConfirm) {
-          flash('PINs do not match.', true);
-          setBusy(false);
-          return;
-        }
-        await setLocationAccessPin(pinTargetId, pinValue);
-        flash(pinMode === 'set' ? 'Warehouse PIN saved' : 'Warehouse PIN updated');
-        setPinTargetId(null);
-        await refresh();
-      } else {
-        const ok = await verifyLocationAccessPin(pinTargetId, pinValue);
-        if (!ok) {
-          flash('Incorrect warehouse PIN.', true);
-          setBusy(false);
-          return;
-        }
-        unlockWarehouseLocation(currentStore.id, pinTargetId);
-        setPinTargetId(null);
-        onOpenWarehouse();
-      }
+      await setLocationAccessPin(pinTargetId, pinValue);
+      flash(pinMode === 'set' ? 'Warehouse PIN saved — you can Open it now' : 'Warehouse PIN updated');
+      setPinTargetId(null);
+      await refresh();
     } catch (e) {
       flash(e instanceof Error ? e.message : 'PIN action failed', true);
     }
@@ -167,8 +168,7 @@ export default function WarehousePortalSection({ onOpenWarehouse }: WarehousePor
         <h3 className="font-bold text-gray-900">My Warehouses</h3>
       </div>
       <p className="text-xs text-gray-500 mb-3">
-        Create warehouses here (admin permission required). Each warehouse needs its own PIN to open
-        and manage stock.
+        Open a warehouse like switching stores — you sign out and enter that warehouse&apos;s PIN.
         {warehouseEnabled && (
           <>
             {' '}
@@ -195,12 +195,12 @@ export default function WarehousePortalSection({ onOpenWarehouse }: WarehousePor
                       {hasPin ? (
                         <>
                           <Lock className="w-3 h-3" />
-                          PIN set — enter PIN to open
+                          PIN set — Open signs you out
                         </>
                       ) : (
                         <>
                           <KeyRound className="w-3 h-3" />
-                          Create a PIN to open &amp; manage
+                          Create a PIN before you can open it
                         </>
                       )}
                     </p>
@@ -211,10 +211,10 @@ export default function WarehousePortalSection({ onOpenWarehouse }: WarehousePor
                         <button
                           type="button"
                           disabled={busy}
-                          onClick={() => startPinFlow(loc, 'open')}
+                          onClick={() => beginWarehouseSwitch(loc)}
                           className="inline-flex items-center gap-1 rounded-lg bg-amber-700 px-3 py-2 text-xs font-semibold text-white touch-target disabled:opacity-50"
                         >
-                          <Unlock className="w-3.5 h-3.5" />
+                          <ArrowRightLeft className="w-3.5 h-3.5" />
                           Open
                         </button>
                         <button
@@ -243,11 +243,7 @@ export default function WarehousePortalSection({ onOpenWarehouse }: WarehousePor
                 {pinTargetId === loc.id && (
                   <div className="mt-3 space-y-2 rounded-xl border border-amber-200 bg-white p-3">
                     <p className="text-xs font-semibold text-gray-800">
-                      {pinMode === 'open'
-                        ? 'Enter warehouse PIN'
-                        : pinMode === 'change'
-                          ? 'Set a new 4-digit PIN'
-                          : 'Create a 4-digit PIN'}
+                      {pinMode === 'change' ? 'Set a new 4-digit PIN' : 'Create a 4-digit PIN'}
                     </p>
                     <input
                       type="password"
@@ -258,17 +254,15 @@ export default function WarehousePortalSection({ onOpenWarehouse }: WarehousePor
                       placeholder="PIN *"
                       className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-center tracking-widest"
                     />
-                    {(pinMode === 'set' || pinMode === 'change') && (
-                      <input
-                        type="password"
-                        inputMode="numeric"
-                        maxLength={4}
-                        value={pinConfirm}
-                        onChange={(e) => setPinConfirm(e.target.value.replace(/\D/g, ''))}
-                        placeholder="Confirm PIN *"
-                        className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-center tracking-widest"
-                      />
-                    )}
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      maxLength={4}
+                      value={pinConfirm}
+                      onChange={(e) => setPinConfirm(e.target.value.replace(/\D/g, ''))}
+                      placeholder="Confirm PIN *"
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-center tracking-widest"
+                    />
                     <div className="flex gap-2">
                       <button
                         type="button"
@@ -276,20 +270,11 @@ export default function WarehousePortalSection({ onOpenWarehouse }: WarehousePor
                         onClick={() => void handlePinSubmit()}
                         className="flex-1 rounded-xl bg-amber-700 py-2.5 text-sm font-bold text-white disabled:opacity-50"
                       >
-                        {busy ? (
-                          <Loader2 className="mx-auto h-4 w-4 animate-spin" />
-                        ) : pinMode === 'open' ? (
-                          'Unlock & manage'
-                        ) : (
-                          'Save PIN'
-                        )}
+                        {busy ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : 'Save PIN'}
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
-                          setPinTargetId(null);
-                          clearWarehouseUnlock();
-                        }}
+                        onClick={() => setPinTargetId(null)}
                         className="rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600"
                       >
                         Cancel
@@ -360,7 +345,11 @@ export default function WarehousePortalSection({ onOpenWarehouse }: WarehousePor
             onClick={() => void handleCreate()}
             className="w-full rounded-xl bg-amber-700 py-2.5 text-sm font-bold text-white disabled:opacity-50"
           >
-            {busy ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : 'Create & open warehouse'}
+            {busy ? (
+              <Loader2 className="mx-auto h-4 w-4 animate-spin" />
+            ) : (
+              'Create & open warehouse'
+            )}
           </button>
         </div>
       )}
