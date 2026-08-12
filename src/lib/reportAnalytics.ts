@@ -48,7 +48,34 @@ export interface ReportSummary {
   cashiers: CashierSalesStat[];
 }
 
-export function getPeriodRange(period: 'today' | 'week' | 'month'): PeriodRange {
+export type ReportPeriodPreset = 'today' | 'week' | 'month';
+export type ReportPeriod = ReportPeriodPreset | 'custom';
+
+function parseDateOnlyStart(value: string): Date {
+  const [y, m, d] = value.split('-').map(Number);
+  return new Date(y, (m || 1) - 1, d || 1, 0, 0, 0, 0);
+}
+
+function parseDateOnlyEnd(value: string): Date {
+  const [y, m, d] = value.split('-').map(Number);
+  return new Date(y, (m || 1) - 1, d || 1, 23, 59, 59, 999);
+}
+
+/** Inclusive From → To range from YYYY-MM-DD strings. */
+export function getCustomDateRange(fromDate: string, toDate: string): PeriodRange {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate) || !/^\d{4}-\d{2}-\d{2}$/.test(toDate)) {
+    throw new Error('Choose valid From and To dates.');
+  }
+  if (fromDate > toDate) {
+    throw new Error('From date must be on or before the To date.');
+  }
+  return {
+    start: parseDateOnlyStart(fromDate),
+    end: parseDateOnlyEnd(toDate),
+  };
+}
+
+export function getPeriodRange(period: ReportPeriodPreset): PeriodRange {
   const now = new Date();
   const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
 
@@ -66,11 +93,36 @@ export function getPeriodRange(period: 'today' | 'week' | 'month'): PeriodRange 
   }
 }
 
+export function resolveReportRange(
+  period: ReportPeriod,
+  customFrom?: string,
+  customTo?: string
+): PeriodRange {
+  if (period === 'custom') {
+    return getCustomDateRange(customFrom || '', customTo || '');
+  }
+  return getPeriodRange(period);
+}
+
+export function formatReportPeriodLabel(
+  period: ReportPeriod,
+  customFrom?: string,
+  customTo?: string
+): string {
+  if (period === 'custom' && customFrom && customTo) {
+    return `${customFrom} → ${customTo}`;
+  }
+  if (period === 'today') return 'Today';
+  if (period === 'week') return 'This Week';
+  if (period === 'month') return 'This Month';
+  return 'Custom range';
+}
+
 export async function buildReportSummary(
   storeId: string,
-  period: 'today' | 'week' | 'month'
+  range: PeriodRange
 ): Promise<ReportSummary> {
-  const { start, end } = getPeriodRange(period);
+  const { start, end } = range;
 
   const [transactions, items, products, expenses] = await Promise.all([
     db.transactions.where('store_id').equals(storeId).toArray(),
@@ -283,7 +335,7 @@ export function exportReportPdf(
 export interface LocationReportSummary {
   location: LocalLocation;
   storeName: string;
-  period: 'today' | 'week' | 'month' | 'all';
+  period: ReportPeriod | 'all';
   periodLabel: string;
   /** Sales at this location */
   costPrice: number;
@@ -299,13 +351,6 @@ export interface LocationReportSummary {
   stockProfitEstimate: number;
 }
 
-function periodLabelOf(period: 'today' | 'week' | 'month' | 'all'): string {
-  if (period === 'all') return 'All time';
-  if (period === 'today') return 'Today';
-  if (period === 'week') return 'This Week';
-  return 'This Month';
-}
-
 /**
  * Build an individual shop/warehouse report:
  * - sales metrics for transactions at this location
@@ -314,8 +359,10 @@ function periodLabelOf(period: 'today' | 'week' | 'month' | 'all'): string {
 export async function buildLocationReportSummary(
   storeId: string,
   locationId: string,
-  period: 'today' | 'week' | 'month' | 'all' = 'month',
-  storeName = 'Store'
+  range: PeriodRange | null,
+  storeName = 'Store',
+  periodLabel = 'Custom range',
+  period: ReportPeriod | 'all' = 'custom'
 ): Promise<LocationReportSummary> {
   const locations = await listLocations(storeId);
   const location = locations.find((l) => l.id === locationId);
@@ -333,8 +380,8 @@ export async function buildLocationReportSummary(
     (t) => t.status === 'completed' && t.location_id === locationId
   );
 
-  if (period !== 'all') {
-    const { start, end } = getPeriodRange(period);
+  if (range) {
+    const { start, end } = range;
     periodTxns = periodTxns.filter((t) => {
       const d = new Date(t.created_at);
       return d >= start && d <= end;
@@ -383,7 +430,7 @@ export async function buildLocationReportSummary(
     location,
     storeName,
     period,
-    periodLabel: periodLabelOf(period),
+    periodLabel,
     costPrice,
     sellingPrice,
     profitEstimate,
