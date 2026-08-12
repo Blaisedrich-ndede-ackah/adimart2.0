@@ -42,9 +42,9 @@ export default function WarehousePortalSection() {
       setWarehouses([]);
       return;
     }
+    await refreshStore();
     const locs = await listLocations(currentStore.id);
     setWarehouses(locs.filter((l) => l.location_type === 'warehouse'));
-    await refreshStore();
   }, [currentStore?.id, refreshStore]);
 
   useEffect(() => {

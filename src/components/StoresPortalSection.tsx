@@ -19,7 +19,7 @@ import { useAuthStore } from '@/store/useAuthStore';
  * that store's inventory and staff after signing in.
  */
 export default function StoresPortalSection() {
-  const { currentStore, switchStore, currentUser } = useAuthStore();
+  const { currentStore, switchStore, currentUser, refreshStore } = useAuthStore();
   const [stores, setStores] = useState<LocalStore[]>([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
@@ -41,12 +41,13 @@ export default function StoresPortalSection() {
 
   const refresh = useCallback(async () => {
     setStores(await listLocalStores());
+    await refreshStore();
     const phoneHint =
       currentUser?.phone || currentStore?.support_number || newPhone || '';
     const quota = await getAdditionalStoreQuota(phoneHint);
     setCanCreateStore(quota.canCreate);
     setQuotaLabel(`${quota.ownedCount}/${quota.maxStores} stores allowed`);
-  }, [currentStore?.support_number, currentUser?.phone, newPhone]);
+  }, [currentStore?.support_number, currentUser?.phone, newPhone, refreshStore]);
 
   useEffect(() => {
     void refresh();
