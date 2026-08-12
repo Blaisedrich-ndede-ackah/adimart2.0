@@ -27,6 +27,7 @@ import {
   savePlatformSettings,
   type PlatformSettings,
 } from '@/lib/platformSettings';
+import AdminStoreWorkspace from '@/components/AdminStoreWorkspace';
 
 type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'contact';
 
@@ -42,6 +43,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
   const [error, setError] = useState('');
   const [busyStoreId, setBusyStoreId] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState('');
+  const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
   const [grantMonths, setGrantMonths] = useState<Record<string, number>>({});
   const [warehouseDrafts, setWarehouseDrafts] = useState<
     Record<string, { warehouse_enabled: boolean; max_shops: number; max_warehouses: number }>
@@ -327,7 +329,10 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         ] as const).map(([id, label]) => (
           <button
             key={id}
-            onClick={() => setTab(id)}
+            onClick={() => {
+              setTab(id);
+              if (id !== 'stores') setSelectedStoreId(null);
+            }}
             className={`px-3 py-2 rounded-lg text-xs font-semibold whitespace-nowrap touch-target ${
               tab === id ? 'bg-primary text-white' : 'text-slate-600 bg-emerald-50/70'
             }`}
@@ -851,11 +856,32 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
 
         {data && tab === 'stores' && (
           <div className="space-y-2">
-            {data.performance.map((row) => (
-              <StoreRevenueCard key={row.store.id} row={row} />
-            ))}
-            {data.stores.length === 0 && (
-              <p className="text-sm text-slate-500 text-center py-10">No stores synced to the cloud yet.</p>
+            {selectedStoreId && data.stores.find((s) => s.id === selectedStoreId) ? (
+              <AdminStoreWorkspace
+                store={data.stores.find((s) => s.id === selectedStoreId)!}
+                data={data}
+                onBack={() => setSelectedStoreId(null)}
+                onChanged={refresh}
+              />
+            ) : (
+              <>
+                <p className="text-xs text-slate-500 px-1">
+                  Open a store to view its inventory and manage staff.
+                </p>
+                {data.performance.map((row) => (
+                  <button
+                    key={row.store.id}
+                    type="button"
+                    onClick={() => setSelectedStoreId(row.store.id)}
+                    className="w-full text-left"
+                  >
+                    <StoreRevenueCard row={row} />
+                  </button>
+                ))}
+                {data.stores.length === 0 && (
+                  <p className="text-sm text-slate-500 text-center py-10">No stores synced to the cloud yet.</p>
+                )}
+              </>
             )}
           </div>
         )}
@@ -929,7 +955,7 @@ function StatCard({ icon, label, value }: { icon: ReactNode; label: string; valu
 
 function StoreRevenueCard({ row, compact = false }: { row: StorePerformance; compact?: boolean }) {
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-4">
+    <div className="bg-white rounded-2xl border border-slate-200 p-4 hover:border-emerald-200 hover:shadow-sm transition-shadow">
       <div className="flex items-start gap-3">
         <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center flex-shrink-0">
           <Store className="w-5 h-5 text-slate-600" />
@@ -944,6 +970,7 @@ function StoreRevenueCard({ row, compact = false }: { row: StorePerformance; com
             <span>{row.productCount} products</span>
             <span>{row.saleCount} sales</span>
           </div>
+          <p className="text-[11px] text-emerald-700 font-semibold mt-2">Tap to open inventory &amp; staff</p>
           <p className="text-[11px] text-slate-500 mt-1">
             Warehouse {row.store.warehouse_enabled ? 'on' : 'off'} · {row.store.max_shops} shop
             {row.store.max_shops === 1 ? '' : 's'} · {row.store.max_warehouses} warehouse

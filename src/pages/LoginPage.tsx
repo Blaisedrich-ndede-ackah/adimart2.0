@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Delete, Fingerprint, Shield } from 'lucide-react';
+import { Delete, Fingerprint, Shield, Store, ChevronDown } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { authenticateWithBiometric, isBiometricAvailable, hasBiometricRegistered } from '@/lib/biometric';
-import { db } from '@/lib/dexie';
+import { db, listLocalStores, type LocalStore } from '@/lib/dexie';
 import { hasStoreLogo } from '@/lib/productImage';
 
 interface LoginPageProps {
@@ -15,7 +15,9 @@ export default function LoginPage({ onOpenAdmin }: LoginPageProps) {
   const [shake, setShake] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricError, setBiometricError] = useState('');
-  const { login, loginError, currentStore } = useAuthStore();
+  const [stores, setStores] = useState<LocalStore[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const { login, loginError, currentStore, switchStore } = useAuthStore();
   const storeLogo = currentStore?.logo_url;
   const storeName = currentStore?.name?.trim();
 
@@ -25,8 +27,23 @@ export default function LoginPage({ onOpenAdmin }: LoginPageProps) {
       const registered = hasBiometricRegistered();
       setBiometricAvailable(available && registered);
     }
-    checkBiometric();
-  }, []);
+    void checkBiometric();
+  }, [currentStore?.id]);
+
+  useEffect(() => {
+    void listLocalStores().then(setStores);
+  }, [currentStore?.id]);
+
+  const handleSelectStore = async (storeId: string) => {
+    if (storeId === currentStore?.id) {
+      setPickerOpen(false);
+      return;
+    }
+    setPin('');
+    setBiometricError('');
+    await switchStore(storeId);
+    setPickerOpen(false);
+  };
 
   const handleKeyPress = useCallback(async (key: string) => {
     setBiometricError('');
@@ -37,7 +54,7 @@ export default function LoginPage({ onOpenAdmin }: LoginPageProps) {
     }
 
     if (key === 'biometric') {
-      handleBiometricLogin();
+      void handleBiometricLogin();
       return;
     }
 
@@ -67,16 +84,15 @@ export default function LoginPage({ onOpenAdmin }: LoginPageProps) {
     const result = await authenticateWithBiometric();
     
     if (result.success && result.userId) {
-      // Find the user and log them in directly
       const user = await db.users.get(result.userId);
-      if (user) {
+      if (user && (!currentStore || user.store_id === currentStore.id)) {
         useAuthStore.setState({ 
           currentUser: user, 
           isAuthenticated: true, 
           loginError: '' 
         });
       } else {
-        setBiometricError('User not found. Please login with PIN.');
+        setBiometricError('User not found for this store. Please login with PIN.');
       }
     } else {
       setBiometricError(result.error || 'Biometric login failed');
@@ -90,7 +106,7 @@ export default function LoginPage({ onOpenAdmin }: LoginPageProps) {
   return (
     <div className="auth-shell">
       <div className="auth-panel flex flex-col items-center animate-fade-in">
-        <div className="flex flex-col items-center mb-8">
+        <div className="flex flex-col items-center mb-6 w-full">
           <div className="w-20 h-20 md:w-24 md:h-24 bg-white rounded-2xl flex items-center justify-center mb-4 shadow-lg overflow-hidden">
             {hasStoreLogo(storeLogo) ? (
               <img src={storeLogo!} alt={storeName || 'Store logo'} className="w-full h-full object-cover" />
@@ -102,8 +118,48 @@ export default function LoginPage({ onOpenAdmin }: LoginPageProps) {
             {hasStoreLogo(storeLogo) && storeName ? storeName : 'Adimat'}
           </h1>
           <p className="text-emerald-100/90 text-sm mt-2">
-            {hasStoreLogo(storeLogo) && storeName ? 'POS · Enter your PIN' : 'POS · Enter your PIN to continue'}
+            Enter your PIN to continue
           </p>
+
+          {stores.length > 1 && (
+            <div className="relative mt-4 w-full max-w-[280px] md:max-w-[300px]">
+              <button
+                type="button"
+                onClick={() => setPickerOpen((v) => !v)}
+                className="w-full flex items-center justify-between gap-2 rounded-2xl bg-white/15 border border-white/20 px-4 py-3 text-left text-white touch-target"
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  <Store className="w-4 h-4 flex-shrink-0 text-emerald-200" />
+                  <span className="truncate text-sm font-semibold">
+                    {currentStore?.name || 'Select store'}
+                  </span>
+                </span>
+                <ChevronDown className={`w-4 h-4 flex-shrink-0 transition-transform ${pickerOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {pickerOpen && (
+                <div className="absolute z-20 mt-2 w-full rounded-2xl bg-white shadow-xl overflow-hidden border border-emerald-100">
+                  {stores.map((store) => {
+                    const active = store.id === currentStore?.id;
+                    return (
+                      <button
+                        key={store.id}
+                        type="button"
+                        onClick={() => void handleSelectStore(store.id)}
+                        className={`w-full text-left px-4 py-3 text-sm touch-target border-b border-slate-100 last:border-0 ${
+                          active ? 'bg-emerald-50 text-primary font-bold' : 'text-slate-800 hover:bg-slate-50'
+                        }`}
+                      >
+                        <p className="truncate">{store.name}</p>
+                        {store.address ? (
+                          <p className="text-[11px] text-slate-500 truncate mt-0.5">{store.address}</p>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className={`flex gap-3 mb-6 ${shake ? 'animate-[shake_0.5s_ease-in-out]' : ''}`}>
@@ -135,7 +191,7 @@ export default function LoginPage({ onOpenAdmin }: LoginPageProps) {
               return (
                 <button
                   key={key}
-                  onClick={() => handleKeyPress(key)}
+                  onClick={() => void handleKeyPress(key)}
                   disabled={!biometricAvailable}
                   className={`h-16 md:h-[4.5rem] rounded-2xl flex items-center justify-center touch-target transition-colors ${
                     biometricAvailable
@@ -152,7 +208,7 @@ export default function LoginPage({ onOpenAdmin }: LoginPageProps) {
               return (
                 <button
                   key={key}
-                  onClick={() => handleKeyPress(key)}
+                  onClick={() => void handleKeyPress(key)}
                   className="h-16 md:h-[4.5rem] rounded-2xl bg-white/10 flex items-center justify-center touch-target active:bg-white/20 transition-colors"
                 >
                   <Delete className="w-6 h-6 text-emerald-200" />
@@ -162,7 +218,7 @@ export default function LoginPage({ onOpenAdmin }: LoginPageProps) {
             return (
               <button
                 key={key}
-                onClick={() => handleKeyPress(key)}
+                onClick={() => void handleKeyPress(key)}
                 disabled={isLoading}
                 className="h-16 md:h-[4.5rem] rounded-2xl bg-white/15 text-white text-2xl font-semibold touch-target active:bg-white/30 transition-colors disabled:opacity-50"
               >

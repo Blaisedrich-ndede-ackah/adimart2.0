@@ -4,7 +4,7 @@
  */
 
 import { isSupabaseConfigured, supabase } from './supabase';
-import { generateId } from './dexie';
+import { generateId, hashPin } from './dexie';
 import {
   addMonthsIso,
   getSubscriptionInfo,
@@ -662,4 +662,102 @@ export async function markWeeklyPayoutSent(
 
 export function formatGhs(amount: number): string {
   return `GH₵${amount.toFixed(2)}`;
+}
+
+/** Admin: set staff active/blocked for a store. */
+export async function setAdminUserActive(
+  userId: string,
+  isActive: boolean
+): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: 'Supabase not configured' };
+  }
+  const { error } = await supabase
+    .from('users')
+    .update({ is_active: isActive })
+    .eq('id', userId);
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
+/** Admin: add a cashier to a store. */
+export async function addAdminStoreCashier(
+  storeId: string,
+  name: string,
+  pin: string
+): Promise<{ success: boolean; error?: string; user?: AdminUserRow }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: 'Supabase not configured' };
+  }
+  if (!name.trim()) return { success: false, error: 'Enter staff name' };
+  if (!/^\d{4}$/.test(pin)) return { success: false, error: 'PIN must be 4 digits' };
+
+  const id = generateId();
+  const now = new Date().toISOString();
+  const row = {
+    id,
+    store_id: storeId,
+    name: name.trim(),
+    role: 'cashier',
+    pin_hash: hashPin(pin),
+    is_active: true,
+    assigned_location_id: null,
+    can_wholesale: false,
+    can_sell_from_warehouse: false,
+    can_manage_ecommerce: false,
+    created_at: now,
+  };
+
+  const { error } = await supabase.from('users').insert(row);
+  if (error) return { success: false, error: error.message };
+
+  return {
+    success: true,
+    user: {
+      id,
+      store_id: storeId,
+      name: row.name,
+      role: 'cashier',
+      is_active: true,
+      created_at: now,
+    },
+  };
+}
+
+/** Admin: reset a staff PIN. */
+export async function resetAdminUserPin(
+  userId: string,
+  pin: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: 'Supabase not configured' };
+  }
+  if (!/^\d{4}$/.test(pin)) return { success: false, error: 'PIN must be 4 digits' };
+  const { error } = await supabase
+    .from('users')
+    .update({ pin_hash: hashPin(pin) })
+    .eq('id', userId);
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
+/** Admin: update product active flag / stock for a store inventory row. */
+export async function updateAdminProduct(
+  productId: string,
+  patch: { is_active?: boolean; stock_level?: number }
+): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: 'Supabase not configured' };
+  }
+  const payload: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+  if (patch.is_active !== undefined) payload.is_active = patch.is_active;
+  if (patch.stock_level !== undefined) {
+    const stock = Math.max(0, Math.floor(Number(patch.stock_level) || 0));
+    payload.stock_level = stock;
+  }
+  const { error } = await supabase.from('products').update(payload).eq('id', productId);
+  if (error) return { success: false, error: error.message };
+  return { success: true };
 }

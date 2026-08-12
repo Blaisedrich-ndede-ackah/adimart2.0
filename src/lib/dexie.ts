@@ -363,6 +363,24 @@ export async function hasAnyStore(): Promise<boolean> {
   return count > 0;
 }
 
+/** All stores present on this device (multi-store support). */
+export async function listLocalStores(): Promise<LocalStore[]> {
+  const stores = await db.stores.toArray();
+  stores.sort((a, b) => a.name.localeCompare(b.name));
+  return stores;
+}
+
+/**
+ * Switch the active store on this device. Caller should clear the logged-in user
+ * so staff sign in under the selected store.
+ */
+export async function switchToStore(storeId: string): Promise<LocalStore> {
+  const store = await db.stores.get(storeId);
+  if (!store) throw new Error('Store not found on this device');
+  await setCurrentStoreId(storeId);
+  return store;
+}
+
 // Create a new store with owner
 export async function createStoreWithOwner(
   storeName: string,
@@ -1615,6 +1633,67 @@ export async function restoreStoreFromCloud(
   return {
     success: true,
     message: `Restored "${remoteStore.name}" from cloud. ${pull.message}`,
+  };
+}
+
+/**
+ * Add / refresh another cloud store on this device without wiping existing stores.
+ * Verifies owner PIN, pulls that store's data, and switches to it.
+ */
+export async function addStoreFromCloud(
+  storeId: string,
+  ownerPin: string
+): Promise<{ success: boolean; message: string }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, message: 'Supabase not configured.' };
+  }
+
+  const connection = await testSupabaseConnection();
+  if (!connection.ok) {
+    return { success: false, message: connection.error || 'Could not connect to Supabase.' };
+  }
+
+  const cleanId = storeId.trim();
+  if (!cleanId) {
+    return { success: false, message: 'Enter a Store ID.' };
+  }
+
+  const { data: remoteStore, error: storeError } = await supabase
+    .from('stores')
+    .select('*')
+    .eq('id', cleanId)
+    .maybeSingle();
+
+  if (storeError || !remoteStore) {
+    return { success: false, message: 'Store not found in cloud. Check your Store ID.' };
+  }
+
+  const { data: owners, error: ownerError } = await supabase
+    .from('users')
+    .select('*')
+    .eq('store_id', cleanId)
+    .eq('role', 'owner')
+    .eq('is_active', true);
+
+  if (ownerError || !owners?.length) {
+    return { success: false, message: 'No owner account found for this store.' };
+  }
+
+  const pinHash = hashPin(ownerPin);
+  const ownerMatch = owners.find((o) => o.pin_hash === pinHash);
+  if (!ownerMatch) {
+    return { success: false, message: 'Invalid owner PIN for this store.' };
+  }
+
+  await setCurrentStoreId(cleanId);
+  const pull = await syncFromSupabase();
+  if (!pull.success) {
+    return { success: false, message: pull.message };
+  }
+
+  return {
+    success: true,
+    message: `Opened "${remoteStore.name}" on this device. ${pull.message}`,
   };
 }
 

@@ -29,6 +29,7 @@ import { isBiometricAvailable, registerBiometric, hasBiometricRegistered, clearB
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { isValidGhanaPhone } from '@/lib/platformSettings';
 import { fileToStoreLogoDataUrl, hasStoreLogo } from '@/lib/productImage';
+import StoresPortalSection from '@/components/StoresPortalSection';
 
 export default function SettingsPage() {
   const { currentUser, currentStore, refreshStore } = useAuthStore();
@@ -345,6 +346,8 @@ export default function SettingsPage() {
       </div>
 
       <div className="page-body no-scrollbar">
+        <StoresPortalSection />
+
         {/* Store Profile */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">
           <div className="flex items-center gap-2 mb-4">

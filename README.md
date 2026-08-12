@@ -148,9 +148,16 @@ Store owners set their preferred MoMo account under **Settings → Mobile Money 
 
 If your Supabase project was created before these features, run `supabase-migrate-admin.sql`, `supabase-migrate-subscriptions.sql`, and `supabase-migrate-platform-settings.sql` in the SQL Editor (or re-apply the latest `supabase-init.sql`).
 
-### First-Time Setup
+### Multi-store on one device
 
-On first launch, you'll be guided through a setup wizard:
+Store owners can keep **multiple stores** on the same phone/tablet:
+
+1. **Settings → My Stores** — create another store or open one from cloud (Store ID + owner PIN) without wiping existing stores  
+2. **Login store picker** — when more than one store is on the device, choose which store to open, then enter that store’s PIN  
+3. After opening a store, **Inventory** and **Settings → Staff** apply only to that store  
+
+Platform admins can also **Admin → Stores → tap a store** to view that store’s inventory and manage its staff in the portal.
+
 
 1. **Enter store profile** — name, address, and support phone (all required)
 2. **Create owner account** with your name and a 4-digit PIN you choose
