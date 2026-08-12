@@ -132,6 +132,7 @@ Reports overview includes a donut chart for **Cost price** (blue), **Selling pri
 Products support pack size, expiry tracking, and owner-defined wholesale pricing (`pack`, lower unit price, or quantity tiers). POS sells **retail or wholesale** from the cashier’s location (warehouse sales only if permitted). Stock deducts with **FEFO** when batches have expiry dates.
 
 If your Supabase project predates this feature, run `supabase-migrate-warehouse.sql` in the SQL Editor.
+For store quotas + warehouse PINs, also run `supabase-migrate-max-stores-warehouse-pin.sql`.
 
 ### E-commerce storefront
 
