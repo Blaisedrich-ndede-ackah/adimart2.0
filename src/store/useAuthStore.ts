@@ -145,11 +145,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   updateMyPhone: async (phone: string) => {
     const user = get().currentUser;
     if (!user) throw new Error('Not signed in');
-    await updateUserPhone(user.id, phone);
+    const saved = await updateUserPhone(user.id, phone);
     const refreshed = await (await import('@/lib/dexie')).db.users.get(user.id);
-    if (refreshed) {
-      set({ currentUser: refreshed });
-    }
+    set({
+      currentUser: refreshed
+        ? refreshed
+        : { ...user, phone: saved },
+    });
   },
 
   setStoreSetup: (value: boolean) => {

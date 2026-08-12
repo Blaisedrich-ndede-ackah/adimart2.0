@@ -515,7 +515,7 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
                 className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-primary"
               >
                 <ChevronLeft className="w-4 h-4" />
-                Back to Settings
+                Back to store login
               </button>
             )}
           </div>

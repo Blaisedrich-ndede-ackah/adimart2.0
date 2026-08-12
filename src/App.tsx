@@ -3,7 +3,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { initAutoSync, stopAutoSync } from '@/lib/sync';
 import { autoReconnectPeripherals } from '@/lib/bluetoothPeripherals';
 import { isAdminSessionActive, clearAdminSession } from '@/lib/adminAuth';
-import { normalizeGhanaPhone } from '@/lib/platformSettings';
+import { isValidGhanaPhone } from '@/lib/platformSettings';
 import { getUnlockedWarehouseLocationId } from '@/lib/warehouseAccess';
 import PWAInstallBanner from '@/components/PWAInstallBanner';
 import SubscriptionWarningBanner from '@/components/SubscriptionWarningBanner';
@@ -38,7 +38,7 @@ function readPublicShopSlug(): string | null {
 
 function userNeedsPhone(user: { phone?: string | null } | null | undefined): boolean {
   if (!user) return false;
-  return !normalizeGhanaPhone(user.phone || '');
+  return !isValidGhanaPhone(user.phone || '');
 }
 
 export default function App() {

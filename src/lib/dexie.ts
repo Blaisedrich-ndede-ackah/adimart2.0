@@ -636,7 +636,7 @@ export async function updateUserPin(userId: string, newPin: string): Promise<voi
 }
 
 /** Attach / update a user's Ghana phone (self-serve or owner edit). */
-export async function updateUserPhone(userId: string, phoneRaw: string): Promise<void> {
+export async function updateUserPhone(userId: string, phoneRaw: string): Promise<string> {
   const { isValidGhanaPhone, normalizeGhanaPhone } = await import('./platformSettings');
   if (!isValidGhanaPhone(phoneRaw)) {
     throw new Error('Enter a valid Ghana mobile number (e.g. 024XXXXXXX).');
@@ -644,17 +644,28 @@ export async function updateUserPhone(userId: string, phoneRaw: string): Promise
   const phone = normalizeGhanaPhone(phoneRaw);
   const display =
     phone.startsWith('233') && phone.length === 12 ? `0${phone.slice(3)}` : phoneRaw.trim();
-  await db.users.update(userId, {
+
+  const existing = await db.users.get(userId);
+  if (!existing) throw new Error('User not found');
+
+  await db.users.put({
+    ...existing,
     phone: display,
     synced: 0,
   });
+
   if (isSupabaseConfigured()) {
-    try {
-      await supabase.from('users').update({ phone: display }).eq('id', userId);
-    } catch {
-      // offline — local remains unsynced
+    const { error } = await supabase
+      .from('users')
+      .update({ phone: display })
+      .eq('id', userId);
+    if (!error) {
+      await db.users.update(userId, { synced: 1 });
     }
+    // If cloud update fails (offline / missing column), keep local phone with synced:0
   }
+
+  return display;
 }
 
 /** Active owner for the current (or given) store — used after warehouse PIN login. */
@@ -1383,6 +1394,33 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
           synced: 1,
         }),
         dbTable: db.users,
+        merge: async (remote: LocalUser, local: LocalUser | undefined) => {
+          if (!local) return remote;
+          // Keep unsynced local edits (e.g. self-serve phone) until push succeeds
+          if (local.synced === 0) {
+            return {
+              ...remote,
+              name: local.name || remote.name,
+              pin_hash: local.pin_hash || remote.pin_hash,
+              is_active: local.is_active,
+              phone: (local.phone || '').trim() || remote.phone || '',
+              assigned_location_id:
+                local.assigned_location_id !== undefined
+                  ? local.assigned_location_id
+                  : remote.assigned_location_id,
+              can_wholesale: local.can_wholesale ?? remote.can_wholesale,
+              can_sell_from_warehouse:
+                local.can_sell_from_warehouse ?? remote.can_sell_from_warehouse,
+              can_manage_ecommerce: local.can_manage_ecommerce ?? remote.can_manage_ecommerce,
+              synced: 0,
+            };
+          }
+          // Never clobber a local phone with an empty cloud value
+          return {
+            ...remote,
+            phone: (remote.phone || '').trim() || local.phone || '',
+          };
+        },
       },
       {
         label: 'Products',
@@ -1674,8 +1712,10 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
 }
 
 export async function syncBidirectional(): Promise<{ success: boolean; message: string }> {
-  const pull = await syncFromSupabase();
+  // Push first so local edits (e.g. newly attached phone) reach the cloud
+  // before pull can overwrite them with stale empty remote rows.
   const push = await syncToSupabase();
+  const pull = await syncFromSupabase();
 
   if (!pull.success && !push.success) {
     return { success: false, message: `Pull: ${pull.message}; Push: ${push.message}` };
