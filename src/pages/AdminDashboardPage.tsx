@@ -577,7 +577,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                       }
                       className="flex-1 rounded-xl border border-slate-200 bg-white px-2 py-2 text-sm"
                     >
-                      {[1, 2, 3, 6, 12].map((m) => (
+                      {[1, 2, 3, 6, 12, 24, 36, 48].map((m) => (
                         <option key={m} value={m}>
                           {m} month{m === 1 ? '' : 's'}
                         </option>
@@ -595,6 +595,11 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                   <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
                     <p className="text-[11px] font-semibold text-slate-700">
                       Stores &amp; warehouse limits
+                    </p>
+                    <p className="text-[10px] text-slate-500 leading-relaxed">
+                      Saves to the cloud <span className="font-semibold">store_quotas</span> table.
+                      If save fails, run <span className="font-mono">supabase-migrate-store-quotas.sql</span> in
+                      Supabase.
                     </p>
                     <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                       <span className="text-xs text-slate-700">Warehouse enabled</span>

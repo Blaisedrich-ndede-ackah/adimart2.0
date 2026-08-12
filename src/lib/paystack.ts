@@ -44,6 +44,8 @@ interface PaystackConfig {
   onSuccess: (reference: string) => void;
   onClose: () => void;
   metadata?: Record<string, unknown>;
+  /** Shown in Paystack receipt metadata (default: POS Sale) */
+  paymentFor?: string;
 }
 
 // Load Paystack script dynamically
@@ -83,6 +85,11 @@ export async function initializePaystack(config: PaystackConfig): Promise<void> 
       throw new Error('Paystack script loaded but PaystackPop not available');
     }
 
+    const paymentFor =
+      config.paymentFor ||
+      (typeof config.metadata?.payment_for === 'string' ? config.metadata.payment_for : '') ||
+      'POS Sale';
+
     const handler = PaystackPop.setup({
       key: PAYSTACK_PUBLIC_KEY,
       email,
@@ -95,13 +102,17 @@ export async function initializePaystack(config: PaystackConfig): Promise<void> 
           {
             display_name: 'Payment For',
             variable_name: 'payment_for',
-            value: 'POS Sale',
+            value: paymentFor,
           },
-          ...(config.metadata ? Object.entries(config.metadata).map(([key, value]) => ({
-            display_name: key,
-            variable_name: key.toLowerCase().replace(/\s/g, '_'),
-            value: String(value),
-          })) : []),
+          ...(config.metadata
+            ? Object.entries(config.metadata)
+                .filter(([key]) => key !== 'payment_for')
+                .map(([key, value]) => ({
+                  display_name: key,
+                  variable_name: key.toLowerCase().replace(/\s/g, '_'),
+                  value: String(value),
+                }))
+            : []),
         ],
       },
       callback: (response: { reference: string; status: string; message: string }) => {

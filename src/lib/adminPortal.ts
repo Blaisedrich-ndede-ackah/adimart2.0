@@ -6,11 +6,10 @@
 import { isSupabaseConfigured, supabase } from './supabase';
 import { generateId, hashPin } from './dexie';
 import {
-  addMonthsIso,
   getSubscriptionInfo,
   type SubscriptionStatus,
 } from './subscription';
-import { notifySubscriptionActivated, resolveStoreOwnerPhone } from './mnotify';
+import { resolveStoreOwnerPhone } from './mnotify';
 import {
   loadAllStoreQuotas,
   normalizeStoreQuota,
@@ -432,84 +431,17 @@ export async function grantStoreSubscription(
   months: number,
   notes = ''
 ): Promise<{ success: boolean; error?: string; expiresAt?: string }> {
-  if (!isSupabaseConfigured()) {
-    return { success: false, error: 'Supabase not configured' };
-  }
-  if (!Number.isFinite(months) || months < 1 || months > 36) {
-    return { success: false, error: 'Months must be between 1 and 36' };
-  }
-
-  const nowIso = new Date().toISOString();
-  const info = getSubscriptionInfo(store.subscription_expires_at, store.subscription_started_at);
-
-  const baseIso =
-    info.status === 'active' && store.subscription_expires_at
-      ? store.subscription_expires_at
-      : nowIso;
-
-  const periodStart = baseIso;
-  const periodEnd = addMonthsIso(baseIso, months);
-  const startedAt =
-    info.status === 'active' && store.subscription_started_at
-      ? store.subscription_started_at
-      : nowIso;
-  const monthsGranted = (store.subscription_months_granted || 0) + months;
-
-  const { error: updateError } = await supabase
-    .from('stores')
-    .update({
-      subscription_started_at: startedAt,
-      subscription_expires_at: periodEnd,
-      subscription_months_granted: monthsGranted,
-    })
-    .eq('id', store.id);
-
-  if (updateError) {
-    return {
-      success: false,
-      error: updateError.message.includes('subscription_')
-        ? `${updateError.message} — run supabase-migrate-subscriptions.sql in Supabase.`
-        : updateError.message,
-    };
-  }
-
-  const grantPayload = {
-    id: generateId(),
-    store_id: store.id,
-    months,
-    period_start: periodStart,
-    period_end: periodEnd,
-    notes,
-    granted_at: nowIso,
-  };
-
-  const { error: grantError } = await supabase.from('subscription_grants').insert(grantPayload);
-  if (grantError) {
-    // Store was updated; surface grant-history failure but treat grant as applied
-    void notifySubscriptionActivated({
-      storeId: store.id,
-      storeName: store.name,
-      ownerPhone: resolveStoreOwnerPhone(store),
-      months,
-      expiresAt: periodEnd,
-    });
-    return {
-      success: true,
-      expiresAt: periodEnd,
-      error: `Subscription saved, but grant history failed: ${grantError.message}`,
-    };
-  }
-
-  // Alert store owner via mNotify SMS (soft-fail if not configured)
-  void notifySubscriptionActivated({
+  const { applySubscriptionGrant } = await import('./subscriptionPayments');
+  return applySubscriptionGrant({
     storeId: store.id,
     storeName: store.name,
     ownerPhone: resolveStoreOwnerPhone(store),
     months,
-    expiresAt: periodEnd,
+    notes: notes || `Admin grant · ${months} month(s)`,
+    currentExpiresAt: store.subscription_expires_at,
+    currentStartedAt: store.subscription_started_at,
+    currentMonthsGranted: store.subscription_months_granted,
   });
-
-  return { success: true, expiresAt: periodEnd };
 }
 
 /**

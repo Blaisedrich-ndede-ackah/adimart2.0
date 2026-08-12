@@ -149,6 +149,7 @@ If your Supabase project predates this feature, run `supabase-migrate-ecommerce.
 Store owners set their preferred MoMo account under **Settings → Mobile Money Payout**, then sync to Supabase.
 
 If your Supabase project was created before these features, run `supabase-migrate-admin.sql`, `supabase-migrate-subscriptions.sql`, and `supabase-migrate-platform-settings.sql` in the SQL Editor (or re-apply the latest `supabase-init.sql`).
+For self-serve Paystack subscription renewals, also run `supabase-migrate-subscription-payments.sql`.
 
 ### Multi-store on one device
 

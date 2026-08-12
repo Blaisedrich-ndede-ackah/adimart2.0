@@ -13,7 +13,7 @@ interface SubscriptionWarningBannerProps {
 
 /**
  * Shows a simple warning when the store subscription is expiring soon or expired.
- * Store owners/cashiers can open the Plan tab to contact the administrator.
+ * Store owners can open the Plan tab to renew online with Paystack.
  */
 export default function SubscriptionWarningBanner({ onOpenPlan }: SubscriptionWarningBannerProps) {
   const [info, setInfo] = useState<SubscriptionInfo | null>(null);
@@ -71,13 +71,13 @@ export default function SubscriptionWarningBanner({ onOpenPlan }: SubscriptionWa
         {isExpired ? (
           <p>
             <span className="font-bold">Subscription expired</span>
-            {daysText ? ` (${daysText})` : ''}. Open Plan to contact the system administrator to renew.
+            {daysText ? ` (${daysText})` : ''}. Open Plan to renew online with Paystack.
           </p>
         ) : (
           <p>
             <span className="font-bold">Subscription ending soon</span>
             {daysText ? ` — expires ${daysText}` : ''} (
-            {formatSubscriptionDate(info.expiresAt)}). Open Plan to renew with the administrator.
+            {formatSubscriptionDate(info.expiresAt)}). Open Plan to renew online with Paystack.
           </p>
         )}
         {onOpenPlan && (
