@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt,
-  CalendarClock, ShoppingBag, MoreHorizontal, X,
+  CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -31,6 +31,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
       [
         { id: 'pos', label: 'POS', icon: ScanBarcode, show: true },
         { id: 'transactions', label: isOwner ? 'Sales' : 'My Sales', icon: Receipt, show: true },
+        { id: 'expenses', label: 'Expenses', icon: PiggyBank, show: true },
         { id: 'devices', label: 'Devices', icon: Bluetooth, show: true },
         { id: 'subscription', label: 'Plan', icon: CalendarClock, show: true },
         { id: 'inventory', label: 'Inventory', icon: Package, show: isOwner },
@@ -49,7 +50,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   // Keep bottom bar to a few primary destinations; rest live under More
   const primaryIds = useMemo(() => {
     if (isOwner) return ['pos', 'transactions', 'inventory'] as const;
-    return ['pos', 'transactions', 'devices'] as const;
+    return ['pos', 'transactions', 'expenses'] as const;
   }, [isOwner]);
 
   const primaryItems = navItems.filter((item) =>
