@@ -515,7 +515,7 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
                 className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-primary"
               >
                 <ChevronLeft className="w-4 h-4" />
-                Back to Settings
+                Back to store login
               </button>
             )}
           </div>
@@ -538,10 +538,11 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
             <div className="w-16 h-16 rounded-2xl bg-amber-50 flex items-center justify-center mx-auto mb-4">
               <Warehouse className="w-8 h-8 text-amber-700" />
             </div>
-            <h2 className="text-lg font-bold text-gray-900 mb-2">Unlock from Settings</h2>
+            <h2 className="text-lg font-bold text-gray-900 mb-2">Unlock with warehouse PIN</h2>
             <p className="text-sm text-gray-500 leading-relaxed mb-4">
-              Warehouses are managed from Settings → My Warehouses. Create or enter that warehouse&apos;s
-              PIN to open it here.
+              Switching to a warehouse works like switching stores — sign out from Settings → My
+              Warehouses (or pick the warehouse on the login screen), then enter that warehouse&apos;s
+              PIN.
             </p>
             <p className="text-[11px] text-gray-400 mb-4">
               {warehouseCount} warehouse{warehouseCount !== 1 ? 's' : ''} · limit {maxWarehouses}
@@ -552,7 +553,7 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
                 onClick={onBackToSettings}
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-bold text-white touch-target"
               >
-                Go to Settings
+                Go to store login
               </button>
             )}
           </div>
@@ -589,7 +590,7 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
               className="inline-flex items-center gap-1 text-emerald-100 text-xs font-medium mb-2 touch-target"
             >
               <ChevronLeft className="w-4 h-4" />
-              Back to Settings
+              Back to store login
             </button>
             <div className="flex items-start justify-between gap-3 mb-3">
               <div className="min-w-0">

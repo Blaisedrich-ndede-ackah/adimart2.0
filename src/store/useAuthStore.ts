@@ -4,13 +4,16 @@ import {
   LocalStore,
   authenticateByPin, 
   verifyOwnerPin as dbVerifyOwnerPin,
+  getActiveStoreOwner,
   getCurrentStoreUsers,
   getCurrentStore,
   getCurrentStoreId,
   hasAnyStore,
   listLocalStores,
   switchToStore,
+  updateUserPhone,
 } from '@/lib/dexie';
+import { clearAllWarehouseSessions, clearWarehouseUnlock } from '@/lib/warehouseAccess';
 
 interface AuthState {
   currentUser: LocalUser | null;
@@ -22,6 +25,8 @@ interface AuthState {
   
   initialize: () => Promise<void>;
   login: (pin: string) => Promise<boolean>;
+  /** After warehouse PIN succeeds — enter as the store owner. */
+  loginAsStoreOwner: () => Promise<boolean>;
   logout: () => void;
   switchUser: () => void;
   /** Switch active store and require a fresh login for that store. */
@@ -30,6 +35,7 @@ interface AuthState {
   verifyOwnerPin: (pin: string) => Promise<boolean>;
   getAllUsers: () => Promise<LocalUser[]>;
   refreshStore: () => Promise<void>;
+  updateMyPhone: (phone: string) => Promise<void>;
   setStoreSetup: (value: boolean) => void;
 }
 
@@ -67,6 +73,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     const user = await authenticateByPin(pin);
     if (user) {
+      clearAllWarehouseSessions();
       const store = await getCurrentStore();
       set({ 
         currentUser: user, 
@@ -81,15 +88,35 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     return false;
   },
 
+  loginAsStoreOwner: async () => {
+    const owner = await getActiveStoreOwner();
+    if (!owner) {
+      set({ loginError: 'No active store owner found for this warehouse.' });
+      return false;
+    }
+    const store = await getCurrentStore();
+    set({
+      currentUser: owner,
+      currentStore: store,
+      isAuthenticated: true,
+      loginError: '',
+    });
+    return true;
+  },
+
   logout: () => {
+    clearAllWarehouseSessions();
     set({ currentUser: null, isAuthenticated: false, loginError: '' });
   },
 
   switchUser: () => {
+    // Keep any pending warehouse login set by Settings → Open warehouse
+    clearWarehouseUnlock();
     set({ currentUser: null, isAuthenticated: false, loginError: '' });
   },
 
   switchStore: async (storeId: string) => {
+    clearAllWarehouseSessions();
     const store = await switchToStore(storeId);
     set({
       currentStore: store,
@@ -113,6 +140,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   refreshStore: async () => {
     const store = await getCurrentStore();
     set({ currentStore: store });
+  },
+
+  updateMyPhone: async (phone: string) => {
+    const user = get().currentUser;
+    if (!user) throw new Error('Not signed in');
+    const saved = await updateUserPhone(user.id, phone);
+    const refreshed = await (await import('@/lib/dexie')).db.users.get(user.id);
+    set({
+      currentUser: refreshed
+        ? refreshed
+        : { ...user, phone: saved },
+    });
   },
 
   setStoreSetup: (value: boolean) => {

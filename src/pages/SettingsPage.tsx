@@ -21,6 +21,7 @@ import {
   deleteUser,
   deactivateUser,
   activateUser,
+  updateUserPhone,
 } from '@/lib/dexie';
 import { ensureStoreLocations, listLocations } from '@/lib/warehouse';
 import { isAutoSyncEnabled, setAutoSyncEnabled, startAutoSync, stopAutoSync } from '@/lib/sync';
@@ -359,11 +360,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
 
       <div className="page-body no-scrollbar">
         <StoresPortalSection />
-        <WarehousePortalSection
-          onOpenWarehouse={() => {
-            onNavigate?.('warehouse');
-          }}
-        />
+        <WarehousePortalSection />
 
         {/* Store Profile */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">
@@ -751,15 +748,13 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
                       </p>
                     </div>
                     <div className="flex items-center gap-1">
-                      {user.role === 'cashier' && (
-                        <button
-                          type="button"
-                          onClick={() => setPermUserId(permUserId === user.id ? null : user.id)}
-                          className="px-2 py-1 text-[10px] font-semibold rounded-lg bg-slate-100 text-slate-700 touch-target"
-                        >
-                          Perms
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => setPermUserId(permUserId === user.id ? null : user.id)}
+                        className="px-2 py-1 text-[10px] font-semibold rounded-lg bg-slate-100 text-slate-700 touch-target"
+                      >
+                        {user.role === 'cashier' ? 'Perms' : 'Phone'}
+                      </button>
                       {user.id !== currentUser?.id && (
                         <>
                           <button
@@ -799,7 +794,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
                       )}
                     </div>
                   </div>
-                  {permUserId === user.id && user.role === 'cashier' && (
+                  {permUserId === user.id && (
                     <div className="mt-2 bg-slate-50 rounded-xl p-3 space-y-2 text-xs">
                       <div>
                         <label className="text-gray-500 font-medium block mb-1">Phone (PIN reset)</label>
@@ -808,16 +803,30 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
                           defaultValue={user.phone || ''}
                           onBlur={(e) => {
                             const value = e.target.value.trim();
-                            if (value && !isValidGhanaPhone(value)) {
+                            if (!value) return;
+                            if (!isValidGhanaPhone(value)) {
                               alert('Enter a valid Ghana phone number');
                               return;
                             }
-                            void updateCashierPerms(user, { phone: value });
+                            void (async () => {
+                              try {
+                                if (user.id === currentUser?.id) {
+                                  await useAuthStore.getState().updateMyPhone(value);
+                                } else {
+                                  await updateUserPhone(user.id, value);
+                                }
+                                await loadData();
+                              } catch (err) {
+                                alert(err instanceof Error ? err.message : 'Could not save phone');
+                              }
+                            })();
                           }}
                           placeholder="024 XXX XXXX"
                           className="w-full px-2 py-2 border border-gray-200 rounded-lg bg-white"
                         />
                       </div>
+                      {user.role === 'cashier' && (
+                      <>
                       <div>
                         <label className="text-gray-500 font-medium block mb-1">Assigned location</label>
                         <select
@@ -874,6 +883,8 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
                             }
                           />
                         </label>
+                      )}
+                      </>
                       )}
                     </div>
                   )}
