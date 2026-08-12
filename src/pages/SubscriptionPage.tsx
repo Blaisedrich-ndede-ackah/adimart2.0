@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  CalendarClock, CheckCircle2, AlertCircle, Mail, MessageCircle, Phone,
+  CheckCircle2, AlertCircle, Mail, MessageCircle, Phone,
   RefreshCcw, Loader2, Headphones, CreditCard,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
