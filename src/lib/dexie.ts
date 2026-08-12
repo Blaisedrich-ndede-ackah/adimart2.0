@@ -355,6 +355,33 @@ export async function setCurrentStoreId(storeId: string | null): Promise<void> {
   });
 }
 
+export async function setCurrentUserId(userId: string | null): Promise<void> {
+  const config = await db.app_config.get('main');
+  await db.app_config.put({
+    id: 'main',
+    current_store_id: config?.current_store_id ?? null,
+    current_user_id: userId,
+  });
+}
+
+export async function getCurrentUserId(): Promise<string | null> {
+  const config = await db.app_config.get('main');
+  return config?.current_user_id ?? null;
+}
+
+/** Restore the last signed-in user for the current store (survives page refresh). */
+export async function getPersistedCurrentUser(): Promise<LocalUser | null> {
+  const storeId = await getCurrentStoreId();
+  const userId = await getCurrentUserId();
+  if (!storeId || !userId) return null;
+  const user = await db.users.get(userId);
+  if (!user || user.store_id !== storeId) {
+    await setCurrentUserId(null);
+    return null;
+  }
+  return user;
+}
+
 // Get current store
 export async function getCurrentStore(): Promise<LocalStore | null> {
   const storeId = await getCurrentStoreId();
@@ -451,6 +478,51 @@ export async function createStoreWithOwner(
 }
 
 /**
+ * Pull admin-managed store limits from cloud into local IndexedDB.
+ * Prevents stale max_stores / warehouse caps after the admin raises them.
+ */
+export async function pullAdminStoreLimits(storeId: string): Promise<LocalStore | null> {
+  const local = await db.stores.get(storeId);
+  if (!local) return null;
+  if (!isSupabaseConfigured()) return local;
+
+  try {
+    const { data, error } = await supabase
+      .from('stores')
+      .select(
+        'warehouse_enabled, max_shops, max_warehouses, max_stores, ecommerce_enabled, ecommerce_slug, ecommerce_tagline, subscription_started_at, subscription_expires_at, subscription_months_granted'
+      )
+      .eq('id', storeId)
+      .maybeSingle();
+
+    if (error || !data) return local;
+
+    const updated: LocalStore = {
+      ...local,
+      warehouse_enabled: data.warehouse_enabled ? 1 : 0,
+      max_shops: Math.max(1, Number(data.max_shops) || 1),
+      max_warehouses: Math.max(0, Number(data.max_warehouses) || 0),
+      max_stores: Math.max(1, Number(data.max_stores) || 1),
+      ecommerce_enabled: data.ecommerce_enabled ? 1 : 0,
+      ecommerce_slug: String(data.ecommerce_slug || local.ecommerce_slug || ''),
+      ecommerce_tagline: String(data.ecommerce_tagline || local.ecommerce_tagline || ''),
+      subscription_started_at: data.subscription_started_at
+        ? String(data.subscription_started_at)
+        : local.subscription_started_at ?? null,
+      subscription_expires_at: data.subscription_expires_at
+        ? String(data.subscription_expires_at)
+        : local.subscription_expires_at ?? null,
+      subscription_months_granted:
+        Number(data.subscription_months_granted) || local.subscription_months_granted || 0,
+    };
+    await db.stores.put(updated);
+    return updated;
+  } catch {
+    return local;
+  }
+}
+
+/**
  * How many business stores this owner may create, based on admin max_stores
  * across stores they already own (matched by owner phone when available).
  */
@@ -462,7 +534,13 @@ export async function getAdditionalStoreQuota(ownerPhone?: string): Promise<{
   const { normalizeGhanaPhone } = await import('./platformSettings');
   const phone = ownerPhone ? normalizeGhanaPhone(ownerPhone) : '';
   const localStores = await listLocalStores();
-  const ownedStoreIds = new Set<string>(localStores.map((s) => s.id));
+  const currentStoreId = await getCurrentStoreId();
+  const ownedStoreIds = new Set<string>();
+
+  if (currentStoreId) {
+    ownedStoreIds.add(currentStoreId);
+    await pullAdminStoreLimits(currentStoreId);
+  }
 
   if (phone) {
     const localOwners = await db.users
@@ -472,6 +550,14 @@ export async function getAdditionalStoreQuota(ownerPhone?: string): Promise<{
       const ownerPhoneNorm = owner.phone ? normalizeGhanaPhone(owner.phone) : '';
       if (ownerPhoneNorm && ownerPhoneNorm === phone) {
         ownedStoreIds.add(owner.store_id);
+      }
+    }
+
+    // Local stores whose support number matches (older accounts)
+    for (const store of localStores) {
+      const support = store.support_number ? normalizeGhanaPhone(store.support_number) : '';
+      if (support && support === phone) {
+        ownedStoreIds.add(store.id);
       }
     }
 
@@ -492,12 +578,18 @@ export async function getAdditionalStoreQuota(ownerPhone?: string): Promise<{
         // Offline / schema — fall back to local count
       }
     }
+  } else {
+    // No phone identity — count stores already on this device
+    for (const store of localStores) {
+      ownedStoreIds.add(store.id);
+    }
   }
 
   let maxStores = 1;
   for (const storeId of ownedStoreIds) {
-    const local = await db.stores.get(storeId);
+    let local = await db.stores.get(storeId);
     if (local) {
+      local = (await pullAdminStoreLimits(storeId)) || local;
       maxStores = Math.max(maxStores, local.max_stores ?? 1);
       continue;
     }
@@ -1036,6 +1128,7 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
 
     const store = await db.stores.get(storeId);
     if (store && store.synced === 0) {
+      // Do NOT push admin-managed fields — local defaults would overwrite raised limits.
       syncedCount += await upsertToSupabase(
         'Store',
         'stores',
@@ -1053,13 +1146,6 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
           momo_number: store.momo_number || '',
           momo_network: store.momo_network || '',
           logo_url: store.logo_url || '',
-          warehouse_enabled: (store.warehouse_enabled ?? 0) === 1,
-          max_shops: store.max_shops ?? 1,
-          max_warehouses: store.max_warehouses ?? 0,
-          max_stores: store.max_stores ?? 1,
-          ecommerce_enabled: (store.ecommerce_enabled ?? 0) === 1,
-          ecommerce_slug: store.ecommerce_slug || '',
-          ecommerce_tagline: store.ecommerce_tagline || '',
           created_at: store.created_at,
         }],
         async () => { await db.stores.update(storeId, { synced: 1 }); },

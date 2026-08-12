@@ -135,6 +135,8 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
       const user = await db.users.get(result.userId);
       if (user && (!currentStore || user.store_id === currentStore.id)) {
         clearPendingWarehouseLogin();
+        const { setCurrentUserId } = await import('@/lib/dexie');
+        await setCurrentUserId(user.id);
         useAuthStore.setState({
           currentUser: user,
           isAuthenticated: true,

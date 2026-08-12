@@ -8,8 +8,11 @@ import {
   getCurrentStoreUsers,
   getCurrentStore,
   getCurrentStoreId,
+  getPersistedCurrentUser,
   hasAnyStore,
   listLocalStores,
+  pullAdminStoreLimits,
+  setCurrentUserId,
   switchToStore,
   updateUserPhone,
 } from '@/lib/dexie';
@@ -52,13 +55,38 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     
     const hasStore = await hasAnyStore();
     if (!hasStore) {
-      set({ isStoreSetup: false, isLoading: false, currentStore: null });
+      set({
+        isStoreSetup: false,
+        isLoading: false,
+        currentStore: null,
+        currentUser: null,
+        isAuthenticated: false,
+      });
       return;
     }
     
-    const store = await getCurrentStore();
+    let store = await getCurrentStore();
+    if (store?.id) {
+      store = (await pullAdminStoreLimits(store.id)) || store;
+    }
+
+    const persistedUser = await getPersistedCurrentUser();
+    if (persistedUser) {
+      set({
+        currentStore: store,
+        currentUser: persistedUser,
+        isAuthenticated: true,
+        isStoreSetup: true,
+        isLoading: false,
+        loginError: '',
+      });
+      return;
+    }
+
     set({ 
       currentStore: store, 
+      currentUser: null,
+      isAuthenticated: false,
       isStoreSetup: true, 
       isLoading: false 
     });
@@ -74,7 +102,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const user = await authenticateByPin(pin);
     if (user) {
       clearAllWarehouseSessions();
-      const store = await getCurrentStore();
+      await setCurrentUserId(user.id);
+      const store = (await pullAdminStoreLimits(storeId)) || (await getCurrentStore());
       set({ 
         currentUser: user, 
         currentStore: store,
@@ -94,7 +123,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ loginError: 'No active store owner found for this warehouse.' });
       return false;
     }
-    const store = await getCurrentStore();
+    await setCurrentUserId(owner.id);
+    const storeId = await getCurrentStoreId();
+    const store = storeId
+      ? (await pullAdminStoreLimits(storeId)) || (await getCurrentStore())
+      : await getCurrentStore();
     set({
       currentUser: owner,
       currentStore: store,
@@ -106,20 +139,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: () => {
     clearAllWarehouseSessions();
+    void setCurrentUserId(null);
     set({ currentUser: null, isAuthenticated: false, loginError: '' });
   },
 
   switchUser: () => {
     // Keep any pending warehouse login set by Settings → Open warehouse
     clearWarehouseUnlock();
+    void setCurrentUserId(null);
     set({ currentUser: null, isAuthenticated: false, loginError: '' });
   },
 
   switchStore: async (storeId: string) => {
     clearAllWarehouseSessions();
     const store = await switchToStore(storeId);
+    // switchToStore clears persisted user via setCurrentStoreId
+    const refreshed = (await pullAdminStoreLimits(storeId)) || store;
     set({
-      currentStore: store,
+      currentStore: refreshed,
       currentUser: null,
       isAuthenticated: false,
       isStoreSetup: true,
@@ -138,7 +175,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   refreshStore: async () => {
-    const store = await getCurrentStore();
+    const storeId = await getCurrentStoreId();
+    if (!storeId) {
+      set({ currentStore: null });
+      return;
+    }
+    const store = (await pullAdminStoreLimits(storeId)) || (await getCurrentStore());
     set({ currentStore: store });
   },
 
