@@ -96,7 +96,8 @@ VITE_PAYSTACK_PUBLIC_KEY=pk_live_your-public-key
 # Administrator portal PIN (platform-wide)
 VITE_ADMIN_PIN=9999
 
-# Optional mNotify SMS fallbacks (prefer Admin → Contact in the portal)
+# Optional admin phone for SMS login OTP (also configurable in Admin → Contact)
+# VITE_ADMIN_PHONE=024XXXXXXX
 # VITE_MNOTIFY_API_KEY=
 # VITE_MNOTIFY_SENDER_ID=Adimat
 ```

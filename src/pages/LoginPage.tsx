@@ -4,6 +4,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { authenticateWithBiometric, isBiometricAvailable, hasBiometricRegistered } from '@/lib/biometric';
 import { db, listLocalStores, type LocalStore } from '@/lib/dexie';
 import { hasStoreLogo } from '@/lib/productImage';
+import { confirmPinResetWithOtp, requestPinResetOtp } from '@/lib/pinReset';
 
 interface LoginPageProps {
   onOpenAdmin?: () => void;
@@ -229,21 +230,163 @@ export default function LoginPage({ onOpenAdmin }: LoginPageProps) {
         </div>
 
         {biometricAvailable && (
-          <p className="mt-8 text-emerald-100 text-xs text-center">
+          <p className="mt-6 text-emerald-100 text-xs text-center">
             Biometric login available
           </p>
         )}
 
+        <ForgotPinSection />
+
         {onOpenAdmin && (
           <button
             onClick={onOpenAdmin}
-            className="mt-6 flex items-center gap-2 text-emerald-100/80 text-xs font-medium touch-target"
+            className="mt-4 flex items-center gap-2 text-emerald-100/80 text-xs font-medium touch-target"
           >
             <Shield className="w-3.5 h-3.5" />
             Administrator portal
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+function ForgotPinSection() {
+  const [open, setOpen] = useState(false);
+  const [step, setStep] = useState<'phone' | 'code'>('phone');
+  const [phone, setPhone] = useState('');
+  const [code, setCode] = useState('');
+  const [pin1, setPin1] = useState('');
+  const [pin2, setPin2] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const requestCode = async () => {
+    setBusy(true);
+    setError('');
+    setMessage('');
+    const result = await requestPinResetOtp(phone);
+    setBusy(false);
+    if (!result.success) {
+      setError(result.message);
+      return;
+    }
+    setMessage(result.message);
+    setStep('code');
+  };
+
+  const confirmReset = async () => {
+    setBusy(true);
+    setError('');
+    setMessage('');
+    if (pin1 !== pin2) {
+      setError('New PINs do not match');
+      setBusy(false);
+      return;
+    }
+    const result = await confirmPinResetWithOtp(code, pin1);
+    setBusy(false);
+    if (!result.success) {
+      setError(result.message);
+      return;
+    }
+    setMessage(result.message);
+    setStep('phone');
+    setPhone('');
+    setCode('');
+    setPin1('');
+    setPin2('');
+    setTimeout(() => setOpen(false), 1500);
+  };
+
+  return (
+    <div className="mt-8 w-full max-w-[280px] md:max-w-[300px]">
+      <button
+        type="button"
+        onClick={() => {
+          setOpen((v) => !v);
+          setError('');
+          setMessage('');
+        }}
+        className="w-full text-center text-emerald-100 text-xs font-semibold underline-offset-2 touch-target"
+      >
+        Forgot PIN? Reset with SMS
+      </button>
+
+      {open && (
+        <div className="mt-3 rounded-2xl bg-white/10 border border-white/15 p-3 space-y-2">
+          {step === 'phone' ? (
+            <>
+              <p className="text-[11px] text-emerald-50/90 text-center">
+                Use the phone number saved on your staff profile for this store.
+              </p>
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="024 XXX XXXX"
+                className="w-full rounded-xl bg-white px-3 py-2.5 text-sm text-slate-900 outline-none"
+              />
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void requestCode()}
+                className="w-full rounded-xl bg-white py-2.5 text-sm font-bold text-primary disabled:opacity-50"
+              >
+                {busy ? 'Sending…' : 'Send reset code'}
+              </button>
+            </>
+          ) : (
+            <>
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={4}
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+                placeholder="SMS code"
+                className="w-full rounded-xl bg-white px-3 py-2.5 text-sm text-center tracking-widest text-slate-900 outline-none"
+              />
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={4}
+                value={pin1}
+                onChange={(e) => setPin1(e.target.value.replace(/\D/g, ''))}
+                placeholder="New PIN"
+                className="w-full rounded-xl bg-white px-3 py-2.5 text-sm text-center tracking-widest text-slate-900 outline-none"
+              />
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={4}
+                value={pin2}
+                onChange={(e) => setPin2(e.target.value.replace(/\D/g, ''))}
+                placeholder="Confirm new PIN"
+                className="w-full rounded-xl bg-white px-3 py-2.5 text-sm text-center tracking-widest text-slate-900 outline-none"
+              />
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void confirmReset()}
+                className="w-full rounded-xl bg-white py-2.5 text-sm font-bold text-primary disabled:opacity-50"
+              >
+                {busy ? 'Saving…' : 'Update PIN'}
+              </button>
+              <button
+                type="button"
+                className="w-full text-[11px] text-emerald-100"
+                onClick={() => setStep('phone')}
+              >
+                Use a different phone
+              </button>
+            </>
+          )}
+          {error && <p className="text-red-200 text-[11px] text-center">{error}</p>}
+          {message && <p className="text-emerald-100 text-[11px] text-center">{message}</p>}
+        </div>
+      )}
     </div>
   );
 }

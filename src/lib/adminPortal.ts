@@ -65,6 +65,7 @@ export interface AdminUserRow {
   name: string;
   role: 'owner' | 'cashier';
   is_active: boolean;
+  phone: string;
   created_at: string;
 }
 
@@ -248,6 +249,7 @@ export async function loadAdminDashboard(weekStart = getWeekStart()): Promise<Ad
     name: String(u.name || ''),
     role: (u.role === 'cashier' ? 'cashier' : 'owner') as 'owner' | 'cashier',
     is_active: Boolean(u.is_active),
+    phone: String(u.phone || ''),
     created_at: String(u.created_at || ''),
   }));
 
@@ -664,6 +666,59 @@ export function formatGhs(amount: number): string {
   return `GH₵${amount.toFixed(2)}`;
 }
 
+export interface LinkedUserStores {
+  phone: string;
+  displayName: string;
+  roles: string[];
+  storeIds: string[];
+  storeNames: string[];
+  userCount: number;
+}
+
+function normalizePhoneDigits(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('233')) return digits;
+  if (digits.startsWith('0') && digits.length === 10) return `233${digits.slice(1)}`;
+  if (digits.length === 9) return `233${digits}`;
+  return digits;
+}
+
+/** Group users by phone to show which additional stores the same person opened. */
+export function buildLinkedUserStores(
+  users: AdminUserRow[],
+  stores: AdminStoreRow[]
+): LinkedUserStores[] {
+  const nameOf = (id: string) => stores.find((s) => s.id === id)?.name || 'Unknown';
+  const byPhone = new Map<string, AdminUserRow[]>();
+
+  for (const user of users) {
+    const phone = normalizePhoneDigits(user.phone || '');
+    if (!phone) continue;
+    const list = byPhone.get(phone) || [];
+    list.push(user);
+    byPhone.set(phone, list);
+  }
+
+  return Array.from(byPhone.entries())
+    .map(([phone, rows]) => {
+      const storeIds = [...new Set(rows.map((r) => r.store_id))];
+      const names = [...new Set(rows.map((r) => r.name.trim()).filter(Boolean))];
+      return {
+        phone,
+        displayName: names[0] || 'User',
+        roles: [...new Set(rows.map((r) => r.role))],
+        storeIds,
+        storeNames: storeIds.map(nameOf),
+        userCount: rows.length,
+      };
+    })
+    .sort(
+      (a, b) =>
+        b.storeIds.length - a.storeIds.length || a.displayName.localeCompare(b.displayName)
+    );
+}
+
 /** Admin: set staff active/blocked for a store. */
 export async function setAdminUserActive(
   userId: string,
@@ -684,7 +739,8 @@ export async function setAdminUserActive(
 export async function addAdminStoreCashier(
   storeId: string,
   name: string,
-  pin: string
+  pin: string,
+  phone = ''
 ): Promise<{ success: boolean; error?: string; user?: AdminUserRow }> {
   if (!isSupabaseConfigured()) {
     return { success: false, error: 'Supabase not configured' };
@@ -701,6 +757,7 @@ export async function addAdminStoreCashier(
     role: 'cashier',
     pin_hash: hashPin(pin),
     is_active: true,
+    phone: phone.trim(),
     assigned_location_id: null,
     can_wholesale: false,
     can_sell_from_warehouse: false,
@@ -709,7 +766,14 @@ export async function addAdminStoreCashier(
   };
 
   const { error } = await supabase.from('users').insert(row);
-  if (error) return { success: false, error: error.message };
+  if (error) {
+    return {
+      success: false,
+      error: error.message.includes('phone')
+        ? `${error.message} — run supabase-migrate-user-phone-admin-otp.sql`
+        : error.message,
+    };
+  }
 
   return {
     success: true,
@@ -719,6 +783,7 @@ export async function addAdminStoreCashier(
       name: row.name,
       role: 'cashier',
       is_active: true,
+      phone: row.phone,
       created_at: now,
     },
   };

@@ -16,6 +16,7 @@ import {
   shiftWeek,
   updateStoreEcommerce,
   updateStoreWarehouseLimits,
+  buildLinkedUserStores,
 } from '@/lib/adminPortal';
 import { clearAdminSession } from '@/lib/adminAuth';
 import {
@@ -54,6 +55,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
   const [platformSettings, setPlatformSettings] = useState<PlatformSettings | null>(null);
   const [contactWhatsapp, setContactWhatsapp] = useState('');
   const [contactEmail, setContactEmail] = useState('');
+  const [adminPhone, setAdminPhone] = useState('');
   const [mnotifyApiKey, setMnotifyApiKey] = useState('');
   const [mnotifySenderId, setMnotifySenderId] = useState('Adimat');
   const [savingContact, setSavingContact] = useState(false);
@@ -102,6 +104,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
     setPlatformSettings(settings);
     setContactWhatsapp(settings.contact_whatsapp);
     setContactEmail(settings.contact_email);
+    setAdminPhone(settings.admin_phone || '');
     setMnotifyApiKey(settings.mnotify_api_key);
     setMnotifySenderId(settings.mnotify_sender_id || 'Adimat');
   }, []);
@@ -150,6 +153,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
     const result = await savePlatformSettings({
       contact_whatsapp: contactWhatsapp,
       contact_email: contactEmail,
+      admin_phone: adminPhone,
       mnotify_api_key: mnotifyApiKey,
       mnotify_sender_id: mnotifySenderId,
     });
@@ -270,25 +274,42 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
   const storeName = (storeId: string) =>
     data?.stores.find((s) => s.id === storeId)?.name || 'Unknown store';
 
+  const linkedAccounts = useMemo(
+    () => (data ? buildLinkedUserStores(data.users, data.stores) : []),
+    [data]
+  );
+
+  const tabs = (
+    [
+      ['overview', 'Overview'],
+      ['stores', 'Stores'],
+      ['users', 'Users'],
+      ['subscriptions', 'Subs'],
+      ['payouts', 'Payouts'],
+      ['products', 'Products'],
+      ['contact', 'Contact'],
+    ] as const
+  );
+
   return (
     <div className="h-dvh bg-[var(--color-surface)] flex flex-col overflow-hidden md:max-w-6xl md:mx-auto md:border-x md:border-emerald-100 md:shadow-xl">
-      <header className="bg-primary text-white px-4 md:px-6 py-3 flex-shrink-0">
-        <div className="flex items-center justify-between gap-3">
-          <div>
+      <header className="bg-primary text-white px-3 sm:px-4 md:px-6 py-3 flex-shrink-0">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
             <p className="text-emerald-200 text-[10px] font-semibold uppercase tracking-wide">Adimat Admin</p>
-            <h1 className="text-lg md:text-xl font-bold">Platform Overview</h1>
+            <h1 className="text-base sm:text-lg md:text-xl font-bold truncate">Platform Overview</h1>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               onClick={() => void refresh()}
-              className="p-2 rounded-xl bg-white/10 touch-target"
+              className="p-2.5 rounded-xl bg-white/10 touch-target"
               title="Refresh"
             >
               <RefreshCcw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
             <button
               onClick={handleLogout}
-              className="p-2 rounded-xl bg-white/10 touch-target"
+              className="p-2.5 rounded-xl bg-white/10 touch-target"
               title="Log out"
             >
               <LogOut className="w-4 h-4" />
@@ -296,44 +317,39 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
           </div>
         </div>
 
-        <div className="mt-3 flex items-center justify-between bg-white/10 rounded-xl px-2 py-2">
-          <button
-            onClick={() => setWeekStart((w) => shiftWeek(w, -1))}
-            className="p-2 touch-target"
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </button>
-          <div className="text-center">
-            <p className="text-[10px] text-slate-300 uppercase">Payout week</p>
-            <p className="text-sm font-semibold">{weekStart} → {weekEnd}</p>
+        {(tab === 'overview' || tab === 'payouts') && (
+          <div className="mt-3 flex items-center justify-between bg-white/10 rounded-xl px-1.5 py-1.5">
+            <button
+              onClick={() => setWeekStart((w) => shiftWeek(w, -1))}
+              className="p-2.5 touch-target"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <div className="text-center min-w-0 px-1">
+              <p className="text-[10px] text-emerald-100/80 uppercase">Payout week</p>
+              <p className="text-xs sm:text-sm font-semibold truncate">{weekStart} → {weekEnd}</p>
+            </div>
+            <button
+              onClick={() => setWeekStart((w) => shiftWeek(w, 1))}
+              className="p-2.5 touch-target"
+              disabled={weekStart >= getWeekStart()}
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
           </div>
-          <button
-            onClick={() => setWeekStart((w) => shiftWeek(w, 1))}
-            className="p-2 touch-target"
-            disabled={weekStart >= getWeekStart()}
-          >
-            <ChevronRight className="w-4 h-4" />
-          </button>
-        </div>
+        )}
       </header>
 
-      <nav className="bg-white border-b border-emerald-100 px-2 md:px-4 py-2 flex gap-1 overflow-x-auto no-scrollbar flex-shrink-0">
-        {([
-          ['overview', 'Overview'],
-          ['subscriptions', 'Subscriptions'],
-          ['contact', 'Contact'],
-          ['payouts', 'Payouts'],
-          ['stores', 'Stores'],
-          ['users', 'Users'],
-          ['products', 'Products'],
-        ] as const).map(([id, label]) => (
+      {/* Desktop / tablet top tabs */}
+      <nav className="hidden sm:flex bg-white border-b border-emerald-100 px-2 md:px-4 py-2 gap-1 overflow-x-auto no-scrollbar flex-shrink-0">
+        {tabs.map(([id, label]) => (
           <button
             key={id}
             onClick={() => {
               setTab(id);
               if (id !== 'stores') setSelectedStoreId(null);
             }}
-            className={`px-3 py-2 rounded-lg text-xs font-semibold whitespace-nowrap touch-target ${
+            className={`px-3 py-2.5 rounded-xl text-xs font-semibold whitespace-nowrap touch-target ${
               tab === id ? 'bg-primary text-white' : 'text-slate-600 bg-emerald-50/70'
             }`}
           >
@@ -343,7 +359,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       </nav>
 
       <main
-        className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 md:px-6 py-3 md:py-5 pb-8"
+        className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 md:px-6 py-3 md:py-5 pb-24 sm:pb-8"
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
         {loading && !data && tab !== 'contact' && (
@@ -735,6 +751,22 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                   className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
                 />
               </div>
+              <div>
+                <label className="text-[11px] font-medium text-slate-500 mb-1 block">
+                  Admin login phone (SMS OTP)
+                </label>
+                <input
+                  type="tel"
+                  value={adminPhone}
+                  onChange={(e) => setAdminPhone(e.target.value)}
+                  placeholder="024XXXXXXX — receives admin login codes"
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Required for admin SMS verification after PIN. Falls back to WhatsApp number or
+                  VITE_ADMIN_PHONE.
+                </p>
+              </div>
             </div>
 
             <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
@@ -887,27 +919,84 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         )}
 
         {data && tab === 'users' && (
-          <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-            {data.users.length === 0 ? (
-              <p className="text-sm text-slate-500 text-center py-10">No users found.</p>
-            ) : (
-              data.users.map((user) => (
-                <div key={user.id} className="px-4 py-3 border-b border-slate-100 last:border-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">{user.name}</p>
-                      <p className="text-[11px] text-slate-500">{storeName(user.store_id)}</p>
+          <div className="space-y-3">
+            <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 text-xs text-emerald-900">
+              Linked accounts show people who share the same phone across stores — including additional
+              stores they opened on a device.
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-100">
+                <h2 className="text-sm font-bold text-slate-900">Linked stores by phone</h2>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  {linkedAccounts.length} phone identities · multi-store owners appear here
+                </p>
+              </div>
+              {linkedAccounts.length === 0 ? (
+                <p className="text-sm text-slate-500 text-center py-8 px-4">
+                  No user phones synced yet. Staff need a phone on their profile.
+                </p>
+              ) : (
+                linkedAccounts.map((row) => (
+                  <div key={row.phone} className="px-4 py-3 border-b border-slate-100 last:border-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900">{row.displayName}</p>
+                        <p className="text-[11px] text-slate-500 font-mono">{row.phone}</p>
+                        <p className="text-[11px] text-slate-500 mt-1 capitalize">
+                          {row.roles.join(', ')} · {row.userCount} account
+                          {row.userCount === 1 ? '' : 's'}
+                        </p>
+                      </div>
+                      <span className="shrink-0 rounded-lg bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-700">
+                        {row.storeIds.length} store{row.storeIds.length === 1 ? '' : 's'}
+                      </span>
                     </div>
-                    <div className="text-right">
-                      <span className="text-[10px] uppercase font-bold tracking-wide text-slate-500">{user.role}</span>
-                      {!user.is_active && (
-                        <p className="text-[10px] text-red-500">Inactive</p>
-                      )}
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {row.storeNames.map((name) => (
+                        <span
+                          key={`${row.phone}-${name}`}
+                          className="rounded-lg bg-emerald-50 border border-emerald-100 px-2 py-1 text-[11px] font-medium text-emerald-800"
+                        >
+                          {name}
+                        </span>
+                      ))}
                     </div>
                   </div>
-                </div>
-              ))
-            )}
+                ))
+              )}
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-100">
+                <h2 className="text-sm font-bold text-slate-900">All users</h2>
+              </div>
+              {data.users.length === 0 ? (
+                <p className="text-sm text-slate-500 text-center py-10">No users found.</p>
+              ) : (
+                data.users.map((user) => (
+                  <div key={user.id} className="px-4 py-3 border-b border-slate-100 last:border-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900 truncate">{user.name}</p>
+                        <p className="text-[11px] text-slate-500 truncate">
+                          {storeName(user.store_id)}
+                          {user.phone ? ` · ${user.phone}` : ' · no phone'}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span className="text-[10px] uppercase font-bold tracking-wide text-slate-500">
+                          {user.role}
+                        </span>
+                        {!user.is_active && (
+                          <p className="text-[10px] text-red-500">Inactive</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         )}
 
@@ -939,6 +1028,47 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
           </div>
         )}
       </main>
+
+      {/* Mobile bottom tabs */}
+      <nav
+        className="sm:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-emerald-100 bg-white/95 backdrop-blur-md"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
+        <div className="grid grid-cols-4 gap-0.5 px-1 py-1">
+          {tabs.slice(0, 4).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => {
+                setTab(id);
+                if (id !== 'stores') setSelectedStoreId(null);
+              }}
+              className={`flex flex-col items-center justify-center rounded-xl px-1 py-2 touch-target ${
+                tab === id ? 'bg-emerald-50 text-primary' : 'text-slate-500'
+              }`}
+            >
+              <span className={`text-[11px] ${tab === id ? 'font-bold' : 'font-medium'}`}>{label}</span>
+            </button>
+          ))}
+        </div>
+        <div className="grid grid-cols-3 gap-0.5 px-1 pb-1">
+          {tabs.slice(4).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => {
+                setTab(id);
+                if (id !== 'stores') setSelectedStoreId(null);
+              }}
+              className={`flex flex-col items-center justify-center rounded-xl px-1 py-2 touch-target ${
+                tab === id ? 'bg-emerald-50 text-primary' : 'text-slate-500'
+              }`}
+            >
+              <span className={`text-[11px] ${tab === id ? 'font-bold' : 'font-medium'}`}>{label}</span>
+            </button>
+          ))}
+        </div>
+      </nav>
     </div>
   );
 }

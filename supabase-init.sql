@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS users (
   role VARCHAR(20) NOT NULL CHECK (role IN ('owner', 'cashier')),
   pin_hash VARCHAR(255) NOT NULL,
   is_active BOOLEAN DEFAULT TRUE,
+  phone VARCHAR(50) DEFAULT '',
   assigned_location_id UUID,
   can_wholesale BOOLEAN DEFAULT FALSE,
   can_sell_from_warehouse BOOLEAN DEFAULT FALSE,
@@ -69,6 +70,7 @@ CREATE POLICY "users_delete" ON users FOR DELETE USING (true);
 
 CREATE INDEX IF NOT EXISTS idx_users_store ON users(store_id);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
 
 -- ============================================================
 -- PRODUCTS TABLE (linked to stores)
@@ -336,6 +338,7 @@ CREATE TABLE IF NOT EXISTS platform_settings (
   contact_email VARCHAR(255) DEFAULT '',
   mnotify_api_key TEXT DEFAULT '',
   mnotify_sender_id VARCHAR(11) DEFAULT 'Adimat',
+  admin_phone VARCHAR(50) DEFAULT '',
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 

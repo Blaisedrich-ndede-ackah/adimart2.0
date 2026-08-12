@@ -49,6 +49,8 @@ export interface LocalUser {
   role: 'owner' | 'cashier';
   pin_hash: string;
   is_active: number;
+  /** Ghana phone for SMS PIN reset / multi-store identity */
+  phone?: string;
   assigned_location_id?: string | null;
   can_wholesale?: number;
   can_sell_from_warehouse?: number;
@@ -386,11 +388,12 @@ export async function createStoreWithOwner(
   storeName: string,
   ownerName: string,
   ownerPin: string,
-  profile?: { address?: string; supportNumber?: string }
+  profile?: { address?: string; supportNumber?: string; ownerPhone?: string }
 ): Promise<{ store: LocalStore; owner: LocalUser }> {
   const storeId = generateId();
   const ownerId = generateId();
   const now = new Date().toISOString();
+  const ownerPhone = (profile?.ownerPhone || profile?.supportNumber || '').trim();
 
   const store: LocalStore = {
     id: storeId,
@@ -426,6 +429,7 @@ export async function createStoreWithOwner(
     role: 'owner',
     pin_hash: hashPin(ownerPin),
     is_active: 1,
+    phone: ownerPhone,
     assigned_location_id: null,
     can_wholesale: 1,
     can_sell_from_warehouse: 1,
@@ -506,7 +510,8 @@ export async function verifyOwnerPin(pin: string): Promise<boolean> {
 export async function addUserToStore(
   name: string,
   pin: string,
-  role: 'owner' | 'cashier'
+  role: 'owner' | 'cashier',
+  phone = ''
 ): Promise<LocalUser> {
   const storeId = await getCurrentStoreId();
   if (!storeId) throw new Error('No store selected');
@@ -518,6 +523,7 @@ export async function addUserToStore(
     role,
     pin_hash: hashPin(pin),
     is_active: 1,
+    phone: phone.trim(),
     assigned_location_id: null,
     can_wholesale: role === 'owner' ? 1 : 0,
     can_sell_from_warehouse: role === 'owner' ? 1 : 0,
@@ -528,6 +534,16 @@ export async function addUserToStore(
   
   await db.users.add(user);
   return user;
+}
+
+export async function updateUserPin(userId: string, newPin: string): Promise<void> {
+  await db.users.update(userId, {
+    pin_hash: hashPin(newPin),
+    synced: 0,
+  });
+  if (isSupabaseConfigured()) {
+    await supabase.from('users').update({ pin_hash: hashPin(newPin) }).eq('id', userId);
+  }
 }
 
 // Block a cashier (can log in, but app shows a restricted contact-owner screen)
@@ -927,6 +943,7 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         role: u.role,
         pin_hash: u.pin_hash,
         is_active: u.is_active === 1,
+        phone: u.phone || '',
         assigned_location_id: u.assigned_location_id || null,
         can_wholesale: (u.can_wholesale ?? 0) === 1,
         can_sell_from_warehouse: (u.can_sell_from_warehouse ?? 0) === 1,
@@ -1231,6 +1248,7 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
           role: row.role as 'owner' | 'cashier',
           pin_hash: row.pin_hash as string,
           is_active: row.is_active ? 1 : 0,
+          phone: String(row.phone || ''),
           assigned_location_id: (row.assigned_location_id as string) || null,
           can_wholesale: row.can_wholesale ? 1 : 0,
           can_sell_from_warehouse: row.can_sell_from_warehouse ? 1 : 0,

@@ -78,6 +78,7 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
       await createStoreWithOwner(storeName.trim(), ownerName.trim(), ownerPin, {
         address: storeAddress.trim(),
         supportNumber: supportNumber.trim(),
+        ownerPhone: supportNumber.trim(),
       });
       setStoreSetup(true);
       await initialize();

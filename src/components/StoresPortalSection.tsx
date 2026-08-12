@@ -95,7 +95,11 @@ export default function StoresPortalSection() {
         newName.trim(),
         ownerName.trim(),
         ownerPin,
-        { address: newAddress.trim(), supportNumber: newPhone.trim() }
+        {
+          address: newAddress.trim(),
+          supportNumber: newPhone.trim(),
+          ownerPhone: newPhone.trim(),
+        }
       );
       await switchStore(store.id);
       setShowCreate(false);

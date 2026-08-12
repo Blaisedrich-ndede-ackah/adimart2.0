@@ -63,6 +63,7 @@ export default function SettingsPage() {
   const [users, setUsers] = useState<LocalUser[]>([]);
   const [showAddUser, setShowAddUser] = useState(false);
   const [newUserName, setNewUserName] = useState('');
+  const [newUserPhone, setNewUserPhone] = useState('');
   const [newUserPin, setNewUserPin] = useState('');
   const [newUserRole, setNewUserRole] = useState<'cashier' | 'owner'>('cashier');
   const [addUserError, setAddUserError] = useState('');
@@ -243,14 +244,19 @@ export default function SettingsPage() {
       setAddUserError('Name is required');
       return;
     }
+    if (!isValidGhanaPhone(newUserPhone)) {
+      setAddUserError('Valid Ghana phone is required for PIN reset');
+      return;
+    }
     if (newUserPin.length !== 4) {
       setAddUserError('PIN must be 4 digits');
       return;
     }
 
     try {
-      await addUserToStore(newUserName.trim(), newUserPin, newUserRole);
+      await addUserToStore(newUserName.trim(), newUserPin, newUserRole, newUserPhone.trim());
       setNewUserName('');
+      setNewUserPhone('');
       setNewUserPin('');
       setShowAddUser(false);
       
@@ -295,6 +301,7 @@ export default function SettingsPage() {
         | 'can_wholesale'
         | 'can_sell_from_warehouse'
         | 'can_manage_ecommerce'
+        | 'phone'
       >
     >
   ) => {
@@ -669,7 +676,14 @@ export default function SettingsPage() {
                 type="text"
                 value={newUserName}
                 onChange={e => setNewUserName(e.target.value)}
-                placeholder="Staff name"
+                placeholder="Staff name *"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
+              />
+              <input
+                type="tel"
+                value={newUserPhone}
+                onChange={e => setNewUserPhone(e.target.value)}
+                placeholder="Phone * (024…) — for PIN reset"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
               />
               <input
@@ -678,7 +692,7 @@ export default function SettingsPage() {
                 maxLength={4}
                 value={newUserPin}
                 onChange={e => setNewUserPin(e.target.value.replace(/\D/g, ''))}
-                placeholder="4-digit PIN"
+                placeholder="4-digit PIN *"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
               />
               <select
@@ -720,6 +734,7 @@ export default function SettingsPage() {
                       </p>
                       <p className="text-xs text-gray-500 capitalize">
                         {user.role}
+                        {user.phone ? ` · ${user.phone}` : ' · no phone'}
                         {user.role === 'cashier' && (user.can_wholesale === 1 ? ' · wholesale' : '')}
                         {user.role === 'cashier' && (user.can_sell_from_warehouse === 1 ? ' · warehouse sales' : '')}
                         {user.role === 'cashier' && (user.can_manage_ecommerce === 1 ? ' · online shop' : '')}
@@ -776,6 +791,23 @@ export default function SettingsPage() {
                   </div>
                   {permUserId === user.id && user.role === 'cashier' && (
                     <div className="mt-2 bg-slate-50 rounded-xl p-3 space-y-2 text-xs">
+                      <div>
+                        <label className="text-gray-500 font-medium block mb-1">Phone (PIN reset)</label>
+                        <input
+                          type="tel"
+                          defaultValue={user.phone || ''}
+                          onBlur={(e) => {
+                            const value = e.target.value.trim();
+                            if (value && !isValidGhanaPhone(value)) {
+                              alert('Enter a valid Ghana phone number');
+                              return;
+                            }
+                            void updateCashierPerms(user, { phone: value });
+                          }}
+                          placeholder="024 XXX XXXX"
+                          className="w-full px-2 py-2 border border-gray-200 rounded-lg bg-white"
+                        />
+                      </div>
                       <div>
                         <label className="text-gray-500 font-medium block mb-1">Assigned location</label>
                         <select
@@ -861,7 +893,9 @@ export default function SettingsPage() {
 
           {storeId && (
             <div className="bg-gray-50 rounded-lg p-3 mb-3">
-              <p className="text-[10px] text-gray-500 mb-1">Store ID (for restore on new device)</p>
+              <p className="text-[10px] text-gray-500 mb-1">
+                Store ID (open this store on another device via My Stores / Restore)
+              </p>
               <p className="text-xs font-mono text-gray-800 break-all">{storeId}</p>
             </div>
           )}
