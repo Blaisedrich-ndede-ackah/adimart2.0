@@ -20,14 +20,15 @@ import {
   exportLocationReportPdf,
   exportReportCsv,
   exportReportPdf,
-  getPeriodRange,
+  formatReportPeriodLabel,
   listReportLocations,
+  resolveReportRange,
+  type ReportPeriod,
   ReportSummary,
 } from '@/lib/reportAnalytics';
 import { getExpiringBatches } from '@/lib/warehouse';
 import FinancialDonutChart from '@/components/FinancialDonutChart';
 
-type Period = 'today' | 'week' | 'month';
 type ReportTab = 'overview' | 'products' | 'expenses' | 'locations';
 
 interface DayData {
@@ -38,9 +39,24 @@ interface DayData {
 
 const EXPENSE_CATEGORIES = ['Rent', 'Utilities', 'Supplier', 'Salaries', 'Transport', 'Other'];
 
+function todayDateOnly(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function monthStartDateOnly(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+}
+
 export default function ReportsPage() {
   const { currentStore, currentUser } = useAuthStore();
-  const [period, setPeriod] = useState<Period>('today');
+  const [period, setPeriod] = useState<ReportPeriod>('today');
+  const [customFrom, setCustomFrom] = useState(monthStartDateOnly);
+  const [customTo, setCustomTo] = useState(todayDateOnly);
+  const [appliedFrom, setAppliedFrom] = useState(monthStartDateOnly);
+  const [appliedTo, setAppliedTo] = useState(todayDateOnly);
+  const [rangeError, setRangeError] = useState('');
   const [tab, setTab] = useState<ReportTab>('overview');
   const [transactions, setTransactions] = useState<LocalTransaction[]>([]);
   const [expenses, setExpenses] = useState<LocalExpense[]>([]);
@@ -58,58 +74,78 @@ export default function ReportsPage() {
   const [productNames, setProductNames] = useState<Record<string, string>>({});
   const [locations, setLocations] = useState<LocalLocation[]>([]);
   const [exportingLocationId, setExportingLocationId] = useState<string | null>(null);
+  const [loadingReport, setLoadingReport] = useState(false);
 
   const loadData = useCallback(async () => {
     const storeId = await getCurrentStoreId();
     if (!storeId) return;
 
-    const { start, end } = getPeriodRange(period);
-    const allTxns = (await getCurrentStoreTransactions()).filter(t => t.status === 'completed');
-    const allExpenses = await getCurrentStoreExpenses();
-    const expiring = await getExpiringBatches(storeId, 30);
-    setExpiringBatches(expiring.slice(0, 8));
-    const products = await db.products.where('store_id').equals(storeId).toArray();
-    const names: Record<string, string> = {};
-    products.forEach((p) => { names[p.id] = p.name; });
-    setProductNames(names);
-    setLocations(await listReportLocations(storeId));
-
-    const periodTxns = allTxns.filter(t => {
-      const d = new Date(t.created_at);
-      return d >= start && d <= end;
-    }).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
-    const periodExpenses = allExpenses.filter(e => {
-      const d = new Date(e.created_at);
-      return d >= start && d <= end;
-    }).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
-    setTransactions(periodTxns);
-    setExpenses(periodExpenses);
-    setSummary(await buildReportSummary(storeId, period));
-
-    const now = new Date();
-    const days: DayData[] = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(now);
-      d.setDate(now.getDate() - i);
-      const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0);
-      const dayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59);
-      const dayTxns = allTxns.filter(t => {
-        const td = new Date(t.created_at);
-        return td >= dayStart && td <= dayEnd;
-      });
-      days.push({
-        day: d.toLocaleDateString('en-US', { weekday: 'short' }),
-        revenue: dayTxns.reduce((s, t) => s + t.total_amount, 0),
-        count: dayTxns.length,
-      });
+    let range;
+    try {
+      range = resolveReportRange(period, appliedFrom, appliedTo);
+      setRangeError('');
+    } catch (err) {
+      setRangeError(err instanceof Error ? err.message : 'Invalid date range');
+      return;
     }
-    setChartData(days);
-  }, [period]);
+
+    setLoadingReport(true);
+    try {
+      const { start, end } = range;
+      const allTxns = (await getCurrentStoreTransactions()).filter(t => t.status === 'completed');
+      const allExpenses = await getCurrentStoreExpenses();
+      const expiring = await getExpiringBatches(storeId, 30);
+      setExpiringBatches(expiring.slice(0, 8));
+      const products = await db.products.where('store_id').equals(storeId).toArray();
+      const names: Record<string, string> = {};
+      products.forEach((p) => { names[p.id] = p.name; });
+      setProductNames(names);
+      setLocations(await listReportLocations(storeId));
+
+      const periodTxns = allTxns.filter(t => {
+        const d = new Date(t.created_at);
+        return d >= start && d <= end;
+      }).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      const periodExpenses = allExpenses.filter(e => {
+        const d = new Date(e.created_at);
+        return d >= start && d <= end;
+      }).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      setTransactions(periodTxns);
+      setExpenses(periodExpenses);
+      setSummary(await buildReportSummary(storeId, range));
+
+      // Chart: last up to 14 days inside the selected range
+      const dayMs = 24 * 60 * 60 * 1000;
+      const spanDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / dayMs) + 1);
+      const chartDays = Math.min(14, spanDays);
+      const days: DayData[] = [];
+      for (let i = chartDays - 1; i >= 0; i--) {
+        const d = new Date(end);
+        d.setHours(0, 0, 0, 0);
+        d.setDate(d.getDate() - i);
+        if (d < start) continue;
+        const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0);
+        const dayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59);
+        const dayTxns = allTxns.filter(t => {
+          const td = new Date(t.created_at);
+          return td >= dayStart && td <= dayEnd;
+        });
+        days.push({
+          day: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          revenue: dayTxns.reduce((s, t) => s + t.total_amount, 0),
+          count: dayTxns.length,
+        });
+      }
+      setChartData(days);
+    } finally {
+      setLoadingReport(false);
+    }
+  }, [period, appliedFrom, appliedTo]);
 
   useEffect(() => {
-    loadData();
+    void loadData();
   }, [loadData]);
 
   const loadTxnItems = async (txnId: string) => {
@@ -122,7 +158,19 @@ export default function ReportsPage() {
     setExpandedTxn(txnId);
   };
 
-  const periodLabel = period === 'today' ? 'Today' : period === 'week' ? 'This Week' : 'This Month';
+  const periodLabel = formatReportPeriodLabel(period, appliedFrom, appliedTo);
+
+  const applyCustomRange = () => {
+    try {
+      resolveReportRange('custom', customFrom, customTo);
+      setRangeError('');
+      setAppliedFrom(customFrom);
+      setAppliedTo(customTo);
+      setPeriod('custom');
+    } catch (err) {
+      setRangeError(err instanceof Error ? err.message : 'Invalid date range');
+    }
+  };
 
   const handleExportCsv = () => {
     if (!summary || !currentStore) return;
@@ -139,11 +187,14 @@ export default function ReportsPage() {
     if (!storeId || !currentStore) return;
     setExportingLocationId(locationId);
     try {
+      const range = resolveReportRange(period, appliedFrom, appliedTo);
       const locSummary = await buildLocationReportSummary(
         storeId,
         locationId,
-        period,
-        currentStore.name
+        range,
+        currentStore.name,
+        periodLabel,
+        period
       );
       if (format === 'csv') exportLocationReportCsv(locSummary);
       else exportLocationReportPdf(locSummary);
@@ -206,12 +257,19 @@ export default function ReportsPage() {
         <div className="flex bg-white/15 rounded-xl p-0.5 mb-2">
           {([
             { key: 'today', label: 'Today' },
-            { key: 'week', label: 'This Week' },
-            { key: 'month', label: 'This Month' },
+            { key: 'week', label: 'Week' },
+            { key: 'month', label: 'Month' },
+            { key: 'custom', label: 'Custom' },
           ] as const).map(tabItem => (
             <button
               key={tabItem.key}
-              onClick={() => setPeriod(tabItem.key)}
+              onClick={() => {
+                if (tabItem.key === 'custom') {
+                  setPeriod('custom');
+                  return;
+                }
+                setPeriod(tabItem.key);
+              }}
               className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${
                 period === tabItem.key ? 'bg-white text-primary' : 'text-white/80'
               }`}
@@ -220,6 +278,50 @@ export default function ReportsPage() {
             </button>
           ))}
         </div>
+
+        {period === 'custom' && (
+          <div className="bg-white/10 rounded-xl p-3 mb-2 space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block">
+                <span className="text-[10px] uppercase tracking-wide text-emerald-100/80">From</span>
+                <input
+                  type="date"
+                  value={customFrom}
+                  max={customTo}
+                  onChange={(e) => setCustomFrom(e.target.value)}
+                  className="mt-1 w-full rounded-lg border-0 px-2 py-2 text-sm text-slate-900"
+                />
+              </label>
+              <label className="block">
+                <span className="text-[10px] uppercase tracking-wide text-emerald-100/80">To</span>
+                <input
+                  type="date"
+                  value={customTo}
+                  min={customFrom}
+                  max={todayDateOnly()}
+                  onChange={(e) => setCustomTo(e.target.value)}
+                  className="mt-1 w-full rounded-lg border-0 px-2 py-2 text-sm text-slate-900"
+                />
+              </label>
+            </div>
+            <button
+              type="button"
+              onClick={applyCustomRange}
+              disabled={loadingReport}
+              className="w-full rounded-lg bg-white text-primary py-2 text-sm font-semibold disabled:opacity-60"
+            >
+              {loadingReport ? 'Generating…' : 'Generate report'}
+            </button>
+            {rangeError && (
+              <p className="text-[11px] text-amber-100">{rangeError}</p>
+            )}
+            {period === 'custom' && !rangeError && (
+              <p className="text-[11px] text-emerald-100/90">
+                Showing whole-store results for {periodLabel}
+              </p>
+            )}
+          </div>
+        )}
 
         <div className="flex gap-2 overflow-x-auto no-scrollbar">
           {([

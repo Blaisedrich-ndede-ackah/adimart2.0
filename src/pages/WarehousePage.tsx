@@ -47,6 +47,8 @@ import {
   buildLocationReportSummary,
   exportLocationReportCsv,
   exportLocationReportPdf,
+  formatReportPeriodLabel,
+  getPeriodRange,
   type LocationReportSummary,
 } from '@/lib/reportAnalytics';
 import FinancialDonutChart from '@/components/FinancialDonutChart';
@@ -310,11 +312,16 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
     }
     setReportBusy(true);
     try {
+      const range = reportPeriod === 'all' ? null : getPeriodRange(reportPeriod);
+      const label =
+        reportPeriod === 'all' ? 'All time' : formatReportPeriodLabel(reportPeriod);
       const report = await buildLocationReportSummary(
         currentStore.id,
         activeLocationId,
-        reportPeriod,
-        currentStore.name
+        range,
+        currentStore.name,
+        label,
+        reportPeriod
       );
       setLocationReport(report);
     } catch (err: unknown) {
@@ -781,8 +788,10 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
                               const report = await buildLocationReportSummary(
                                 currentStore.id,
                                 loc.id,
-                                'month',
-                                currentStore.name
+                                getPeriodRange('month'),
+                                currentStore.name,
+                                'This Month',
+                                'month'
                               );
                               exportLocationReportCsv(report);
                             } catch (err: unknown) {
