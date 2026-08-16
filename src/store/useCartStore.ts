@@ -10,7 +10,7 @@ import {
 } from '@/lib/dexie';
 import { triggerAutoSync } from '@/lib/sync';
 import { resolveSalePrice, type SaleMode, type UnitType } from '@/lib/bulkPricing';
-import { deductSaleStock, getLocationStock, reconcileProductStockBatches } from '@/lib/warehouse';
+import { deductSaleStockForItems, getLocationStock, reconcileProductStockBatches } from '@/lib/warehouse';
 
 export interface CartItem {
   id: string;
@@ -334,71 +334,89 @@ export const useCartStore = create<CartState>((set, get) => ({
     }
     if (!locationId) throw new Error('No sale location configured');
 
-    // Inventory may have stock_level without matching batches (legacy edits).
-    // Reconcile first so FEFO deduction and product.stock_level stay in sync.
+    // Aggregate needed qty per product (packs + duplicate lines)
+    const needByProduct = new Map<string, { qty: number; name: string }>();
     for (const item of state.items) {
-      await reconcileProductStockBatches(storeId, item.product_id, locationId);
+      const prev = needByProduct.get(item.product_id);
+      needByProduct.set(item.product_id, {
+        qty: (prev?.qty || 0) + item.base_quantity,
+        name: item.name,
+      });
     }
 
-    for (const item of state.items) {
-      const available = await getLocationStock(item.product_id, locationId);
-      if (available < item.base_quantity) {
-        throw new Error(
-          `Insufficient stock for "${item.name}". Only ${available} available at this location.`
-        );
-      }
-    }
+    // Only reconcile products that look short at this location (cheap when already migrated)
+    await Promise.all(
+      [...needByProduct.entries()].map(async ([productId, need]) => {
+        const available = await getLocationStock(productId, locationId);
+        if (available >= need.qty) return;
+        await reconcileProductStockBatches(storeId, productId, locationId);
+        const after = await getLocationStock(productId, locationId);
+        if (after < need.qty) {
+          throw new Error(
+            `Insufficient stock for "${need.name}". Only ${after} available at this location.`
+          );
+        }
+      })
+    );
 
     const txnId = generateId();
     const receiptNumber = generateReceiptNumber();
     const now = new Date().toISOString();
 
-    await db.transactions.add({
-      id: txnId,
-      store_id: storeId,
-      receipt_number: receiptNumber,
-      cashier_id: cashierId,
-      cashier_name: cashierName,
-      total_amount: state.total,
-      discount_applied: state.discountAmount,
-      payment_method: paymentMethod,
-      cash_amount: paymentMethod === 'cash' ? state.total : cashAmount,
-      paystack_amount: paymentMethod === 'paystack' ? state.total : paystackAmount,
-      paystack_reference: paystackReference,
-      status: 'completed',
-      location_id: locationId,
-      sale_mode: state.saleMode,
-      created_at: now,
-      synced: 0,
-    });
+    await db.transaction(
+      'rw',
+      db.transactions,
+      db.transaction_items,
+      async () => {
+        await db.transactions.add({
+          id: txnId,
+          store_id: storeId,
+          receipt_number: receiptNumber,
+          cashier_id: cashierId,
+          cashier_name: cashierName,
+          total_amount: state.total,
+          discount_applied: state.discountAmount,
+          payment_method: paymentMethod,
+          cash_amount: paymentMethod === 'cash' ? state.total : cashAmount,
+          paystack_amount: paymentMethod === 'paystack' ? state.total : paystackAmount,
+          paystack_reference: paystackReference,
+          status: 'completed',
+          location_id: locationId,
+          sale_mode: state.saleMode,
+          created_at: now,
+          synced: 0,
+        });
 
-    const txnItems = state.items.map((item) => ({
-      id: generateId(),
-      store_id: storeId,
-      transaction_id: txnId,
-      product_id: item.product_id,
-      product_name: item.name,
-      quantity: item.quantity,
-      unit_price: item.unit_price,
-      subtotal: item.subtotal,
-      unit_type: item.unit_type,
-      pack_size: item.pack_size,
-      base_quantity: item.base_quantity,
-      synced: 0,
-    }));
+        await db.transaction_items.bulkAdd(
+          state.items.map((item) => ({
+            id: generateId(),
+            store_id: storeId,
+            transaction_id: txnId,
+            product_id: item.product_id,
+            product_name: item.name,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            subtotal: item.subtotal,
+            unit_type: item.unit_type,
+            pack_size: item.pack_size,
+            base_quantity: item.base_quantity,
+            synced: 0,
+          }))
+        );
+      }
+    );
 
-    await db.transaction_items.bulkAdd(txnItems);
-
-    for (const item of state.items) {
-      await deductSaleStock({
-        storeId,
+    await deductSaleStockForItems({
+      storeId,
+      locationId,
+      userId: cashierId,
+      transactionId: txnId,
+      items: state.items.map((item) => ({
         productId: item.product_id,
-        locationId,
         baseQty: item.base_quantity,
-        userId: cashierId,
-        transactionId: txnId,
-      });
-    }
+        name: item.name,
+      })),
+    });
 
     const saleData = {
       receiptNumber,
@@ -418,7 +436,10 @@ export const useCartStore = create<CartState>((set, get) => ({
       total: 0,
     });
 
-    void triggerAutoSync('sale');
+    // Defer cloud sync so checkout UI returns immediately
+    window.setTimeout(() => {
+      void triggerAutoSync('sale');
+    }, 0);
     return saleData;
   },
 }));

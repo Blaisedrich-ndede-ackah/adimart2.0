@@ -32,74 +32,111 @@ function sortBatchesFefo(batches: LocalStockBatch[]): LocalStockBatch[] {
   });
 }
 
-export async function ensureStoreLocations(storeId: string): Promise<LocalLocation[]> {
+/** Avoid re-scanning every product on each POS/sale call */
+const openingStockMigrated = new Set<string>();
+const ensureInFlight = new Map<string, Promise<LocalLocation[]>>();
+
+async function ensureDefaultLocation(storeId: string): Promise<LocalLocation[]> {
   let locations = await db.locations.where('store_id').equals(storeId).toArray();
+  if (locations.length > 0) return locations;
+
   const now = nowIso();
+  const shop: LocalLocation = {
+    id: generateId(),
+    store_id: storeId,
+    name: 'Shop',
+    location_type: 'shop',
+    is_default: 1,
+    is_active: 1,
+    created_at: now,
+    updated_at: now,
+    synced: 0,
+  };
+  await db.locations.add(shop);
+  return [shop];
+}
 
-  if (locations.length === 0) {
-    const shop: LocalLocation = {
-      id: generateId(),
-      store_id: storeId,
-      name: 'Shop',
-      location_type: 'shop',
-      is_default: 1,
-      is_active: 1,
-      created_at: now,
-      updated_at: now,
-      synced: 0,
-    };
-    await db.locations.add(shop);
-    locations = [shop];
+export async function ensureStoreLocations(storeId: string): Promise<LocalLocation[]> {
+  const existing = ensureInFlight.get(storeId);
+  if (existing) return existing;
+
+  const run = (async () => {
+    const locations = await ensureDefaultLocation(storeId);
+
+    // One-time (per session) opening-stock migration — do not re-scan catalog on every sale
+    if (openingStockMigrated.has(storeId)) {
+      return locations;
+    }
+
+    const defaultShop =
+      locations.find((l) => l.is_default === 1 && l.location_type === 'shop' && l.is_active === 1) ||
+      locations.find((l) => l.location_type === 'shop' && l.is_active === 1) ||
+      locations[0];
+
+    const now = nowIso();
+    const products = await db.products.where('store_id').equals(storeId).toArray();
+    const allBatches = await db.stock_batches.where('store_id').equals(storeId).toArray();
+    const qtyByProduct = new Map<string, number>();
+    for (const batch of allBatches) {
+      qtyByProduct.set(
+        batch.product_id,
+        (qtyByProduct.get(batch.product_id) || 0) + (batch.quantity || 0)
+      );
+    }
+
+    const newBatches: LocalStockBatch[] = [];
+    const newMovements: LocalStockMovement[] = [];
+
+    for (const product of products) {
+      const batchTotal = qtyByProduct.get(product.id) || 0;
+      if (batchTotal > 0) continue;
+      if (!(product.stock_level > 0)) continue;
+
+      const batchId = generateId();
+      newBatches.push({
+        id: batchId,
+        store_id: storeId,
+        product_id: product.id,
+        location_id: defaultShop.id,
+        batch_code: 'OPENING',
+        expiry_date: null,
+        quantity: product.stock_level,
+        cost_price: product.cost_price || 0,
+        created_at: now,
+        updated_at: now,
+        synced: 0,
+      });
+      newMovements.push({
+        id: generateId(),
+        store_id: storeId,
+        product_id: product.id,
+        batch_id: batchId,
+        from_location_id: null,
+        to_location_id: defaultShop.id,
+        movement_type: 'receive',
+        quantity: product.stock_level,
+        note: 'Migrated opening stock',
+        user_id: null,
+        created_at: now,
+        synced: 0,
+      });
+    }
+
+    if (newBatches.length > 0) {
+      await db.stock_batches.bulkAdd(newBatches);
+      await db.stock_movements.bulkAdd(newMovements);
+    }
+
+    openingStockMigrated.add(storeId);
+    return db.locations.where('store_id').equals(storeId).toArray();
+  })();
+
+  ensureInFlight.set(storeId, run);
+  try {
+    return await run;
+  } finally {
+    ensureInFlight.delete(storeId);
   }
-
-  const defaultShop =
-    locations.find((l) => l.is_default === 1 && l.location_type === 'shop' && l.is_active === 1) ||
-    locations.find((l) => l.location_type === 'shop' && l.is_active === 1) ||
-    locations[0];
-
-  const products = await db.products.where('store_id').equals(storeId).toArray();
-  for (const product of products) {
-    const existingBatches = await db.stock_batches
-      .where('product_id')
-      .equals(product.id)
-      .toArray();
-    const batchTotal = existingBatches.reduce((sum, b) => sum + (b.quantity || 0), 0);
-    // Only skip when live batch qty already covers inventory. Empty/ghost batches
-    // must not block opening-stock migration or sales cannot deduct.
-    if (batchTotal > 0) continue;
-    if (!(product.stock_level > 0)) continue;
-
-    const batch: LocalStockBatch = {
-      id: generateId(),
-      store_id: storeId,
-      product_id: product.id,
-      location_id: defaultShop.id,
-      batch_code: 'OPENING',
-      expiry_date: null,
-      quantity: product.stock_level,
-      cost_price: product.cost_price || 0,
-      created_at: now,
-      updated_at: now,
-      synced: 0,
-    };
-    await db.stock_batches.add(batch);
-    await db.stock_movements.add({
-      id: generateId(),
-      store_id: storeId,
-      product_id: product.id,
-      batch_id: batch.id,
-      from_location_id: null,
-      to_location_id: defaultShop.id,
-      movement_type: 'receive',
-      quantity: product.stock_level,
-      note: 'Migrated opening stock',
-      user_id: null,
-      created_at: now,
-      synced: 0,
-    });
-  }
-
-  return db.locations.where('store_id').equals(storeId).toArray();
 }
 
 export async function listLocations(storeId: string): Promise<LocalLocation[]> {
@@ -206,6 +243,23 @@ export async function getLocationStock(productId: string, locationId: string): P
   return batches.reduce((sum, b) => sum + (b.quantity || 0), 0);
 }
 
+/** One query for POS product grid instead of N getLocationStock calls */
+export async function getLocationStockMap(
+  storeId: string,
+  locationId: string
+): Promise<Record<string, number>> {
+  const batches = await db.stock_batches
+    .where('store_id')
+    .equals(storeId)
+    .and((b) => b.location_id === locationId)
+    .toArray();
+  const map: Record<string, number> = {};
+  for (const batch of batches) {
+    map[batch.product_id] = (map[batch.product_id] || 0) + (batch.quantity || 0);
+  }
+  return map;
+}
+
 export async function getProductTotalStock(productId: string): Promise<number> {
   const batches = await db.stock_batches.where('product_id').equals(productId).toArray();
   return batches.reduce((sum, b) => sum + (b.quantity || 0), 0);
@@ -233,34 +287,36 @@ export async function syncProductStockLevel(productId: string): Promise<number> 
 }
 
 /**
- * Inventory edits historically wrote product.stock_level without batches.
- * Sales deduct from batches — so any stock_level ahead of batch totals must be
- * seeded into sellable location stock or POS stock will not move after a sale.
+ * Fast path: only touch the one product being sold/edited.
+ * Does not re-scan the whole catalog (that is ensureStoreLocations' job, cached).
  */
 export async function reconcileProductStockBatches(
   storeId: string,
   productId: string,
   preferredLocationId?: string | null
 ): Promise<number> {
-  await ensureStoreLocations(storeId);
   const product = await db.products.get(productId);
   if (!product || product.store_id !== storeId) {
     throw new Error('Product not found');
   }
 
-  const batchTotal = await getProductTotalStock(productId);
+  const batches = await db.stock_batches.where('product_id').equals(productId).toArray();
+  const batchTotal = batches.reduce((sum, b) => sum + (b.quantity || 0), 0);
   const target = Math.max(0, Math.floor(Number(product.stock_level) || 0));
   const gap = target - batchTotal;
 
   if (gap < 0) {
-    // Batches are source of truth after warehouse migration
     return syncProductStockLevel(productId);
   }
   if (gap === 0) {
     return batchTotal;
   }
 
-  const locations = await db.locations.where('store_id').equals(storeId).toArray();
+  let locations = await db.locations.where('store_id').equals(storeId).toArray();
+  if (locations.length === 0) {
+    locations = await ensureDefaultLocation(storeId);
+  }
+
   const locationId =
     (preferredLocationId && locations.some((l) => l.id === preferredLocationId)
       ? preferredLocationId
@@ -274,8 +330,9 @@ export async function reconcileProductStockBatches(
   }
 
   const now = nowIso();
-  const batch: LocalStockBatch = {
-    id: generateId(),
+  const batchId = generateId();
+  await db.stock_batches.add({
+    id: batchId,
     store_id: storeId,
     product_id: productId,
     location_id: locationId,
@@ -286,13 +343,12 @@ export async function reconcileProductStockBatches(
     created_at: now,
     updated_at: now,
     synced: 0,
-  };
-  await db.stock_batches.add(batch);
+  });
   await db.stock_movements.add({
     id: generateId(),
     store_id: storeId,
     product_id: productId,
-    batch_id: batch.id,
+    batch_id: batchId,
     from_location_id: null,
     to_location_id: locationId,
     movement_type: 'adjust',
@@ -520,38 +576,184 @@ export async function deductSaleStock(params: {
   const quantity = Math.floor(Number(params.baseQty) || 0);
   if (quantity <= 0) return [];
 
-  const allocations = await allocateFefo(params.productId, params.locationId, quantity);
-  const now = nowIso();
-  const note = params.transactionId ? `Sale ${params.transactionId}` : 'Sale';
+  const liveBatches = sortBatchesFefo(
+    (
+      await db.stock_batches
+        .where('product_id')
+        .equals(params.productId)
+        .and((b) => b.location_id === params.locationId && b.quantity > 0)
+        .toArray()
+    )
+  );
 
-  for (const alloc of allocations) {
-    const batch = await db.stock_batches.get(alloc.batchId);
-    if (!batch || batch.quantity < alloc.qty) {
-      throw new Error('Insufficient stock at location');
-    }
-    await db.stock_batches.update(batch.id, {
-      quantity: batch.quantity - alloc.qty,
+  const allocations: { batchId: string; qty: number }[] = [];
+  let remaining = quantity;
+  const updatedBatches: LocalStockBatch[] = [];
+  const now = nowIso();
+
+  for (const batch of liveBatches) {
+    if (remaining <= 0) break;
+    const take = Math.min(batch.quantity, remaining);
+    if (take <= 0) continue;
+    allocations.push({ batchId: batch.id, qty: take });
+    updatedBatches.push({
+      ...batch,
+      quantity: batch.quantity - take,
       updated_at: now,
       synced: 0,
     });
-    await db.stock_movements.add({
-      id: generateId(),
-      store_id: params.storeId,
-      product_id: params.productId,
-      batch_id: batch.id,
-      from_location_id: params.locationId,
-      to_location_id: null,
-      movement_type: 'sale',
-      quantity: alloc.qty,
-      note,
-      user_id: params.userId || null,
-      created_at: now,
+    remaining -= take;
+  }
+
+  if (remaining > 0) {
+    throw new Error('Insufficient stock at location');
+  }
+
+  const note = params.transactionId ? `Sale ${params.transactionId}` : 'Sale';
+  const movements: LocalStockMovement[] = allocations.map((alloc) => ({
+    id: generateId(),
+    store_id: params.storeId,
+    product_id: params.productId,
+    batch_id: alloc.batchId,
+    from_location_id: params.locationId,
+    to_location_id: null,
+    movement_type: 'sale' as const,
+    quantity: alloc.qty,
+    note,
+    user_id: params.userId || null,
+    created_at: now,
+    synced: 0,
+  }));
+
+  await db.transaction('rw', db.stock_batches, db.stock_movements, db.products, async () => {
+    if (updatedBatches.length > 0) {
+      await db.stock_batches.bulkPut(updatedBatches);
+    }
+    if (movements.length > 0) {
+      await db.stock_movements.bulkAdd(movements);
+    }
+    const total = await getProductTotalStock(params.productId);
+    await db.products.update(params.productId, {
+      stock_level: total,
+      updated_at: now,
       synced: 0,
+    });
+  });
+
+  return allocations;
+}
+
+/** Deduct stock for a whole cart in one IndexedDB transaction (faster checkout). */
+export async function deductSaleStockForItems(params: {
+  storeId: string;
+  locationId: string;
+  userId?: string | null;
+  transactionId?: string | null;
+  items: Array<{ productId: string; baseQty: number; name?: string }>;
+}): Promise<void> {
+  if (params.items.length === 0) return;
+
+  const now = nowIso();
+  const note = params.transactionId ? `Sale ${params.transactionId}` : 'Sale';
+
+  const productIds = [...new Set(params.items.map((i) => i.productId))];
+  if (productIds.length === 0) return;
+
+  const allBatches = await db.stock_batches
+    .where('product_id')
+    .anyOf(productIds)
+    .and((b) => b.location_id === params.locationId)
+    .toArray();
+
+  const batchesByProduct = new Map<string, LocalStockBatch[]>();
+  for (const batch of allBatches) {
+    const list = batchesByProduct.get(batch.product_id) || [];
+    list.push(batch);
+    batchesByProduct.set(batch.product_id, list);
+  }
+
+  // Aggregate qty needed per product (multiple cart lines can share a SKU)
+  const needByProduct = new Map<string, { qty: number; name?: string }>();
+  for (const item of params.items) {
+    const qty = Math.floor(Number(item.baseQty) || 0);
+    if (qty <= 0) continue;
+    const prev = needByProduct.get(item.productId);
+    needByProduct.set(item.productId, {
+      qty: (prev?.qty || 0) + qty,
+      name: item.name || prev?.name,
     });
   }
 
-  await syncProductStockLevel(params.productId);
-  return allocations;
+  const updatedBatches: LocalStockBatch[] = [];
+  const movements: LocalStockMovement[] = [];
+  const touchedProducts = new Set<string>();
+
+  for (const [productId, need] of needByProduct) {
+    const live = sortBatchesFefo(
+      (batchesByProduct.get(productId) || []).filter((b) => b.quantity > 0)
+    );
+    // Mutate working copies so multiple lines against same product allocate correctly
+    const working = live.map((b) => ({ ...b }));
+    let remaining = need.qty;
+
+    for (const batch of working) {
+      if (remaining <= 0) break;
+      const take = Math.min(batch.quantity, remaining);
+      if (take <= 0) continue;
+      batch.quantity -= take;
+      batch.updated_at = now;
+      batch.synced = 0;
+      movements.push({
+        id: generateId(),
+        store_id: params.storeId,
+        product_id: productId,
+        batch_id: batch.id,
+        from_location_id: params.locationId,
+        to_location_id: null,
+        movement_type: 'sale',
+        quantity: take,
+        note,
+        user_id: params.userId || null,
+        created_at: now,
+        synced: 0,
+      });
+      remaining -= take;
+    }
+
+    if (remaining > 0) {
+      throw new Error(
+        `Insufficient stock for "${need.name || 'item'}". Not enough units at this location.`
+      );
+    }
+
+    updatedBatches.push(...working);
+    touchedProducts.add(productId);
+  }
+
+  await db.transaction(
+    'rw',
+    db.stock_batches,
+    db.stock_movements,
+    db.products,
+    async () => {
+      if (updatedBatches.length > 0) {
+        await db.stock_batches.bulkPut(updatedBatches);
+      }
+      if (movements.length > 0) {
+        await db.stock_movements.bulkAdd(movements);
+      }
+      for (const productId of touchedProducts) {
+        const total = (
+          await db.stock_batches.where('product_id').equals(productId).toArray()
+        ).reduce((sum, b) => sum + (b.quantity || 0), 0);
+        await db.products.update(productId, {
+          stock_level: total,
+          updated_at: now,
+          synced: 0,
+        });
+      }
+    }
+  );
 }
 
 export async function getExpiringBatches(
