@@ -2,6 +2,8 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { X, Camera, Save, AlertTriangle, StopCircle, ScanBarcode, Bluetooth, ImagePlus, Trash2, Plus } from 'lucide-react';
 import { BrowserMultiFormatReader, NotFoundException } from '@zxing/library';
 import { db, generateId, LocalProduct, getCurrentStoreId } from '@/lib/dexie';
+import { setProductStockLevel } from '@/lib/warehouse';
+import { triggerAutoSync } from '@/lib/sync';
 import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 import { playScanBeep } from '@/lib/scanBeep';
 import { getBluetoothHardwareStatus } from '@/lib/bluetoothPeripherals';
@@ -288,16 +290,22 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           barcode: barcode.trim(),
           cost_price: parseFloat(costPrice),
           selling_price: parseFloat(sellingPrice),
-          stock_level: parseInt(stockLevel),
           sku_type: skuType,
           image_url: imageUrl || '',
           ...wholesaleFields,
           updated_at: now,
           synced: 0,
         });
+        await setProductStockLevel({
+          storeId,
+          productId: editProduct.id,
+          targetQty: parseInt(stockLevel) || 0,
+          note: 'Product edit stock',
+        });
       } else {
+        const productId = generateId();
         await db.products.add({
-          id: generateId(),
+          id: productId,
           store_id: storeId,
           name: name.trim(),
           category,
@@ -305,7 +313,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           barcode: barcode.trim(),
           cost_price: parseFloat(costPrice),
           selling_price: parseFloat(sellingPrice),
-          stock_level: parseInt(stockLevel),
+          stock_level: 0,
           is_active: 1,
           image_url: imageUrl || '',
           ...wholesaleFields,
@@ -313,8 +321,18 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           updated_at: now,
           synced: 0,
         });
+        const openingQty = parseInt(stockLevel) || 0;
+        if (openingQty > 0) {
+          await setProductStockLevel({
+            storeId,
+            productId,
+            targetQty: openingQty,
+            note: 'Opening stock',
+          });
+        }
       }
 
+      void triggerAutoSync('product-save');
       onSaved();
       onClose();
     } catch (err: unknown) {

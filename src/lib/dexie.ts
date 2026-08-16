@@ -1020,6 +1020,7 @@ export async function importProductsFromRows(
   const storeId = await getCurrentStoreId();
   if (!storeId) throw new Error('No store selected');
 
+  const { setProductStockLevel } = await import('./warehouse');
   let imported = 0;
   let skipped = 0;
   const now = new Date().toISOString();
@@ -1042,8 +1043,9 @@ export async function importProductsFromRows(
       }
     }
 
+    const productId = generateId();
     await db.products.add({
-      id: generateId(),
+      id: productId,
       store_id: storeId,
       name: row.name.trim(),
       category: row.category.trim() || 'Other',
@@ -1051,7 +1053,7 @@ export async function importProductsFromRows(
       barcode: row.barcode.trim(),
       cost_price: row.cost_price,
       selling_price: row.selling_price,
-      stock_level: row.stock_level,
+      stock_level: 0,
       is_active: 1,
       image_url: '',
       pack_size: 1,
@@ -1064,6 +1066,15 @@ export async function importProductsFromRows(
       updated_at: now,
       synced: 0,
     });
+    const openingQty = Math.max(0, Math.floor(Number(row.stock_level) || 0));
+    if (openingQty > 0) {
+      await setProductStockLevel({
+        storeId,
+        productId,
+        targetQty: openingQty,
+        note: 'CSV import opening stock',
+      });
+    }
     imported++;
   }
 
@@ -1577,11 +1588,8 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
         dbTable: db.products,
         merge: async (remote: LocalProduct, local: LocalProduct | undefined) => {
           if (!local) return remote;
-          if (local.synced === 0) {
-            const remoteTime = new Date(remote.updated_at).getTime();
-            const localTime = new Date(local.updated_at).getTime();
-            return remoteTime >= localTime ? { ...remote, synced: 1 } : local;
-          }
+          // Never let a pull clobber unsynced local stock/price edits (e.g. post-sale).
+          if (local.synced === 0) return local;
           return remote;
         },
       },
@@ -1698,11 +1706,8 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
         dbTable: db.stock_batches,
         merge: async (remote: LocalStockBatch, local: LocalStockBatch | undefined) => {
           if (!local) return remote;
-          if (local.synced === 0) {
-            const remoteTime = new Date(remote.updated_at).getTime();
-            const localTime = new Date(local.updated_at).getTime();
-            return remoteTime >= localTime ? { ...remote, synced: 1 } : local;
-          }
+          // Keep post-sale / receive batch qty until push succeeds
+          if (local.synced === 0) return local;
           return remote;
         },
       },

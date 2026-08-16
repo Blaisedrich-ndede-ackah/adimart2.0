@@ -63,7 +63,10 @@ export async function ensureStoreLocations(storeId: string): Promise<LocalLocati
       .where('product_id')
       .equals(product.id)
       .toArray();
-    if (existingBatches.length > 0) continue;
+    const batchTotal = existingBatches.reduce((sum, b) => sum + (b.quantity || 0), 0);
+    // Only skip when live batch qty already covers inventory. Empty/ghost batches
+    // must not block opening-stock migration or sales cannot deduct.
+    if (batchTotal > 0) continue;
     if (!(product.stock_level > 0)) continue;
 
     const batch: LocalStockBatch = {
@@ -227,6 +230,114 @@ export async function syncProductStockLevel(productId: string): Promise<number> 
     synced: 0,
   });
   return total;
+}
+
+/**
+ * Inventory edits historically wrote product.stock_level without batches.
+ * Sales deduct from batches — so any stock_level ahead of batch totals must be
+ * seeded into sellable location stock or POS stock will not move after a sale.
+ */
+export async function reconcileProductStockBatches(
+  storeId: string,
+  productId: string,
+  preferredLocationId?: string | null
+): Promise<number> {
+  await ensureStoreLocations(storeId);
+  const product = await db.products.get(productId);
+  if (!product || product.store_id !== storeId) {
+    throw new Error('Product not found');
+  }
+
+  const batchTotal = await getProductTotalStock(productId);
+  const target = Math.max(0, Math.floor(Number(product.stock_level) || 0));
+  const gap = target - batchTotal;
+
+  if (gap < 0) {
+    // Batches are source of truth after warehouse migration
+    return syncProductStockLevel(productId);
+  }
+  if (gap === 0) {
+    return batchTotal;
+  }
+
+  const locations = await db.locations.where('store_id').equals(storeId).toArray();
+  const locationId =
+    (preferredLocationId && locations.some((l) => l.id === preferredLocationId)
+      ? preferredLocationId
+      : null) ||
+    locations.find((l) => l.is_default === 1 && l.is_active === 1)?.id ||
+    locations.find((l) => l.location_type === 'shop' && l.is_active === 1)?.id ||
+    locations[0]?.id;
+
+  if (!locationId) {
+    throw new Error('No location available to reconcile stock');
+  }
+
+  const now = nowIso();
+  const batch: LocalStockBatch = {
+    id: generateId(),
+    store_id: storeId,
+    product_id: productId,
+    location_id: locationId,
+    batch_code: 'RECONCILE',
+    expiry_date: null,
+    quantity: gap,
+    cost_price: product.cost_price || 0,
+    created_at: now,
+    updated_at: now,
+    synced: 0,
+  };
+  await db.stock_batches.add(batch);
+  await db.stock_movements.add({
+    id: generateId(),
+    store_id: storeId,
+    product_id: productId,
+    batch_id: batch.id,
+    from_location_id: null,
+    to_location_id: locationId,
+    movement_type: 'adjust',
+    quantity: gap,
+    note: 'Reconciled inventory stock into location batches',
+    user_id: null,
+    created_at: now,
+    synced: 0,
+  });
+  return syncProductStockLevel(productId);
+}
+
+export async function setProductStockLevel(params: {
+  storeId: string;
+  productId: string;
+  targetQty: number;
+  locationId?: string | null;
+  note?: string;
+  userId?: string | null;
+}): Promise<number> {
+  await ensureStoreLocations(params.storeId);
+  const target = Math.max(0, Math.floor(Number(params.targetQty) || 0));
+  const current = await getProductTotalStock(params.productId);
+  const delta = target - current;
+  if (delta === 0) {
+    return syncProductStockLevel(params.productId);
+  }
+
+  const locations = await db.locations.where('store_id').equals(params.storeId).toArray();
+  const locationId =
+    params.locationId ||
+    locations.find((l) => l.is_default === 1 && l.is_active === 1)?.id ||
+    locations.find((l) => l.location_type === 'shop' && l.is_active === 1)?.id ||
+    locations[0]?.id;
+  if (!locationId) throw new Error('No location available for stock update');
+
+  await adjustLocationStock({
+    storeId: params.storeId,
+    productId: params.productId,
+    locationId,
+    delta,
+    note: params.note || 'Inventory stock update',
+    userId: params.userId || null,
+  });
+  return getProductTotalStock(params.productId);
 }
 
 export async function receiveStock(params: {
