@@ -10,7 +10,7 @@ import {
 } from '@/lib/dexie';
 import { triggerAutoSync } from '@/lib/sync';
 import { resolveSalePrice, type SaleMode, type UnitType } from '@/lib/bulkPricing';
-import { deductSaleStock, getLocationStock } from '@/lib/warehouse';
+import { deductSaleStock, getLocationStock, reconcileProductStockBatches } from '@/lib/warehouse';
 
 export interface CartItem {
   id: string;
@@ -333,6 +333,12 @@ export const useCartStore = create<CartState>((set, get) => ({
         null;
     }
     if (!locationId) throw new Error('No sale location configured');
+
+    // Inventory may have stock_level without matching batches (legacy edits).
+    // Reconcile first so FEFO deduction and product.stock_level stay in sync.
+    for (const item of state.items) {
+      await reconcileProductStockBatches(storeId, item.product_id, locationId);
+    }
 
     for (const item of state.items) {
       const available = await getLocationStock(item.product_id, locationId);

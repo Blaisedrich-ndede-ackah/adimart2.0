@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, Plus, Minus, Package, Save } from 'lucide-react';
-import { db, LocalProduct } from '@/lib/dexie';
+import { LocalProduct, getCurrentStoreId } from '@/lib/dexie';
+import { getProductTotalStock, setProductStockLevel } from '@/lib/warehouse';
+import { triggerAutoSync } from '@/lib/sync';
 
 interface StockAdjustmentProps {
   isOpen: boolean;
@@ -15,6 +17,19 @@ export default function StockAdjustment({ isOpen, product, onClose, onSaved }: S
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [baseStock, setBaseStock] = useState(0);
+
+  useEffect(() => {
+    if (!isOpen || !product) return;
+    setAdjustmentType('add');
+    setAmount('');
+    setReason('');
+    setError('');
+    setBaseStock(product.stock_level);
+    void getProductTotalStock(product.id).then((total) => {
+      setBaseStock(total);
+    });
+  }, [isOpen, product]);
 
   if (!isOpen || !product) return null;
 
@@ -24,9 +39,9 @@ export default function StockAdjustment({ isOpen, product, onClose, onSaved }: S
       case 'set':
         return Math.max(0, value);
       case 'add':
-        return product.stock_level + value;
+        return baseStock + value;
       case 'subtract':
-        return Math.max(0, product.stock_level - value);
+        return Math.max(0, baseStock - value);
     }
   };
 
@@ -40,12 +55,23 @@ export default function StockAdjustment({ isOpen, product, onClose, onSaved }: S
     setError('');
 
     try {
-      const newStock = calculateNewStock();
-      await db.products.update(product.id, {
-        stock_level: newStock,
-        updated_at: new Date().toISOString(),
-        synced: 0,
+      const storeId = (await getCurrentStoreId()) || product.store_id;
+      if (!storeId) throw new Error('No store selected');
+
+      const liveTotal = await getProductTotalStock(product.id);
+      const value = parseInt(amount) || 0;
+      let newStock = liveTotal;
+      if (adjustmentType === 'set') newStock = Math.max(0, value);
+      else if (adjustmentType === 'add') newStock = liveTotal + value;
+      else newStock = Math.max(0, liveTotal - value);
+
+      await setProductStockLevel({
+        storeId,
+        productId: product.id,
+        targetQty: newStock,
+        note: reason.trim() || `Stock ${adjustmentType}`,
       });
+      void triggerAutoSync('stock-adjust');
       onSaved();
       onClose();
     } catch (err: unknown) {
@@ -68,7 +94,6 @@ export default function StockAdjustment({ isOpen, product, onClose, onSaved }: S
         </div>
 
         <div className="p-5 space-y-4">
-          {/* Product Info */}
           <div className="bg-gray-50 rounded-xl p-4">
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 bg-white rounded-lg flex items-center justify-center border border-gray-200">
@@ -76,16 +101,18 @@ export default function StockAdjustment({ isOpen, product, onClose, onSaved }: S
               </div>
               <div>
                 <p className="font-semibold text-gray-900">{product.name}</p>
-                <p className="text-sm text-gray-500">Current stock: <strong>{product.stock_level}</strong></p>
+                <p className="text-sm text-gray-500">
+                  Current stock: <strong>{baseStock}</strong>
+                </p>
               </div>
             </div>
           </div>
 
-          {/* Adjustment Type */}
           <div>
             <label className="text-sm font-medium text-gray-700 mb-2 block">Adjustment Type</label>
             <div className="grid grid-cols-3 gap-2">
               <button
+                type="button"
                 onClick={() => setAdjustmentType('add')}
                 className={`py-3 rounded-xl text-sm font-medium flex items-center justify-center gap-1.5 touch-target ${
                   adjustmentType === 'add'
@@ -97,6 +124,7 @@ export default function StockAdjustment({ isOpen, product, onClose, onSaved }: S
                 Add
               </button>
               <button
+                type="button"
                 onClick={() => setAdjustmentType('subtract')}
                 className={`py-3 rounded-xl text-sm font-medium flex items-center justify-center gap-1.5 touch-target ${
                   adjustmentType === 'subtract'
@@ -108,6 +136,7 @@ export default function StockAdjustment({ isOpen, product, onClose, onSaved }: S
                 Remove
               </button>
               <button
+                type="button"
                 onClick={() => setAdjustmentType('set')}
                 className={`py-3 rounded-xl text-sm font-medium touch-target ${
                   adjustmentType === 'set'
@@ -120,7 +149,6 @@ export default function StockAdjustment({ isOpen, product, onClose, onSaved }: S
             </div>
           </div>
 
-          {/* Amount */}
           <div>
             <label className="text-sm font-medium text-gray-700 mb-2 block">
               {adjustmentType === 'set' ? 'New Stock Level' : 'Quantity'}
@@ -128,7 +156,7 @@ export default function StockAdjustment({ isOpen, product, onClose, onSaved }: S
             <input
               type="number"
               value={amount}
-              onChange={e => setAmount(e.target.value)}
+              onChange={(e) => setAmount(e.target.value)}
               placeholder="0"
               min="0"
               className="w-full px-4 py-3 border border-gray-300 rounded-xl text-lg font-semibold text-center focus:ring-2 focus:ring-primary outline-none"
@@ -136,53 +164,54 @@ export default function StockAdjustment({ isOpen, product, onClose, onSaved }: S
             />
           </div>
 
-          {/* Preview */}
           {amount && (
-            <div className={`p-4 rounded-xl ${
-              newStock === 0 ? 'bg-red-50' : newStock < 5 ? 'bg-amber-50' : 'bg-green-50'
-            }`}>
+            <div
+              className={`p-4 rounded-xl ${
+                newStock === 0 ? 'bg-red-50' : newStock < 5 ? 'bg-amber-50' : 'bg-green-50'
+              }`}
+            >
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-gray-700">New Stock Level</span>
-                <span className={`text-xl font-bold ${
-                  newStock === 0 ? 'text-red-600' : newStock < 5 ? 'text-amber-600' : 'text-green-600'
-                }`}>
+                <span
+                  className={`text-xl font-bold ${
+                    newStock === 0 ? 'text-red-600' : newStock < 5 ? 'text-amber-600' : 'text-green-600'
+                  }`}
+                >
                   {newStock}
                 </span>
               </div>
               <p className="text-xs text-gray-500 mt-1">
-                {product.stock_level} → {newStock}
+                {baseStock} → {newStock}
                 {newStock === 0 && ' (Out of Stock)'}
                 {newStock > 0 && newStock < 5 && ' (Low Stock)'}
               </p>
             </div>
           )}
 
-          {/* Reason (optional) */}
           <div>
             <label className="text-sm font-medium text-gray-700 mb-2 block">Reason (optional)</label>
             <input
               type="text"
               value={reason}
-              onChange={e => setReason(e.target.value)}
+              onChange={(e) => setReason(e.target.value)}
               placeholder="e.g., New shipment, damaged items, etc."
               className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
             />
           </div>
 
-          {error && (
-            <p className="text-red-500 text-sm">{error}</p>
-          )}
+          {error && <p className="text-red-500 text-sm">{error}</p>}
 
-          {/* Actions */}
           <div className="flex gap-3 pt-2">
             <button
+              type="button"
               onClick={onClose}
               className="flex-1 py-3 border border-gray-300 rounded-xl text-gray-700 font-medium touch-target"
             >
               Cancel
             </button>
             <button
-              onClick={handleSave}
+              type="button"
+              onClick={() => void handleSave()}
               disabled={saving || !amount}
               className="flex-1 py-3 bg-primary text-white rounded-xl font-medium touch-target flex items-center justify-center gap-2 disabled:opacity-50"
             >
