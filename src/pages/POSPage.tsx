@@ -16,7 +16,7 @@ import { getAvailableSaleModes, type SaleMode, type UnitType } from '@/lib/bulkP
 import {
   canUserSellWholesale,
   ensureStoreLocations,
-  getLocationStock,
+  getLocationStockMap,
   resolveSaleLocations,
 } from '@/lib/warehouse';
 
@@ -70,14 +70,10 @@ export default function POSPage() {
       list.sort((a, b) => a.name.localeCompare(b.name));
       setProducts(list);
 
-      if (selectedLocationId) {
-        const stocks: Record<string, number> = {};
-        await Promise.all(
-          list.map(async (p) => {
-            stocks[p.id] = await getLocationStock(p.id, selectedLocationId);
-          })
-        );
-        setLocationStock(stocks);
+      if (storeId && selectedLocationId) {
+        setLocationStock(await getLocationStockMap(storeId, selectedLocationId));
+      } else {
+        setLocationStock({});
       }
     } finally {
       setLoadingProducts(false);
