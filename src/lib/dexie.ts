@@ -209,6 +209,23 @@ export interface LocalExpense {
   synced: number;
 }
 
+/** Owner cash book ledger (manual income / expense entries) */
+export interface LocalCashBookEntry {
+  id: string;
+  store_id: string;
+  entry_type: 'income' | 'expense';
+  description: string;
+  category: string;
+  amount: number;
+  notes: string;
+  /** YYYY-MM-DD for range filters */
+  entry_date: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
 export interface SyncMeta {
   id: string;
   last_synced_at: string;
@@ -237,6 +254,7 @@ class AdimatDB extends Dexie {
   transactions!: Table<LocalTransaction, string>;
   transaction_items!: Table<LocalTransactionItem, string>;
   expenses!: Table<LocalExpense, string>;
+  cash_book_entries!: Table<LocalCashBookEntry, string>;
   locations!: Table<LocalLocation, string>;
   stock_batches!: Table<LocalStockBatch, string>;
   stock_movements!: Table<LocalStockMovement, string>;
@@ -302,6 +320,23 @@ class AdimatDB extends Dexie {
       transactions: 'id, store_id, receipt_number, cashier_id, status, created_at, synced',
       transaction_items: 'id, store_id, transaction_id, product_id, synced',
       expenses: 'id, store_id, category, created_at, synced',
+      locations: 'id, store_id, location_type, is_default, is_active, synced',
+      stock_batches: 'id, store_id, product_id, location_id, expiry_date, synced, updated_at',
+      stock_movements: 'id, store_id, product_id, batch_id, movement_type, created_at, synced',
+      online_orders: 'id, store_id, order_number, status, created_at, synced',
+      online_order_items: 'id, store_id, order_id, product_id, synced',
+      deleted_records: 'id, store_id, table_name, record_id, synced, deleted_at',
+      sync_meta: 'id',
+      app_config: 'id',
+    });
+    this.version(7).stores({
+      stores: 'id, synced',
+      users: 'id, store_id, role, pin_hash, is_active, synced',
+      products: 'id, store_id, name, category, barcode, is_active, sell_online, synced, updated_at',
+      transactions: 'id, store_id, receipt_number, cashier_id, status, created_at, synced',
+      transaction_items: 'id, store_id, transaction_id, product_id, synced',
+      expenses: 'id, store_id, category, created_at, synced',
+      cash_book_entries: 'id, store_id, entry_type, entry_date, created_at, synced',
       locations: 'id, store_id, location_type, is_default, is_active, synced',
       stock_batches: 'id, store_id, product_id, location_id, expiry_date, synced, updated_at',
       stock_movements: 'id, store_id, product_id, batch_id, movement_type, created_at, synced',
@@ -1006,6 +1041,41 @@ export async function deleteExpense(id: string): Promise<void> {
   await db.expenses.delete(id);
 }
 
+export async function getCurrentStoreCashBookEntries(): Promise<LocalCashBookEntry[]> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) return [];
+  return db.cash_book_entries.where('store_id').equals(storeId).toArray();
+}
+
+export async function addCashBookEntry(
+  entry: Omit<
+    LocalCashBookEntry,
+    'id' | 'store_id' | 'created_at' | 'updated_at' | 'synced'
+  >
+): Promise<LocalCashBookEntry> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) throw new Error('No store selected');
+
+  const now = new Date().toISOString();
+  const entryDate = (entry.entry_date || now.slice(0, 10)).slice(0, 10);
+  const newEntry: LocalCashBookEntry = {
+    id: generateId(),
+    store_id: storeId,
+    ...entry,
+    entry_date: entryDate,
+    created_at: now,
+    updated_at: now,
+    synced: 0,
+  };
+
+  await db.cash_book_entries.add(newEntry);
+  return newEntry;
+}
+
+export async function deleteCashBookEntry(id: string): Promise<void> {
+  await db.cash_book_entries.delete(id);
+}
+
 export async function importProductsFromRows(
   rows: Array<{
     name: string;
@@ -1098,6 +1168,7 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
     | 'transactions'
     | 'transaction_items'
     | 'expenses'
+    | 'cash_book_entries'
     | 'locations'
     | 'stock_batches'
     | 'stock_movements'
@@ -1307,6 +1378,33 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         updated_at: e.updated_at,
       })),
       async () => { await Promise.all(unsyncedExpenses.map(e => db.expenses.update(e.id, { synced: 1 }))); },
+      errors
+    );
+
+    const unsyncedCashBook = await db.cash_book_entries
+      .where('store_id')
+      .equals(storeId)
+      .and((e) => e.synced === 0)
+      .toArray();
+    syncedCount += await upsertToSupabase(
+      'Cash book',
+      'cash_book_entries',
+      unsyncedCashBook.map((e) => ({
+        id: e.id,
+        store_id: e.store_id,
+        entry_type: e.entry_type,
+        description: e.description,
+        category: e.category,
+        amount: e.amount,
+        notes: e.notes,
+        entry_date: e.entry_date,
+        created_by: e.created_by || '',
+        created_at: e.created_at,
+        updated_at: e.updated_at,
+      })),
+      async () => {
+        await Promise.all(unsyncedCashBook.map((e) => db.cash_book_entries.update(e.id, { synced: 1 })));
+      },
       errors
     );
 
@@ -1662,6 +1760,30 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
         },
       },
       {
+        label: 'Cash book',
+        table: 'cash_book_entries',
+        map: (row: Record<string, unknown>) => ({
+          id: row.id as string,
+          store_id: row.store_id as string,
+          entry_type: row.entry_type === 'income' ? 'income' : 'expense',
+          description: (row.description as string) || '',
+          category: (row.category as string) || 'Other',
+          amount: Number(row.amount) || 0,
+          notes: (row.notes as string) || '',
+          entry_date: String(row.entry_date || row.created_at || '').slice(0, 10),
+          created_by: (row.created_by as string) || '',
+          created_at: row.created_at as string,
+          updated_at: (row.updated_at as string) || (row.created_at as string),
+          synced: 1,
+        }),
+        dbTable: db.cash_book_entries,
+        merge: async (remote: LocalCashBookEntry, local: LocalCashBookEntry | undefined) => {
+          if (!local) return remote;
+          if (local.synced === 0) return local;
+          return remote;
+        },
+      },
+      {
         label: 'Locations',
         table: 'locations',
         map: (row: Record<string, unknown>) => ({
@@ -1912,6 +2034,7 @@ export async function restoreStoreFromCloud(
       db.transactions,
       db.transaction_items,
       db.expenses,
+      db.cash_book_entries,
       db.locations,
       db.stock_batches,
       db.stock_movements,
@@ -1927,6 +2050,7 @@ export async function restoreStoreFromCloud(
       await db.transactions.clear();
       await db.transaction_items.clear();
       await db.expenses.clear();
+      await db.cash_book_entries.clear();
       await db.locations.clear();
       await db.stock_batches.clear();
       await db.stock_movements.clear();
