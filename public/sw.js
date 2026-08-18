@@ -1,4 +1,4 @@
-const CACHE_NAME = 'adimat-v5';
+const CACHE_NAME = 'adimat-v6';
 const OFFLINE_URL = '/';
 
 // Assets to cache immediately on install
