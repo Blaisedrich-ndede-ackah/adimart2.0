@@ -260,6 +260,60 @@ export async function getLocationStockMap(
   return map;
 }
 
+/** Total on-hand qty per product from batches (source of truth after sales). */
+export async function getStoreBatchStockMap(storeId: string): Promise<Record<string, number>> {
+  const batches = await db.stock_batches.where('store_id').equals(storeId).toArray();
+  const map: Record<string, number> = {};
+  for (const batch of batches) {
+    map[batch.product_id] = (map[batch.product_id] || 0) + (batch.quantity || 0);
+  }
+  return map;
+}
+
+/**
+ * Align product.stock_level with batch totals so Inventory / POS match across devices.
+ * Returns products with corrected stock_level (and persists drift locally).
+ */
+export async function alignProductsWithBatchStock(
+  products: LocalProduct[]
+): Promise<LocalProduct[]> {
+  if (products.length === 0) return products;
+  const storeId = products[0]?.store_id;
+  if (!storeId) return products;
+
+  const batchMap = await getStoreBatchStockMap(storeId);
+  const now = nowIso();
+  const aligned: LocalProduct[] = [];
+  const writes: Promise<unknown>[] = [];
+
+  for (const product of products) {
+    // Only trust batches when the product has been migrated into warehouse stock.
+    // Products with no batch rows keep their catalog stock_level.
+    if (!Object.prototype.hasOwnProperty.call(batchMap, product.id)) {
+      aligned.push(product);
+      continue;
+    }
+    const batchQty = batchMap[product.id] || 0;
+    if (batchQty === product.stock_level) {
+      aligned.push(product);
+      continue;
+    }
+    aligned.push({ ...product, stock_level: batchQty });
+    writes.push(
+      db.products.update(product.id, {
+        stock_level: batchQty,
+        updated_at: now,
+        synced: 0,
+      })
+    );
+  }
+
+  if (writes.length > 0) {
+    await Promise.all(writes);
+  }
+  return aligned;
+}
+
 export async function getProductTotalStock(productId: string): Promise<number> {
   const batches = await db.stock_batches.where('product_id').equals(productId).toArray();
   return batches.reduce((sum, b) => sum + (b.quantity || 0), 0);

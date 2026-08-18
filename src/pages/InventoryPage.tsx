@@ -1,10 +1,18 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Package, AlertTriangle, TrendingDown, DollarSign, Coins,
   Plus, Search, ArrowUpDown, Edit, Trash2, ToggleLeft, ToggleRight,
   PackagePlus, RefreshCw, Upload, Barcode, Bluetooth
 } from 'lucide-react';
-import { db, deleteProductCompletely, LocalProduct, getCurrentStoreProducts } from '@/lib/dexie';
+import {
+  db,
+  deleteProductCompletely,
+  LocalProduct,
+  getCurrentStoreProducts,
+  syncBidirectional,
+} from '@/lib/dexie';
+import { isSupabaseConfigured } from '@/lib/supabase';
+import { alignProductsWithBatchStock } from '@/lib/warehouse';
 import AddProduct from '@/components/AddProduct';
 import StockAdjustment from '@/components/StockAdjustment';
 import CsvImportModal from '@/components/CsvImportModal';
@@ -32,13 +40,34 @@ export default function InventoryPage() {
   const [showCsvImport, setShowCsvImport] = useState(false);
   const [labelStatus, setLabelStatus] = useState('');
   const [scanFeedback, setScanFeedback] = useState('');
+  const [syncStatus, setSyncStatus] = useState('');
   const [scannedBarcodeForAdd, setScannedBarcodeForAdd] = useState<string | null>(null);
   const [highlightedProductId, setHighlightedProductId] = useState<string | null>(null);
+  const lastSyncAtRef = useRef(0);
 
-  const loadProducts = useCallback(async () => {
+  const loadProducts = useCallback(async (opts?: { sync?: boolean }) => {
+    const shouldSync = Boolean(opts?.sync);
+    if (shouldSync && isSupabaseConfigured() && navigator.onLine) {
+      const now = Date.now();
+      // Avoid hammering cloud when switching tabs quickly
+      if (now - lastSyncAtRef.current > 12_000) {
+        try {
+          setSyncStatus('Syncing inventory…');
+          await syncBidirectional();
+          lastSyncAtRef.current = Date.now();
+          setSyncStatus('Inventory synced');
+        } catch {
+          setSyncStatus('Showing local inventory (sync failed)');
+        }
+        window.setTimeout(() => setSyncStatus(''), 2500);
+      }
+    }
+
     const allProducts = await getCurrentStoreProducts();
-    setProducts(allProducts);
-    const cats = [...new Set(allProducts.map(p => p.category))].sort();
+    // Sales deduct warehouse batches — keep catalog stock_level aligned so phone & PC match
+    const aligned = await alignProductsWithBatchStock(allProducts);
+    setProducts(aligned);
+    const cats = [...new Set(aligned.map((p) => p.category))].sort();
     setCategories(['All', ...cats]);
   }, []);
 
@@ -75,19 +104,32 @@ export default function InventoryPage() {
   );
 
   useEffect(() => {
-    loadProducts();
+    void loadProducts({ sync: true });
   }, [loadProducts]);
 
-  // Auto-refresh every 30 seconds to catch stock changes from sales
+  // When returning to this tab/device, pull latest cloud stock
   useEffect(() => {
-    const interval = setInterval(loadProducts, 30000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void loadProducts({ sync: true });
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [loadProducts]);
+
+  // Local refresh between syncs (sales on this device)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      void loadProducts({ sync: false });
+    }, 30000);
     return () => clearInterval(interval);
   }, [loadProducts]);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await loadProducts();
-    setTimeout(() => setIsRefreshing(false), 500);
+    await loadProducts({ sync: true });
+    setIsRefreshing(false);
   };
 
   useEffect(() => {
@@ -98,10 +140,10 @@ export default function InventoryPage() {
     }
 
     if (searchQuery) {
-      const q = searchQuery.toLowerCase();
+      const q = searchQuery.toLowerCase().trim();
       result = result.filter(p =>
         p.name.toLowerCase().includes(q) ||
-        p.barcode.includes(q)
+        (p.barcode || '').toLowerCase().includes(q)
       );
     }
 
@@ -207,17 +249,20 @@ export default function InventoryPage() {
         {scanFeedback && (
           <p className="text-emerald-100 text-xs text-center mb-2 animate-fade-in">{scanFeedback}</p>
         )}
+        {syncStatus && (
+          <p className="text-emerald-100/90 text-[11px] text-center mb-2">{syncStatus}</p>
+        )}
 
-        {/* Dashboard Cards */}
-        <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
-          <div className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center">
+        {/* Dashboard Cards — same metrics on phone & desktop */}
+        <div className="flex gap-2 overflow-x-auto no-scrollbar pb-0.5 sm:grid sm:grid-cols-5 sm:overflow-visible sm:pb-0">
+          <div className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center min-w-[4.75rem] flex-shrink-0 sm:min-w-0">
             <Package className="w-4 h-4 text-white mx-auto mb-1" />
             <p className="text-white font-bold text-lg leading-none">{totalSKUs}</p>
             <p className="text-emerald-200 text-[9px] mt-0.5">Total SKUs</p>
           </div>
           <button 
             onClick={() => { setSelectedCategory('All'); setSortMode('stock-low'); }}
-            className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center hover:bg-white/25 transition"
+            className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center hover:bg-white/25 transition min-w-[4.75rem] flex-shrink-0 sm:min-w-0"
           >
             <AlertTriangle className="w-4 h-4 text-red-300 mx-auto mb-1" />
             <p className="text-white font-bold text-lg leading-none">{outOfStock}</p>
@@ -225,18 +270,18 @@ export default function InventoryPage() {
           </button>
           <button
             onClick={() => { setSelectedCategory('All'); setSortMode('stock-low'); }}
-            className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center hover:bg-white/25 transition"
+            className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center hover:bg-white/25 transition min-w-[4.75rem] flex-shrink-0 sm:min-w-0"
           >
             <TrendingDown className="w-4 h-4 text-yellow-300 mx-auto mb-1" />
             <p className="text-white font-bold text-lg leading-none">{lowStock}</p>
             <p className="text-emerald-200 text-[9px] mt-0.5">Low Stock</p>
           </button>
-          <div className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center">
+          <div className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center min-w-[4.75rem] flex-shrink-0 sm:min-w-0">
             <DollarSign className="w-4 h-4 text-green-300 mx-auto mb-1" />
             <p className="text-white font-bold text-sm leading-none">GH₵{totalValue.toFixed(0)}</p>
             <p className="text-emerald-200 text-[9px] mt-0.5">Value</p>
           </div>
-          <div className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center">
+          <div className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center min-w-[5.25rem] flex-shrink-0 sm:min-w-0">
             <Coins className="w-4 h-4 text-amber-200 mx-auto mb-1" />
             <p className="text-white font-bold text-sm leading-none">GH₵{totalCostOfProduct.toFixed(0)}</p>
             <p className="text-emerald-200 text-[8px] sm:text-[9px] mt-0.5 leading-tight">
@@ -325,11 +370,11 @@ export default function InventoryPage() {
             </button>
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-2 md:space-y-2.5">
             {filteredProducts.map(product => (
               <div
                 key={product.id}
-                className={`bg-white rounded-xl p-3 shadow-sm border ${
+                className={`bg-white rounded-xl p-3 md:p-3.5 shadow-sm border ${
                   highlightedProductId === product.id
                     ? 'border-primary ring-2 ring-primary/30'
                     : 'border-gray-100'
@@ -338,32 +383,53 @@ export default function InventoryPage() {
                 <div className="flex items-start gap-3">
                   <ProductImage src={product.image_url} alt={product.name} size="md" />
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2">
+                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-sm font-semibold text-gray-900 truncate">{product.name}</p>
+                          <p className="text-sm font-semibold text-gray-900 truncate max-w-full">
+                            {product.name}
+                          </p>
                           {product.stock_level === 0 && product.is_active === 1 && (
-                            <span className="px-1.5 py-0.5 bg-red-100 text-red-700 text-[9px] font-bold rounded">OUT OF STOCK</span>
+                            <span className="px-1.5 py-0.5 bg-red-100 text-red-700 text-[9px] font-bold rounded">
+                              OUT OF STOCK
+                            </span>
                           )}
                           {product.stock_level > 0 && product.stock_level < 5 && product.is_active === 1 && (
-                            <span className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 text-[9px] font-bold rounded">LOW</span>
+                            <span className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 text-[9px] font-bold rounded">
+                              LOW
+                            </span>
                           )}
                           {product.is_active === 0 && (
-                            <span className="px-1.5 py-0.5 bg-gray-100 text-gray-500 text-[9px] font-bold rounded">INACTIVE</span>
+                            <span className="px-1.5 py-0.5 bg-gray-100 text-gray-500 text-[9px] font-bold rounded">
+                              INACTIVE
+                            </span>
                           )}
                         </div>
-                        <p className="text-xs text-gray-500 mt-0.5">{product.category} • {product.sku_type}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          {product.category} • {product.sku_type}
+                        </p>
                         {product.barcode && (
                           <p className="text-[10px] text-gray-400 font-mono mt-0.5">{product.barcode}</p>
                         )}
                       </div>
-                      <div className="text-right flex-shrink-0">
-                        <p className="text-sm font-bold text-primary">GH₵{product.selling_price.toFixed(2)}</p>
-                        <p className="text-[10px] text-gray-400">Cost: GH₵{product.cost_price.toFixed(2)}</p>
-                        <p className={`text-xs font-medium mt-0.5 ${
-                          product.stock_level === 0 ? 'text-red-500' : 
-                          product.stock_level < 5 ? 'text-amber-500' : 'text-gray-600'
-                        }`}>
+                      <div className="flex sm:flex-col sm:text-right items-end justify-between sm:justify-start gap-3 sm:gap-0.5 shrink-0">
+                        <div className="text-left sm:text-right">
+                          <p className="text-sm font-bold text-primary">
+                            GH₵{product.selling_price.toFixed(2)}
+                          </p>
+                          <p className="text-[10px] text-gray-400">
+                            Cost: GH₵{product.cost_price.toFixed(2)}
+                          </p>
+                        </div>
+                        <p
+                          className={`text-xs font-semibold ${
+                            product.stock_level === 0
+                              ? 'text-red-500'
+                              : product.stock_level < 5
+                                ? 'text-amber-500'
+                                : 'text-gray-700'
+                          }`}
+                        >
                           Stock: {product.stock_level}
                         </p>
                       </div>
@@ -419,7 +485,7 @@ export default function InventoryPage() {
       <AddProduct
         isOpen={showAddProduct}
         onClose={() => { setShowAddProduct(false); setEditProduct(null); setScannedBarcodeForAdd(null); }}
-        onSaved={() => { setScannedBarcodeForAdd(null); loadProducts(); }}
+        onSaved={() => { setScannedBarcodeForAdd(null); void loadProducts({ sync: true }); }}
         editProduct={editProduct}
         initialBarcode={scannedBarcodeForAdd}
       />
@@ -428,13 +494,13 @@ export default function InventoryPage() {
         isOpen={stockAdjustProduct !== null}
         product={stockAdjustProduct}
         onClose={() => setStockAdjustProduct(null)}
-        onSaved={loadProducts}
+        onSaved={() => void loadProducts({ sync: true })}
       />
 
       <CsvImportModal
         isOpen={showCsvImport}
         onClose={() => setShowCsvImport(false)}
-        onImported={loadProducts}
+        onImported={() => void loadProducts({ sync: true })}
       />
     </div>
   );
