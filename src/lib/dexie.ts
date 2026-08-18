@@ -1309,24 +1309,40 @@ export async function adoptCloudStockLedger(
   return { ok: true, batchCount: nextBatches.length };
 }
 
-export async function refreshStockFromCloud(): Promise<{ ok: boolean; message: string }> {
-  const storeId = await getCurrentStoreId();
-  if (!storeId) return { ok: false, message: 'No store selected' };
+let hydrateInFlight: Promise<{ ok: boolean; message: string }> | null = null;
 
-  const adopted = await adoptCloudStockLedger(storeId);
-  if (!adopted.ok) {
-    return { ok: false, message: adopted.error || 'Cloud stock pull failed' };
-  }
+export async function refreshStockFromCloud(): Promise<{ ok: boolean; message: string }> {
+  if (hydrateInFlight) return hydrateInFlight;
+
+  hydrateInFlight = (async () => {
+    const storeId = await getCurrentStoreId();
+    if (!storeId) return { ok: false, message: 'No store selected' };
+
+    if (!isSupabaseConfigured()) {
+      return { ok: false, message: 'Supabase not configured' };
+    }
+
+    const adopted = await adoptCloudStockLedger(storeId);
+    if (!adopted.ok) {
+      return { ok: false, message: adopted.error || 'Cloud stock pull failed' };
+    }
+
+    try {
+      const { canonicalizeStoreStock, syncStoreCatalogStockFromBatches } = await import('@/lib/warehouse');
+      await canonicalizeStoreStock(storeId);
+      await syncStoreCatalogStockFromBatches(storeId);
+    } catch {
+      // Ledger was replaced even if heal fails
+    }
+
+    return { ok: true, message: `Stock matched to cloud (${adopted.batchCount} batches)` };
+  })();
 
   try {
-    const { canonicalizeStoreStock, syncStoreCatalogStockFromBatches } = await import('@/lib/warehouse');
-    await canonicalizeStoreStock(storeId);
-    await syncStoreCatalogStockFromBatches(storeId);
-  } catch {
-    // Ledger was replaced even if heal fails
+    return await hydrateInFlight;
+  } finally {
+    hydrateInFlight = null;
   }
-
-  return { ok: true, message: `Stock matched to cloud (${adopted.batchCount} batches)` };
 }
 
 function dateOrNull(value: unknown): string | null {
@@ -2231,7 +2247,6 @@ export async function syncFromSupabase(opts?: {
 
 export async function pullStockLedgerFromCloud(storeId?: string): Promise<boolean> {
   if (!isSupabaseConfigured()) return false;
-  if (typeof navigator !== 'undefined' && !navigator.onLine) return false;
 
   const id = storeId || (await getCurrentStoreId());
   if (!id) return false;

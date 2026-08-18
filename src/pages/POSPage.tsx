@@ -7,7 +7,7 @@ import BarcodeScanner from '@/components/BarcodeScanner';
 import CheckoutOverlay from '@/components/CheckoutOverlay';
 import { useCartStore } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
-import { LocalProduct, LocalLocation, getCurrentStoreActiveProducts, getCurrentStoreId } from '@/lib/dexie';
+import { LocalProduct, LocalLocation, getCurrentStoreActiveProducts, getCurrentStoreId, refreshStockFromCloud } from '@/lib/dexie';
 import { playScanBeep, primeScanBeep } from '@/lib/scanBeep';
 import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 import { getBluetoothHardwareStatus, subscribeBluetoothStatus } from '@/lib/bluetoothPeripherals';
@@ -71,7 +71,10 @@ export default function POSPage() {
     if (!soft) setLoadingProducts(true);
     try {
       const storeId = await getCurrentStoreId();
-      if (storeId && !soft) await ensureStoreLocations(storeId);
+      if (storeId && !soft) {
+        await refreshStockFromCloud();
+        await ensureStoreLocations(storeId);
+      }
       let list = await getCurrentStoreActiveProducts();
       // Keep catalog stock_level = batch totals (same truth Inventory uses)
       if (storeId) {

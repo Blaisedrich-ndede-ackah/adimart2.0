@@ -58,7 +58,22 @@ export default function InventoryPage() {
     };
 
     try {
-      // Always paint local inventory first so the screen is never blocked on cloud
+      if (shouldSync && isSupabaseConfigured()) {
+        try {
+          setSyncStatus('Matching stock with cloud…');
+          const result = await syncBidirectional();
+          lastSyncAtRef.current = Date.now();
+          if (result.success) {
+            setSyncStatus('Same stock on every browser');
+            window.setTimeout(() => setSyncStatus(''), 2500);
+          } else {
+            setSyncStatus(result.message || 'Cloud sync failed — tap Refresh');
+          }
+        } catch {
+          setSyncStatus('Cloud sync failed — tap Refresh');
+        }
+      }
+
       await paintLocal();
     } catch {
       try {
@@ -66,32 +81,11 @@ export default function InventoryPage() {
         setProducts(allProducts);
         const cats = [...new Set(allProducts.map((p) => p.category || 'Other'))].sort();
         setCategories(['All', ...cats]);
-        setSyncStatus('Showing local inventory');
+        setSyncStatus('Showing this browser’s inventory');
         window.setTimeout(() => setSyncStatus(''), 2500);
       } catch {
         setProducts([]);
         setCategories(['All']);
-      }
-      return;
-    }
-
-    if (shouldSync && isSupabaseConfigured() && navigator.onLine) {
-      const now = Date.now();
-      if (now - lastSyncAtRef.current > 1_500) {
-        try {
-          setSyncStatus('Syncing from cloud…');
-          const result = await syncBidirectional();
-          lastSyncAtRef.current = Date.now();
-          if (result.success) {
-            setSyncStatus('Synced — same stock on all devices');
-            window.setTimeout(() => setSyncStatus(''), 2500);
-          } else {
-            setSyncStatus(result.message || 'Cloud sync failed — tap Refresh');
-          }
-          await paintLocal();
-        } catch {
-          setSyncStatus('Cloud sync failed — tap Refresh');
-        }
       }
     }
   }, [currentStore?.id]);
