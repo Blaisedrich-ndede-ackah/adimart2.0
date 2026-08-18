@@ -12,7 +12,7 @@ import {
   syncBidirectional,
 } from '@/lib/dexie';
 import { isSupabaseConfigured } from '@/lib/supabase';
-import { alignProductsWithBatchStock, canonicalizeStoreStock, toMoney, toQty } from '@/lib/warehouse';
+import { alignProductsWithBatchStock, toMoney, toQty } from '@/lib/warehouse';
 import { subscribeStockChanges } from '@/lib/stockEvents';
 import AddProduct from '@/components/AddProduct';
 import StockAdjustment from '@/components/StockAdjustment';
@@ -50,13 +50,6 @@ export default function InventoryPage() {
     const shouldSync = Boolean(opts?.sync);
 
     const paintLocal = async () => {
-      if (currentStore?.id) {
-        try {
-          await canonicalizeStoreStock(currentStore.id);
-        } catch {
-          // Still paint this store's catalog
-        }
-      }
       const allProducts = await getCurrentStoreProducts();
       const aligned = await alignProductsWithBatchStock(allProducts);
       setProducts(aligned);
@@ -84,18 +77,21 @@ export default function InventoryPage() {
 
     if (shouldSync && isSupabaseConfigured() && navigator.onLine) {
       const now = Date.now();
-      // Short debounce only — never skip a real refresh for 12s (phone vs laptop drift)
       if (now - lastSyncAtRef.current > 1_500) {
         try {
-          setSyncStatus('Syncing inventory…');
-          await syncBidirectional();
+          setSyncStatus('Syncing from cloud…');
+          const result = await syncBidirectional();
           lastSyncAtRef.current = Date.now();
-          setSyncStatus('Inventory synced');
+          if (result.success) {
+            setSyncStatus('Synced — same stock on all devices');
+            window.setTimeout(() => setSyncStatus(''), 2500);
+          } else {
+            setSyncStatus(result.message || 'Cloud sync failed — tap Refresh');
+          }
           await paintLocal();
         } catch {
-          setSyncStatus('Showing local inventory (sync failed)');
+          setSyncStatus('Cloud sync failed — tap Refresh');
         }
-        window.setTimeout(() => setSyncStatus(''), 2500);
       }
     }
   }, [currentStore?.id]);

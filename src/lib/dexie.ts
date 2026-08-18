@@ -1204,6 +1204,119 @@ async function fetchAllStoreRows(
   return { data: all, error: null };
 }
 
+function mapCloudBatch(row: Record<string, unknown>): LocalStockBatch {
+  return {
+    id: String(row.id),
+    store_id: String(row.store_id),
+    product_id: String(row.product_id),
+    location_id: String(row.location_id),
+    batch_code: String(row.batch_code || ''),
+    expiry_date: (row.expiry_date as string) || null,
+    quantity: asQty(row.quantity),
+    cost_price: Number(row.cost_price) || 0,
+    created_at: String(row.created_at || ''),
+    updated_at: String(row.updated_at || row.created_at || ''),
+    synced: 1,
+  };
+}
+
+function mapCloudLocation(row: Record<string, unknown>): LocalLocation {
+  return {
+    id: String(row.id),
+    store_id: String(row.store_id),
+    name: String(row.name || ''),
+    location_type: row.location_type === 'warehouse' ? 'warehouse' : 'shop',
+    is_default: row.is_default ? 1 : 0,
+    is_active: row.is_active === false ? 0 : 1,
+    access_pin_hash: (row.access_pin_hash as string) || null,
+    created_at: String(row.created_at || ''),
+    updated_at: String(row.updated_at || row.created_at || ''),
+    synced: 1,
+  };
+}
+
+/**
+ * Replace this store's local stock ledger with the cloud snapshot so every
+ * phone and computer shows the same figures. Keeps only unsynced local
+ * deductions (sales not pushed yet) and unsynced non-OPENING receives.
+ */
+export async function adoptCloudStockLedger(
+  storeId: string
+): Promise<{ ok: boolean; batchCount: number; error?: string }> {
+  if (!isSupabaseConfigured()) {
+    return { ok: false, batchCount: 0, error: 'Supabase not configured' };
+  }
+
+  const { data: remoteRows, error } = await fetchAllStoreRows('stock_batches', storeId);
+  if (error || !remoteRows) {
+    return { ok: false, batchCount: 0, error: error?.message || 'Could not pull stock from cloud' };
+  }
+
+  const { data: remoteLocs, error: locError } = await fetchAllStoreRows('locations', storeId);
+  if (locError || !remoteLocs) {
+    return { ok: false, batchCount: 0, error: locError?.message || 'Could not pull locations from cloud' };
+  }
+
+  const localBatches = await db.stock_batches.where('store_id').equals(storeId).toArray();
+  const localById = new Map(localBatches.map((b) => [b.id, b]));
+  const remoteBatches = remoteRows.map(mapCloudBatch);
+  const remoteIds = new Set(remoteBatches.map((b) => b.id));
+
+  const nextBatches: LocalStockBatch[] = remoteBatches.map((remote) => {
+    const local = localById.get(remote.id);
+    if (local && local.synced === 0 && asQty(local.quantity) < asQty(remote.quantity)) {
+      return {
+        ...remote,
+        quantity: asQty(local.quantity),
+        updated_at: local.updated_at || remote.updated_at,
+        synced: 0,
+      };
+    }
+    return remote;
+  });
+
+  for (const local of localBatches) {
+    if (remoteIds.has(local.id)) continue;
+    if (local.synced !== 0) continue;
+    if ((local.batch_code || '').trim().toUpperCase() === 'OPENING') continue;
+    nextBatches.push({ ...local, quantity: asQty(local.quantity) });
+  }
+
+  const remoteLocations = remoteLocs.map(mapCloudLocation);
+
+  await db.transaction('rw', db.stock_batches, db.locations, async () => {
+    await db.stock_batches.where('store_id').equals(storeId).delete();
+    if (nextBatches.length > 0) {
+      await db.stock_batches.bulkPut(nextBatches);
+    }
+    if (remoteLocations.length > 0) {
+      await db.locations.bulkPut(remoteLocations);
+    }
+  });
+
+  return { ok: true, batchCount: nextBatches.length };
+}
+
+export async function refreshStockFromCloud(): Promise<{ ok: boolean; message: string }> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) return { ok: false, message: 'No store selected' };
+
+  const adopted = await adoptCloudStockLedger(storeId);
+  if (!adopted.ok) {
+    return { ok: false, message: adopted.error || 'Cloud stock pull failed' };
+  }
+
+  try {
+    const { canonicalizeStoreStock, syncStoreCatalogStockFromBatches } = await import('@/lib/warehouse');
+    await canonicalizeStoreStock(storeId);
+    await syncStoreCatalogStockFromBatches(storeId);
+  } catch {
+    // Ledger was replaced even if heal fails
+  }
+
+  return { ok: true, message: `Stock matched to cloud (${adopted.batchCount} batches)` };
+}
+
 async function upsertToSupabase<T extends Record<string, unknown>>(
   label: string,
   table:
@@ -1769,17 +1882,11 @@ export async function syncFromSupabase(opts?: {
         merge: async (remote: LocalProduct, local: LocalProduct | undefined) => {
           if (!local) return remote;
           if (local.synced !== 0) return remote;
-          // Keep unsynced local edits, but if remote is newer take remote stock_level
-          // (another device sold). Batches are still reconciled after pull.
-          const localTime = new Date(local.updated_at || local.created_at).getTime();
-          const remoteTime = new Date(remote.updated_at || remote.created_at).getTime();
-          if (remoteTime > localTime) {
-            return {
-              ...local,
-              stock_level: Number(remote.stock_level) || 0,
-            };
-          }
-          return local;
+          // Keep unsynced name/price edits, but stock always follows cloud then batch align
+          return {
+            ...local,
+            stock_level: asQty(remote.stock_level),
+          };
         },
       },
       {
@@ -1922,12 +2029,9 @@ export async function syncFromSupabase(opts?: {
           if (local.synced !== 0) return remote;
           const localQty = asQty(local.quantity);
           const remoteQty = asQty(remote.quantity);
-          // Never resurrect stock by accepting a higher remote qty over an unsynced local deduction
-          if (localQty < remoteQty) return local;
-          if (remoteQty < localQty) return remote;
-          const localTime = new Date(local.updated_at || local.created_at).getTime();
-          const remoteTime = new Date(remote.updated_at || remote.created_at).getTime();
-          return remoteTime >= localTime ? remote : local;
+          // Unsynced local sale: keep the lower qty. Inflated local stock: take cloud.
+          if (localQty < remoteQty) return { ...local, quantity: localQty };
+          return remote;
         },
       },
       {
@@ -2046,14 +2150,22 @@ export async function syncFromSupabase(opts?: {
       last_synced_at: new Date().toISOString(),
     });
 
-    // Batches are quantity authority — collapse duplicate shops/OPENING then heal catalog
+    // Cloud snapshot is the shared ledger — replace local extras so devices match
     if (!opts?.skipCatalogAlign) {
+      const adopted = await adoptCloudStockLedger(storeId);
+      if (!adopted.ok) {
+        return {
+          success: false,
+          message: adopted.error || 'Could not adopt cloud stock',
+          pulledCount,
+        };
+      }
       try {
         const { canonicalizeStoreStock, syncStoreCatalogStockFromBatches } = await import('@/lib/warehouse');
         await canonicalizeStoreStock(storeId);
         await syncStoreCatalogStockFromBatches(storeId);
       } catch {
-        // Non-fatal: pull still succeeded
+        // Non-fatal: snapshot still replaced
       }
     }
 
@@ -2075,24 +2187,22 @@ export async function pullStockLedgerFromCloud(storeId?: string): Promise<boolea
   const id = storeId || (await getCurrentStoreId());
   if (!id) return false;
 
-  const result = await syncFromSupabase({
-    onlyTables: ['locations', 'stock_batches', 'stock_movements'],
-    skipCatalogAlign: true,
-  });
-  return result.success;
+  const adopted = await adoptCloudStockLedger(id);
+  return adopted.ok;
 }
 
 export async function syncBidirectional(): Promise<{ success: boolean; message: string }> {
-  // Pull the stock ledger first and collapse duplicate OPENING/shops so a stale
-  // phone cannot push inflated catalog stock over a laptop that already sold.
   const storeId = await getCurrentStoreId();
   if (storeId) {
-    await pullStockLedgerFromCloud(storeId);
-    try {
-      const { canonicalizeStoreStock } = await import('@/lib/warehouse');
-      await canonicalizeStoreStock(storeId);
-    } catch {
-      // Local heal is best-effort
+    const adopted = await adoptCloudStockLedger(storeId);
+    if (adopted.ok) {
+      try {
+        const { canonicalizeStoreStock, syncStoreCatalogStockFromBatches } = await import('@/lib/warehouse');
+        await canonicalizeStoreStock(storeId);
+        await syncStoreCatalogStockFromBatches(storeId);
+      } catch {
+        // Push whatever we have
+      }
     }
   }
 
