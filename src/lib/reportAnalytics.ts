@@ -5,7 +5,7 @@ import {
   LocalLocation,
   LocalTransaction,
 } from './dexie';
-import { getLocationInventory, listLocations } from './warehouse';
+import { getLocationInventory, listLocations, toMoney, toQty } from './warehouse';
 
 export interface PeriodRange {
   start: Date;
@@ -421,9 +421,10 @@ export async function buildLocationReportSummary(
   let stockCostValue = 0;
   let stockSellingValue = 0;
   for (const row of inventory) {
-    stockUnits += row.quantity;
-    stockCostValue += (row.product.cost_price || 0) * row.quantity;
-    stockSellingValue += (row.product.selling_price || 0) * row.quantity;
+    const qty = toQty(row.quantity);
+    stockUnits += qty;
+    stockCostValue += toMoney(row.product.cost_price) * qty;
+    stockSellingValue += toMoney(row.product.selling_price) * qty;
   }
 
   return {
