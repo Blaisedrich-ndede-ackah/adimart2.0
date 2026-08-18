@@ -13,6 +13,7 @@ import {
 } from '@/lib/dexie';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { alignProductsWithBatchStock } from '@/lib/warehouse';
+import { subscribeStockChanges } from '@/lib/stockEvents';
 import AddProduct from '@/components/AddProduct';
 import StockAdjustment from '@/components/StockAdjustment';
 import CsvImportModal from '@/components/CsvImportModal';
@@ -47,6 +48,19 @@ export default function InventoryPage() {
 
   const loadProducts = useCallback(async (opts?: { sync?: boolean }) => {
     const shouldSync = Boolean(opts?.sync);
+
+    const paintLocal = async () => {
+      const allProducts = await getCurrentStoreProducts();
+      // Sales deduct warehouse batches — keep catalog stock_level aligned so phone & PC match
+      const aligned = await alignProductsWithBatchStock(allProducts);
+      setProducts(aligned);
+      const cats = [...new Set(aligned.map((p) => p.category))].sort();
+      setCategories(['All', ...cats]);
+    };
+
+    // Always paint local inventory first so the screen is never blocked on cloud
+    await paintLocal();
+
     if (shouldSync && isSupabaseConfigured() && navigator.onLine) {
       const now = Date.now();
       // Avoid hammering cloud when switching tabs quickly
@@ -56,19 +70,13 @@ export default function InventoryPage() {
           await syncBidirectional();
           lastSyncAtRef.current = Date.now();
           setSyncStatus('Inventory synced');
+          await paintLocal();
         } catch {
           setSyncStatus('Showing local inventory (sync failed)');
         }
         window.setTimeout(() => setSyncStatus(''), 2500);
       }
     }
-
-    const allProducts = await getCurrentStoreProducts();
-    // Sales deduct warehouse batches — keep catalog stock_level aligned so phone & PC match
-    const aligned = await alignProductsWithBatchStock(allProducts);
-    setProducts(aligned);
-    const cats = [...new Set(aligned.map((p) => p.category))].sort();
-    setCategories(['All', ...cats]);
   }, []);
 
   const handleInventoryScan = useCallback(async (barcode: string) => {
@@ -107,6 +115,21 @@ export default function InventoryPage() {
     void loadProducts({ sync: true });
   }, [loadProducts]);
 
+  // Instant stock numbers after POS sale / order fulfill / adjust
+  useEffect(() => {
+    if (!currentStore?.id) return;
+    return subscribeStockChanges((event) => {
+      if (event.storeId !== currentStore.id) return;
+      setProducts((prev) =>
+        prev.map((p) => {
+          const change = event.changes.find((c) => c.productId === p.id);
+          if (!change || change.totalQty === undefined) return p;
+          return { ...p, stock_level: change.totalQty };
+        })
+      );
+    });
+  }, [currentStore?.id]);
+
   // When returning to this tab/device, pull latest cloud stock
   useEffect(() => {
     const onVisible = () => {
@@ -118,11 +141,11 @@ export default function InventoryPage() {
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [loadProducts]);
 
-  // Local refresh between syncs (sales on this device)
+  // Local refresh between syncs (sales on this device) — less aggressive now that events patch live
   useEffect(() => {
     const interval = setInterval(() => {
       void loadProducts({ sync: false });
-    }, 30000);
+    }, 60_000);
     return () => clearInterval(interval);
   }, [loadProducts]);
 

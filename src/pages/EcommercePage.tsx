@@ -11,6 +11,7 @@ import {
   setProductSellOnline,
   updateOnlineOrderStatus,
 } from '@/lib/ecommerce';
+import { subscribeStockChanges } from '@/lib/stockEvents';
 import { useAuthStore } from '@/store/useAuthStore';
 
 const STATUS_FLOW: OnlineOrderStatus[] = ['new', 'confirmed', 'fulfilled', 'cancelled'];
@@ -46,18 +47,27 @@ export default function EcommercePage() {
     setCatalog(await listOnlineCatalogProducts(currentStore.id));
   }, [currentStore]);
 
-  const refreshOrders = useCallback(async () => {
+  const refreshOrders = useCallback(async (opts?: { pull?: boolean }) => {
     if (!currentStore) return;
+    const shouldPull = opts?.pull !== false;
     setBusy(true);
     try {
-      await pullOnlineOrdersFromCloud(currentStore.id);
-      const rows = await listLocalOnlineOrders(currentStore.id);
-      const withItems: OrderRow[] = [];
-      for (const order of rows) {
-        const items = await listLocalOnlineOrderItems(currentStore.id, order.id);
-        withItems.push({ ...order, items });
+      // Paint local orders immediately, then optionally pull cloud
+      const paintLocal = async () => {
+        const rows = await listLocalOnlineOrders(currentStore.id);
+        const withItems: OrderRow[] = [];
+        for (const order of rows) {
+          const items = await listLocalOnlineOrderItems(currentStore.id, order.id);
+          withItems.push({ ...order, items });
+        }
+        setOrders(withItems);
+      };
+
+      await paintLocal();
+      if (shouldPull) {
+        await pullOnlineOrdersFromCloud(currentStore.id);
+        await paintLocal();
       }
-      setOrders(withItems);
     } catch (e) {
       setStatusMsg(e instanceof Error ? e.message : 'Could not refresh orders');
       setTimeout(() => setStatusMsg(''), 4000);
@@ -72,12 +82,27 @@ export default function EcommercePage() {
 
   useEffect(() => {
     if (!currentStore || !enabled || !staffOk) return;
-    void refreshOrders();
+    void refreshOrders({ pull: true });
     const id = window.setInterval(() => {
-      void refreshOrders();
-    }, 45000);
+      void refreshOrders({ pull: true });
+    }, 60_000);
     return () => window.clearInterval(id);
   }, [currentStore, enabled, staffOk, refreshOrders]);
+
+  // Keep online catalog stock numbers fresh after POS sales
+  useEffect(() => {
+    if (!currentStore?.id) return;
+    return subscribeStockChanges((event) => {
+      if (event.storeId !== currentStore.id) return;
+      setCatalog((prev) =>
+        prev.map((p) => {
+          const change = event.changes.find((c) => c.productId === p.id);
+          if (!change || change.totalQty === undefined) return p;
+          return { ...p, stock_level: change.totalQty };
+        })
+      );
+    });
+  }, [currentStore?.id]);
 
   const copyLink = async () => {
     if (!shareUrl) return;

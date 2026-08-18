@@ -8,9 +8,10 @@ import {
   getCurrentStoreId,
   type LocalLocation,
 } from '@/lib/dexie';
-import { triggerAutoSync } from '@/lib/sync';
+import { triggerPushSync } from '@/lib/sync';
 import { resolveSalePrice, type SaleMode, type UnitType } from '@/lib/bulkPricing';
-import { deductSaleStockForItems, getLocationStock, reconcileProductStockBatches } from '@/lib/warehouse';
+import type { StockChange } from '@/lib/stockEvents';
+import { deductSaleStockForItems, getLocationStockMap, reconcileProductStockBatches } from '@/lib/warehouse';
 
 export interface CartItem {
   id: string;
@@ -65,7 +66,15 @@ interface CartState {
     cashAmount?: number,
     paystackAmount?: number,
     paystackReference?: string
-  ) => Promise<{ receiptNumber: string; items: CartItem[]; subtotal: number; discount: number; total: number }>;
+  ) => Promise<{
+    receiptNumber: string;
+    items: CartItem[];
+    subtotal: number;
+    discount: number;
+    total: number;
+    stockChanges: StockChange[];
+    locationId: string;
+  }>;
 }
 
 function recalculate(
@@ -344,20 +353,29 @@ export const useCartStore = create<CartState>((set, get) => ({
       });
     }
 
-    // Only reconcile products that look short at this location (cheap when already migrated)
-    await Promise.all(
-      [...needByProduct.entries()].map(async ([productId, need]) => {
-        const available = await getLocationStock(productId, locationId);
-        if (available >= need.qty) return;
-        await reconcileProductStockBatches(storeId, productId, locationId);
-        const after = await getLocationStock(productId, locationId);
+    // One stock map query instead of N per-product location lookups
+    const stockMap = await getLocationStockMap(storeId, locationId);
+    const shortProductIds: string[] = [];
+    for (const [productId, need] of needByProduct) {
+      if ((stockMap[productId] || 0) < need.qty) shortProductIds.push(productId);
+    }
+    if (shortProductIds.length > 0) {
+      await Promise.all(
+        shortProductIds.map((productId) =>
+          reconcileProductStockBatches(storeId, productId, locationId)
+        )
+      );
+      const afterMap = await getLocationStockMap(storeId, locationId);
+      for (const productId of shortProductIds) {
+        const need = needByProduct.get(productId)!;
+        const after = afterMap[productId] || 0;
         if (after < need.qty) {
           throw new Error(
             `Insufficient stock for "${need.name}". Only ${after} available at this location.`
           );
         }
-      })
-    );
+      }
+    }
 
     const txnId = generateId();
     const receiptNumber = generateReceiptNumber();
@@ -406,11 +424,12 @@ export const useCartStore = create<CartState>((set, get) => ({
       }
     );
 
-    await deductSaleStockForItems({
+    const stockChanges = await deductSaleStockForItems({
       storeId,
       locationId,
       userId: cashierId,
       transactionId: txnId,
+      reason: 'sale',
       items: state.items.map((item) => ({
         productId: item.product_id,
         baseQty: item.base_quantity,
@@ -424,6 +443,8 @@ export const useCartStore = create<CartState>((set, get) => ({
       subtotal: state.subtotal,
       discount: state.discountAmount,
       total: state.total,
+      stockChanges,
+      locationId,
     };
 
     set({
@@ -436,9 +457,9 @@ export const useCartStore = create<CartState>((set, get) => ({
       total: 0,
     });
 
-    // Defer cloud sync so checkout UI returns immediately
+    // Push-only sync (no cloud pull) so checkout stays snappy
     window.setTimeout(() => {
-      void triggerAutoSync('sale');
+      void triggerPushSync('sale');
     }, 0);
     return saleData;
   },

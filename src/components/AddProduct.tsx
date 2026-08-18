@@ -3,7 +3,7 @@ import { X, Camera, Save, AlertTriangle, StopCircle, ScanBarcode, Bluetooth, Ima
 import { BrowserMultiFormatReader, NotFoundException } from '@zxing/library';
 import { db, generateId, LocalProduct, getCurrentStoreId } from '@/lib/dexie';
 import { setProductStockLevel } from '@/lib/warehouse';
-import { triggerAutoSync } from '@/lib/sync';
+import { triggerPushSync } from '@/lib/sync';
 import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 import { playScanBeep } from '@/lib/scanBeep';
 import { getBluetoothHardwareStatus } from '@/lib/bluetoothPeripherals';
@@ -332,7 +332,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         }
       }
 
-      void triggerAutoSync('product-save');
+      void triggerPushSync('product-save');
       onSaved();
       onClose();
     } catch (err: unknown) {

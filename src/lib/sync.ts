@@ -1,5 +1,5 @@
 import { isSupabaseConfigured } from './supabase';
-import { syncBidirectional } from './dexie';
+import { syncBidirectional, syncToSupabase } from './dexie';
 
 const AUTO_SYNC_KEY = 'adimat_auto_sync';
 const AUTO_SYNC_INTERVAL_MS = 3 * 60 * 1000;
@@ -31,6 +31,22 @@ export async function triggerAutoSync(reason = 'auto'): Promise<void> {
   syncInProgress = true;
   try {
     await syncBidirectional();
+    lastAutoSyncAt = Date.now();
+  } catch {
+    // Silent fail for background sync
+  } finally {
+    syncInProgress = false;
+  }
+}
+
+/** Push local changes only — much faster after checkout / order fulfill. */
+export async function triggerPushSync(reason = 'push'): Promise<void> {
+  if (!isAutoSyncEnabled() || !isSupabaseConfigured() || !navigator.onLine) return;
+  if (syncInProgress) return;
+
+  syncInProgress = true;
+  try {
+    await syncToSupabase();
     lastAutoSyncAt = Date.now();
   } catch {
     // Silent fail for background sync
