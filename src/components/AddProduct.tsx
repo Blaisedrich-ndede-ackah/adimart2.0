@@ -15,6 +15,7 @@ import {
   type WholesaleMode,
   type WholesaleTier,
 } from '@/lib/bulkPricing';
+import { toMoneyAmount } from '@/lib/money';
 
 interface AddProductProps {
   isOpen: boolean;
@@ -231,11 +232,13 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
       setError('Product name is required');
       return;
     }
-    if (!costPrice || parseFloat(costPrice) < 0) {
+    const cost = toMoneyAmount(costPrice);
+    const sell = toMoneyAmount(sellingPrice);
+    if (!costPrice || cost < 0 || Number.isNaN(Number(costPrice))) {
       setError('Enter a valid cost price');
       return;
     }
-    if (!sellingPrice || parseFloat(sellingPrice) < 0) {
+    if (!sellingPrice || sell < 0 || Number.isNaN(Number(sellingPrice))) {
       setError('Enter a valid selling price');
       return;
     }
@@ -245,11 +248,11 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
     }
 
     const packSizeNum = Math.max(1, Math.floor(Number(packSize) || 1));
-    if (wholesaleMode === 'pack' && !(parseFloat(wholesalePackPrice) > 0)) {
+    if (wholesaleMode === 'pack' && !(toMoneyAmount(wholesalePackPrice) > 0)) {
       setError('Enter a wholesale pack price');
       return;
     }
-    if (wholesaleMode === 'unit_discount' && !(parseFloat(wholesaleUnitPrice) >= 0)) {
+    if (wholesaleMode === 'unit_discount' && !(toMoneyAmount(wholesaleUnitPrice) >= 0 && wholesaleUnitPrice !== '')) {
       setError('Enter a wholesale unit price');
       return;
     }
@@ -276,11 +279,18 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         sell_online: sellOnline ? 1 : 0,
         wholesale_mode: wholesaleMode,
         wholesale_pack_price:
-          wholesaleMode === 'pack' ? parseFloat(wholesalePackPrice) || 0 : 0,
+          wholesaleMode === 'pack' ? toMoneyAmount(wholesalePackPrice) : 0,
         wholesale_unit_price:
-          wholesaleMode === 'unit_discount' ? parseFloat(wholesaleUnitPrice) || 0 : 0,
+          wholesaleMode === 'unit_discount' ? toMoneyAmount(wholesaleUnitPrice) : 0,
         wholesale_tiers_json:
-          wholesaleMode === 'tiers' ? serializeTiers(tiers) : serializeTiers([]),
+          wholesaleMode === 'tiers'
+            ? serializeTiers(
+                tiers.map((t) => ({
+                  ...t,
+                  unit_price: toMoneyAmount(t.unit_price),
+                }))
+              )
+            : serializeTiers([]),
       };
 
       if (editProduct) {
@@ -288,8 +298,8 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           name: name.trim(),
           category,
           barcode: barcode.trim(),
-          cost_price: parseFloat(costPrice),
-          selling_price: parseFloat(sellingPrice),
+          cost_price: cost,
+          selling_price: sell,
           sku_type: skuType,
           image_url: imageUrl || '',
           ...wholesaleFields,
@@ -311,8 +321,8 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           category,
           sku_type: skuType,
           barcode: barcode.trim(),
-          cost_price: parseFloat(costPrice),
-          selling_price: parseFloat(sellingPrice),
+          cost_price: cost,
+          selling_price: sell,
           stock_level: 0,
           is_active: 1,
           image_url: imageUrl || '',

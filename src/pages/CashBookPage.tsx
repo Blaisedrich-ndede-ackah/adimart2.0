@@ -10,6 +10,7 @@ import {
 } from '@/lib/dexie';
 import { useAuthStore } from '@/store/useAuthStore';
 import { triggerAutoSync } from '@/lib/sync';
+import { roundMoney, toMoneyAmount } from '@/lib/money';
 
 const INCOME_CATEGORIES = ['Cash sales', 'Capital', 'Loan', 'Refund', 'Other'];
 const EXPENSE_CATEGORIES = ['Rent', 'Utilities', 'Supplier', 'Salaries', 'Transport', 'Withdrawal', 'Other'];
@@ -92,13 +93,13 @@ export default function CashBookPage() {
     let income = 0;
     let expense = 0;
     for (const e of entries) {
-      if (e.entry_type === 'income') income += e.amount;
-      else expense += e.amount;
+      if (e.entry_type === 'income') income += Number(e.amount) || 0;
+      else expense += Number(e.amount) || 0;
     }
     return {
-      income,
-      expense,
-      net: income - expense,
+      income: roundMoney(income),
+      expense: roundMoney(expense),
+      net: roundMoney(income - expense),
     };
   }, [entries]);
 
@@ -114,12 +115,12 @@ export default function CashBookPage() {
 
   const handleSave = async () => {
     setError('');
-    const value = parseFloat(amount);
+    const value = toMoneyAmount(amount);
     if (!description.trim()) {
       setError('Enter a description.');
       return;
     }
-    if (isNaN(value) || value <= 0) {
+    if (value <= 0) {
       setError('Enter a valid amount.');
       return;
     }

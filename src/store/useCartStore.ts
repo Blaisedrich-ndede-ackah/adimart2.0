@@ -11,6 +11,7 @@ import {
 import { triggerPushSync } from '@/lib/sync';
 import { resolveSalePrice, type SaleMode, type UnitType } from '@/lib/bulkPricing';
 import type { StockChange } from '@/lib/stockEvents';
+import { moneyEquals, roundMoney, toMoneyAmount } from '@/lib/money';
 import { deductSaleStockForItems, getLocationStock, getLocationStockMap, reconcileProductStockBatches, toQty } from '@/lib/warehouse';
 
 export interface CartItem {
@@ -83,25 +84,25 @@ function recalculate(
   discountPercent: number,
   discountFixed: number
 ) {
-  const subtotal = items.reduce((sum, i) => sum + i.subtotal, 0);
+  const subtotal = roundMoney(items.reduce((sum, i) => sum + i.subtotal, 0));
   let kind = discountKind;
   let percent = Math.max(0, Math.min(100, discountPercent));
   let fixed = Math.max(0, discountFixed);
   let discountAmount = 0;
 
   if (kind === 'percentage') {
-    discountAmount = Math.round((subtotal * percent) / 100 * 100) / 100;
+    discountAmount = roundMoney((subtotal * percent) / 100);
   } else if (kind === 'fixed') {
-    discountAmount = Math.min(Math.round(fixed * 100) / 100, subtotal);
+    discountAmount = Math.min(roundMoney(fixed), subtotal);
     fixed = discountAmount;
-    percent = subtotal > 0 ? Math.round((discountAmount / subtotal) * 10000) / 100 : 0;
+    percent = subtotal > 0 ? roundMoney((discountAmount / subtotal) * 100) : 0;
   } else {
     percent = 0;
     fixed = 0;
     discountAmount = 0;
   }
 
-  const total = Math.round((subtotal - discountAmount) * 100) / 100;
+  const total = roundMoney(subtotal - discountAmount);
   return {
     subtotal,
     discountAmount,
@@ -125,7 +126,7 @@ function buildCartLine(
   existingId?: string
 ): CartItem {
   const priced = resolveSalePrice({ product, saleMode, quantity, unitType });
-  const unitPrice = Math.round(priced.unitPrice * 100) / 100;
+  const unitPrice = roundMoney(priced.unitPrice);
   return {
     id: existingId || generateId(),
     product_id: product.id,
@@ -136,7 +137,7 @@ function buildCartLine(
     unit_type: unitType,
     sale_mode: saleMode,
     pack_size: Math.max(1, Number(product.pack_size) || 1),
-    subtotal: Math.round(unitPrice * quantity * 100) / 100,
+    subtotal: roundMoney(unitPrice * quantity),
     available_stock: availableStock,
     image_url: product.image_url,
     price_label: priced.label,
@@ -351,6 +352,49 @@ export const useCartStore = create<CartState>((set, get) => ({
     const storeId = await getCurrentStoreId();
     if (!storeId) throw new Error('No store selected');
 
+    const store = await db.stores.get(storeId);
+    const discountCap = store?.discount_cap_percentage ?? 10;
+    const cashierCanDiscount = (store?.cashier_can_discount ?? 1) === 1;
+    const cashier = await db.users.get(cashierId);
+    const isOwner = cashier?.role === 'owner';
+
+    // Recompute totals from lines so persisted sale matches cart math
+    const priced = recalculate(
+      state.items,
+      state.discountKind,
+      state.discountPercent,
+      state.discountFixed
+    );
+
+    if (!isOwner && !cashierCanDiscount && priced.discountAmount > 0) {
+      throw new Error('Discount is disabled for cashiers. Ask the store owner.');
+    }
+    if (priced.discountAmount > 0) {
+      const capAmount = roundMoney((priced.subtotal * discountCap) / 100);
+      if (priced.discountAmount > capAmount + 0.009 && !isOwner) {
+        throw new Error(
+          `Discount exceeds the store cap of ${discountCap}% (max GH₵${capAmount.toFixed(2)}).`
+        );
+      }
+    }
+
+    let cash = toMoneyAmount(cashAmount);
+    let paystack = toMoneyAmount(paystackAmount);
+    if (paymentMethod === 'cash') {
+      cash = priced.total;
+      paystack = 0;
+    } else if (paymentMethod === 'paystack') {
+      cash = 0;
+      paystack = priced.total;
+    } else {
+      // split
+      if (!moneyEquals(cash + paystack, priced.total)) {
+        throw new Error(
+          `Split payment must equal total. Cash GH₵${cash.toFixed(2)} + MoMo GH₵${paystack.toFixed(2)} ≠ GH₵${priced.total.toFixed(2)}.`
+        );
+      }
+    }
+
     let locationId = state.locationId;
     if (!locationId) {
       const locations = await db.locations.where('store_id').equals(storeId).toArray();
@@ -402,11 +446,11 @@ export const useCartStore = create<CartState>((set, get) => ({
           receipt_number: receiptNumber,
           cashier_id: cashierId,
           cashier_name: cashierName,
-          total_amount: state.total,
-          discount_applied: state.discountAmount,
+          total_amount: priced.total,
+          discount_applied: priced.discountAmount,
           payment_method: paymentMethod,
-          cash_amount: paymentMethod === 'cash' ? state.total : cashAmount,
-          paystack_amount: paymentMethod === 'paystack' ? state.total : paystackAmount,
+          cash_amount: cash,
+          paystack_amount: paystack,
           paystack_reference: paystackReference,
           status: 'completed',
           location_id: locationId,
@@ -459,9 +503,9 @@ export const useCartStore = create<CartState>((set, get) => ({
     const saleData = {
       receiptNumber,
       items: [...state.items],
-      subtotal: state.subtotal,
-      discount: state.discountAmount,
-      total: state.total,
+      subtotal: priced.subtotal,
+      discount: priced.discountAmount,
+      total: priced.total,
       stockChanges,
       locationId,
     };

@@ -285,8 +285,9 @@ export async function updateOnlineOrderStatus(
 
   const previousStatus = order.status;
   const now = new Date().toISOString();
+  const orderRef = order.order_number || orderId;
 
-  // Deduct stock once when the order is fulfilled (before committing status)
+  // Deduct stock once when the order is fulfilled (idempotent)
   if (status === 'fulfilled' && previousStatus !== 'fulfilled') {
     const items = await db.online_order_items
       .where('store_id')
@@ -310,33 +311,43 @@ export async function updateOnlineOrderStatus(
         reconcileProductStockBatches,
         getLocationStock,
       } = await import('@/lib/warehouse');
-      const locationId = await getDefaultShopLocationId(order.store_id);
-      if (!locationId) throw new Error('No shop location configured for stock deduction');
 
-      for (const item of deductItems) {
-        let available = await getLocationStock(item.productId, locationId);
-        if (available < item.baseQty) {
-          // Only migrates when there are zero batch rows; never invents from stale catalog
-          await reconcileProductStockBatches(order.store_id, item.productId, locationId);
-          available = await getLocationStock(item.productId, locationId);
-        }
-        if (available < item.baseQty) {
-          throw new Error(
-            `Insufficient stock for "${item.name}". Only ${available} available to fulfill this order.`
-          );
-        }
-      }
+      // Skip deduct if this order already created sale movements (retry / dual device)
+      const priorMovement = await db.stock_movements
+        .where('store_id')
+        .equals(order.store_id)
+        .filter(
+          (m) =>
+            m.movement_type === 'sale' &&
+            typeof m.note === 'string' &&
+            (m.note.includes(orderRef) || m.note.includes(orderId))
+        )
+        .first();
 
-      try {
+      if (!priorMovement) {
+        const locationId = await getDefaultShopLocationId(order.store_id);
+        if (!locationId) throw new Error('No shop location configured for stock deduction');
+
+        for (const item of deductItems) {
+          let available = await getLocationStock(item.productId, locationId);
+          if (available < item.baseQty) {
+            await reconcileProductStockBatches(order.store_id, item.productId, locationId);
+            available = await getLocationStock(item.productId, locationId);
+          }
+          if (available < item.baseQty) {
+            throw new Error(
+              `Insufficient stock for "${item.name}". Only ${available} available to fulfill this order.`
+            );
+          }
+        }
+
         await deductSaleStockForItems({
           storeId: order.store_id,
           locationId,
-          transactionId: order.order_number || orderId,
+          transactionId: orderRef,
           reason: 'order',
           items: deductItems,
         });
-      } catch (err) {
-        throw err;
       }
     }
   }
@@ -347,7 +358,7 @@ export async function updateOnlineOrderStatus(
     synced: 0,
   });
 
-  // Push the final local status only (never cloud-fulfill after a local rollback)
+  // Push the final local status only
   if (isSupabaseConfigured()) {
     const latest = await db.online_orders.get(orderId);
     const cloudStatus = latest?.status ?? previousStatus;
