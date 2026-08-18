@@ -2,6 +2,7 @@ import Dexie, { Table } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
 import { isSupabaseConfigured, supabase, testSupabaseConnection } from './supabase';
 import { toMoneyAmount } from './money';
+import { formatUnknownError, isUuid, uuidOrNull } from './ids';
 
 // Store represents a business/shop
 export interface LocalStore {
@@ -1166,7 +1167,7 @@ export async function importProductsFromRows(
 }
 
 function formatSyncError(label: string, error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = formatUnknownError(error);
   if (message.includes('Load failed') || message.includes('Failed to fetch')) {
     return `${label}: Could not reach Supabase. Check your internet connection and VITE_SUPABASE_URL.`;
   }
@@ -1249,12 +1250,12 @@ export async function adoptCloudStockLedger(
 
   const { data: remoteRows, error } = await fetchAllStoreRows('stock_batches', storeId);
   if (error || !remoteRows) {
-    return { ok: false, batchCount: 0, error: error?.message || 'Could not pull stock from cloud' };
+    return { ok: false, batchCount: 0, error: formatUnknownError(error) || 'Could not pull stock from cloud' };
   }
 
   const { data: remoteLocs, error: locError } = await fetchAllStoreRows('locations', storeId);
   if (locError || !remoteLocs) {
-    return { ok: false, batchCount: 0, error: locError?.message || 'Could not pull locations from cloud' };
+    return { ok: false, batchCount: 0, error: formatUnknownError(locError) || 'Could not pull locations from cloud' };
   }
 
   const localBatches = await db.stock_batches.where('store_id').equals(storeId).toArray();
@@ -1279,15 +1280,26 @@ export async function adoptCloudStockLedger(
     if (remoteIds.has(local.id)) continue;
     if (local.synced !== 0) continue;
     if ((local.batch_code || '').trim().toUpperCase() === 'OPENING') continue;
+    if (!isUuid(local.id) || !isUuid(local.product_id) || !isUuid(local.location_id)) continue;
     nextBatches.push({ ...local, quantity: asQty(local.quantity) });
   }
 
   const remoteLocations = remoteLocs.map(mapCloudLocation);
+  const remoteLocIds = new Set(remoteLocations.map((l) => l.id));
+  const localLocations = await db.locations.where('store_id').equals(storeId).toArray();
 
   await db.transaction('rw', db.stock_batches, db.locations, async () => {
     await db.stock_batches.where('store_id').equals(storeId).delete();
     if (nextBatches.length > 0) {
       await db.stock_batches.bulkPut(nextBatches);
+    }
+    for (const loc of localLocations) {
+      if (remoteLocIds.has(loc.id)) continue;
+      const keepNew =
+        loc.synced === 0 && isUuid(loc.id) && loc.location_type === 'warehouse';
+      if (!keepNew) {
+        await db.locations.delete(loc.id);
+      }
     }
     if (remoteLocations.length > 0) {
       await db.locations.bulkPut(remoteLocations);
@@ -1315,6 +1327,13 @@ export async function refreshStockFromCloud(): Promise<{ ok: boolean; message: s
   }
 
   return { ok: true, message: `Stock matched to cloud (${adopted.batchCount} batches)` };
+}
+
+function dateOrNull(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, 10);
 }
 
 async function upsertToSupabase<T extends Record<string, unknown>>(
@@ -1373,6 +1392,13 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
   let syncedCount = 0;
 
   try {
+    try {
+      const { canonicalizeStoreStock } = await import('@/lib/warehouse');
+      await canonicalizeStoreStock(storeId);
+    } catch {
+      // Push remaining UUID-safe rows even if heal fails
+    }
+
     // Push hard-deletes first so cloud rows (and CASCADE children) are removed
     const pendingDeletes = await db.deleted_records
       .where('store_id')
@@ -1434,7 +1460,7 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         pin_hash: u.pin_hash,
         is_active: u.is_active === 1,
         phone: u.phone || '',
-        assigned_location_id: u.assigned_location_id || null,
+        assigned_location_id: uuidOrNull(u.assigned_location_id),
         can_wholesale: (u.can_wholesale ?? 0) === 1,
         can_sell_from_warehouse: (u.can_sell_from_warehouse ?? 0) === 1,
         can_manage_ecommerce: (u.can_manage_ecommerce ?? (u.role === 'owner' ? 1 : 0)) === 1,
@@ -1445,10 +1471,15 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
     );
 
     const unsyncedLocations = await db.locations.where('store_id').equals(storeId).and(l => l.synced === 0).toArray();
+    const locationsToPush = unsyncedLocations.filter((l) => isUuid(l.id) && isUuid(l.store_id));
+    for (const leftover of unsyncedLocations) {
+      if (isUuid(leftover.id) && isUuid(leftover.store_id)) continue;
+      await db.locations.delete(leftover.id);
+    }
     syncedCount += await upsertToSupabase(
       'Locations',
       'locations',
-      unsyncedLocations.map(l => ({
+      locationsToPush.map(l => ({
         id: l.id,
         store_id: l.store_id,
         name: l.name,
@@ -1459,7 +1490,7 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         created_at: l.created_at,
         updated_at: l.updated_at,
       })),
-      async () => { await Promise.all(unsyncedLocations.map(l => db.locations.update(l.id, { synced: 1 }))); },
+      async () => { await Promise.all(locationsToPush.map(l => db.locations.update(l.id, { synced: 1 }))); },
       errors
     );
 
@@ -1494,6 +1525,10 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
           continue;
         }
       }
+      if (!isUuid(batch.id) || !isUuid(batch.store_id) || !isUuid(batch.product_id) || !isUuid(batch.location_id)) {
+        await db.stock_batches.delete(batch.id);
+        continue;
+      }
       batchesToPush.push({ ...batch, quantity: localQty });
     }
     syncedCount += await upsertToSupabase(
@@ -1505,7 +1540,7 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         product_id: b.product_id,
         location_id: b.location_id,
         batch_code: b.batch_code || '',
-        expiry_date: b.expiry_date,
+        expiry_date: dateOrNull(b.expiry_date),
         quantity: b.quantity,
         cost_price: b.cost_price,
         created_at: b.created_at,
@@ -1516,23 +1551,31 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
     );
 
     const unsyncedMovements = await db.stock_movements.where('store_id').equals(storeId).and(m => m.synced === 0).toArray();
+    const movementsToPush: LocalStockMovement[] = [];
+    for (const movement of unsyncedMovements) {
+      if (!isUuid(movement.id) || !isUuid(movement.store_id) || !isUuid(movement.product_id)) {
+        await db.stock_movements.delete(movement.id);
+        continue;
+      }
+      movementsToPush.push(movement);
+    }
     syncedCount += await upsertToSupabase(
       'Stock movements',
       'stock_movements',
-      unsyncedMovements.map(m => ({
+      movementsToPush.map(m => ({
         id: m.id,
         store_id: m.store_id,
         product_id: m.product_id,
-        batch_id: m.batch_id,
-        from_location_id: m.from_location_id,
-        to_location_id: m.to_location_id,
+        batch_id: uuidOrNull(m.batch_id),
+        from_location_id: uuidOrNull(m.from_location_id),
+        to_location_id: uuidOrNull(m.to_location_id),
         movement_type: m.movement_type,
         quantity: m.quantity,
         note: m.note || '',
-        user_id: m.user_id,
+        user_id: uuidOrNull(m.user_id),
         created_at: m.created_at,
       })),
-      async () => { await Promise.all(unsyncedMovements.map(m => db.stock_movements.update(m.id, { synced: 1 }))); },
+      async () => { await Promise.all(movementsToPush.map(m => db.stock_movements.update(m.id, { synced: 1 }))); },
       errors
     );
 
@@ -1574,7 +1617,7 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         id: t.id,
         store_id: t.store_id,
         receipt_number: t.receipt_number,
-        cashier_id: t.cashier_id,
+        cashier_id: uuidOrNull(t.cashier_id),
         cashier_name: t.cashier_name,
         total_amount: t.total_amount,
         discount_applied: t.discount_applied,
@@ -1583,7 +1626,7 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         paystack_amount: t.paystack_amount,
         paystack_reference: t.paystack_reference,
         status: t.status,
-        location_id: t.location_id || null,
+        location_id: uuidOrNull(t.location_id),
         sale_mode: t.sale_mode || 'retail',
         created_at: t.created_at,
       })),
@@ -1599,7 +1642,7 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         id: i.id,
         store_id: i.store_id,
         transaction_id: i.transaction_id,
-        product_id: i.product_id,
+        product_id: uuidOrNull(i.product_id),
         product_name: i.product_name,
         quantity: i.quantity,
         unit_price: i.unit_price,
@@ -1607,7 +1650,7 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         unit_type: i.unit_type || 'base',
         pack_size: i.pack_size ?? 1,
         base_quantity: i.base_quantity ?? i.quantity,
-        batch_id: i.batch_id || null,
+        batch_id: uuidOrNull(i.batch_id),
       })),
       async () => { await Promise.all(unsyncedItems.map(i => db.transaction_items.update(i.id, { synced: 1 }))); },
       errors
@@ -1688,7 +1731,7 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         id: i.id,
         store_id: i.store_id,
         order_id: i.order_id,
-        product_id: i.product_id,
+        product_id: uuidOrNull(i.product_id),
         product_name: i.product_name,
         unit_price: i.unit_price,
         quantity: i.quantity,
