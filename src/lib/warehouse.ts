@@ -10,8 +10,33 @@ import {
   type LocalUser,
 } from '@/lib/dexie';
 
+/** Beyond this, qty is treated as corrupt (e.g. string-concat / scientific junk). */
+const MAX_REASONABLE_QTY = 50_000_000;
+const MAX_REASONABLE_UNIT_PRICE = 100_000_000;
+
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+/**
+ * Coerce stock quantities from Dexie/cloud to a safe non-negative integer.
+ * Critical: `0 + "5"` concatenates in JS — never add raw batch.quantity with `+`.
+ * Also: `"0" || 0` is `"0"` (truthy), which spreads the string-concat bug.
+ */
+export function toQty(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  const floored = Math.floor(n);
+  if (floored > MAX_REASONABLE_QTY) return 0;
+  return floored;
+}
+
+/** Coerce money fields; drop non-finite / absurd unit prices. */
+export function toMoney(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  if (n > MAX_REASONABLE_UNIT_PRICE) return 0;
+  return n;
 }
 
 function dateOnly(value: string | null | undefined): string | null {
@@ -80,7 +105,7 @@ export async function ensureStoreLocations(storeId: string): Promise<LocalLocati
     for (const batch of allBatches) {
       qtyByProduct.set(
         batch.product_id,
-        (qtyByProduct.get(batch.product_id) || 0) + (batch.quantity || 0)
+        (qtyByProduct.get(batch.product_id) || 0) + toQty(batch.quantity)
       );
     }
 
@@ -100,8 +125,8 @@ export async function ensureStoreLocations(storeId: string): Promise<LocalLocati
         location_id: defaultShop.id,
         batch_code: 'OPENING',
         expiry_date: null,
-        quantity: product.stock_level,
-        cost_price: product.cost_price || 0,
+        quantity: toQty(product.stock_level),
+        cost_price: toMoney(product.cost_price),
         created_at: now,
         updated_at: now,
         synced: 0,
@@ -114,7 +139,7 @@ export async function ensureStoreLocations(storeId: string): Promise<LocalLocati
         from_location_id: null,
         to_location_id: defaultShop.id,
         movement_type: 'receive',
-        quantity: product.stock_level,
+        quantity: toQty(product.stock_level),
         note: 'Migrated opening stock',
         user_id: null,
         created_at: now,
@@ -240,7 +265,7 @@ export async function getLocationStock(productId: string, locationId: string): P
     .equals(productId)
     .and((b) => b.location_id === locationId)
     .toArray();
-  return batches.reduce((sum, b) => sum + (b.quantity || 0), 0);
+  return batches.reduce((sum, b) => sum + toQty(b.quantity), 0);
 }
 
 /** One query for POS product grid instead of N getLocationStock calls */
@@ -255,7 +280,7 @@ export async function getLocationStockMap(
     .toArray();
   const map: Record<string, number> = {};
   for (const batch of batches) {
-    map[batch.product_id] = (map[batch.product_id] || 0) + (batch.quantity || 0);
+    map[batch.product_id] = (map[batch.product_id] || 0) + toQty(batch.quantity);
   }
   return map;
 }
@@ -265,9 +290,68 @@ export async function getStoreBatchStockMap(storeId: string): Promise<Record<str
   const batches = await db.stock_batches.where('store_id').equals(storeId).toArray();
   const map: Record<string, number> = {};
   for (const batch of batches) {
-    map[batch.product_id] = (map[batch.product_id] || 0) + (batch.quantity || 0);
+    map[batch.product_id] = (map[batch.product_id] || 0) + toQty(batch.quantity);
   }
   return map;
+}
+
+/**
+ * Persist numeric batch/product quantities when IndexedDB has strings or absurd values
+ * (fixes inventory Value showing e.g. GH₵1e+26 from JS string concatenation).
+ */
+export async function repairCorruptStockQuantities(storeId: string): Promise<number> {
+  const now = nowIso();
+  let fixed = 0;
+
+  const batches = await db.stock_batches.where('store_id').equals(storeId).toArray();
+  const batchFixes: LocalStockBatch[] = [];
+  for (const batch of batches) {
+    const safe = toQty(batch.quantity);
+    const cost = toMoney(batch.cost_price);
+    if (batch.quantity !== safe || batch.cost_price !== cost) {
+      batchFixes.push({
+        ...batch,
+        quantity: safe,
+        cost_price: cost,
+        updated_at: now,
+        synced: 0,
+      });
+    }
+  }
+  if (batchFixes.length > 0) {
+    await db.stock_batches.bulkPut(batchFixes);
+    fixed += batchFixes.length;
+  }
+
+  const products = await db.products.where('store_id').equals(storeId).toArray();
+  const batchMap = await getStoreBatchStockMap(storeId);
+  const productFixes: LocalProduct[] = [];
+  for (const product of products) {
+    const hasBatches = Object.prototype.hasOwnProperty.call(batchMap, product.id);
+    const safeStock = hasBatches ? batchMap[product.id] || 0 : toQty(product.stock_level);
+    const cost = toMoney(product.cost_price);
+    const sell = toMoney(product.selling_price);
+    if (
+      product.stock_level !== safeStock ||
+      product.cost_price !== cost ||
+      product.selling_price !== sell
+    ) {
+      productFixes.push({
+        ...product,
+        stock_level: safeStock,
+        cost_price: cost,
+        selling_price: sell,
+        updated_at: now,
+        synced: 0,
+      });
+    }
+  }
+  if (productFixes.length > 0) {
+    await db.products.bulkPut(productFixes);
+    fixed += productFixes.length;
+  }
+
+  return fixed;
 }
 
 /**
@@ -281,27 +365,39 @@ export async function alignProductsWithBatchStock(
   const storeId = products[0]?.store_id;
   if (!storeId) return products;
 
+  // Heal string-concat / non-numeric qty corruption before aligning catalog stock
+  await repairCorruptStockQuantities(storeId);
+
   const batchMap = await getStoreBatchStockMap(storeId);
   const now = nowIso();
   const aligned: LocalProduct[] = [];
   const writes: Promise<unknown>[] = [];
 
   for (const product of products) {
+    const cost = toMoney(product.cost_price);
+    const sell = toMoney(product.selling_price);
     // Only trust batches when the product has been migrated into warehouse stock.
     // Products with no batch rows keep their catalog stock_level.
     if (!Object.prototype.hasOwnProperty.call(batchMap, product.id)) {
-      aligned.push(product);
+      const stock = toQty(product.stock_level);
+      aligned.push({ ...product, stock_level: stock, cost_price: cost, selling_price: sell });
       continue;
     }
     const batchQty = batchMap[product.id] || 0;
-    if (batchQty === product.stock_level) {
+    if (
+      batchQty === product.stock_level &&
+      cost === product.cost_price &&
+      sell === product.selling_price
+    ) {
       aligned.push(product);
       continue;
     }
-    aligned.push({ ...product, stock_level: batchQty });
+    aligned.push({ ...product, stock_level: batchQty, cost_price: cost, selling_price: sell });
     writes.push(
       db.products.update(product.id, {
         stock_level: batchQty,
+        cost_price: cost,
+        selling_price: sell,
         updated_at: now,
         synced: 0,
       })
@@ -316,7 +412,7 @@ export async function alignProductsWithBatchStock(
 
 export async function getProductTotalStock(productId: string): Promise<number> {
   const batches = await db.stock_batches.where('product_id').equals(productId).toArray();
-  return batches.reduce((sum, b) => sum + (b.quantity || 0), 0);
+  return batches.reduce((sum, b) => sum + toQty(b.quantity), 0);
 }
 
 export async function listBatches(
@@ -355,7 +451,7 @@ export async function reconcileProductStockBatches(
   }
 
   const batches = await db.stock_batches.where('product_id').equals(productId).toArray();
-  const batchTotal = batches.reduce((sum, b) => sum + (b.quantity || 0), 0);
+  const batchTotal = batches.reduce((sum, b) => sum + toQty(b.quantity), 0);
   const target = Math.max(0, Math.floor(Number(product.stock_level) || 0));
   const gap = target - batchTotal;
 
@@ -799,7 +895,7 @@ export async function deductSaleStockForItems(params: {
       for (const productId of touchedProducts) {
         const total = (
           await db.stock_batches.where('product_id').equals(productId).toArray()
-        ).reduce((sum, b) => sum + (b.quantity || 0), 0);
+        ).reduce((sum, b) => sum + toQty(b.quantity), 0);
         await db.products.update(productId, {
           stock_level: total,
           updated_at: now,
@@ -870,7 +966,7 @@ export async function getLocationInventory(
   const byProduct = new Map<string, { quantity: number; batchCount: number }>();
   for (const batch of batches) {
     const prev = byProduct.get(batch.product_id) || { quantity: 0, batchCount: 0 };
-    prev.quantity += batch.quantity;
+    prev.quantity += toQty(batch.quantity);
     prev.batchCount += 1;
     byProduct.set(batch.product_id, prev);
   }
@@ -909,7 +1005,7 @@ export async function getLocationStats(
 
   return {
     skuCount: productIds.size,
-    totalUnits: batches.reduce((sum, b) => sum + b.quantity, 0),
+    totalUnits: batches.reduce((sum, b) => sum + toQty(b.quantity), 0),
     expiringSoon: expiring.length,
     batchCount: batches.length,
   };

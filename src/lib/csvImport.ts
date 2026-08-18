@@ -42,7 +42,10 @@ function normalizeHeader(header: string): string {
 
 function parseNumber(value: string, fallback = 0): number {
   const parsed = parseFloat(value.replace(/[^0-9.-]/g, ''));
-  return Number.isFinite(parsed) ? parsed : fallback;
+  if (!Number.isFinite(parsed)) return fallback;
+  // Reject absurd values (scientific junk / misaligned CSV columns)
+  if (Math.abs(parsed) > 50_000_000) return fallback;
+  return parsed;
 }
 
 export function parseProductCsv(content: string): CsvParseResult {

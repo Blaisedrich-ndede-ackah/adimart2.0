@@ -12,7 +12,7 @@ import {
   syncBidirectional,
 } from '@/lib/dexie';
 import { isSupabaseConfigured } from '@/lib/supabase';
-import { alignProductsWithBatchStock } from '@/lib/warehouse';
+import { alignProductsWithBatchStock, toMoney, toQty } from '@/lib/warehouse';
 import AddProduct from '@/components/AddProduct';
 import StockAdjustment from '@/components/StockAdjustment';
 import CsvImportModal from '@/components/CsvImportModal';
@@ -167,16 +167,24 @@ export default function InventoryPage() {
 
   const activeProducts = products.filter((p) => p.is_active === 1);
   const totalSKUs = activeProducts.length;
-  const outOfStock = activeProducts.filter((p) => p.stock_level === 0).length;
-  const lowStock = activeProducts.filter((p) => p.stock_level > 0 && p.stock_level < 5).length;
+  const outOfStock = activeProducts.filter((p) => toQty(p.stock_level) === 0).length;
+  const lowStock = activeProducts.filter((p) => {
+    const stock = toQty(p.stock_level);
+    return stock > 0 && stock < 5;
+  }).length;
   const totalValue = activeProducts.reduce(
-    (sum, p) => sum + p.stock_level * p.selling_price,
+    (sum, p) => sum + toQty(p.stock_level) * toMoney(p.selling_price),
     0
   );
   const totalCostOfProduct = activeProducts.reduce(
-    (sum, p) => sum + p.stock_level * p.cost_price,
+    (sum, p) => sum + toQty(p.stock_level) * toMoney(p.cost_price),
     0
   );
+
+  const formatInventoryMoney = (amount: number) => {
+    const n = Number.isFinite(amount) && amount >= 0 ? amount : 0;
+    return `GH₵${Math.round(n).toLocaleString('en-GH')}`;
+  };
 
   const handleDelete = async (id: string) => {
     if (
@@ -278,12 +286,12 @@ export default function InventoryPage() {
           </button>
           <div className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center min-w-[4.75rem] flex-shrink-0 sm:min-w-0">
             <DollarSign className="w-4 h-4 text-green-300 mx-auto mb-1" />
-            <p className="text-white font-bold text-sm leading-none">GH₵{totalValue.toFixed(0)}</p>
+            <p className="text-white font-bold text-sm leading-none">{formatInventoryMoney(totalValue)}</p>
             <p className="text-emerald-200 text-[9px] mt-0.5">Value</p>
           </div>
           <div className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center min-w-[5.25rem] flex-shrink-0 sm:min-w-0">
             <Coins className="w-4 h-4 text-amber-200 mx-auto mb-1" />
-            <p className="text-white font-bold text-sm leading-none">GH₵{totalCostOfProduct.toFixed(0)}</p>
+            <p className="text-white font-bold text-sm leading-none">{formatInventoryMoney(totalCostOfProduct)}</p>
             <p className="text-emerald-200 text-[8px] sm:text-[9px] mt-0.5 leading-tight">
               Total Cost of Product
             </p>
@@ -415,22 +423,22 @@ export default function InventoryPage() {
                       <div className="flex sm:flex-col sm:text-right items-end justify-between sm:justify-start gap-3 sm:gap-0.5 shrink-0">
                         <div className="text-left sm:text-right">
                           <p className="text-sm font-bold text-primary">
-                            GH₵{product.selling_price.toFixed(2)}
+                            GH₵{toMoney(product.selling_price).toFixed(2)}
                           </p>
                           <p className="text-[10px] text-gray-400">
-                            Cost: GH₵{product.cost_price.toFixed(2)}
+                            Cost: GH₵{toMoney(product.cost_price).toFixed(2)}
                           </p>
                         </div>
                         <p
                           className={`text-xs font-semibold ${
-                            product.stock_level === 0
+                            toQty(product.stock_level) === 0
                               ? 'text-red-500'
-                              : product.stock_level < 5
+                              : toQty(product.stock_level) < 5
                                 ? 'text-amber-500'
                                 : 'text-gray-700'
                           }`}
                         >
-                          Stock: {product.stock_level}
+                          Stock: {toQty(product.stock_level)}
                         </p>
                       </div>
                     </div>
