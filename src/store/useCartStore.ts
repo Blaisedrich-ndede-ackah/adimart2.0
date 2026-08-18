@@ -145,16 +145,26 @@ function buildCartLine(
 
 async function stockAtContext(productId: string, locationId: string | null): Promise<number> {
   if (locationId) {
-    let available = await getLocationStock(productId, locationId);
+    const available = await getLocationStock(productId, locationId);
     if (available > 0) return available;
 
-    // Location batches empty but catalog may still have stock — reconcile into this location
     const product = await db.products.get(productId);
-    if (product && toQty(product.stock_level) > 0) {
+    if (!product) return 0;
+
+    const allBatches = await db.stock_batches.where('product_id').equals(productId).toArray();
+    const batchTotal = allBatches.reduce((sum, b) => sum + toQty(b.quantity), 0);
+
+    // Stock lives at another location — do not invent shop stock from catalog
+    if (allBatches.length > 0 && batchTotal > 0) return 0;
+
+    // Truly no batch rows yet: migrate catalog opening stock into this location once
+    if (allBatches.length === 0 && toQty(product.stock_level) > 0) {
       await reconcileProductStockBatches(product.store_id, productId, locationId);
-      available = await getLocationStock(productId, locationId);
+      return getLocationStock(productId, locationId);
     }
-    return available;
+
+    // Batch rows exist but sum to 0 → sold out
+    return 0;
   }
   const product = await db.products.get(productId);
   return toQty(product?.stock_level);

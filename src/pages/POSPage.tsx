@@ -18,8 +18,10 @@ import {
   canUserSellWholesale,
   ensureStoreLocations,
   getLocationStockMap,
+  alignProductsWithBatchStock,
   resolveSaleLocations,
 } from '@/lib/warehouse';
+import { triggerAutoSync } from '@/lib/sync';
 
 type PosTab = 'products' | 'cart';
 
@@ -68,7 +70,15 @@ export default function POSPage() {
     try {
       const storeId = await getCurrentStoreId();
       if (storeId && !soft) await ensureStoreLocations(storeId);
-      const list = await getCurrentStoreActiveProducts();
+      let list = await getCurrentStoreActiveProducts();
+      // Keep catalog stock_level = batch totals (same truth Inventory uses)
+      if (storeId) {
+        try {
+          list = await alignProductsWithBatchStock(list);
+        } catch {
+          // Still show products even if align fails
+        }
+      }
       list.sort((a, b) => a.name.localeCompare(b.name));
       setProducts(list);
 
@@ -92,6 +102,19 @@ export default function POSPage() {
 
   useEffect(() => {
     void loadProducts();
+  }, [loadProducts]);
+
+  // Match Inventory: pull cloud stock when returning to POS on this device
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      void (async () => {
+        await triggerAutoSync('pos-visible');
+        await loadProducts({ soft: true });
+      })();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
   }, [loadProducts]);
 
   // Instant stock UI after sale / order / adjust — no full catalog reload
@@ -438,8 +461,10 @@ export default function POSPage() {
             ) : (
               <div className="space-y-2 md:grid md:grid-cols-1 xl:grid-cols-2 md:gap-2 md:space-y-0">
                 {filteredProducts.map((product) => {
-                  const stock = locationStock[product.id] ?? product.stock_level;
-                  const outOfStock = stock <= 0;
+                  // Location batches only — never fall back to store-wide catalog stock
+                  const stockHere = locationStock[product.id] ?? 0;
+                  const stockAll = Number(product.stock_level) || 0;
+                  const outOfStock = stockHere <= 0;
                   const packSize = Math.max(1, Number(product.pack_size) || 1);
                   const modes = getAvailableSaleModes(product);
                   const wholesaleOk = saleMode === 'wholesale' && modes.includes('wholesale');
@@ -458,12 +483,15 @@ export default function POSPage() {
                           {packSize > 1 ? <span className="text-[10px] text-gray-400 font-medium"> / unit</span> : null}
                         </p>
                         <p className="text-[10px] text-gray-500 mt-0.5">
-                          Stock here: {stock}
+                          Here: {stockHere}
+                          {stockAll !== stockHere ? ` · All locations: ${stockAll}` : ''}
                           {product.track_expiry === 1 ? ' · Expiry tracked' : ''}
                           {wholesaleOk ? ' · Wholesale ready' : ''}
                         </p>
                         {outOfStock && (
-                          <p className="text-[10px] font-semibold text-red-600 mt-0.5">Out of stock</p>
+                          <p className="text-[10px] font-semibold text-red-600 mt-0.5">
+                            {stockAll > 0 ? 'None at this location' : 'Out of stock'}
+                          </p>
                         )}
                       </div>
                       <button
