@@ -16,8 +16,8 @@ if ('serviceWorker' in navigator) {
           if (newWorker) {
             newWorker.addEventListener('statechange', () => {
               if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                // New content available, notify user
-                console.log('New content available, refresh to update');
+                newWorker.postMessage('skipWaiting');
+                window.location.reload();
               }
             });
           }

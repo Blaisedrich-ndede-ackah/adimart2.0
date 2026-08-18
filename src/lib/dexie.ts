@@ -1173,6 +1173,37 @@ function formatSyncError(label: string, error: unknown): string {
   return `${label}: ${message}`;
 }
 
+function asQty(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  const floored = Math.floor(n);
+  return floored > 50_000_000 ? 0 : floored;
+}
+
+/** PostgREST defaults to 1000 rows — page so phone and laptop pull the same full ledger. */
+async function fetchAllStoreRows(
+  table: string,
+  storeId: string
+): Promise<{ data: Record<string, unknown>[] | null; error: { message: string } | null }> {
+  const pageSize = 1000;
+  const all: Record<string, unknown>[] = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .eq('store_id', storeId)
+      .range(from, from + pageSize - 1);
+    if (error) return { data: null, error };
+    const rows = (data || []) as Record<string, unknown>[];
+    all.push(...rows);
+    if (rows.length < pageSize) break;
+    from += pageSize;
+    if (from >= 50_000) break;
+  }
+  return { data: all, error: null };
+}
+
 async function upsertToSupabase<T extends Record<string, unknown>>(
   label: string,
   table:
@@ -1321,10 +1352,41 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
 
     // Push batches BEFORE products so catalog stock_level never arrives without matching batches
     const unsyncedBatches = await db.stock_batches.where('store_id').equals(storeId).and(b => b.synced === 0).toArray();
+    const batchesToPush: LocalStockBatch[] = [];
+    const openingUnsynced = unsyncedBatches.filter(
+      (b) => (b.batch_code || '').trim().toUpperCase() === 'OPENING'
+    );
+    const remoteOpeningQty = new Map<string, { quantity: number; updated_at: string }>();
+    if (openingUnsynced.length > 0) {
+      const { data: remoteOpenings } = await fetchAllStoreRows('stock_batches', storeId);
+      for (const row of remoteOpenings || []) {
+        if (String(row.batch_code || '').trim().toUpperCase() !== 'OPENING') continue;
+        remoteOpeningQty.set(String(row.id), {
+          quantity: asQty(row.quantity),
+          updated_at: String(row.updated_at || row.created_at || ''),
+        });
+      }
+    }
+    for (const batch of unsyncedBatches) {
+      const localQty = asQty(batch.quantity);
+      if ((batch.batch_code || '').trim().toUpperCase() === 'OPENING') {
+        const remote = remoteOpeningQty.get(batch.id);
+        if (remote && remote.quantity < localQty) {
+          // Cloud already has a deducted qty — do not resurrect stock from a stale device OPENING
+          await db.stock_batches.update(batch.id, {
+            quantity: remote.quantity,
+            updated_at: remote.updated_at || batch.updated_at,
+            synced: 1,
+          });
+          continue;
+        }
+      }
+      batchesToPush.push({ ...batch, quantity: localQty });
+    }
     syncedCount += await upsertToSupabase(
       'Stock batches',
       'stock_batches',
-      unsyncedBatches.map(b => ({
+      batchesToPush.map(b => ({
         id: b.id,
         store_id: b.store_id,
         product_id: b.product_id,
@@ -1336,7 +1398,7 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
         created_at: b.created_at,
         updated_at: b.updated_at,
       })),
-      async () => { await Promise.all(unsyncedBatches.map(b => db.stock_batches.update(b.id, { synced: 1 }))); },
+      async () => { await Promise.all(batchesToPush.map(b => db.stock_batches.update(b.id, { synced: 1 }))); },
       errors
     );
 
@@ -1550,7 +1612,10 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
   }
 }
 
-export async function syncFromSupabase(): Promise<{ success: boolean; message: string; pulledCount: number }> {
+export async function syncFromSupabase(opts?: {
+  onlyTables?: string[];
+  skipCatalogAlign?: boolean;
+}): Promise<{ success: boolean; message: string; pulledCount: number }> {
   if (!isSupabaseConfigured()) {
     return { success: false, message: 'Supabase not configured.', pulledCount: 0 };
   }
@@ -1570,6 +1635,7 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
   const deletedProductIds = await getDeletedProductIds(storeId);
 
   try {
+    if (!opts?.onlyTables) {
     const { data: remoteStore, error: storeError } = await supabase
       .from('stores')
       .select('*')
@@ -1619,6 +1685,7 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
         synced: localStore?.synced === 0 ? 0 : 1,
       });
       pulledCount++;
+    }
     }
 
     const tables = [
@@ -1843,7 +1910,7 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
           location_id: row.location_id as string,
           batch_code: (row.batch_code as string) || '',
           expiry_date: (row.expiry_date as string) || null,
-          quantity: Number(row.quantity) || 0,
+          quantity: asQty(row.quantity),
           cost_price: Number(row.cost_price) || 0,
           created_at: row.created_at as string,
           updated_at: (row.updated_at as string) || (row.created_at as string),
@@ -1853,8 +1920,8 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
         merge: async (remote: LocalStockBatch, local: LocalStockBatch | undefined) => {
           if (!local) return remote;
           if (local.synced !== 0) return remote;
-          const localQty = Number(local.quantity) || 0;
-          const remoteQty = Number(remote.quantity) || 0;
+          const localQty = asQty(local.quantity);
+          const remoteQty = asQty(remote.quantity);
           // Never resurrect stock by accepting a higher remote qty over an unsynced local deduction
           if (localQty < remoteQty) return local;
           if (remoteQty < localQty) return remote;
@@ -1931,10 +1998,9 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
     ] as const;
 
     for (const config of tables) {
-      const { data, error } = await supabase
-        .from(config.table)
-        .select('*')
-        .eq('store_id', storeId);
+      if (opts?.onlyTables && !opts.onlyTables.includes(config.table)) continue;
+
+      const { data, error } = await fetchAllStoreRows(config.table, storeId);
 
       if (error) {
         errors.push(formatSyncError(config.label, error));
@@ -1980,12 +2046,15 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
       last_synced_at: new Date().toISOString(),
     });
 
-    // Batches are quantity authority — heal catalog stock and notify POS/Inventory UIs
-    try {
-      const { syncStoreCatalogStockFromBatches } = await import('@/lib/warehouse');
-      await syncStoreCatalogStockFromBatches(storeId);
-    } catch {
-      // Non-fatal: pull still succeeded
+    // Batches are quantity authority — collapse duplicate shops/OPENING then heal catalog
+    if (!opts?.skipCatalogAlign) {
+      try {
+        const { canonicalizeStoreStock, syncStoreCatalogStockFromBatches } = await import('@/lib/warehouse');
+        await canonicalizeStoreStock(storeId);
+        await syncStoreCatalogStockFromBatches(storeId);
+      } catch {
+        // Non-fatal: pull still succeeded
+      }
     }
 
     return {
@@ -1999,9 +2068,34 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
   }
 }
 
+export async function pullStockLedgerFromCloud(storeId?: string): Promise<boolean> {
+  if (!isSupabaseConfigured()) return false;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return false;
+
+  const id = storeId || (await getCurrentStoreId());
+  if (!id) return false;
+
+  const result = await syncFromSupabase({
+    onlyTables: ['locations', 'stock_batches', 'stock_movements'],
+    skipCatalogAlign: true,
+  });
+  return result.success;
+}
+
 export async function syncBidirectional(): Promise<{ success: boolean; message: string }> {
-  // Push first so local edits (e.g. newly attached phone) reach the cloud
-  // before pull can overwrite them with stale empty remote rows.
+  // Pull the stock ledger first and collapse duplicate OPENING/shops so a stale
+  // phone cannot push inflated catalog stock over a laptop that already sold.
+  const storeId = await getCurrentStoreId();
+  if (storeId) {
+    await pullStockLedgerFromCloud(storeId);
+    try {
+      const { canonicalizeStoreStock } = await import('@/lib/warehouse');
+      await canonicalizeStoreStock(storeId);
+    } catch {
+      // Local heal is best-effort
+    }
+  }
+
   const push = await syncToSupabase();
   const pull = await syncFromSupabase();
 
