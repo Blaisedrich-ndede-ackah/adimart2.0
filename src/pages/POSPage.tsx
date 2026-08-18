@@ -13,6 +13,7 @@ import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 import { getBluetoothHardwareStatus, subscribeBluetoothStatus } from '@/lib/bluetoothPeripherals';
 import ProductImage from '@/components/ProductImage';
 import { getAvailableSaleModes, type SaleMode, type UnitType } from '@/lib/bulkPricing';
+import { subscribeStockChanges } from '@/lib/stockEvents';
 import {
   canUserSellWholesale,
   ensureStoreLocations,
@@ -61,11 +62,12 @@ export default function POSPage() {
     });
   }, [currentStore, currentUser]);
 
-  const loadProducts = useCallback(async () => {
-    setLoadingProducts(true);
+  const loadProducts = useCallback(async (opts?: { soft?: boolean }) => {
+    const soft = Boolean(opts?.soft);
+    if (!soft) setLoadingProducts(true);
     try {
       const storeId = await getCurrentStoreId();
-      if (storeId) await ensureStoreLocations(storeId);
+      if (storeId && !soft) await ensureStoreLocations(storeId);
       const list = await getCurrentStoreActiveProducts();
       list.sort((a, b) => a.name.localeCompare(b.name));
       setProducts(list);
@@ -76,7 +78,7 @@ export default function POSPage() {
         setLocationStock({});
       }
     } finally {
-      setLoadingProducts(false);
+      if (!soft) setLoadingProducts(false);
     }
   }, [selectedLocationId]);
 
@@ -92,11 +94,33 @@ export default function POSPage() {
     void loadProducts();
   }, [loadProducts]);
 
+  // Instant stock UI after sale / order / adjust — no full catalog reload
   useEffect(() => {
-    if (posTab === 'products') {
-      void loadProducts();
-    }
-  }, [posTab, loadProducts]);
+    if (!currentStore?.id) return;
+    return subscribeStockChanges((event) => {
+      if (event.storeId !== currentStore.id) return;
+
+      setProducts((prev) =>
+        prev.map((p) => {
+          const change = event.changes.find((c) => c.productId === p.id);
+          if (!change || change.totalQty === undefined) return p;
+          return { ...p, stock_level: change.totalQty };
+        })
+      );
+
+      if (!event.locationId || event.locationId === selectedLocationId) {
+        setLocationStock((prev) => {
+          const next = { ...prev };
+          for (const change of event.changes) {
+            if (change.locationQty !== undefined) {
+              next[change.productId] = change.locationQty;
+            }
+          }
+          return next;
+        });
+      }
+    });
+  }, [currentStore?.id, selectedLocationId]);
 
   useEffect(() => {
     // iOS/Safari often blocks WebAudio until the first user gesture.
@@ -199,7 +223,8 @@ export default function POSPage() {
     setShowCheckout(false);
     setScannerActive(true);
     setPosTab('products');
-    void loadProducts();
+    // Stock already patched via stockEvents — soft refresh without spinner
+    void loadProducts({ soft: true });
   };
 
   const cartCount = cart.items.reduce((sum, i) => sum + i.quantity, 0);
