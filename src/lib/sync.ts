@@ -24,7 +24,7 @@ export function setAutoSyncEnabled(enabled: boolean): void {
 }
 
 export async function triggerAutoSync(reason = 'auto'): Promise<void> {
-  if (!isAutoSyncEnabled() || !isSupabaseConfigured() || !navigator.onLine) return;
+  if (!isAutoSyncEnabled() || !isSupabaseConfigured()) return;
   if (syncInProgress) {
     syncQueued = true;
     return;
@@ -50,7 +50,7 @@ export async function triggerAutoSync(reason = 'auto'): Promise<void> {
 
 /** Push local changes only — much faster after checkout / order fulfill. */
 export async function triggerPushSync(reason = 'push'): Promise<void> {
-  if (!isAutoSyncEnabled() || !isSupabaseConfigured() || !navigator.onLine) return;
+  if (!isAutoSyncEnabled() || !isSupabaseConfigured()) return;
   if (syncInProgress) {
     syncQueued = true;
     return;

@@ -10,6 +10,7 @@ import {
   type LocalUser,
 } from '@/lib/dexie';
 import { emitStockChanged, type StockChange } from '@/lib/stockEvents';
+import { isSupabaseConfigured } from '@/lib/supabase';
 import { canonicalShopId, openingBatchId, legacyShopId, isUuid, stableUuid } from '@/lib/ids';
 
 /** Beyond this, qty is treated as corrupt (e.g. string-concat / scientific junk). */
@@ -399,15 +400,16 @@ export async function ensureStoreLocations(storeId: string): Promise<LocalLocati
   if (existing) return existing;
 
   const run = (async () => {
-    await ensureDefaultLocation(storeId);
-
     // One-time (per session) cloud heal + opening-stock migration
     if (openingStockMigrated.has(storeId)) {
+      await ensureDefaultLocation(storeId);
       return db.locations.where('store_id').equals(storeId).toArray();
     }
 
+    // Pull cloud BEFORE creating a local shop UUID. Chrome and Opera each have
+    // their own IndexedDB; the cloud ledger is what they must share.
     let pulledCloudStock = false;
-    if (typeof navigator !== 'undefined' && navigator.onLine) {
+    if (isSupabaseConfigured()) {
       try {
         const { pullStockLedgerFromCloud } = await import('@/lib/dexie');
         pulledCloudStock = await pullStockLedgerFromCloud(storeId);
@@ -416,16 +418,17 @@ export async function ensureStoreLocations(storeId: string): Promise<LocalLocati
       }
     }
 
+    await ensureDefaultLocation(storeId);
+
     try {
       await canonicalizeStoreStock(storeId);
     } catch {
       // Local duplicate collapse is best-effort
     }
 
-    // If we are online but could not pull, do not mint OPENING from stale catalog —
-    // that is what made phone and laptop show different stock.
-    const allowOpeningMigration =
-      pulledCloudStock || typeof navigator === 'undefined' || !navigator.onLine;
+    // Never mint OPENING from this browser's catalog while cloud is configured
+    // but unreachable — that is what made Opera and Chrome show different stock.
+    const allowOpeningMigration = pulledCloudStock || !isSupabaseConfigured();
 
     if (allowOpeningMigration) {
       const locations = await db.locations.where('store_id').equals(storeId).toArray();
@@ -596,13 +599,33 @@ export async function locationHasAccessPin(locationId: string): Promise<boolean>
 
 export async function getPrimaryShopLocationId(storeId: string): Promise<string> {
   const shopId = canonicalShopId(storeId);
-  const canonical = await db.locations.get(shopId);
+  const locations = await db.locations.where('store_id').equals(storeId).toArray();
+  const shops = locations.filter((l) => l.location_type === 'shop');
+  const batches = await db.stock_batches.where('store_id').equals(storeId).toArray();
+  const qtyByLocation = new Map<string, number>();
+  for (const batch of batches) {
+    qtyByLocation.set(batch.location_id, (qtyByLocation.get(batch.location_id) || 0) + toQty(batch.quantity));
+  }
+
+  // Prefer the shop that actually holds stock so an empty local UUID does not hide cloud qty.
+  let bestShop: LocalLocation | undefined;
+  let bestQty = -1;
+  for (const shop of shops) {
+    const qty = qtyByLocation.get(shop.id) || 0;
+    if (qty > bestQty) {
+      bestQty = qty;
+      bestShop = shop;
+    }
+  }
+  if (bestShop && bestQty > 0) return bestShop.id;
+
+  const canonical = shops.find((l) => l.id === shopId) || (await db.locations.get(shopId));
   if (canonical && canonical.store_id === storeId) return shopId;
 
-  const locations = await db.locations.where('store_id').equals(storeId).toArray();
   const shop =
-    locations.find((l) => l.is_default === 1 && l.location_type === 'shop') ||
-    locations.find((l) => l.location_type === 'shop' && l.is_active === 1) ||
+    shops.find((l) => l.is_default === 1 && l.is_active === 1) ||
+    shops.find((l) => l.is_active === 1) ||
+    shops[0] ||
     locations.find((l) => l.is_active === 1) ||
     locations[0];
   if (shop) return shop.id;
@@ -753,6 +776,7 @@ export async function alignProductsWithBatchStock(
   const source = products.map((p) => byId.get(p.id) || p);
 
   const batchMap = await getStoreBatchStockMap(storeId);
+  const storeHasLedger = (await db.stock_batches.where('store_id').equals(storeId).count()) > 0;
   const aligned: LocalProduct[] = [];
   const writes: Promise<unknown>[] = [];
 
@@ -768,8 +792,10 @@ export async function alignProductsWithBatchStock(
       : toQty(product.stock_level);
 
     const hasBatches = Object.prototype.hasOwnProperty.call(batchMap, product.id);
-    // Batches win whenever rows exist — including sold-out (0)
-    const nextStock = hasBatches ? batchMap[product.id] || 0 : catalogStock;
+    // Once this store has a batch ledger, catalog stock_level is not truth.
+    // That stopped Opera (catalog copy) and Chrome (live batches) from disagreeing.
+    const nextStock =
+      storeHasLedger || hasBatches ? batchMap[product.id] || 0 : catalogStock;
 
     if (
       nextStock === product.stock_level &&

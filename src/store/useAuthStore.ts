@@ -12,6 +12,7 @@ import {
   hasAnyStore,
   listLocalStores,
   pullAdminStoreLimits,
+  refreshStockFromCloud,
   setCurrentUserId,
   switchToStore,
   updateUserPhone,
@@ -77,18 +78,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         currentUser: persistedUser,
         isAuthenticated: true,
         isStoreSetup: true,
-        isLoading: false,
         loginError: '',
       });
+      try {
+        await refreshStockFromCloud();
+      } catch {
+        // Show local stock if cloud is unreachable
+      }
+      set({ isLoading: false });
       return;
     }
 
-    set({ 
-      currentStore: store, 
+    set({
+      currentStore: store,
       currentUser: null,
       isAuthenticated: false,
-      isStoreSetup: true, 
-      isLoading: false 
+      isStoreSetup: true,
+      isLoading: false,
     });
   },
 
@@ -104,6 +110,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       clearAllWarehouseSessions();
       await setCurrentUserId(user.id);
       const store = (await pullAdminStoreLimits(storeId)) || (await getCurrentStore());
+      try {
+        await refreshStockFromCloud();
+      } catch {
+        // Login still succeeds; inventory will retry
+      }
       set({ 
         currentUser: user, 
         currentStore: store,
@@ -128,6 +139,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const store = storeId
       ? (await pullAdminStoreLimits(storeId)) || (await getCurrentStore())
       : await getCurrentStore();
+    try {
+      await refreshStockFromCloud();
+    } catch {
+      // Warehouse login still succeeds
+    }
     set({
       currentUser: owner,
       currentStore: store,
