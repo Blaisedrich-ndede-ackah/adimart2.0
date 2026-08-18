@@ -12,7 +12,7 @@ import {
   syncBidirectional,
 } from '@/lib/dexie';
 import { isSupabaseConfigured } from '@/lib/supabase';
-import { alignProductsWithBatchStock } from '@/lib/warehouse';
+import { alignProductsWithBatchStock, toMoney, toQty } from '@/lib/warehouse';
 import { subscribeStockChanges } from '@/lib/stockEvents';
 import AddProduct from '@/components/AddProduct';
 import StockAdjustment from '@/components/StockAdjustment';
