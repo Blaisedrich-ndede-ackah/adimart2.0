@@ -11,7 +11,7 @@ import {
 import { triggerPushSync } from '@/lib/sync';
 import { resolveSalePrice, type SaleMode, type UnitType } from '@/lib/bulkPricing';
 import type { StockChange } from '@/lib/stockEvents';
-import { deductSaleStockForItems, getLocationStockMap, reconcileProductStockBatches } from '@/lib/warehouse';
+import { deductSaleStockForItems, getLocationStock, getLocationStockMap, reconcileProductStockBatches, toQty } from '@/lib/warehouse';
 
 export interface CartItem {
   id: string;
@@ -145,10 +145,19 @@ function buildCartLine(
 
 async function stockAtContext(productId: string, locationId: string | null): Promise<number> {
   if (locationId) {
-    return getLocationStock(productId, locationId);
+    let available = await getLocationStock(productId, locationId);
+    if (available > 0) return available;
+
+    // Location batches empty but catalog may still have stock — reconcile into this location
+    const product = await db.products.get(productId);
+    if (product && toQty(product.stock_level) > 0) {
+      await reconcileProductStockBatches(product.store_id, productId, locationId);
+      available = await getLocationStock(productId, locationId);
+    }
+    return available;
   }
   const product = await db.products.get(productId);
-  return product?.stock_level ?? 0;
+  return toQty(product?.stock_level);
 }
 
 export const useCartStore = create<CartState>((set, get) => ({
