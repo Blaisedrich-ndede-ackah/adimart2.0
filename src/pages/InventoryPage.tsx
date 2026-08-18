@@ -442,12 +442,12 @@ export default function InventoryPage() {
                           <p className="text-sm font-semibold text-gray-900 truncate max-w-full">
                             {product.name}
                           </p>
-                          {product.stock_level === 0 && product.is_active === 1 && (
+                          {toQty(product.stock_level) === 0 && product.is_active === 1 && (
                             <span className="px-1.5 py-0.5 bg-red-100 text-red-700 text-[9px] font-bold rounded">
                               OUT OF STOCK
                             </span>
                           )}
-                          {product.stock_level > 0 && product.stock_level < 5 && product.is_active === 1 && (
+                          {toQty(product.stock_level) > 0 && toQty(product.stock_level) < 5 && product.is_active === 1 && (
                             <span className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 text-[9px] font-bold rounded">
                               LOW
                             </span>

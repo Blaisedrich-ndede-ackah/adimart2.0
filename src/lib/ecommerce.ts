@@ -285,13 +285,8 @@ export async function updateOnlineOrderStatus(
 
   const previousStatus = order.status;
   const now = new Date().toISOString();
-  await db.online_orders.update(orderId, {
-    status,
-    updated_at: now,
-    synced: 0,
-  });
 
-  // Deduct stock once when the order is fulfilled (not on repeat updates)
+  // Deduct stock once when the order is fulfilled (before committing status)
   if (status === 'fulfilled' && previousStatus !== 'fulfilled') {
     const items = await db.online_order_items
       .where('store_id')
@@ -309,31 +304,28 @@ export async function updateOnlineOrderStatus(
       .filter((i) => i.baseQty > 0);
 
     if (deductItems.length > 0) {
-      const { deductSaleStockForItems, getDefaultShopLocationId, reconcileProductStockBatches, getLocationStock } =
-        await import('@/lib/warehouse');
+      const {
+        deductSaleStockForItems,
+        getDefaultShopLocationId,
+        reconcileProductStockBatches,
+        getLocationStock,
+      } = await import('@/lib/warehouse');
       const locationId = await getDefaultShopLocationId(order.store_id);
       if (!locationId) throw new Error('No shop location configured for stock deduction');
 
-      // Ensure batches cover catalog stock before deducting
-      await Promise.all(
-        deductItems.map(async (item) => {
-          const available = await getLocationStock(item.productId, locationId);
-          if (available >= item.baseQty) return;
+      for (const item of deductItems) {
+        let available = await getLocationStock(item.productId, locationId);
+        if (available < item.baseQty) {
+          // Only migrates when there are zero batch rows; never invents from stale catalog
           await reconcileProductStockBatches(order.store_id, item.productId, locationId);
-          const after = await getLocationStock(item.productId, locationId);
-          if (after < item.baseQty) {
-            // Roll status back so the order is not marked fulfilled without stock
-            await db.online_orders.update(orderId, {
-              status: previousStatus,
-              updated_at: new Date().toISOString(),
-              synced: 0,
-            });
-            throw new Error(
-              `Insufficient stock for "${item.name}". Only ${after} available to fulfill this order.`
-            );
-          }
-        })
-      );
+          available = await getLocationStock(item.productId, locationId);
+        }
+        if (available < item.baseQty) {
+          throw new Error(
+            `Insufficient stock for "${item.name}". Only ${available} available to fulfill this order.`
+          );
+        }
+      }
 
       try {
         await deductSaleStockForItems({
@@ -344,26 +336,28 @@ export async function updateOnlineOrderStatus(
           items: deductItems,
         });
       } catch (err) {
-        await db.online_orders.update(orderId, {
-          status: previousStatus,
-          updated_at: new Date().toISOString(),
-          synced: 0,
-        });
         throw err;
       }
     }
   }
 
+  await db.online_orders.update(orderId, {
+    status,
+    updated_at: now,
+    synced: 0,
+  });
+
+  // Push the final local status only (never cloud-fulfill after a local rollback)
   if (isSupabaseConfigured()) {
-    // Fire-and-forget cloud status update so the UI stays responsive
+    const latest = await db.online_orders.get(orderId);
+    const cloudStatus = latest?.status ?? previousStatus;
     void supabase
       .from('online_orders')
-      .update({ status, updated_at: now })
+      .update({ status: cloudStatus, updated_at: latest?.updated_at || now })
       .eq('id', orderId)
       .then(() => undefined);
   }
 
-  // Push local stock + order changes without waiting for a full bidirectional sync
   const { triggerPushSync } = await import('@/lib/sync');
   window.setTimeout(() => {
     void triggerPushSync('order');
