@@ -21,6 +21,7 @@ import {
   alignProductsWithBatchStock,
   resolveSaleLocations,
   toMoney,
+  toQty,
 } from '@/lib/warehouse';
 import { triggerAutoSync } from '@/lib/sync';
 
@@ -464,7 +465,7 @@ export default function POSPage() {
                 {filteredProducts.map((product) => {
                   // Location batches only — never fall back to store-wide catalog stock
                   const stockHere = locationStock[product.id] ?? 0;
-                  const stockAll = Number(product.stock_level) || 0;
+                  const stockAll = toQty(product.stock_level);
                   const outOfStock = stockHere <= 0;
                   const packSize = Math.max(1, Number(product.pack_size) || 1);
                   const modes = getAvailableSaleModes(product);

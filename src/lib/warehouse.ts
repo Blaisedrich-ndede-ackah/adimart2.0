@@ -78,35 +78,232 @@ function sortBatchesFefo(batches: LocalStockBatch[]): LocalStockBatch[] {
 const openingStockMigrated = new Set<string>();
 const ensureInFlight = new Map<string, Promise<LocalLocation[]>>();
 
-async function ensureDefaultLocation(storeId: string): Promise<LocalLocation[]> {
-  let locations = await db.locations.where('store_id').equals(storeId).toArray();
-  if (locations.length > 0) return locations;
+function canonicalShopId(storeId: string): string {
+  return `shop_${storeId}`;
+}
 
-  const now = nowIso();
-  // Deterministic shop id so phone + desktop do not create two default shops
-  const shopId = `shop_${storeId}`;
-  const existing = await db.locations.get(shopId);
-  if (existing) return [existing];
+function isAutoDefaultShop(location: LocalLocation): boolean {
+  return location.location_type === 'shop' && location.name.trim().toLowerCase() === 'shop';
+}
 
-  const shop: LocalLocation = {
-    id: shopId,
-    store_id: storeId,
-    name: 'Shop',
-    location_type: 'shop',
-    is_default: 1,
-    is_active: 1,
-    created_at: now,
-    updated_at: now,
-    synced: 0,
-  };
-  try {
-    await db.locations.add(shop);
-  } catch {
-    const raced = await db.locations.get(shopId);
-    if (raced) return [raced];
-    throw new Error('Could not create default shop location');
+function isOpeningBatch(batch: LocalStockBatch): boolean {
+  return (batch.batch_code || '').trim().toUpperCase() === 'OPENING';
+}
+
+function batchTime(batch: LocalStockBatch): number {
+  return new Date(batch.updated_at || batch.created_at || 0).getTime();
+}
+
+/** Among duplicate OPENING rows, keep the live ledger (newest), not the inflated copy. */
+function pickCanonicalOpening(a: LocalStockBatch, b: LocalStockBatch): LocalStockBatch {
+  const aQty = toQty(a.quantity);
+  const bQty = toQty(b.quantity);
+  if ((aQty > 0) !== (bQty > 0)) return aQty > 0 ? a : b;
+  const aTime = batchTime(a);
+  const bTime = batchTime(b);
+  if (aTime !== bTime) return aTime > bTime ? a : b;
+  if (aQty !== bQty) return aQty < bQty ? a : b;
+  if (a.id.startsWith('opening_') !== b.id.startsWith('opening_')) {
+    return a.id.startsWith('opening_') ? a : b;
   }
-  return [shop];
+  return a.id.localeCompare(b.id) <= 0 ? a : b;
+}
+
+async function ensureDefaultLocation(storeId: string): Promise<LocalLocation[]> {
+  const now = nowIso();
+  const shopId = canonicalShopId(storeId);
+  const existing = await db.locations.get(shopId);
+  if (!existing) {
+    const shop: LocalLocation = {
+      id: shopId,
+      store_id: storeId,
+      name: 'Shop',
+      location_type: 'shop',
+      is_default: 1,
+      is_active: 1,
+      created_at: now,
+      updated_at: now,
+      synced: 0,
+    };
+    try {
+      await db.locations.add(shop);
+    } catch {
+      const raced = await db.locations.get(shopId);
+      if (!raced) throw new Error('Could not create default shop location');
+    }
+  } else if (existing.is_active !== 1 || existing.is_default !== 1) {
+    await db.locations.update(shopId, {
+      is_active: 1,
+      is_default: 1,
+      updated_at: now,
+      synced: 0,
+    });
+  }
+
+  return db.locations.where('store_id').equals(storeId).toArray();
+}
+
+/**
+ * Collapse phone/laptop duplicate default shops and duplicate OPENING batches
+ * so every device sums the same on-hand quantities.
+ */
+export async function canonicalizeStoreStock(storeId: string): Promise<boolean> {
+  const now = nowIso();
+  await ensureDefaultLocation(storeId);
+
+  const canonicalId = canonicalShopId(storeId);
+  const [locations, batches] = await Promise.all([
+    db.locations.where('store_id').equals(storeId).toArray(),
+    db.stock_batches.where('store_id').equals(storeId).toArray(),
+  ]);
+
+  const qtyOnLocation = (locationId: string) =>
+    batches.some((b) => b.location_id === locationId && toQty(b.quantity) > 0);
+
+  const duplicateShops = locations.filter(
+    (l) =>
+      isAutoDefaultShop(l) &&
+      l.id !== canonicalId &&
+      (l.is_active === 1 || qtyOnLocation(l.id))
+  );
+  const dupeIds = new Set(duplicateShops.map((l) => l.id));
+
+  const working: LocalStockBatch[] = batches.map((batch) =>
+    dupeIds.has(batch.location_id) ? { ...batch, location_id: canonicalId } : batch
+  );
+
+  const openingsByProduct = new Map<string, LocalStockBatch[]>();
+  for (const batch of working) {
+    if (!isOpeningBatch(batch)) continue;
+    const list = openingsByProduct.get(batch.product_id) || [];
+    list.push(batch);
+    openingsByProduct.set(batch.product_id, list);
+  }
+
+  const byId = new Map<string, LocalStockBatch>();
+  const noteChange = (row: LocalStockBatch) => {
+    byId.set(row.id, row);
+  };
+
+  let changed = false;
+
+  for (const [productId, openings] of openingsByProduct) {
+    const destId = openingBatchId(storeId, productId);
+    const live = openings.filter((b) => toQty(b.quantity) > 0);
+    if (live.length === 0) continue;
+
+    const alreadyCanonical =
+      live.length === 1 && live[0].id === destId && live[0].location_id === canonicalId;
+    if (alreadyCanonical) continue;
+
+    let winner = live[0];
+    for (let i = 1; i < live.length; i++) {
+      winner = pickCanonicalOpening(winner, live[i]);
+    }
+
+    changed = true;
+    noteChange({
+      ...winner,
+      id: destId,
+      location_id: canonicalId,
+      batch_code: 'OPENING',
+      quantity: toQty(winner.quantity),
+      cost_price: toMoney(winner.cost_price),
+      updated_at: winner.updated_at || now,
+      synced: 0,
+    });
+
+    for (const extra of live) {
+      if (extra.id === destId) continue;
+      noteChange({
+        ...extra,
+        quantity: 0,
+        updated_at: now,
+        synced: 0,
+      });
+    }
+  }
+
+  for (const batch of working) {
+    if (isOpeningBatch(batch)) continue;
+    const original = batches.find((b) => b.id === batch.id);
+    if (original && original.location_id !== batch.location_id) {
+      changed = true;
+      noteChange({
+        ...batch,
+        updated_at: now,
+        synced: 0,
+      });
+    }
+  }
+
+  if (byId.size > 0) {
+    await db.stock_batches.bulkPut([...byId.values()]);
+  }
+
+  if (duplicateShops.length > 0) {
+    changed = true;
+    const movements = await db.stock_movements.where('store_id').equals(storeId).toArray();
+    const movementWrites: LocalStockMovement[] = [];
+    for (const movement of movements) {
+      const fromId =
+        movement.from_location_id && dupeIds.has(movement.from_location_id)
+          ? canonicalId
+          : movement.from_location_id;
+      const toId =
+        movement.to_location_id && dupeIds.has(movement.to_location_id)
+          ? canonicalId
+          : movement.to_location_id;
+      if (fromId !== movement.from_location_id || toId !== movement.to_location_id) {
+        movementWrites.push({
+          ...movement,
+          from_location_id: fromId,
+          to_location_id: toId,
+          synced: 0,
+        });
+      }
+    }
+    if (movementWrites.length > 0) {
+      await db.stock_movements.bulkPut(movementWrites);
+    }
+
+    const users = await db.users.where('store_id').equals(storeId).toArray();
+    for (const user of users) {
+      if (user.assigned_location_id && dupeIds.has(user.assigned_location_id)) {
+        await db.users.update(user.id, {
+          assigned_location_id: canonicalId,
+          synced: 0,
+        });
+      }
+    }
+
+    for (const dupe of duplicateShops) {
+      await db.locations.update(dupe.id, {
+        is_active: 0,
+        is_default: 0,
+        updated_at: now,
+        synced: 0,
+      });
+    }
+  }
+
+  const canonical = await db.locations.get(canonicalId);
+  if (canonical && (canonical.is_active !== 1 || canonical.is_default !== 1)) {
+    await db.locations.update(canonicalId, {
+      is_active: 1,
+      is_default: 1,
+      updated_at: now,
+      synced: 0,
+    });
+    changed = true;
+  }
+
+  if (changed) {
+    const products = await db.products.where('store_id').equals(storeId).toArray();
+    await alignProductsWithBatchStock(products);
+  }
+
+  return changed;
 }
 
 export async function ensureStoreLocations(storeId: string): Promise<LocalLocation[]> {
@@ -114,67 +311,92 @@ export async function ensureStoreLocations(storeId: string): Promise<LocalLocati
   if (existing) return existing;
 
   const run = (async () => {
-    const locations = await ensureDefaultLocation(storeId);
+    await ensureDefaultLocation(storeId);
 
-    // One-time (per session) opening-stock migration — do not re-scan catalog on every sale
+    // One-time (per session) cloud heal + opening-stock migration
     if (openingStockMigrated.has(storeId)) {
-      return locations;
+      return db.locations.where('store_id').equals(storeId).toArray();
     }
 
-    const defaultShop =
-      locations.find((l) => l.is_default === 1 && l.location_type === 'shop' && l.is_active === 1) ||
-      locations.find((l) => l.location_type === 'shop' && l.is_active === 1) ||
-      locations[0];
-
-    const now = nowIso();
-    const products = await db.products.where('store_id').equals(storeId).toArray();
-    const allBatches = await db.stock_batches.where('store_id').equals(storeId).toArray();
-    // Any batch row (even qty 0) means the product was already migrated — never mint a second OPENING
-    const productsWithBatchRows = new Set(allBatches.map((b) => b.product_id));
-
-    const newBatches: LocalStockBatch[] = [];
-    const newMovements: LocalStockMovement[] = [];
-
-    for (const product of products) {
-      if (productsWithBatchRows.has(product.id)) continue;
-      const openingQty = toQty(product.stock_level);
-      if (openingQty <= 0) continue;
-
-      // Deterministic id so phone + desktop never create two OPENING rows for the same SKU
-      const batchId = openingBatchId(storeId, product.id);
-      newBatches.push({
-        id: batchId,
-        store_id: storeId,
-        product_id: product.id,
-        location_id: defaultShop.id,
-        batch_code: 'OPENING',
-        expiry_date: null,
-        quantity: openingQty,
-        cost_price: toMoney(product.cost_price),
-        created_at: now,
-        updated_at: now,
-        synced: 0,
-      });
-      newMovements.push({
-        id: generateId(),
-        store_id: storeId,
-        product_id: product.id,
-        batch_id: batchId,
-        from_location_id: null,
-        to_location_id: defaultShop.id,
-        movement_type: 'receive',
-        quantity: openingQty,
-        note: 'Migrated opening stock',
-        user_id: null,
-        created_at: now,
-        synced: 0,
-      });
+    let pulledCloudStock = false;
+    if (typeof navigator !== 'undefined' && navigator.onLine) {
+      try {
+        const { pullStockLedgerFromCloud } = await import('@/lib/dexie');
+        pulledCloudStock = await pullStockLedgerFromCloud(storeId);
+      } catch {
+        pulledCloudStock = false;
+      }
     }
 
-    if (newBatches.length > 0) {
-      // Put (not Add) so a second device upserts the same deterministic OPENING row
-      await db.stock_batches.bulkPut(newBatches);
-      await db.stock_movements.bulkAdd(newMovements);
+    try {
+      await canonicalizeStoreStock(storeId);
+    } catch {
+      // Local duplicate collapse is best-effort
+    }
+
+    // If we are online but could not pull, do not mint OPENING from stale catalog —
+    // that is what made phone and laptop show different stock.
+    const allowOpeningMigration =
+      pulledCloudStock || typeof navigator === 'undefined' || !navigator.onLine;
+
+    if (allowOpeningMigration) {
+      const locations = await db.locations.where('store_id').equals(storeId).toArray();
+      const defaultShop =
+        locations.find((l) => l.id === canonicalShopId(storeId)) ||
+        locations.find((l) => l.is_default === 1 && l.location_type === 'shop' && l.is_active === 1) ||
+        locations.find((l) => l.location_type === 'shop' && l.is_active === 1) ||
+        locations[0];
+
+      if (defaultShop) {
+        const now = nowIso();
+        const products = await db.products.where('store_id').equals(storeId).toArray();
+        const allBatches = await db.stock_batches.where('store_id').equals(storeId).toArray();
+        // Any batch row (even qty 0) means the product was already migrated
+        const productsWithBatchRows = new Set(allBatches.map((b) => b.product_id));
+
+        const newBatches: LocalStockBatch[] = [];
+        const newMovements: LocalStockMovement[] = [];
+
+        for (const product of products) {
+          if (productsWithBatchRows.has(product.id)) continue;
+          const openingQty = toQty(product.stock_level);
+          if (openingQty <= 0) continue;
+
+          const batchId = openingBatchId(storeId, product.id);
+          newBatches.push({
+            id: batchId,
+            store_id: storeId,
+            product_id: product.id,
+            location_id: defaultShop.id,
+            batch_code: 'OPENING',
+            expiry_date: null,
+            quantity: openingQty,
+            cost_price: toMoney(product.cost_price),
+            created_at: now,
+            updated_at: now,
+            synced: 0,
+          });
+          newMovements.push({
+            id: generateId(),
+            store_id: storeId,
+            product_id: product.id,
+            batch_id: batchId,
+            from_location_id: null,
+            to_location_id: defaultShop.id,
+            movement_type: 'receive',
+            quantity: openingQty,
+            note: 'Migrated opening stock',
+            user_id: null,
+            created_at: now,
+            synced: 0,
+          });
+        }
+
+        if (newBatches.length > 0) {
+          await db.stock_batches.bulkPut(newBatches);
+          await db.stock_movements.bulkAdd(newMovements);
+        }
+      }
     }
 
     openingStockMigrated.add(storeId);

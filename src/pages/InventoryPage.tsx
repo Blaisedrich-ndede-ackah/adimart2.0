@@ -78,8 +78,8 @@ export default function InventoryPage() {
 
     if (shouldSync && isSupabaseConfigured() && navigator.onLine) {
       const now = Date.now();
-      // Avoid hammering cloud when switching tabs quickly
-      if (now - lastSyncAtRef.current > 12_000) {
+      // Short debounce only — never skip a real refresh for 12s (phone vs laptop drift)
+      if (now - lastSyncAtRef.current > 1_500) {
         try {
           setSyncStatus('Syncing inventory…');
           await syncBidirectional();
@@ -92,7 +92,7 @@ export default function InventoryPage() {
         window.setTimeout(() => setSyncStatus(''), 2500);
       }
     }
-  }, []);
+  }, [currentStore?.id]);
 
   const handleInventoryScan = useCallback(async (barcode: string) => {
     // While adding/editing a product, let AddProduct own the barcode field
@@ -166,6 +166,7 @@ export default function InventoryPage() {
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
+    lastSyncAtRef.current = 0;
     await loadProducts({ sync: true });
     setIsRefreshing(false);
   };
@@ -225,11 +226,12 @@ export default function InventoryPage() {
 
   const formatInventoryMoney = (amount: number) => {
     const n = Number.isFinite(amount) && amount >= 0 ? amount : 0;
-    // Avoid toFixed scientific notation and locales some mobile WebViews reject.
     const rounded = Math.round(n);
     const withCommas = String(rounded).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     return `GH₵${withCommas}`;
   };
+
+  const formatStockQty = (value: unknown) => String(toQty(value));
 
   const handleDelete = async (id: string) => {
     if (
@@ -306,40 +308,54 @@ export default function InventoryPage() {
           <p className="text-emerald-100/90 text-[11px] text-center mb-2">{syncStatus}</p>
         )}
 
-        {/* Dashboard Cards — same metrics on phone & desktop */}
-        <div className="flex gap-2 overflow-x-auto no-scrollbar pb-0.5 sm:grid sm:grid-cols-5 sm:overflow-visible sm:pb-0">
-          <div className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center min-w-[4.75rem] flex-shrink-0 sm:min-w-0">
-            <Package className="w-4 h-4 text-white mx-auto mb-1" />
-            <p className="text-white font-bold text-lg leading-none">{totalSKUs}</p>
-            <p className="text-emerald-200 text-[9px] mt-0.5">Total SKUs</p>
+        {/* Dashboard Cards — identical layout and figures on phone and desktop */}
+        <div className="space-y-2">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="bg-white/15 rounded-xl p-2 text-center min-w-0">
+              <Package className="w-4 h-4 text-white mx-auto mb-1" />
+              <p className="text-white font-bold text-base sm:text-lg leading-tight tabular-nums">
+                {formatStockQty(totalSKUs)}
+              </p>
+              <p className="text-emerald-200 text-[9px] mt-0.5">Total SKUs</p>
+            </div>
+            <button
+              onClick={() => { setSelectedCategory('All'); setSortMode('stock-low'); }}
+              className="bg-white/15 rounded-xl p-2 text-center hover:bg-white/25 transition min-w-0"
+            >
+              <AlertTriangle className="w-4 h-4 text-red-300 mx-auto mb-1" />
+              <p className="text-white font-bold text-base sm:text-lg leading-tight tabular-nums">
+                {formatStockQty(outOfStock)}
+              </p>
+              <p className="text-emerald-200 text-[9px] mt-0.5">Out of Stock</p>
+            </button>
+            <button
+              onClick={() => { setSelectedCategory('All'); setSortMode('stock-low'); }}
+              className="bg-white/15 rounded-xl p-2 text-center hover:bg-white/25 transition min-w-0"
+            >
+              <TrendingDown className="w-4 h-4 text-yellow-300 mx-auto mb-1" />
+              <p className="text-white font-bold text-base sm:text-lg leading-tight tabular-nums">
+                {formatStockQty(lowStock)}
+              </p>
+              <p className="text-emerald-200 text-[9px] mt-0.5">Low Stock</p>
+            </button>
           </div>
-          <button 
-            onClick={() => { setSelectedCategory('All'); setSortMode('stock-low'); }}
-            className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center hover:bg-white/25 transition min-w-[4.75rem] flex-shrink-0 sm:min-w-0"
-          >
-            <AlertTriangle className="w-4 h-4 text-red-300 mx-auto mb-1" />
-            <p className="text-white font-bold text-lg leading-none">{outOfStock}</p>
-            <p className="text-emerald-200 text-[9px] mt-0.5">Out of Stock</p>
-          </button>
-          <button
-            onClick={() => { setSelectedCategory('All'); setSortMode('stock-low'); }}
-            className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center hover:bg-white/25 transition min-w-[4.75rem] flex-shrink-0 sm:min-w-0"
-          >
-            <TrendingDown className="w-4 h-4 text-yellow-300 mx-auto mb-1" />
-            <p className="text-white font-bold text-lg leading-none">{lowStock}</p>
-            <p className="text-emerald-200 text-[9px] mt-0.5">Low Stock</p>
-          </button>
-          <div className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center min-w-[4.75rem] flex-shrink-0 sm:min-w-0">
-            <DollarSign className="w-4 h-4 text-green-300 mx-auto mb-1" />
-            <p className="text-white font-bold text-sm leading-none">{formatInventoryMoney(totalValue)}</p>
-            <p className="text-emerald-200 text-[9px] mt-0.5">Value (all locations)</p>
-          </div>
-          <div className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center min-w-[5.25rem] flex-shrink-0 sm:min-w-0">
-            <Coins className="w-4 h-4 text-amber-200 mx-auto mb-1" />
-            <p className="text-white font-bold text-sm leading-none">{formatInventoryMoney(totalCostOfProduct)}</p>
-            <p className="text-emerald-200 text-[8px] sm:text-[9px] mt-0.5 leading-tight">
-              Total Cost (all locations)
-            </p>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="bg-white/15 rounded-xl p-2 text-center min-w-0">
+              <DollarSign className="w-4 h-4 text-green-300 mx-auto mb-1" />
+              <p className="text-white font-bold text-xs sm:text-sm leading-tight tabular-nums break-all">
+                {formatInventoryMoney(totalValue)}
+              </p>
+              <p className="text-emerald-200 text-[9px] mt-0.5">Value (all locations)</p>
+            </div>
+            <div className="bg-white/15 rounded-xl p-2 text-center min-w-0">
+              <Coins className="w-4 h-4 text-amber-200 mx-auto mb-1" />
+              <p className="text-white font-bold text-xs sm:text-sm leading-tight tabular-nums break-all">
+                {formatInventoryMoney(totalCostOfProduct)}
+              </p>
+              <p className="text-emerald-200 text-[9px] mt-0.5 leading-tight">
+                Total Cost (all locations)
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -483,7 +499,7 @@ export default function InventoryPage() {
                                 : 'text-gray-700'
                           }`}
                         >
-                          Stock (all locations): {toQty(product.stock_level)}
+                          Stock (all locations): {formatStockQty(product.stock_level)}
                         </p>
                       </div>
                     </div>
