@@ -2,7 +2,7 @@ export type StockChange = {
   productId: string;
   /** Absolute qty at the sale location after the change (if known) */
   locationQty?: number;
-  /** Absolute product.stock_level after the change (all locations) */
+  /** Absolute product.stock_level after the change (this store's shop) */
   totalQty?: number;
   /** Units removed from the location (positive = deducted) */
   deducted?: number;

@@ -225,33 +225,35 @@ export async function canonicalizeStoreStock(storeId: string): Promise<boolean> 
   }
 
   for (const batch of working) {
-    if (isOpeningBatch(batch)) continue;
-    const original = batches.find((b) => b.id === batch.id);
-    if (original && original.location_id !== batch.location_id) {
-      changed = true;
-      noteChange({
-        ...batch,
-        updated_at: now,
-        synced: 0,
-      });
-    }
+    const current = byId.get(batch.id) || batch;
+    if (current.location_id === canonicalId) continue;
+    changed = true;
+    noteChange({
+      ...current,
+      location_id: canonicalId,
+      updated_at: now,
+      synced: 0,
+    });
   }
+
+  const extraLocations = locations.filter((l) => l.id !== canonicalId);
+  const extraIds = new Set(extraLocations.map((l) => l.id));
 
   if (byId.size > 0) {
     await db.stock_batches.bulkPut([...byId.values()]);
   }
 
-  if (duplicateShops.length > 0) {
+  if (extraLocations.length > 0) {
     changed = true;
     const movements = await db.stock_movements.where('store_id').equals(storeId).toArray();
     const movementWrites: LocalStockMovement[] = [];
     for (const movement of movements) {
       const fromId =
-        movement.from_location_id && dupeIds.has(movement.from_location_id)
+        movement.from_location_id && extraIds.has(movement.from_location_id)
           ? canonicalId
           : movement.from_location_id;
       const toId =
-        movement.to_location_id && dupeIds.has(movement.to_location_id)
+        movement.to_location_id && extraIds.has(movement.to_location_id)
           ? canonicalId
           : movement.to_location_id;
       if (fromId !== movement.from_location_id || toId !== movement.to_location_id) {
@@ -269,7 +271,7 @@ export async function canonicalizeStoreStock(storeId: string): Promise<boolean> 
 
     const users = await db.users.where('store_id').equals(storeId).toArray();
     for (const user of users) {
-      if (user.assigned_location_id && dupeIds.has(user.assigned_location_id)) {
+      if (user.assigned_location_id && extraIds.has(user.assigned_location_id)) {
         await db.users.update(user.id, {
           assigned_location_id: canonicalId,
           synced: 0,
@@ -277,8 +279,9 @@ export async function canonicalizeStoreStock(storeId: string): Promise<boolean> 
       }
     }
 
-    for (const dupe of duplicateShops) {
-      await db.locations.update(dupe.id, {
+    for (const extra of extraLocations) {
+      if (extra.is_active === 0 && extra.is_default === 0) continue;
+      await db.locations.update(extra.id, {
         is_active: 0,
         is_default: 0,
         updated_at: now,
@@ -506,6 +509,23 @@ export async function locationHasAccessPin(locationId: string): Promise<boolean>
   return Boolean(location?.access_pin_hash);
 }
 
+export async function getPrimaryShopLocationId(storeId: string): Promise<string> {
+  const shopId = canonicalShopId(storeId);
+  const canonical = await db.locations.get(shopId);
+  if (canonical && canonical.store_id === storeId) return shopId;
+
+  const locations = await db.locations.where('store_id').equals(storeId).toArray();
+  const shop =
+    locations.find((l) => l.is_default === 1 && l.location_type === 'shop') ||
+    locations.find((l) => l.location_type === 'shop' && l.is_active === 1) ||
+    locations.find((l) => l.is_active === 1) ||
+    locations[0];
+  if (shop) return shop.id;
+
+  await ensureDefaultLocation(storeId);
+  return shopId;
+}
+
 export async function getLocationStock(productId: string, locationId: string): Promise<number> {
   const batches = await db.stock_batches
     .where('product_id')
@@ -532,12 +552,19 @@ export async function getLocationStockMap(
   return map;
 }
 
-/** Total on-hand qty per product from batches (source of truth after sales). */
+/** On-hand qty per product for this store's single shop (not other stores or leftover locations). */
 export async function getStoreBatchStockMap(storeId: string): Promise<Record<string, number>> {
+  const locationId = await getPrimaryShopLocationId(storeId);
   const batches = await db.stock_batches.where('store_id').equals(storeId).toArray();
   const map: Record<string, number> = {};
   for (const batch of batches) {
+    if (batch.location_id !== locationId) continue;
     map[batch.product_id] = (map[batch.product_id] || 0) + toQty(batch.quantity);
+  }
+  // Products that only have leftover rows at inactive extra locations still count as 0 here
+  for (const batch of batches) {
+    if (Object.prototype.hasOwnProperty.call(map, batch.product_id)) continue;
+    map[batch.product_id] = 0;
   }
   return map;
 }
@@ -717,8 +744,15 @@ export async function syncStoreCatalogStockFromBatches(storeId: string): Promise
 }
 
 export async function getProductTotalStock(productId: string): Promise<number> {
+  const product = await db.products.get(productId);
   const batches = await db.stock_batches.where('product_id').equals(productId).toArray();
-  return batches.reduce((sum, b) => sum + toQty(b.quantity), 0);
+  if (!product?.store_id) {
+    return batches.reduce((sum, b) => sum + toQty(b.quantity), 0);
+  }
+  const locationId = await getPrimaryShopLocationId(product.store_id);
+  return batches
+    .filter((b) => b.location_id === locationId)
+    .reduce((sum, b) => sum + toQty(b.quantity), 0);
 }
 
 export async function listBatches(
@@ -1530,24 +1564,10 @@ export function canUserSellFromWarehouse(user: LocalUser | null | undefined): bo
 
 export async function resolveSaleLocations(
   store: LocalStore,
-  user: LocalUser
+  _user: LocalUser
 ): Promise<LocalLocation[]> {
-  const locations = await listLocations(store.id);
-  const shops = locations.filter((l) => l.location_type === 'shop');
-  const warehouses = locations.filter((l) => l.location_type === 'warehouse');
-
-  if (user.assigned_location_id) {
-    const assigned = locations.find((l) => l.id === user.assigned_location_id);
-    if (assigned) {
-      if (assigned.location_type === 'warehouse' && !canUserSellFromWarehouse(user)) {
-        return shops;
-      }
-      return [assigned];
-    }
-  }
-
-  if (canUserSellFromWarehouse(user) && (store.warehouse_enabled ?? 0) === 1) {
-    return [...shops, ...warehouses];
-  }
-  return shops;
+  await ensureStoreLocations(store.id);
+  const locationId = await getPrimaryShopLocationId(store.id);
+  const shop = await db.locations.get(locationId);
+  return shop && shop.store_id === store.id ? [shop] : [];
 }
