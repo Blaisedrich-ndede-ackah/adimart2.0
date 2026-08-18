@@ -170,6 +170,8 @@ ALTER TABLE transaction_items ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "transaction_items_select" ON transaction_items FOR SELECT USING (true);
 CREATE POLICY "transaction_items_insert" ON transaction_items FOR INSERT WITH CHECK (true);
+CREATE POLICY "transaction_items_update" ON transaction_items FOR UPDATE USING (true) WITH CHECK (true);
+CREATE POLICY "transaction_items_delete" ON transaction_items FOR DELETE USING (true);
 
 CREATE INDEX IF NOT EXISTS idx_transaction_items_store ON transaction_items(store_id);
 CREATE INDEX IF NOT EXISTS idx_transaction_items_txn ON transaction_items(transaction_id);
@@ -320,6 +322,8 @@ ALTER TABLE stock_movements ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "stock_movements_select" ON stock_movements FOR SELECT USING (true);
 CREATE POLICY "stock_movements_insert" ON stock_movements FOR INSERT WITH CHECK (true);
+CREATE POLICY "stock_movements_update" ON stock_movements FOR UPDATE USING (true) WITH CHECK (true);
+CREATE POLICY "stock_movements_delete" ON stock_movements FOR DELETE USING (true);
 
 CREATE INDEX IF NOT EXISTS idx_stock_movements_store ON stock_movements(store_id);
 CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id);

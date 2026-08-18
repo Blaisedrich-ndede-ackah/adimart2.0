@@ -1358,7 +1358,13 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
   if (rows.length === 0) return 0;
 
   try {
-    const { error } = await supabase.from(table).upsert(rows as Record<string, unknown>[], { onConflict: 'id' });
+    // Append-only ledgers have INSERT policies but historically no UPDATE.
+    // PostgREST upsert is ON CONFLICT DO UPDATE and needs UPDATE RLS (42501).
+    const appendOnly = table === 'stock_movements' || table === 'transaction_items';
+    const { error } = await supabase.from(table).upsert(rows as Record<string, unknown>[], {
+      onConflict: 'id',
+      ignoreDuplicates: appendOnly,
+    });
     if (error) {
       errors.push(formatSyncError(label, error));
       return 0;
