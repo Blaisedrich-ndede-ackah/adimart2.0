@@ -9,6 +9,7 @@ import {
   type LocalStore,
   type LocalUser,
 } from '@/lib/dexie';
+import { emitStockChanged, type StockChange } from '@/lib/stockEvents';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -447,7 +448,15 @@ export async function setProductStockLevel(params: {
     note: params.note || 'Inventory stock update',
     userId: params.userId || null,
   });
-  return getProductTotalStock(params.productId);
+  const totalQty = await getProductTotalStock(params.productId);
+  const locationQty = await getLocationStock(params.productId, locationId);
+  emitStockChanged({
+    storeId: params.storeId,
+    locationId,
+    reason: 'adjust',
+    changes: [{ productId: params.productId, totalQty, locationQty, deducted: delta < 0 ? -delta : 0 }],
+  });
+  return totalQty;
 }
 
 export async function receiveStock(params: {
@@ -703,24 +712,31 @@ export async function deductSaleStockForItems(params: {
   locationId: string;
   userId?: string | null;
   transactionId?: string | null;
+  reason?: 'sale' | 'order';
   items: Array<{ productId: string; baseQty: number; name?: string }>;
-}): Promise<void> {
-  if (params.items.length === 0) return;
+}): Promise<StockChange[]> {
+  if (params.items.length === 0) return [];
 
   const now = nowIso();
-  const note = params.transactionId ? `Sale ${params.transactionId}` : 'Sale';
+  const reason = params.reason || 'sale';
+  const note = params.transactionId
+    ? `${reason === 'order' ? 'Order' : 'Sale'} ${params.transactionId}`
+    : reason === 'order'
+      ? 'Online order'
+      : 'Sale';
 
   const productIds = [...new Set(params.items.map((i) => i.productId))];
-  if (productIds.length === 0) return;
+  if (productIds.length === 0) return [];
 
-  const allBatches = await db.stock_batches
+  // One query for all product batches (location allocation + store-wide totals)
+  const allProductBatches = await db.stock_batches
     .where('product_id')
     .anyOf(productIds)
-    .and((b) => b.location_id === params.locationId)
     .toArray();
 
   const batchesByProduct = new Map<string, LocalStockBatch[]>();
-  for (const batch of allBatches) {
+  for (const batch of allProductBatches) {
+    if (batch.location_id !== params.locationId) continue;
     const list = batchesByProduct.get(batch.product_id) || [];
     list.push(batch);
     batchesByProduct.set(batch.product_id, list);
@@ -741,6 +757,7 @@ export async function deductSaleStockForItems(params: {
   const updatedBatches: LocalStockBatch[] = [];
   const movements: LocalStockMovement[] = [];
   const touchedProducts = new Set<string>();
+  const locationQtyAfter = new Map<string, number>();
 
   for (const [productId, need] of needByProduct) {
     const live = sortBatchesFefo(
@@ -782,7 +799,37 @@ export async function deductSaleStockForItems(params: {
 
     updatedBatches.push(...working);
     touchedProducts.add(productId);
+    locationQtyAfter.set(
+      productId,
+      working.reduce((sum, b) => sum + (b.quantity || 0), 0)
+    );
   }
+
+  // In-memory store-wide totals (avoid N re-queries inside the transaction)
+  const qtyByBatchId = new Map<string, number>();
+  for (const batch of allProductBatches) {
+    qtyByBatchId.set(batch.id, batch.quantity || 0);
+  }
+  for (const batch of updatedBatches) {
+    qtyByBatchId.set(batch.id, batch.quantity || 0);
+  }
+
+  const totalQtyAfter = new Map<string, number>();
+  for (const productId of touchedProducts) {
+    let total = 0;
+    for (const batch of allProductBatches) {
+      if (batch.product_id !== productId) continue;
+      total += qtyByBatchId.get(batch.id) ?? batch.quantity ?? 0;
+    }
+    totalQtyAfter.set(productId, total);
+  }
+
+  const changes: StockChange[] = [...touchedProducts].map((productId) => ({
+    productId,
+    deducted: needByProduct.get(productId)?.qty || 0,
+    locationQty: locationQtyAfter.get(productId) ?? 0,
+    totalQty: totalQtyAfter.get(productId) ?? 0,
+  }));
 
   await db.transaction(
     'rw',
@@ -796,17 +843,35 @@ export async function deductSaleStockForItems(params: {
       if (movements.length > 0) {
         await db.stock_movements.bulkAdd(movements);
       }
-      for (const productId of touchedProducts) {
-        const total = (
-          await db.stock_batches.where('product_id').equals(productId).toArray()
-        ).reduce((sum, b) => sum + (b.quantity || 0), 0);
-        await db.products.update(productId, {
-          stock_level: total,
+      for (const change of changes) {
+        await db.products.update(change.productId, {
+          stock_level: change.totalQty ?? 0,
           updated_at: now,
           synced: 0,
         });
       }
     }
+  );
+
+  emitStockChanged({
+    storeId: params.storeId,
+    locationId: params.locationId,
+    reason,
+    changes,
+  });
+
+  return changes;
+}
+
+/** Default shop location used for online-order fulfillment stock. */
+export async function getDefaultShopLocationId(storeId: string): Promise<string | null> {
+  await ensureStoreLocations(storeId);
+  const locations = await db.locations.where('store_id').equals(storeId).toArray();
+  return (
+    locations.find((l) => l.is_default === 1 && l.is_active === 1)?.id ||
+    locations.find((l) => l.location_type === 'shop' && l.is_active === 1)?.id ||
+    locations.find((l) => l.is_active === 1)?.id ||
+    null
   );
 }
 

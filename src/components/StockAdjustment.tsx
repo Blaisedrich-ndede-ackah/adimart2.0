@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { X, Plus, Minus, Package, Save } from 'lucide-react';
 import { LocalProduct, getCurrentStoreId } from '@/lib/dexie';
 import { getProductTotalStock, setProductStockLevel } from '@/lib/warehouse';
-import { triggerAutoSync } from '@/lib/sync';
+import { triggerPushSync } from '@/lib/sync';
 
 interface StockAdjustmentProps {
   isOpen: boolean;
@@ -71,7 +71,7 @@ export default function StockAdjustment({ isOpen, product, onClose, onSaved }: S
         targetQty: newStock,
         note: reason.trim() || `Stock ${adjustmentType}`,
       });
-      void triggerAutoSync('stock-adjust');
+      void triggerPushSync('stock-adjust');
       onSaved();
       onClose();
     } catch (err: unknown) {

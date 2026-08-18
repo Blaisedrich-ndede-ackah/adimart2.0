@@ -207,7 +207,11 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
       );
       
       const completed: SaleResult = {
-        ...result,
+        receiptNumber: result.receiptNumber,
+        items: result.items,
+        subtotal: result.subtotal,
+        discount: result.discount,
+        total: result.total,
         paymentMethod: method,
         cashAmount: cashAmt,
         paystackAmount: paystackAmt,
