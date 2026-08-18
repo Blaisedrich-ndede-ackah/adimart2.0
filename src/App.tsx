@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
-import { initAutoSync, stopAutoSync } from '@/lib/sync';
+import { initAutoSync, startLiveStockSync, stopAutoSync } from '@/lib/sync';
 import { autoReconnectPeripherals } from '@/lib/bluetoothPeripherals';
 import { isAdminSessionActive, clearAdminSession } from '@/lib/adminAuth';
 import { isValidGhanaPhone } from '@/lib/platformSettings';
@@ -64,6 +64,11 @@ export default function App() {
     void autoReconnectPeripherals();
     return () => stopAutoSync();
   }, [initialize]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentStore?.id) return;
+    return startLiveStockSync(currentStore.id);
+  }, [isAuthenticated, currentStore?.id]);
 
   useEffect(() => {
     // Cashiers cannot stay on owner-only pages after switch/login

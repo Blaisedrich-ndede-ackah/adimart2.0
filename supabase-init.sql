@@ -555,3 +555,20 @@ $$ language 'plpgsql';
 
 -- Prefer dropping the trigger entirely (also see supabase-migrate-disable-auto-deduct.sql)
 DROP TRIGGER IF EXISTS auto_deduct_stock ON transaction_items;
+
+-- Live stock sync: phones and computers receive cloud batch/product changes.
+DO $$
+BEGIN
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE stock_batches;
+  EXCEPTION
+    WHEN duplicate_object THEN NULL;
+    WHEN undefined_object THEN NULL;
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE products;
+  EXCEPTION
+    WHEN duplicate_object THEN NULL;
+    WHEN undefined_object THEN NULL;
+  END;
+END $$;
