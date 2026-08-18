@@ -10,6 +10,7 @@ import {
   type LocalUser,
 } from '@/lib/dexie';
 import { emitStockChanged, type StockChange } from '@/lib/stockEvents';
+import { canonicalShopId, openingBatchId, legacyShopId, isUuid, stableUuid } from '@/lib/ids';
 
 /** Beyond this, qty is treated as corrupt (e.g. string-concat / scientific junk). */
 const MAX_REASONABLE_QTY = 50_000_000;
@@ -51,11 +52,6 @@ function isSaneMoney(value: unknown): boolean {
   return Number.isFinite(n) && n >= 0 && n <= MAX_REASONABLE_UNIT_PRICE;
 }
 
-/** Stable OPENING batch id so multiple devices do not invent duplicate stock. */
-function openingBatchId(storeId: string, productId: string): string {
-  return `opening_${storeId}_${productId}`;
-}
-
 function dateOnly(value: string | null | undefined): string | null {
   if (!value) return null;
   return value.slice(0, 10);
@@ -78,12 +74,12 @@ function sortBatchesFefo(batches: LocalStockBatch[]): LocalStockBatch[] {
 const openingStockMigrated = new Set<string>();
 const ensureInFlight = new Map<string, Promise<LocalLocation[]>>();
 
-function canonicalShopId(storeId: string): string {
-  return `shop_${storeId}`;
-}
-
-function isAutoDefaultShop(location: LocalLocation): boolean {
-  return location.location_type === 'shop' && location.name.trim().toLowerCase() === 'shop';
+function isAutoDefaultShop(location: LocalLocation, storeId: string): boolean {
+  if (location.location_type !== 'shop') return false;
+  if (location.id === canonicalShopId(storeId) || location.id === legacyShopId(storeId)) {
+    return true;
+  }
+  return location.name.trim().toLowerCase() === 'shop';
 }
 
 function isOpeningBatch(batch: LocalStockBatch): boolean {
@@ -104,7 +100,8 @@ function pickCanonicalOpening(a: LocalStockBatch, b: LocalStockBatch): LocalStoc
   if (aTime !== bTime) return aTime > bTime ? a : b;
   if (aQty !== bQty) return aQty < bQty ? a : b;
   if (a.id.startsWith('opening_') !== b.id.startsWith('opening_')) {
-    return a.id.startsWith('opening_') ? a : b;
+    // Prefer a real UUID (cloud / v5) over leftover `opening_*` strings.
+    return a.id.startsWith('opening_') ? b : a;
   }
   return a.id.localeCompare(b.id) <= 0 ? a : b;
 }
@@ -162,15 +159,37 @@ export async function canonicalizeStoreStock(storeId: string): Promise<boolean> 
 
   const duplicateShops = locations.filter(
     (l) =>
-      isAutoDefaultShop(l) &&
+      isAutoDefaultShop(l, storeId) &&
       l.id !== canonicalId &&
       (l.is_active === 1 || qtyOnLocation(l.id))
   );
   const dupeIds = new Set(duplicateShops.map((l) => l.id));
+  const extraLocations = locations.filter((l) => l.id !== canonicalId);
+  const extraIds = new Set(extraLocations.map((l) => l.id));
 
-  const working: LocalStockBatch[] = batches.map((batch) =>
-    dupeIds.has(batch.location_id) ? { ...batch, location_id: canonicalId } : batch
-  );
+  const byId = new Map<string, LocalStockBatch>();
+  const noteChange = (row: LocalStockBatch) => {
+    byId.set(row.id, row);
+  };
+  const idsToDelete = new Set<string>();
+  const openingIdMap = new Map<string, string>();
+
+  let changed = false;
+
+  const working: LocalStockBatch[] = batches.map((batch) => {
+    const needsShop =
+      extraIds.has(batch.location_id) || dupeIds.has(batch.location_id) || !isUuid(batch.location_id);
+    if (!needsShop) return batch;
+    changed = true;
+    const next = {
+      ...batch,
+      location_id: canonicalId,
+      updated_at: now,
+      synced: 0,
+    };
+    noteChange(next);
+    return next;
+  });
 
   const openingsByProduct = new Map<string, LocalStockBatch[]>();
   for (const batch of working) {
@@ -180,21 +199,24 @@ export async function canonicalizeStoreStock(storeId: string): Promise<boolean> 
     openingsByProduct.set(batch.product_id, list);
   }
 
-  const byId = new Map<string, LocalStockBatch>();
-  const noteChange = (row: LocalStockBatch) => {
-    byId.set(row.id, row);
-  };
-
-  let changed = false;
-
   for (const [productId, openings] of openingsByProduct) {
     const destId = openingBatchId(storeId, productId);
     const live = openings.filter((b) => toQty(b.quantity) > 0);
-    if (live.length === 0) continue;
+    if (live.length === 0) {
+      for (const extra of openings) {
+        if (extra.id !== destId && !isUuid(extra.id)) idsToDelete.add(extra.id);
+      }
+      continue;
+    }
 
     const alreadyCanonical =
       live.length === 1 && live[0].id === destId && live[0].location_id === canonicalId;
-    if (alreadyCanonical) continue;
+    if (alreadyCanonical) {
+      for (const extra of openings) {
+        if (extra.id !== destId && !isUuid(extra.id)) idsToDelete.add(extra.id);
+      }
+      continue;
+    }
 
     let winner = live[0];
     for (let i = 1; i < live.length; i++) {
@@ -213,11 +235,17 @@ export async function canonicalizeStoreStock(storeId: string): Promise<boolean> 
       synced: 0,
     });
 
-    for (const extra of live) {
+    for (const extra of openings) {
       if (extra.id === destId) continue;
+      openingIdMap.set(extra.id, destId);
+      if (!isUuid(extra.id)) {
+        idsToDelete.add(extra.id);
+        continue;
+      }
       noteChange({
         ...extra,
         quantity: 0,
+        location_id: canonicalId,
         updated_at: now,
         synced: 0,
       });
@@ -226,7 +254,21 @@ export async function canonicalizeStoreStock(storeId: string): Promise<boolean> 
 
   for (const batch of working) {
     const current = byId.get(batch.id) || batch;
-    if (current.location_id === canonicalId) continue;
+    if (idsToDelete.has(current.id)) continue;
+    if (!isUuid(current.id) || !isUuid(current.product_id)) {
+      if (toQty(current.quantity) > 0 && isUuid(current.product_id)) {
+        noteChange({
+          ...current,
+          id: stableUuid(`batch:${storeId}:${current.id}`),
+          location_id: canonicalId,
+          updated_at: now,
+          synced: 0,
+        });
+      }
+      idsToDelete.add(current.id);
+      continue;
+    }
+    if (current.location_id === canonicalId && isUuid(current.location_id)) continue;
     changed = true;
     noteChange({
       ...current,
@@ -236,18 +278,27 @@ export async function canonicalizeStoreStock(storeId: string): Promise<boolean> 
     });
   }
 
-  const extraLocations = locations.filter((l) => l.id !== canonicalId);
-  const extraIds = new Set(extraLocations.map((l) => l.id));
-
+  for (const id of idsToDelete) {
+    byId.delete(id);
+  }
   if (byId.size > 0) {
     await db.stock_batches.bulkPut([...byId.values()]);
   }
+  for (const id of idsToDelete) {
+    await db.stock_batches.delete(id);
+    changed = true;
+  }
 
-  if (extraLocations.length > 0) {
+  if (extraLocations.length > 0 || openingIdMap.size > 0) {
     changed = true;
     const movements = await db.stock_movements.where('store_id').equals(storeId).toArray();
     const movementWrites: LocalStockMovement[] = [];
+    const movementDeletes: string[] = [];
     for (const movement of movements) {
+      if (!isUuid(movement.id) || !isUuid(movement.product_id)) {
+        movementDeletes.push(movement.id);
+        continue;
+      }
       const fromId =
         movement.from_location_id && extraIds.has(movement.from_location_id)
           ? canonicalId
@@ -256,9 +307,16 @@ export async function canonicalizeStoreStock(storeId: string): Promise<boolean> 
         movement.to_location_id && extraIds.has(movement.to_location_id)
           ? canonicalId
           : movement.to_location_id;
-      if (fromId !== movement.from_location_id || toId !== movement.to_location_id) {
+      const mappedBatch = movement.batch_id ? openingIdMap.get(movement.batch_id) : undefined;
+      const batchId = mappedBatch || movement.batch_id;
+      if (
+        fromId !== movement.from_location_id ||
+        toId !== movement.to_location_id ||
+        batchId !== movement.batch_id
+      ) {
         movementWrites.push({
           ...movement,
+          batch_id: batchId,
           from_location_id: fromId,
           to_location_id: toId,
           synced: 0,
@@ -267,6 +325,9 @@ export async function canonicalizeStoreStock(storeId: string): Promise<boolean> 
     }
     if (movementWrites.length > 0) {
       await db.stock_movements.bulkPut(movementWrites);
+    }
+    for (const id of movementDeletes) {
+      await db.stock_movements.delete(id);
     }
 
     const users = await db.users.where('store_id').equals(storeId).toArray();
@@ -279,7 +340,31 @@ export async function canonicalizeStoreStock(storeId: string): Promise<boolean> 
       }
     }
 
+    const txns = await db.transactions.where('store_id').equals(storeId).toArray();
+    for (const txn of txns) {
+      if (txn.location_id && extraIds.has(txn.location_id)) {
+        await db.transactions.update(txn.id, {
+          location_id: canonicalId,
+          synced: 0,
+        });
+      }
+    }
+
+    const items = await db.transaction_items.where('store_id').equals(storeId).toArray();
+    for (const item of items) {
+      if (item.batch_id && openingIdMap.has(item.batch_id)) {
+        await db.transaction_items.update(item.id, {
+          batch_id: openingIdMap.get(item.batch_id),
+          synced: 0,
+        });
+      }
+    }
+
     for (const extra of extraLocations) {
+      if (!isUuid(extra.id)) {
+        await db.locations.delete(extra.id);
+        continue;
+      }
       if (extra.is_active === 0 && extra.is_default === 0) continue;
       await db.locations.update(extra.id, {
         is_active: 0,
