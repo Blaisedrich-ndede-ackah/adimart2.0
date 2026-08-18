@@ -547,15 +547,11 @@ CREATE TRIGGER update_online_orders_updated_at
 CREATE OR REPLACE FUNCTION deduct_stock_after_sale()
 RETURNS TRIGGER AS $$
 BEGIN
-  UPDATE products
-  SET stock_level = GREATEST(0, stock_level - NEW.quantity),
-      updated_at = NOW()
-  WHERE id = NEW.product_id;
+  -- NO-OP: client + stock_batches are the quantity authority.
+  -- Keeping the function avoids errors if an old trigger still references it.
   RETURN NEW;
 END;
 $$ language 'plpgsql';
 
-CREATE TRIGGER auto_deduct_stock
-  AFTER INSERT ON transaction_items
-  FOR EACH ROW
-  EXECUTE FUNCTION deduct_stock_after_sale();
+-- Prefer dropping the trigger entirely (also see supabase-migrate-disable-auto-deduct.sql)
+DROP TRIGGER IF EXISTS auto_deduct_stock ON transaction_items;

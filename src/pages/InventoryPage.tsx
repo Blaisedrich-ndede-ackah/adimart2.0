@@ -332,13 +332,13 @@ export default function InventoryPage() {
           <div className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center min-w-[4.75rem] flex-shrink-0 sm:min-w-0">
             <DollarSign className="w-4 h-4 text-green-300 mx-auto mb-1" />
             <p className="text-white font-bold text-sm leading-none">{formatInventoryMoney(totalValue)}</p>
-            <p className="text-emerald-200 text-[9px] mt-0.5">Value</p>
+            <p className="text-emerald-200 text-[9px] mt-0.5">Value (all locations)</p>
           </div>
           <div className="bg-white/15 rounded-xl p-2 sm:p-2.5 text-center min-w-[5.25rem] flex-shrink-0 sm:min-w-0">
             <Coins className="w-4 h-4 text-amber-200 mx-auto mb-1" />
             <p className="text-white font-bold text-sm leading-none">{formatInventoryMoney(totalCostOfProduct)}</p>
             <p className="text-emerald-200 text-[8px] sm:text-[9px] mt-0.5 leading-tight">
-              Total Cost of Product
+              Total Cost (all locations)
             </p>
           </div>
         </div>
@@ -483,7 +483,7 @@ export default function InventoryPage() {
                                 : 'text-gray-700'
                           }`}
                         >
-                          Stock: {toQty(product.stock_level)}
+                          Stock (all locations): {toQty(product.stock_level)}
                         </p>
                       </div>
                     </div>

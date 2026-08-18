@@ -1686,9 +1686,18 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
         dbTable: db.products,
         merge: async (remote: LocalProduct, local: LocalProduct | undefined) => {
           if (!local) return remote;
-          // Never let a pull clobber unsynced local stock/price edits (e.g. post-sale).
-          if (local.synced === 0) return local;
-          return remote;
+          if (local.synced !== 0) return remote;
+          // Keep unsynced local edits, but if remote is newer take remote stock_level
+          // (another device sold). Batches are still reconciled after pull.
+          const localTime = new Date(local.updated_at || local.created_at).getTime();
+          const remoteTime = new Date(remote.updated_at || remote.created_at).getTime();
+          if (remoteTime > localTime) {
+            return {
+              ...local,
+              stock_level: Number(remote.stock_level) || 0,
+            };
+          }
+          return local;
         },
       },
       {
@@ -1828,9 +1837,12 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
         dbTable: db.stock_batches,
         merge: async (remote: LocalStockBatch, local: LocalStockBatch | undefined) => {
           if (!local) return remote;
-          // Keep post-sale / receive batch qty until push succeeds
-          if (local.synced === 0) return local;
-          return remote;
+          if (local.synced !== 0) return remote;
+          // Unsynced local wins only when it is at least as new as remote
+          const localTime = new Date(local.updated_at || local.created_at).getTime();
+          const remoteTime = new Date(remote.updated_at || remote.created_at).getTime();
+          if (remoteTime > localTime) return remote;
+          return local;
         },
       },
       {
@@ -1949,6 +1961,14 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
       id: 'last_sync',
       last_synced_at: new Date().toISOString(),
     });
+
+    // Batches are quantity authority — heal catalog stock and notify POS/Inventory UIs
+    try {
+      const { syncStoreCatalogStockFromBatches } = await import('@/lib/warehouse');
+      await syncStoreCatalogStockFromBatches(storeId);
+    } catch {
+      // Non-fatal: pull still succeeded
+    }
 
     return {
       success: true,

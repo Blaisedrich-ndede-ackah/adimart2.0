@@ -21,6 +21,7 @@ import {
   FileText,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
+import { triggerPushSync } from '@/lib/sync';
 import {
   db,
   type LocalLocation,
@@ -413,6 +414,7 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
       setRecvCost('');
       flash(`Received ${qty} into ${activeLocation?.name || 'location'}`);
       await loadWorkspace();
+      void triggerPushSync('warehouse-receive');
     } catch (err: unknown) {
       flash(err instanceof Error ? err.message : 'Receive failed', true);
     }
@@ -455,6 +457,7 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
       setXferQty('');
       flash(`Transferred ${qty} units`);
       await loadWorkspace();
+      void triggerPushSync('warehouse-transfer');
     } catch (err: unknown) {
       flash(err instanceof Error ? err.message : 'Transfer failed', true);
     }
@@ -491,6 +494,7 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
           : `Removed ${qty} from ${activeLocation?.name || 'location'}`
       );
       await loadWorkspace();
+      void triggerPushSync('warehouse-adjust');
     } catch (err: unknown) {
       flash(err instanceof Error ? err.message : 'Adjustment failed', true);
     }
