@@ -7,6 +7,7 @@ import {
   deleteExpense,
 } from '@/lib/dexie';
 import { useAuthStore } from '@/store/useAuthStore';
+import { toMoneyAmount } from '@/lib/money';
 
 const EXPENSE_CATEGORIES = ['Rent', 'Utilities', 'Supplier', 'Salaries', 'Transport', 'Other'];
 
@@ -45,12 +46,12 @@ export default function ExpensesPage() {
 
   const handleAdd = async () => {
     setError('');
-    const value = parseFloat(amount);
+    const value = toMoneyAmount(amount);
     if (!description.trim()) {
       setError('Enter a description.');
       return;
     }
-    if (isNaN(value) || value <= 0) {
+    if (value <= 0) {
       setError('Enter a valid amount.');
       return;
     }
@@ -88,7 +89,7 @@ export default function ExpensesPage() {
     await load();
   };
 
-  const total = expenses.reduce((sum, e) => sum + e.amount, 0);
+  const total = toMoneyAmount(expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0));
 
   return (
     <div className="page-shell">

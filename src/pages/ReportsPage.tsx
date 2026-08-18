@@ -13,6 +13,7 @@ import {
   addExpense, deleteExpense
 } from '@/lib/dexie';
 import { useAuthStore } from '@/store/useAuthStore';
+import { roundMoney, toMoneyAmount } from '@/lib/money';
 import {
   buildLocationReportSummary,
   buildReportSummary,
@@ -205,8 +206,8 @@ export default function ReportsPage() {
   };
 
   const handleAddExpense = async () => {
-    const amount = parseFloat(expenseAmount);
-    if (!expenseDesc.trim() || isNaN(amount) || amount <= 0) return;
+    const amount = toMoneyAmount(expenseAmount);
+    if (!expenseDesc.trim() || amount <= 0) return;
     setSavingExpense(true);
     const recordedBy = currentUser?.name?.trim();
     const noteParts = [
@@ -234,10 +235,8 @@ export default function ReportsPage() {
   };
 
   const totalRevenue = summary?.revenue ?? 0;
-  const cashRevenue = transactions.filter(t => t.payment_method === 'cash').reduce((s, t) => s + t.total_amount, 0);
-  const paystackRevenue = transactions
-    .filter(t => t.payment_method === 'paystack' || t.payment_method === 'split')
-    .reduce((s, t) => s + (t.paystack_amount || 0), 0);
+  const cashRevenue = roundMoney(transactions.reduce((s, t) => s + (Number(t.cash_amount) || 0), 0));
+  const paystackRevenue = roundMoney(transactions.reduce((s, t) => s + (Number(t.paystack_amount) || 0), 0));
 
   return (
     <div className="page-shell">

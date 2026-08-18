@@ -1,3 +1,5 @@
+import { toMoneyAmount } from './money';
+
 export interface CsvProductRow {
   name: string;
   category: string;
@@ -48,6 +50,10 @@ function parseNumber(value: string, fallback = 0): number {
   return parsed;
 }
 
+function parseMoney(value: string): number {
+  return toMoneyAmount(parseNumber(value, 0));
+}
+
 export function parseProductCsv(content: string): CsvParseResult {
   const lines = content
     .split(/\r?\n/)
@@ -90,8 +96,8 @@ export function parseProductCsv(content: string): CsvParseResult {
       name,
       category: getValue(cells, ['category', 'cat']) || 'Other',
       barcode: getValue(cells, ['barcode', 'sku', 'upc', 'ean']),
-      cost_price: parseNumber(getValue(cells, ['cost_price', 'cost', 'buying_price'])),
-      selling_price: parseNumber(getValue(cells, ['selling_price', 'price', 'sell_price', 'sale_price'])),
+      cost_price: parseMoney(getValue(cells, ['cost_price', 'cost', 'buying_price'])),
+      selling_price: parseMoney(getValue(cells, ['selling_price', 'price', 'sell_price', 'sale_price'])),
       stock_level: Math.max(0, Math.round(parseNumber(getValue(cells, ['stock_level', 'stock', 'quantity', 'qty'])))),
       sku_type: getValue(cells, ['sku_type', 'unit']) || 'unit',
     });

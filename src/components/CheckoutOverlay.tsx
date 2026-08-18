@@ -133,31 +133,21 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
       return;
     }
 
-    if (discountExceedsCap(discountMode, value) && pinOnDiscount && !isOwner) {
+    if (discountExceedsCap(discountMode, value) && pinOnDiscount) {
       setPendingDiscountKind(discountMode);
       setPendingDiscountValue(value);
-      if (discountMode === 'percentage') cart.setDiscountPercent(value);
-      else cart.setDiscountFixed(value);
+      // Do not write over-cap discount into the cart until PIN succeeds
       setStep('pin-verify');
       return;
     }
 
-    if (discountExceedsCap(discountMode, value) && pinOnDiscount && isOwner) {
-      // Owners still confirm with PIN when over cap if PIN enforcement is on
-      setPendingDiscountKind(discountMode);
-      setPendingDiscountValue(value);
-      if (discountMode === 'percentage') cart.setDiscountPercent(value);
-      else cart.setDiscountFixed(value);
-      setStep('pin-verify');
+    if (discountExceedsCap(discountMode, value) && !isOwner) {
+      setError(`Discount exceeds the store cap of ${discountCap}%. Owner PIN is required.`);
       return;
     }
 
-    if (discountMode === 'percentage') {
-      cart.setDiscountPercent(Math.min(value, pinOnDiscount ? 100 : discountCap));
-    } else {
-      const capAmount = (cart.subtotal * discountCap) / 100;
-      cart.setDiscountFixed(pinOnDiscount ? value : Math.min(value, capAmount));
-    }
+    if (discountMode === 'percentage') cart.setDiscountPercent(value);
+    else cart.setDiscountFixed(value);
     setStep('method');
   }
 
@@ -178,8 +168,9 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
     if (pendingDiscountKind === 'percentage') {
       cart.setDiscountPercent(discountCap);
     } else {
-      cart.setDiscountFixed((cart.subtotal * discountCap) / 100);
+      cart.setDiscountFixed(Math.round(((cart.subtotal * discountCap) / 100) * 100) / 100);
     }
+    setPendingDiscountValue(0);
     setStep('method');
   }
 
@@ -264,7 +255,12 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
     setIsSharing(true);
     
     try {
-      const receiptData = buildReceiptData(saleResult, 'cash');
+      const receiptData = buildReceiptData(
+        saleResult,
+        saleResult.paymentMethod || 'cash',
+        saleResult.cashAmount,
+        saleResult.paystackAmount
+      );
       await shareReceipt(receiptData);
     } catch {
       // Sharing failed
@@ -275,13 +271,23 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
 
   function handleWhatsAppReceipt() {
     if (!saleResult) return;
-    const receiptData = buildReceiptData(saleResult, 'cash');
+    const receiptData = buildReceiptData(
+      saleResult,
+      saleResult.paymentMethod || 'cash',
+      saleResult.cashAmount,
+      saleResult.paystackAmount
+    );
     shareViaWhatsApp(receiptData, currentStore?.support_number);
   }
 
   function handleDownloadReceipt() {
     if (!saleResult) return;
-    const receiptData = buildReceiptData(saleResult, 'cash');
+    const receiptData = buildReceiptData(
+      saleResult,
+      saleResult.paymentMethod || 'cash',
+      saleResult.cashAmount,
+      saleResult.paystackAmount
+    );
     downloadReceipt(receiptData);
   }
 
@@ -290,12 +296,16 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
   }
 
   function handleSplitConfirm() {
-    const cash = parseFloat(cashAmount);
+    const cash = Math.round((parseFloat(cashAmount) || 0) * 100) / 100;
     if (isNaN(cash) || cash < 0 || cash >= cart.total) {
       setError('Enter a valid cash amount less than total');
       return;
     }
     const paystackAmt = Math.round((cart.total - cash) * 100) / 100;
+    if (Math.abs(cash + paystackAmt - cart.total) > 0.009) {
+      setError('Split amounts must equal the sale total');
+      return;
+    }
     const ref = generatePaystackReference();
     handlePaystackPayment(paystackAmt, ref, cash);
   }

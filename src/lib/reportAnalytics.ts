@@ -6,6 +6,7 @@ import {
   LocalTransaction,
 } from './dexie';
 import { getLocationInventory, listLocations, toMoney, toQty } from './warehouse';
+import { lineBaseQty, roundMoney } from './money';
 
 export interface PeriodRange {
   start: Date;
@@ -145,6 +146,7 @@ export async function buildReportSummary(
   for (const item of periodItems) {
     const product = productMap.get(item.product_id);
     const unitCost = product?.cost_price ?? 0;
+    const baseQty = lineBaseQty(item);
     const existing = productStats.get(item.product_id) || {
       product_id: item.product_id,
       product_name: item.product_name,
@@ -154,10 +156,10 @@ export async function buildReportSummary(
       profit: 0,
     };
 
-    existing.quantity += item.quantity;
-    existing.revenue += item.subtotal;
-    existing.cost += unitCost * item.quantity;
-    existing.profit = existing.revenue - existing.cost;
+    existing.quantity += baseQty;
+    existing.revenue += roundMoney(item.subtotal);
+    existing.cost += roundMoney(unitCost * baseQty);
+    existing.profit = roundMoney(existing.revenue - existing.cost);
     productStats.set(item.product_id, existing);
   }
 
@@ -190,24 +192,28 @@ export async function buildReportSummary(
       revenue: 0,
     };
     existing.transactions += 1;
-    existing.revenue += txn.total_amount;
+    existing.revenue = roundMoney(existing.revenue + txn.total_amount);
     cashierStats.set(txn.cashier_id, existing);
   }
 
-  const revenue = periodTxns.reduce((sum, t) => sum + t.total_amount, 0);
-  const costOfGoods = periodItems.reduce((sum, item) => {
-    const product = productMap.get(item.product_id);
-    return sum + (product?.cost_price ?? 0) * item.quantity;
-  }, 0);
+  const revenue = roundMoney(periodTxns.reduce((sum, t) => sum + t.total_amount, 0));
+  const costOfGoods = roundMoney(
+    periodItems.reduce((sum, item) => {
+      const product = productMap.get(item.product_id);
+      return sum + (product?.cost_price ?? 0) * lineBaseQty(item);
+    }, 0)
+  );
 
-  const periodExpenses = expenses
-    .filter(e => {
-      const d = new Date(e.created_at);
-      return d >= start && d <= end;
-    })
-    .reduce((sum, e) => sum + e.amount, 0);
+  const periodExpenses = roundMoney(
+    expenses
+      .filter(e => {
+        const d = new Date(e.created_at);
+        return d >= start && d <= end;
+      })
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0)
+  );
 
-  const grossProfit = revenue - costOfGoods;
+  const grossProfit = roundMoney(revenue - costOfGoods);
   const netProfit = grossProfit - periodExpenses;
 
   return {
@@ -403,18 +409,20 @@ export async function buildLocationReportSummary(
       cost: 0,
       profit: 0,
     };
-    existing.quantity += item.quantity;
-    existing.revenue += item.subtotal;
-    existing.cost += unitCost * item.quantity;
-    existing.profit = existing.revenue - existing.cost;
+    existing.quantity += lineBaseQty(item);
+    existing.revenue += roundMoney(item.subtotal);
+    existing.cost += roundMoney(unitCost * lineBaseQty(item));
+    existing.profit = roundMoney(existing.revenue - existing.cost);
     productStats.set(item.product_id, existing);
   }
 
-  const sellingPrice = periodItems.reduce((sum, i) => sum + i.subtotal, 0);
-  const costPrice = periodItems.reduce((sum, item) => {
-    const product = productMap.get(item.product_id);
-    return sum + (product?.cost_price ?? 0) * item.quantity;
-  }, 0);
+  const sellingPrice = roundMoney(periodItems.reduce((sum, i) => sum + i.subtotal, 0));
+  const costPrice = roundMoney(
+    periodItems.reduce((sum, item) => {
+      const product = productMap.get(item.product_id);
+      return sum + (product?.cost_price ?? 0) * lineBaseQty(item);
+    }, 0)
+  );
   const profitEstimate = sellingPrice - costPrice;
 
   let stockUnits = 0;

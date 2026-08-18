@@ -1,6 +1,7 @@
 import Dexie, { Table } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
 import { isSupabaseConfigured, supabase, testSupabaseConnection } from './supabase';
+import { toMoneyAmount } from './money';
 
 // Store represents a business/shop
 export interface LocalStore {
@@ -1013,10 +1014,14 @@ export async function addExpense(
   if (!storeId) throw new Error('No store selected');
 
   const now = new Date().toISOString();
+  const amount = toMoneyAmount(expense.amount);
+  if (amount <= 0) throw new Error('Expense amount must be greater than zero');
+
   const newExpense: LocalExpense = {
     id: generateId(),
     store_id: storeId,
     ...expense,
+    amount,
     created_at: now,
     updated_at: now,
     synced: 0,
@@ -1030,8 +1035,13 @@ export async function updateExpense(
   id: string,
   updates: Partial<Pick<LocalExpense, 'description' | 'category' | 'amount' | 'notes'>>
 ): Promise<void> {
+  const next = { ...updates };
+  if (updates.amount !== undefined) {
+    next.amount = toMoneyAmount(updates.amount);
+    if ((next.amount ?? 0) <= 0) throw new Error('Expense amount must be greater than zero');
+  }
   await db.expenses.update(id, {
-    ...updates,
+    ...next,
     updated_at: new Date().toISOString(),
     synced: 0,
   });
@@ -1058,10 +1068,14 @@ export async function addCashBookEntry(
 
   const now = new Date().toISOString();
   const entryDate = (entry.entry_date || now.slice(0, 10)).slice(0, 10);
+  const amount = toMoneyAmount(entry.amount);
+  if (amount <= 0) throw new Error('Cash book amount must be greater than zero');
+
   const newEntry: LocalCashBookEntry = {
     id: generateId(),
     store_id: storeId,
     ...entry,
+    amount,
     entry_date: entryDate,
     created_at: now,
     updated_at: now,
@@ -1121,8 +1135,8 @@ export async function importProductsFromRows(
       category: row.category.trim() || 'Other',
       sku_type: row.sku_type?.trim() || 'unit',
       barcode: row.barcode.trim(),
-      cost_price: row.cost_price,
-      selling_price: row.selling_price,
+      cost_price: toMoneyAmount(row.cost_price),
+      selling_price: toMoneyAmount(row.selling_price),
       stock_level: 0,
       is_active: 1,
       image_url: '',
@@ -1286,6 +1300,67 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
       errors
     );
 
+    const unsyncedLocations = await db.locations.where('store_id').equals(storeId).and(l => l.synced === 0).toArray();
+    syncedCount += await upsertToSupabase(
+      'Locations',
+      'locations',
+      unsyncedLocations.map(l => ({
+        id: l.id,
+        store_id: l.store_id,
+        name: l.name,
+        location_type: l.location_type,
+        is_default: l.is_default === 1,
+        is_active: l.is_active === 1,
+        access_pin_hash: l.access_pin_hash || null,
+        created_at: l.created_at,
+        updated_at: l.updated_at,
+      })),
+      async () => { await Promise.all(unsyncedLocations.map(l => db.locations.update(l.id, { synced: 1 }))); },
+      errors
+    );
+
+    // Push batches BEFORE products so catalog stock_level never arrives without matching batches
+    const unsyncedBatches = await db.stock_batches.where('store_id').equals(storeId).and(b => b.synced === 0).toArray();
+    syncedCount += await upsertToSupabase(
+      'Stock batches',
+      'stock_batches',
+      unsyncedBatches.map(b => ({
+        id: b.id,
+        store_id: b.store_id,
+        product_id: b.product_id,
+        location_id: b.location_id,
+        batch_code: b.batch_code || '',
+        expiry_date: b.expiry_date,
+        quantity: b.quantity,
+        cost_price: b.cost_price,
+        created_at: b.created_at,
+        updated_at: b.updated_at,
+      })),
+      async () => { await Promise.all(unsyncedBatches.map(b => db.stock_batches.update(b.id, { synced: 1 }))); },
+      errors
+    );
+
+    const unsyncedMovements = await db.stock_movements.where('store_id').equals(storeId).and(m => m.synced === 0).toArray();
+    syncedCount += await upsertToSupabase(
+      'Stock movements',
+      'stock_movements',
+      unsyncedMovements.map(m => ({
+        id: m.id,
+        store_id: m.store_id,
+        product_id: m.product_id,
+        batch_id: m.batch_id,
+        from_location_id: m.from_location_id,
+        to_location_id: m.to_location_id,
+        movement_type: m.movement_type,
+        quantity: m.quantity,
+        note: m.note || '',
+        user_id: m.user_id,
+        created_at: m.created_at,
+      })),
+      async () => { await Promise.all(unsyncedMovements.map(m => db.stock_movements.update(m.id, { synced: 1 }))); },
+      errors
+    );
+
     const unsyncedProducts = await db.products.where('store_id').equals(storeId).and(p => p.synced === 0).toArray();
     syncedCount += await upsertToSupabase(
       'Products',
@@ -1405,66 +1480,6 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
       async () => {
         await Promise.all(unsyncedCashBook.map((e) => db.cash_book_entries.update(e.id, { synced: 1 })));
       },
-      errors
-    );
-
-    const unsyncedLocations = await db.locations.where('store_id').equals(storeId).and(l => l.synced === 0).toArray();
-    syncedCount += await upsertToSupabase(
-      'Locations',
-      'locations',
-      unsyncedLocations.map(l => ({
-        id: l.id,
-        store_id: l.store_id,
-        name: l.name,
-        location_type: l.location_type,
-        is_default: l.is_default === 1,
-        is_active: l.is_active === 1,
-        access_pin_hash: l.access_pin_hash || null,
-        created_at: l.created_at,
-        updated_at: l.updated_at,
-      })),
-      async () => { await Promise.all(unsyncedLocations.map(l => db.locations.update(l.id, { synced: 1 }))); },
-      errors
-    );
-
-    const unsyncedBatches = await db.stock_batches.where('store_id').equals(storeId).and(b => b.synced === 0).toArray();
-    syncedCount += await upsertToSupabase(
-      'Stock batches',
-      'stock_batches',
-      unsyncedBatches.map(b => ({
-        id: b.id,
-        store_id: b.store_id,
-        product_id: b.product_id,
-        location_id: b.location_id,
-        batch_code: b.batch_code || '',
-        expiry_date: b.expiry_date,
-        quantity: b.quantity,
-        cost_price: b.cost_price,
-        created_at: b.created_at,
-        updated_at: b.updated_at,
-      })),
-      async () => { await Promise.all(unsyncedBatches.map(b => db.stock_batches.update(b.id, { synced: 1 }))); },
-      errors
-    );
-
-    const unsyncedMovements = await db.stock_movements.where('store_id').equals(storeId).and(m => m.synced === 0).toArray();
-    syncedCount += await upsertToSupabase(
-      'Stock movements',
-      'stock_movements',
-      unsyncedMovements.map(m => ({
-        id: m.id,
-        store_id: m.store_id,
-        product_id: m.product_id,
-        batch_id: m.batch_id,
-        from_location_id: m.from_location_id,
-        to_location_id: m.to_location_id,
-        movement_type: m.movement_type,
-        quantity: m.quantity,
-        note: m.note || '',
-        user_id: m.user_id,
-        created_at: m.created_at,
-      })),
-      async () => { await Promise.all(unsyncedMovements.map(m => db.stock_movements.update(m.id, { synced: 1 }))); },
       errors
     );
 
@@ -1838,11 +1853,14 @@ export async function syncFromSupabase(): Promise<{ success: boolean; message: s
         merge: async (remote: LocalStockBatch, local: LocalStockBatch | undefined) => {
           if (!local) return remote;
           if (local.synced !== 0) return remote;
-          // Unsynced local wins only when it is at least as new as remote
+          const localQty = Number(local.quantity) || 0;
+          const remoteQty = Number(remote.quantity) || 0;
+          // Never resurrect stock by accepting a higher remote qty over an unsynced local deduction
+          if (localQty < remoteQty) return local;
+          if (remoteQty < localQty) return remote;
           const localTime = new Date(local.updated_at || local.created_at).getTime();
           const remoteTime = new Date(remote.updated_at || remote.created_at).getTime();
-          if (remoteTime > localTime) return remote;
-          return local;
+          return remoteTime >= localTime ? remote : local;
         },
       },
       {
