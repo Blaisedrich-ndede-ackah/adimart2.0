@@ -308,8 +308,9 @@ export default function POSPage() {
         </button>
       </div>
 
-      {/* Sale context: location + retail/wholesale + unit */}
+      {/* Sale context: retail/wholesale + unit. One shop per store — no location picker. */}
       <div className="bg-white border-b border-emerald-50 px-3 py-2.5 md:px-4 flex-shrink-0 space-y-2 md:space-y-0 md:flex md:items-center md:gap-3">
+        {saleLocations.length > 1 ? (
         <div className="flex items-center gap-2 md:flex-1 md:min-w-0">
           <MapPin className="w-3.5 h-3.5 text-primary flex-shrink-0" />
           <select
@@ -329,6 +330,7 @@ export default function POSPage() {
             ))}
           </select>
         </div>
+        ) : null}
         <div className="flex gap-2 md:w-auto md:flex-shrink-0">
           <button
             type="button"
@@ -464,8 +466,7 @@ export default function POSPage() {
               <div className="space-y-2 md:grid md:grid-cols-1 xl:grid-cols-2 md:gap-2 md:space-y-0">
                 {filteredProducts.map((product) => {
                   // Location batches only — never fall back to store-wide catalog stock
-                  const stockHere = locationStock[product.id] ?? 0;
-                  const stockAll = toQty(product.stock_level);
+                  const stockHere = locationStock[product.id] ?? toQty(product.stock_level);
                   const outOfStock = stockHere <= 0;
                   const packSize = Math.max(1, Number(product.pack_size) || 1);
                   const modes = getAvailableSaleModes(product);
@@ -485,14 +486,13 @@ export default function POSPage() {
                           {packSize > 1 ? <span className="text-[10px] text-gray-400 font-medium"> / unit</span> : null}
                         </p>
                         <p className="text-[10px] text-gray-500 mt-0.5">
-                          Here: {stockHere}
-                          {stockAll !== stockHere ? ` · All locations: ${stockAll}` : ''}
+                          Stock: {stockHere}
                           {product.track_expiry === 1 ? ' · Expiry tracked' : ''}
                           {wholesaleOk ? ' · Wholesale ready' : ''}
                         </p>
                         {outOfStock && (
                           <p className="text-[10px] font-semibold text-red-600 mt-0.5">
-                            {stockAll > 0 ? 'None at this location' : 'Out of stock'}
+                            Out of stock
                           </p>
                         )}
                       </div>

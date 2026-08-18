@@ -12,7 +12,7 @@ import {
   syncBidirectional,
 } from '@/lib/dexie';
 import { isSupabaseConfigured } from '@/lib/supabase';
-import { alignProductsWithBatchStock, toMoney, toQty } from '@/lib/warehouse';
+import { alignProductsWithBatchStock, canonicalizeStoreStock, toMoney, toQty } from '@/lib/warehouse';
 import { subscribeStockChanges } from '@/lib/stockEvents';
 import AddProduct from '@/components/AddProduct';
 import StockAdjustment from '@/components/StockAdjustment';
@@ -50,8 +50,14 @@ export default function InventoryPage() {
     const shouldSync = Boolean(opts?.sync);
 
     const paintLocal = async () => {
+      if (currentStore?.id) {
+        try {
+          await canonicalizeStoreStock(currentStore.id);
+        } catch {
+          // Still paint this store's catalog
+        }
+      }
       const allProducts = await getCurrentStoreProducts();
-      // Sales deduct warehouse batches — keep catalog stock_level aligned so phone & PC match
       const aligned = await alignProductsWithBatchStock(allProducts);
       setProducts(aligned);
       const cats = [...new Set(aligned.map((p) => p.category || 'Other'))].sort();
@@ -345,7 +351,7 @@ export default function InventoryPage() {
               <p className="text-white font-bold text-xs sm:text-sm leading-tight tabular-nums break-all">
                 {formatInventoryMoney(totalValue)}
               </p>
-              <p className="text-emerald-200 text-[9px] mt-0.5">Value (all locations)</p>
+              <p className="text-emerald-200 text-[9px] mt-0.5">Value</p>
             </div>
             <div className="bg-white/15 rounded-xl p-2 text-center min-w-0">
               <Coins className="w-4 h-4 text-amber-200 mx-auto mb-1" />
@@ -353,7 +359,7 @@ export default function InventoryPage() {
                 {formatInventoryMoney(totalCostOfProduct)}
               </p>
               <p className="text-emerald-200 text-[9px] mt-0.5 leading-tight">
-                Total Cost (all locations)
+                Total Cost
               </p>
             </div>
           </div>
@@ -499,7 +505,7 @@ export default function InventoryPage() {
                                 : 'text-gray-700'
                           }`}
                         >
-                          Stock (all locations): {formatStockQty(product.stock_level)}
+                          Stock: {formatStockQty(product.stock_level)}
                         </p>
                       </div>
                     </div>
