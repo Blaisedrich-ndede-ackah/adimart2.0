@@ -83,8 +83,13 @@ async function ensureDefaultLocation(storeId: string): Promise<LocalLocation[]> 
   if (locations.length > 0) return locations;
 
   const now = nowIso();
+  // Deterministic shop id so phone + desktop do not create two default shops
+  const shopId = `shop_${storeId}`;
+  const existing = await db.locations.get(shopId);
+  if (existing) return [existing];
+
   const shop: LocalLocation = {
-    id: generateId(),
+    id: shopId,
     store_id: storeId,
     name: 'Shop',
     location_type: 'shop',
@@ -94,7 +99,13 @@ async function ensureDefaultLocation(storeId: string): Promise<LocalLocation[]> 
     updated_at: now,
     synced: 0,
   };
-  await db.locations.add(shop);
+  try {
+    await db.locations.add(shop);
+  } catch {
+    const raced = await db.locations.get(shopId);
+    if (raced) return [raced];
+    throw new Error('Could not create default shop location');
+  }
   return [shop];
 }
 
@@ -496,7 +507,7 @@ export async function listBatches(
   const filtered = locationId
     ? batches.filter((b) => b.location_id === locationId)
     : batches;
-  return sortBatchesFefo(filtered.filter((b) => b.quantity > 0));
+  return sortBatchesFefo(filtered.filter((b) => toQty(b.quantity) > 0));
 }
 
 export async function syncProductStockLevel(productId: string): Promise<number> {
@@ -518,8 +529,9 @@ export async function syncProductStockLevel(productId: string): Promise<number> 
 }
 
 /**
- * Fast path: only touch the one product being sold/edited.
- * Does not re-scan the whole catalog (that is ensureStoreLocations' job, cached).
+ * Align catalog stock with batches. Only creates an opening batch when the product
+ * has ZERO batch rows (true first migration). Never invents stock when batches
+ * already exist but catalog is stale-high — that caused sold-out items to reappear.
  */
 export async function reconcileProductStockBatches(
   storeId: string,
@@ -533,17 +545,19 @@ export async function reconcileProductStockBatches(
 
   const batches = await db.stock_batches.where('product_id').equals(productId).toArray();
   const batchTotal = batches.reduce((sum, b) => sum + toQty(b.quantity), 0);
+
+  // Batches already exist: catalog must follow batches (never invent a RECONCILE gap)
+  if (batches.length > 0) {
+    if (toQty(product.stock_level) !== batchTotal) {
+      await syncProductStockLevel(productId);
+    }
+    return batchTotal;
+  }
+
   const target = isSaneQty(product.stock_level)
     ? Math.floor(Number(product.stock_level))
     : toQty(product.stock_level);
-  const gap = target - batchTotal;
-
-  if (gap < 0) {
-    return syncProductStockLevel(productId);
-  }
-  if (gap === 0) {
-    return batchTotal;
-  }
+  if (target <= 0) return 0;
 
   let locations = await db.locations.where('store_id').equals(storeId).toArray();
   if (locations.length === 0) {
@@ -563,16 +577,16 @@ export async function reconcileProductStockBatches(
   }
 
   const now = nowIso();
-  const batchId = generateId();
-  await db.stock_batches.add({
+  const batchId = openingBatchId(storeId, productId);
+  await db.stock_batches.put({
     id: batchId,
     store_id: storeId,
     product_id: productId,
     location_id: locationId,
-    batch_code: 'RECONCILE',
+    batch_code: 'OPENING',
     expiry_date: null,
-    quantity: gap,
-    cost_price: product.cost_price || 0,
+    quantity: target,
+    cost_price: toMoney(product.cost_price),
     created_at: now,
     updated_at: now,
     synced: 0,
@@ -585,8 +599,8 @@ export async function reconcileProductStockBatches(
     from_location_id: null,
     to_location_id: locationId,
     movement_type: 'adjust',
-    quantity: gap,
-    note: 'Reconciled inventory stock into location batches',
+    quantity: target,
+    note: 'Migrated opening stock into location batches',
     user_id: null,
     created_at: now,
     synced: 0,
@@ -626,14 +640,8 @@ export async function setProductStockLevel(params: {
     note: params.note || 'Inventory stock update',
     userId: params.userId || null,
   });
+  // syncProductStockLevel (via adjust) already emits; return live totals
   const totalQty = await getProductTotalStock(params.productId);
-  const locationQty = await getLocationStock(params.productId, locationId);
-  emitStockChanged({
-    storeId: params.storeId,
-    locationId,
-    reason: 'adjust',
-    changes: [{ productId: params.productId, totalQty, locationQty, deducted: delta < 0 ? -delta : 0 }],
-  });
   return totalQty;
 }
 
@@ -709,7 +717,7 @@ export async function allocateFefo(
       await db.stock_batches
         .where('product_id')
         .equals(productId)
-        .and((b) => b.location_id === locationId && b.quantity > 0)
+        .and((b) => b.location_id === locationId && toQty(b.quantity) > 0)
         .toArray()
     )
   );
@@ -719,7 +727,7 @@ export async function allocateFefo(
 
   for (const batch of batches) {
     if (remaining <= 0) break;
-    const take = Math.min(batch.quantity, remaining);
+    const take = Math.min(toQty(batch.quantity), remaining);
     if (take <= 0) continue;
     allocations.push({ batchId: batch.id, qty: take });
     remaining -= take;
@@ -822,7 +830,7 @@ export async function deductSaleStock(params: {
       await db.stock_batches
         .where('product_id')
         .equals(params.productId)
-        .and((b) => b.location_id === params.locationId && b.quantity > 0)
+        .and((b) => b.location_id === params.locationId && toQty(b.quantity) > 0)
         .toArray()
     )
   );
@@ -834,12 +842,13 @@ export async function deductSaleStock(params: {
 
   for (const batch of liveBatches) {
     if (remaining <= 0) break;
-    const take = Math.min(batch.quantity, remaining);
+    const onHand = toQty(batch.quantity);
+    const take = Math.min(onHand, remaining);
     if (take <= 0) continue;
     allocations.push({ batchId: batch.id, qty: take });
     updatedBatches.push({
       ...batch,
-      quantity: batch.quantity - take,
+      quantity: onHand - take,
       updated_at: now,
       synced: 0,
     });
@@ -939,10 +948,10 @@ export async function deductSaleStockForItems(params: {
 
   for (const [productId, need] of needByProduct) {
     const live = sortBatchesFefo(
-      (batchesByProduct.get(productId) || []).filter((b) => b.quantity > 0)
+      (batchesByProduct.get(productId) || []).filter((b) => toQty(b.quantity) > 0)
     );
     // Mutate working copies so multiple lines against same product allocate correctly
-    const working = live.map((b) => ({ ...b }));
+    const working = live.map((b) => ({ ...b, quantity: toQty(b.quantity) }));
     let remaining = need.qty;
 
     for (const batch of working) {

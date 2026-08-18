@@ -372,27 +372,18 @@ export const useCartStore = create<CartState>((set, get) => ({
       });
     }
 
-    // One stock map query instead of N per-product location lookups
+    // Verify location stock — do not invent units from a stale catalog
     const stockMap = await getLocationStockMap(storeId, locationId);
-    const shortProductIds: string[] = [];
     for (const [productId, need] of needByProduct) {
-      if ((stockMap[productId] || 0) < need.qty) shortProductIds.push(productId);
-    }
-    if (shortProductIds.length > 0) {
-      await Promise.all(
-        shortProductIds.map((productId) =>
-          reconcileProductStockBatches(storeId, productId, locationId)
-        )
-      );
-      const afterMap = await getLocationStockMap(storeId, locationId);
-      for (const productId of shortProductIds) {
-        const need = needByProduct.get(productId)!;
-        const after = afterMap[productId] || 0;
-        if (after < need.qty) {
-          throw new Error(
-            `Insufficient stock for "${need.name}". Only ${after} available at this location.`
-          );
-        }
+      const available = stockMap[productId] || 0;
+      if (available >= need.qty) continue;
+      // Only migrates when the product has zero batch rows; otherwise syncs catalog down
+      await reconcileProductStockBatches(storeId, productId, locationId);
+      const after = await getLocationStock(productId, locationId);
+      if (after < need.qty) {
+        throw new Error(
+          `Insufficient stock for "${need.name}". Only ${after} available at this location.`
+        );
       }
     }
 
@@ -443,18 +434,27 @@ export const useCartStore = create<CartState>((set, get) => ({
       }
     );
 
-    const stockChanges = await deductSaleStockForItems({
-      storeId,
-      locationId,
-      userId: cashierId,
-      transactionId: txnId,
-      reason: 'sale',
-      items: state.items.map((item) => ({
-        productId: item.product_id,
-        baseQty: item.base_quantity,
-        name: item.name,
-      })),
-    });
+    let stockChanges;
+    try {
+      stockChanges = await deductSaleStockForItems({
+        storeId,
+        locationId,
+        userId: cashierId,
+        transactionId: txnId,
+        reason: 'sale',
+        items: state.items.map((item) => ({
+          productId: item.product_id,
+          baseQty: item.base_quantity,
+          name: item.name,
+        })),
+      });
+    } catch (err) {
+      // Roll back the sale so we never sync revenue without a stock movement
+      const items = await db.transaction_items.where('transaction_id').equals(txnId).toArray();
+      await Promise.all(items.map((i) => db.transaction_items.delete(i.id)));
+      await db.transactions.delete(txnId);
+      throw err;
+    }
 
     const saleData = {
       receiptNumber,
