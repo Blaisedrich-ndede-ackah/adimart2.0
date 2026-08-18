@@ -40,6 +40,17 @@ export function toMoney(value: unknown): number {
   return n;
 }
 
+/** True when value is a finite qty within the sane retail range (including 0). */
+function isSaneQty(value: unknown): boolean {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) && n >= 0 && n <= MAX_REASONABLE_QTY;
+}
+
+function isSaneMoney(value: unknown): boolean {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) && n >= 0 && n <= MAX_REASONABLE_UNIT_PRICE;
+}
+
 function dateOnly(value: string | null | undefined): string | null {
   if (!value) return null;
   return value.slice(0, 10);
@@ -116,7 +127,7 @@ export async function ensureStoreLocations(storeId: string): Promise<LocalLocati
     for (const product of products) {
       const batchTotal = qtyByProduct.get(product.id) || 0;
       if (batchTotal > 0) continue;
-      if (!(product.stock_level > 0)) continue;
+      if (toQty(product.stock_level) <= 0) continue;
 
       const batchId = generateId();
       newBatches.push({
@@ -299,6 +310,9 @@ export async function getStoreBatchStockMap(storeId: string): Promise<Record<str
 /**
  * Persist numeric batch/product quantities when IndexedDB has strings or absurd values
  * (fixes inventory Value showing e.g. GH₵1e+26 from JS string concatenation).
+ *
+ * Important: do NOT overwrite a sane positive catalog stock_level with 0 just because
+ * zero-qty batch rows exist — that blocked opening-stock migration and broke add-to-cart.
  */
 export async function repairCorruptStockQuantities(storeId: string): Promise<number> {
   const now = nowIso();
@@ -307,17 +321,21 @@ export async function repairCorruptStockQuantities(storeId: string): Promise<num
   const batches = await db.stock_batches.where('store_id').equals(storeId).toArray();
   const batchFixes: LocalStockBatch[] = [];
   for (const batch of batches) {
-    const safe = toQty(batch.quantity);
-    const cost = toMoney(batch.cost_price);
-    if (batch.quantity !== safe || batch.cost_price !== cost) {
-      batchFixes.push({
-        ...batch,
-        quantity: safe,
-        cost_price: cost,
-        updated_at: now,
-        synced: 0,
-      });
-    }
+    const qtyNeedsFix = !isSaneQty(batch.quantity) || typeof batch.quantity === 'string';
+    const costNeedsFix = !isSaneMoney(batch.cost_price) || typeof batch.cost_price === 'string';
+    if (!qtyNeedsFix && !costNeedsFix) continue;
+
+    const safe = isSaneQty(batch.quantity) ? Math.floor(Number(batch.quantity)) : toQty(batch.quantity);
+    const cost = isSaneMoney(batch.cost_price) ? Number(batch.cost_price) : toMoney(batch.cost_price);
+    if (batch.quantity === safe && batch.cost_price === cost) continue;
+
+    batchFixes.push({
+      ...batch,
+      quantity: safe,
+      cost_price: cost,
+      updated_at: now,
+      synced: 0,
+    });
   }
   if (batchFixes.length > 0) {
     await db.stock_batches.bulkPut(batchFixes);
@@ -328,10 +346,30 @@ export async function repairCorruptStockQuantities(storeId: string): Promise<num
   const batchMap = await getStoreBatchStockMap(storeId);
   const productFixes: LocalProduct[] = [];
   for (const product of products) {
-    const hasBatches = Object.prototype.hasOwnProperty.call(batchMap, product.id);
-    const safeStock = hasBatches ? batchMap[product.id] || 0 : toQty(product.stock_level);
-    const cost = toMoney(product.cost_price);
-    const sell = toMoney(product.selling_price);
+    const batchQty = Object.prototype.hasOwnProperty.call(batchMap, product.id)
+      ? batchMap[product.id] || 0
+      : null;
+
+    const catalogStock = isSaneQty(product.stock_level)
+      ? Math.floor(Number(product.stock_level))
+      : toQty(product.stock_level);
+
+    // Prefer positive batch totals; keep sane catalog stock when batches are empty/zero
+    // so ensureStoreLocations can still migrate opening stock for POS.
+    let safeStock = catalogStock;
+    if (batchQty !== null && batchQty > 0) {
+      safeStock = batchQty;
+    } else if (!isSaneQty(product.stock_level)) {
+      safeStock = batchQty !== null ? batchQty : 0;
+    }
+
+    const cost = isSaneMoney(product.cost_price)
+      ? Number(product.cost_price)
+      : toMoney(product.cost_price);
+    const sell = isSaneMoney(product.selling_price)
+      ? Number(product.selling_price)
+      : toMoney(product.selling_price);
+
     if (
       product.stock_level !== safeStock ||
       product.cost_price !== cost ||
@@ -366,39 +404,63 @@ export async function alignProductsWithBatchStock(
   const storeId = products[0]?.store_id;
   if (!storeId) return products;
 
-  // Heal string-concat / non-numeric qty corruption before aligning catalog stock
-  await repairCorruptStockQuantities(storeId);
+  try {
+    await repairCorruptStockQuantities(storeId);
+  } catch {
+    // Never block inventory UI if repair fails
+  }
+
+  // Re-read after repair so we align the healed rows
+  const fresh = await db.products.where('store_id').equals(storeId).toArray();
+  const byId = new Map(fresh.map((p) => [p.id, p]));
+  const source = products.map((p) => byId.get(p.id) || p);
 
   const batchMap = await getStoreBatchStockMap(storeId);
   const now = nowIso();
   const aligned: LocalProduct[] = [];
   const writes: Promise<unknown>[] = [];
 
-  for (const product of products) {
-    const cost = toMoney(product.cost_price);
-    const sell = toMoney(product.selling_price);
-    // Only trust batches when the product has been migrated into warehouse stock.
-    // Products with no batch rows keep their catalog stock_level.
-    if (!Object.prototype.hasOwnProperty.call(batchMap, product.id)) {
-      const stock = toQty(product.stock_level);
-      aligned.push({ ...product, stock_level: stock, cost_price: cost, selling_price: sell });
-      continue;
-    }
-    const batchQty = batchMap[product.id] || 0;
+  for (const product of source) {
+    const displayCost = isSaneMoney(product.cost_price)
+      ? Number(product.cost_price)
+      : toMoney(product.cost_price);
+    const displaySell = isSaneMoney(product.selling_price)
+      ? Number(product.selling_price)
+      : toMoney(product.selling_price);
+    const catalogStock = isSaneQty(product.stock_level)
+      ? Math.floor(Number(product.stock_level))
+      : toQty(product.stock_level);
+
+    const hasBatches = Object.prototype.hasOwnProperty.call(batchMap, product.id);
+    const batchQty = hasBatches ? batchMap[product.id] || 0 : null;
+
+    // Positive batch totals win. Empty/zero batches must not wipe sane catalog stock
+    // (opening-stock migration / reconcile still need it for POS).
+    const nextStock =
+      batchQty !== null && batchQty > 0
+        ? batchQty
+        : catalogStock;
+
     if (
-      batchQty === product.stock_level &&
-      cost === product.cost_price &&
-      sell === product.selling_price
+      nextStock === product.stock_level &&
+      displayCost === product.cost_price &&
+      displaySell === product.selling_price
     ) {
       aligned.push(product);
       continue;
     }
-    aligned.push({ ...product, stock_level: batchQty, cost_price: cost, selling_price: sell });
+
+    aligned.push({
+      ...product,
+      stock_level: nextStock,
+      cost_price: displayCost,
+      selling_price: displaySell,
+    });
     writes.push(
       db.products.update(product.id, {
-        stock_level: batchQty,
-        cost_price: cost,
-        selling_price: sell,
+        stock_level: nextStock,
+        cost_price: displayCost,
+        selling_price: displaySell,
         updated_at: now,
         synced: 0,
       })
@@ -406,7 +468,11 @@ export async function alignProductsWithBatchStock(
   }
 
   if (writes.length > 0) {
-    await Promise.all(writes);
+    try {
+      await Promise.all(writes);
+    } catch {
+      // Still return aligned in-memory view
+    }
   }
   return aligned;
 }
@@ -453,7 +519,9 @@ export async function reconcileProductStockBatches(
 
   const batches = await db.stock_batches.where('product_id').equals(productId).toArray();
   const batchTotal = batches.reduce((sum, b) => sum + toQty(b.quantity), 0);
-  const target = Math.max(0, Math.floor(Number(product.stock_level) || 0));
+  const target = isSaneQty(product.stock_level)
+    ? Math.floor(Number(product.stock_level))
+    : toQty(product.stock_level);
   const gap = target - batchTotal;
 
   if (gap < 0) {

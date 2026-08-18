@@ -54,12 +54,27 @@ export default function InventoryPage() {
       // Sales deduct warehouse batches — keep catalog stock_level aligned so phone & PC match
       const aligned = await alignProductsWithBatchStock(allProducts);
       setProducts(aligned);
-      const cats = [...new Set(aligned.map((p) => p.category))].sort();
+      const cats = [...new Set(aligned.map((p) => p.category || 'Other'))].sort();
       setCategories(['All', ...cats]);
     };
 
-    // Always paint local inventory first so the screen is never blocked on cloud
-    await paintLocal();
+    try {
+      // Always paint local inventory first so the screen is never blocked on cloud
+      await paintLocal();
+    } catch {
+      try {
+        const allProducts = await getCurrentStoreProducts();
+        setProducts(allProducts);
+        const cats = [...new Set(allProducts.map((p) => p.category || 'Other'))].sort();
+        setCategories(['All', ...cats]);
+        setSyncStatus('Showing local inventory');
+        window.setTimeout(() => setSyncStatus(''), 2500);
+      } catch {
+        setProducts([]);
+        setCategories(['All']);
+      }
+      return;
+    }
 
     if (shouldSync && isSupabaseConfigured() && navigator.onLine) {
       const now = Date.now();
@@ -159,29 +174,33 @@ export default function InventoryPage() {
     let result = [...products];
 
     if (selectedCategory !== 'All') {
-      result = result.filter(p => p.category === selectedCategory);
+      result = result.filter((p) => (p.category || 'Other') === selectedCategory);
     }
 
     if (searchQuery) {
       const q = searchQuery.toLowerCase().trim();
-      result = result.filter(p =>
-        p.name.toLowerCase().includes(q) ||
-        (p.barcode || '').toLowerCase().includes(q)
+      result = result.filter(
+        (p) =>
+          (p.name || '').toLowerCase().includes(q) ||
+          (p.barcode || '').toLowerCase().includes(q)
       );
     }
 
     switch (sortMode) {
       case 'recent':
-        result.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+        result.sort(
+          (a, b) =>
+            new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
+        );
         break;
       case 'alpha':
-        result.sort((a, b) => a.name.localeCompare(b.name));
+        result.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
         break;
       case 'stock-low':
-        result.sort((a, b) => a.stock_level - b.stock_level);
+        result.sort((a, b) => toQty(a.stock_level) - toQty(b.stock_level));
         break;
       case 'stock-high':
-        result.sort((a, b) => b.stock_level - a.stock_level);
+        result.sort((a, b) => toQty(b.stock_level) - toQty(a.stock_level));
         break;
     }
 
@@ -206,7 +225,10 @@ export default function InventoryPage() {
 
   const formatInventoryMoney = (amount: number) => {
     const n = Number.isFinite(amount) && amount >= 0 ? amount : 0;
-    return `GH₵${Math.round(n).toLocaleString('en-GH')}`;
+    // Avoid toFixed scientific notation and locales some mobile WebViews reject.
+    const rounded = Math.round(n);
+    const withCommas = String(rounded).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return `GH₵${withCommas}`;
   };
 
   const handleDelete = async (id: string) => {
