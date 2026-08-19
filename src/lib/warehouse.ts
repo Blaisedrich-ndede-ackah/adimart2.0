@@ -408,11 +408,16 @@ export async function ensureStoreLocations(storeId: string): Promise<LocalLocati
 
     // Pull cloud BEFORE creating a local shop UUID. Chrome and Opera each have
     // their own IndexedDB; the cloud ledger is what they must share.
+    // Pull cloud BEFORE creating a local shop UUID — but not if we just hydrated.
     let pulledCloudStock = false;
     if (isSupabaseConfigured()) {
       try {
-        const { pullStockLedgerFromCloud } = await import('@/lib/dexie');
-        pulledCloudStock = await pullStockLedgerFromCloud(storeId);
+        const { lastStockHydrateOkAt, pullStockLedgerFromCloud } = await import('@/lib/dexie');
+        if (Date.now() - lastStockHydrateOkAt < 15_000) {
+          pulledCloudStock = true;
+        } else {
+          pulledCloudStock = await pullStockLedgerFromCloud(storeId);
+        }
       } catch {
         pulledCloudStock = false;
       }
@@ -643,36 +648,51 @@ export async function getLocationStock(productId: string, locationId: string): P
   return batches.reduce((sum, b) => sum + toQty(b.quantity), 0);
 }
 
+function warehouseIdsFrom(locations: LocalLocation[]): Set<string> {
+  return new Set(locations.filter((l) => l.location_type === 'warehouse').map((l) => l.id));
+}
+
+/** True when this location is a warehouse (shop / missing / unknown count as shop). */
+export async function isWarehouseLocation(locationId: string | null | undefined): Promise<boolean> {
+  if (!locationId) return false;
+  const loc = await db.locations.get(locationId);
+  return loc?.location_type === 'warehouse';
+}
+
 /** One query for POS product grid instead of N getLocationStock calls */
 export async function getLocationStockMap(
   storeId: string,
   locationId: string
 ): Promise<Record<string, number>> {
-  const batches = await db.stock_batches
-    .where('store_id')
-    .equals(storeId)
-    .and((b) => b.location_id === locationId)
-    .toArray();
-  const map: Record<string, number> = {};
-  for (const batch of batches) {
-    map[batch.product_id] = (map[batch.product_id] || 0) + toQty(batch.quantity);
+  if (await isWarehouseLocation(locationId)) {
+    const batches = await db.stock_batches
+      .where('store_id')
+      .equals(storeId)
+      .and((b) => b.location_id === locationId)
+      .toArray();
+    const map: Record<string, number> = {};
+    for (const batch of batches) {
+      map[batch.product_id] = (map[batch.product_id] || 0) + toQty(batch.quantity);
+    }
+    return map;
   }
-  return map;
+  return getStoreBatchStockMap(storeId);
 }
 
-/** On-hand qty per product for this store's single shop (not other stores or leftover locations). */
+/**
+ * On-hand qty per product for POS / Inventory: every shop batch (and leftover
+ * rows whose location is not a warehouse). Duplicate shop UUIDs no longer hide stock.
+ */
 export async function getStoreBatchStockMap(storeId: string): Promise<Record<string, number>> {
-  const locationId = await getPrimaryShopLocationId(storeId);
-  const batches = await db.stock_batches.where('store_id').equals(storeId).toArray();
+  const [locations, batches] = await Promise.all([
+    db.locations.where('store_id').equals(storeId).toArray(),
+    db.stock_batches.where('store_id').equals(storeId).toArray(),
+  ]);
+  const warehouseIds = warehouseIdsFrom(locations);
   const map: Record<string, number> = {};
   for (const batch of batches) {
-    if (batch.location_id !== locationId) continue;
+    if (warehouseIds.has(batch.location_id)) continue;
     map[batch.product_id] = (map[batch.product_id] || 0) + toQty(batch.quantity);
-  }
-  // Products that only have leftover rows at inactive extra locations still count as 0 here
-  for (const batch of batches) {
-    if (Object.prototype.hasOwnProperty.call(map, batch.product_id)) continue;
-    map[batch.product_id] = 0;
   }
   return map;
 }
@@ -776,7 +796,6 @@ export async function alignProductsWithBatchStock(
   const source = products.map((p) => byId.get(p.id) || p);
 
   const batchMap = await getStoreBatchStockMap(storeId);
-  const storeHasLedger = (await db.stock_batches.where('store_id').equals(storeId).count()) > 0;
   const aligned: LocalProduct[] = [];
   const writes: Promise<unknown>[] = [];
 
@@ -791,11 +810,8 @@ export async function alignProductsWithBatchStock(
       ? Math.floor(Number(product.stock_level))
       : toQty(product.stock_level);
 
-    const hasBatches = Object.prototype.hasOwnProperty.call(batchMap, product.id);
-    // Once this store has a batch ledger, catalog stock_level is not truth.
-    // That stopped Opera (catalog copy) and Chrome (live batches) from disagreeing.
-    const nextStock =
-      storeHasLedger || hasBatches ? batchMap[product.id] || 0 : catalogStock;
+    const hasShopBatches = Object.prototype.hasOwnProperty.call(batchMap, product.id);
+    const nextStock = hasShopBatches ? batchMap[product.id] || 0 : catalogStock;
 
     if (
       nextStock === product.stock_level &&
@@ -860,10 +876,9 @@ export async function getProductTotalStock(productId: string): Promise<number> {
   if (!product?.store_id) {
     return batches.reduce((sum, b) => sum + toQty(b.quantity), 0);
   }
-  const locationId = await getPrimaryShopLocationId(product.store_id);
-  return batches
-    .filter((b) => b.location_id === locationId)
-    .reduce((sum, b) => sum + toQty(b.quantity), 0);
+  const map = await getStoreBatchStockMap(product.store_id);
+  if (Object.prototype.hasOwnProperty.call(map, productId)) return map[productId] || 0;
+  return batches.reduce((sum, b) => sum + toQty(b.quantity), 0);
 }
 
 export async function listBatches(
@@ -1282,6 +1297,10 @@ export async function deductSaleStockForItems(params: {
   const productIds = [...new Set(params.items.map((i) => i.productId))];
   if (productIds.length === 0) return [];
 
+  const locations = await db.locations.where('store_id').equals(params.storeId).toArray();
+  const locType = new Map(locations.map((l) => [l.id, l.location_type]));
+  const saleIsWarehouse = locType.get(params.locationId) === 'warehouse';
+
   // One query for all product batches (location allocation + store-wide totals)
   const allProductBatches = await db.stock_batches
     .where('product_id')
@@ -1290,7 +1309,11 @@ export async function deductSaleStockForItems(params: {
 
   const batchesByProduct = new Map<string, LocalStockBatch[]>();
   for (const batch of allProductBatches) {
-    if (batch.location_id !== params.locationId) continue;
+    if (saleIsWarehouse) {
+      if (batch.location_id !== params.locationId) continue;
+    } else if (locType.get(batch.location_id) === 'warehouse') {
+      continue;
+    }
     const list = batchesByProduct.get(batch.product_id) || [];
     list.push(batch);
     batchesByProduct.set(batch.product_id, list);
@@ -1333,7 +1356,7 @@ export async function deductSaleStockForItems(params: {
         store_id: params.storeId,
         product_id: productId,
         batch_id: batch.id,
-        from_location_id: params.locationId,
+        from_location_id: batch.location_id || params.locationId,
         to_location_id: null,
         movement_type: 'sale',
         quantity: take,
@@ -1347,7 +1370,7 @@ export async function deductSaleStockForItems(params: {
 
     if (remaining > 0) {
       throw new Error(
-        `Insufficient stock for "${need.name || 'item'}". Not enough units at this location.`
+        `Insufficient stock for "${need.name || 'item'}". Not enough units on hand.`
       );
     }
 

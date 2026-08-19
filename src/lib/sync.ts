@@ -1,8 +1,9 @@
 import { isSupabaseConfigured, supabase } from './supabase';
-import { syncBidirectional, syncToSupabase } from './dexie';
+import { syncStockFast, syncToSupabase } from './dexie';
 
 const AUTO_SYNC_KEY = 'adimat_auto_sync';
-const AUTO_SYNC_INTERVAL_MS = 20 * 1000;
+const AUTO_SYNC_INTERVAL_MS = 45 * 1000;
+const LIVE_DEBOUNCE_MS = 1500;
 
 let syncInProgress = false;
 let syncQueued = false;
@@ -23,6 +24,8 @@ export function setAutoSyncEnabled(enabled: boolean): void {
   }
 }
 
+let liveDebounce: ReturnType<typeof setTimeout> | null = null;
+
 export async function triggerAutoSync(reason = 'auto'): Promise<void> {
   if (!isAutoSyncEnabled() || !isSupabaseConfigured()) return;
   if (syncInProgress) {
@@ -31,11 +34,13 @@ export async function triggerAutoSync(reason = 'auto'): Promise<void> {
   }
 
   const now = Date.now();
-  if (reason === 'auto' && now - lastAutoSyncAt < 8_000) return;
+  if ((reason === 'auto' || reason === 'interval' || reason === 'live') && now - lastAutoSyncAt < 8_000) {
+    return;
+  }
 
   syncInProgress = true;
   try {
-    await syncBidirectional();
+    await syncStockFast();
     lastAutoSyncAt = Date.now();
   } catch {
     // Silent fail for background sync
@@ -81,14 +86,22 @@ export function startLiveStockSync(storeId: string): () => void {
       'postgres_changes',
       { event: '*', schema: 'public', table: 'stock_batches', filter: `store_id=eq.${storeId}` },
       () => {
-        void triggerAutoSync('live');
+        if (liveDebounce) clearTimeout(liveDebounce);
+        liveDebounce = setTimeout(() => {
+          liveDebounce = null;
+          void triggerAutoSync('live');
+        }, LIVE_DEBOUNCE_MS);
       }
     )
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'products', filter: `store_id=eq.${storeId}` },
       () => {
-        void triggerAutoSync('live');
+        if (liveDebounce) clearTimeout(liveDebounce);
+        liveDebounce = setTimeout(() => {
+          liveDebounce = null;
+          void triggerAutoSync('live');
+        }, LIVE_DEBOUNCE_MS);
       }
     )
     .subscribe();
