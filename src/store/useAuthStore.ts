@@ -80,11 +80,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isStoreSetup: true,
         loginError: '',
       });
-      try {
-        await refreshStockFromCloud();
-      } catch {
-        // Show local stock if cloud is unreachable
-      }
+      void refreshStockFromCloud();
       set({ isLoading: false });
       return;
     }
@@ -110,11 +106,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       clearAllWarehouseSessions();
       await setCurrentUserId(user.id);
       const store = (await pullAdminStoreLimits(storeId)) || (await getCurrentStore());
-      try {
-        await refreshStockFromCloud();
-      } catch {
-        // Login still succeeds; inventory will retry
-      }
+      void refreshStockFromCloud();
       set({ 
         currentUser: user, 
         currentStore: store,
@@ -139,11 +131,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const store = storeId
       ? (await pullAdminStoreLimits(storeId)) || (await getCurrentStore())
       : await getCurrentStore();
-    try {
-      await refreshStockFromCloud();
-    } catch {
-      // Warehouse login still succeeds
-    }
+    void refreshStockFromCloud();
     set({
       currentUser: owner,
       currentStore: store,

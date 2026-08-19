@@ -12,7 +12,15 @@ import { triggerPushSync } from '@/lib/sync';
 import { resolveSalePrice, type SaleMode, type UnitType } from '@/lib/bulkPricing';
 import type { StockChange } from '@/lib/stockEvents';
 import { moneyEquals, roundMoney, toMoneyAmount } from '@/lib/money';
-import { deductSaleStockForItems, getLocationStock, getLocationStockMap, reconcileProductStockBatches, toQty } from '@/lib/warehouse';
+import {
+  deductSaleStockForItems,
+  getLocationStock,
+  getLocationStockMap,
+  getStoreBatchStockMap,
+  isWarehouseLocation,
+  reconcileProductStockBatches,
+  toQty,
+} from '@/lib/warehouse';
 
 export interface CartItem {
   id: string;
@@ -145,30 +153,28 @@ function buildCartLine(
 }
 
 async function stockAtContext(productId: string, locationId: string | null): Promise<number> {
-  if (locationId) {
-    const available = await getLocationStock(productId, locationId);
-    if (available > 0) return available;
-
-    const product = await db.products.get(productId);
-    if (!product) return 0;
-
-    const allBatches = await db.stock_batches.where('product_id').equals(productId).toArray();
-    const batchTotal = allBatches.reduce((sum, b) => sum + toQty(b.quantity), 0);
-
-    // Stock lives at another location — do not invent shop stock from catalog
-    if (allBatches.length > 0 && batchTotal > 0) return 0;
-
-    // Truly no batch rows yet: migrate catalog opening stock into this location once
-    if (allBatches.length === 0 && toQty(product.stock_level) > 0) {
-      await reconcileProductStockBatches(product.store_id, productId, locationId);
-      return getLocationStock(productId, locationId);
-    }
-
-    // Batch rows exist but sum to 0 → sold out
-    return 0;
-  }
   const product = await db.products.get(productId);
-  return toQty(product?.stock_level);
+  if (!product) return 0;
+
+  if (locationId && (await isWarehouseLocation(locationId))) {
+    return getLocationStock(productId, locationId);
+  }
+
+  const shopMap = await getStoreBatchStockMap(product.store_id);
+  const shopQty = shopMap[productId];
+  if (typeof shopQty === 'number' && shopQty > 0) return shopQty;
+
+  const allBatches = await db.stock_batches.where('product_id').equals(productId).toArray();
+  const batchTotal = allBatches.reduce((sum, b) => sum + toQty(b.quantity), 0);
+  if (batchTotal > 0) return shopQty || 0;
+
+  if (allBatches.length === 0 && toQty(product.stock_level) > 0) {
+    await reconcileProductStockBatches(product.store_id, productId, locationId);
+    const after = await getStoreBatchStockMap(product.store_id);
+    return after[productId] || toQty(product.stock_level);
+  }
+
+  return shopQty || 0;
 }
 
 export const useCartStore = create<CartState>((set, get) => ({
@@ -216,7 +222,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       unitType === 'pack' ? nextQty * packSize : nextQty;
 
     if (available <= 0) {
-      return { success: false, error: `${product.name} is out of stock at this location` };
+      return { success: false, error: `${product.name} is out of stock` };
     }
     if (nextBase > available) {
       return {
@@ -423,10 +429,11 @@ export const useCartStore = create<CartState>((set, get) => ({
       if (available >= need.qty) continue;
       // Only migrates when the product has zero batch rows; otherwise syncs catalog down
       await reconcileProductStockBatches(storeId, productId, locationId);
-      const after = await getLocationStock(productId, locationId);
+      const afterMap = await getLocationStockMap(storeId, locationId);
+      const after = afterMap[productId] || 0;
       if (after < need.qty) {
         throw new Error(
-          `Insufficient stock for "${need.name}". Only ${after} available at this location.`
+          `Insufficient stock for "${need.name}". Only ${after} available.`
         );
       }
     }

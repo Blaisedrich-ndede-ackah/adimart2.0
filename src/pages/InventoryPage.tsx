@@ -10,6 +10,7 @@ import {
   LocalProduct,
   getCurrentStoreProducts,
   syncBidirectional,
+  syncStockFast,
 } from '@/lib/dexie';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { alignProductsWithBatchStock, toMoney, toQty } from '@/lib/warehouse';
@@ -58,23 +59,24 @@ export default function InventoryPage() {
     };
 
     try {
+      await paintLocal();
+
       if (shouldSync && isSupabaseConfigured()) {
         try {
-          setSyncStatus('Matching stock with cloud…');
-          const result = await syncBidirectional();
+          setSyncStatus('Updating from cloud…');
+          const result = await syncStockFast();
           lastSyncAtRef.current = Date.now();
           if (result.success) {
-            setSyncStatus('Same stock on every browser');
-            window.setTimeout(() => setSyncStatus(''), 2500);
+            setSyncStatus('Stock is up to date');
+            window.setTimeout(() => setSyncStatus(''), 2000);
           } else {
-            setSyncStatus(result.message || 'Cloud sync failed — tap Refresh');
+            setSyncStatus(result.message || 'Cloud update delayed — tap Refresh');
           }
+          await paintLocal();
         } catch {
-          setSyncStatus('Cloud sync failed — tap Refresh');
+          setSyncStatus('Cloud update delayed — tap Refresh');
         }
       }
-
-      await paintLocal();
     } catch {
       try {
         const allProducts = await getCurrentStoreProducts();
@@ -163,8 +165,17 @@ export default function InventoryPage() {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     lastSyncAtRef.current = 0;
-    await loadProducts({ sync: true });
-    setIsRefreshing(false);
+    setSyncStatus('Full sync…');
+    try {
+      if (isSupabaseConfigured()) {
+        const result = await syncBidirectional();
+        setSyncStatus(result.success ? 'Stock is up to date' : result.message);
+        window.setTimeout(() => setSyncStatus(''), 2500);
+      }
+      await loadProducts({ sync: false });
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   useEffect(() => {

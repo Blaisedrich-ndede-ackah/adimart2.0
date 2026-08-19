@@ -7,7 +7,7 @@ import BarcodeScanner from '@/components/BarcodeScanner';
 import CheckoutOverlay from '@/components/CheckoutOverlay';
 import { useCartStore } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
-import { LocalProduct, LocalLocation, getCurrentStoreActiveProducts, getCurrentStoreId, refreshStockFromCloud } from '@/lib/dexie';
+import { LocalProduct, LocalLocation, getCurrentStoreActiveProducts, getCurrentStoreId } from '@/lib/dexie';
 import { playScanBeep, primeScanBeep } from '@/lib/scanBeep';
 import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 import { getBluetoothHardwareStatus, subscribeBluetoothStatus } from '@/lib/bluetoothPeripherals';
@@ -20,6 +20,7 @@ import {
   getLocationStockMap,
   alignProductsWithBatchStock,
   resolveSaleLocations,
+  getStoreBatchStockMap,
   toMoney,
   toQty,
 } from '@/lib/warehouse';
@@ -72,8 +73,8 @@ export default function POSPage() {
     try {
       const storeId = await getCurrentStoreId();
       if (storeId && !soft) {
-        await refreshStockFromCloud();
         await ensureStoreLocations(storeId);
+        void triggerAutoSync('pos-load');
       }
       let list = await getCurrentStoreActiveProducts();
       // Keep catalog stock_level = batch totals (same truth Inventory uses)
@@ -87,8 +88,14 @@ export default function POSPage() {
       list.sort((a, b) => a.name.localeCompare(b.name));
       setProducts(list);
 
-      if (storeId && selectedLocationId) {
-        setLocationStock(await getLocationStockMap(storeId, selectedLocationId));
+      if (storeId) {
+        const map = selectedLocationId
+          ? await getLocationStockMap(storeId, selectedLocationId)
+          : await getStoreBatchStockMap(storeId);
+        for (const product of list) {
+          if (map[product.id] === undefined) map[product.id] = toQty(product.stock_level);
+        }
+        setLocationStock(map);
       } else {
         setLocationStock({});
       }
@@ -468,8 +475,10 @@ export default function POSPage() {
             ) : (
               <div className="space-y-2 md:grid md:grid-cols-1 xl:grid-cols-2 md:gap-2 md:space-y-0">
                 {filteredProducts.map((product) => {
-                  // Location batches only — never fall back to store-wide catalog stock
-                  const stockHere = locationStock[product.id] ?? toQty(product.stock_level);
+                  const stockHere =
+                    locationStock[product.id] !== undefined
+                      ? locationStock[product.id]
+                      : toQty(product.stock_level);
                   const outOfStock = stockHere <= 0;
                   const packSize = Math.max(1, Number(product.pack_size) || 1);
                   const modes = getAvailableSaleModes(product);

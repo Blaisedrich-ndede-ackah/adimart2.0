@@ -1310,6 +1310,8 @@ export async function adoptCloudStockLedger(
 }
 
 let hydrateInFlight: Promise<{ ok: boolean; message: string }> | null = null;
+/** Last successful cloud stock adopt (ms). Used to skip duplicate pulls. */
+export let lastStockHydrateOkAt = 0;
 
 export async function refreshStockFromCloud(): Promise<{ ok: boolean; message: string }> {
   if (hydrateInFlight) return hydrateInFlight;
@@ -1335,6 +1337,7 @@ export async function refreshStockFromCloud(): Promise<{ ok: boolean; message: s
       // Ledger was replaced even if heal fails
     }
 
+    lastStockHydrateOkAt = Date.now();
     return { ok: true, message: `Stock matched to cloud (${adopted.batchCount} batches)` };
   })();
 
@@ -1395,7 +1398,7 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
 }
 
 // Sync to Supabase
-export async function syncToSupabase(): Promise<{ success: boolean; message: string }> {
+export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ success: boolean; message: string }> {
   if (!isSupabaseConfigured()) {
     return { success: false, message: 'Supabase not configured. Add environment variables to enable cloud sync.' };
   }
@@ -1405,9 +1408,11 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
     return { success: false, message: 'No store selected' };
   }
 
-  const connection = await testSupabaseConnection();
-  if (!connection.ok) {
-    return { success: false, message: connection.error || 'Could not connect to Supabase.' };
+  if (!opts?.skipPing) {
+    const connection = await testSupabaseConnection();
+    if (!connection.ok) {
+      return { success: false, message: connection.error || 'Could not connect to Supabase.' };
+    }
   }
 
   const errors: string[] = [];
@@ -1793,6 +1798,7 @@ export async function syncToSupabase(): Promise<{ success: boolean; message: str
 export async function syncFromSupabase(opts?: {
   onlyTables?: string[];
   skipCatalogAlign?: boolean;
+  includeHistory?: boolean;
 }): Promise<{ success: boolean; message: string; pulledCount: number }> {
   if (!isSupabaseConfigured()) {
     return { success: false, message: 'Supabase not configured.', pulledCount: 0 };
@@ -2168,6 +2174,7 @@ export async function syncFromSupabase(opts?: {
 
     for (const config of tables) {
       if (opts?.onlyTables && !opts.onlyTables.includes(config.table)) continue;
+      if (!opts?.includeHistory && config.table === 'stock_movements') continue;
 
       const { data, error } = await fetchAllStoreRows(config.table, storeId);
 
@@ -2255,34 +2262,33 @@ export async function pullStockLedgerFromCloud(storeId?: string): Promise<boolea
   return adopted.ok;
 }
 
-export async function syncBidirectional(): Promise<{ success: boolean; message: string }> {
-  const storeId = await getCurrentStoreId();
-  if (storeId) {
-    const adopted = await adoptCloudStockLedger(storeId);
-    if (adopted.ok) {
-      try {
-        const { canonicalizeStoreStock, syncStoreCatalogStockFromBatches } = await import('@/lib/warehouse');
-        await canonicalizeStoreStock(storeId);
-        await syncStoreCatalogStockFromBatches(storeId);
-      } catch {
-        // Push whatever we have
-      }
-    }
+export async function syncStockFast(): Promise<{ success: boolean; message: string }> {
+  const push = await syncToSupabase({ skipPing: true });
+  const adopted = await refreshStockFromCloud();
+  if (adopted.ok) {
+    return { success: true, message: adopted.message };
   }
+  if (push.success) {
+    return { success: false, message: `Pushed local sales. Pull issue: ${adopted.message}` };
+  }
+  return { success: false, message: adopted.message || push.message };
+}
 
+export async function syncBidirectional(): Promise<{ success: boolean; message: string }> {
   const push = await syncToSupabase();
-  const pull = await syncFromSupabase();
+  const pull = await syncFromSupabase({ skipCatalogAlign: true });
+  const adopted = await refreshStockFromCloud();
 
-  if (!pull.success && !push.success) {
+  if (!pull.success && !push.success && !adopted.ok) {
     return { success: false, message: `Pull: ${pull.message}; Push: ${push.message}` };
   }
 
-  if (!pull.success) {
-    return { success: push.success, message: `Pushed to cloud. Pull issue: ${pull.message}` };
+  if (!adopted.ok) {
+    return { success: false, message: adopted.message || pull.message };
   }
 
   if (!push.success) {
-    return { success: false, message: `Pulled from cloud. Push issue: ${push.message}` };
+    return { success: true, message: `${adopted.message}. ${push.message}` };
   }
 
   return {
@@ -2367,7 +2373,7 @@ export async function restoreStoreFromCloud(
   );
 
   await setCurrentStoreId(storeId);
-  const pull = await syncFromSupabase();
+  const pull = await syncFromSupabase({ includeHistory: true });
 
   if (!pull.success) {
     return { success: false, message: pull.message };
@@ -2429,7 +2435,7 @@ export async function addStoreFromCloud(
   }
 
   await setCurrentStoreId(cleanId);
-  const pull = await syncFromSupabase();
+  const pull = await syncFromSupabase({ includeHistory: true });
   if (!pull.success) {
     return { success: false, message: pull.message };
   }
