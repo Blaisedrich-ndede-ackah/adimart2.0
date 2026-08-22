@@ -118,7 +118,7 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
 
   if (loading) {
     return (
-      <div className="min-h-[100dvh] bg-[var(--color-surface)] flex items-center justify-center">
+      <div className="h-full min-h-0 bg-[var(--color-surface)] flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
       </div>
     );
@@ -126,7 +126,7 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
 
   if (!catalog) {
     return (
-      <div className="min-h-[100dvh] bg-[var(--color-surface)] flex flex-col items-center justify-center p-6 text-center">
+      <div className="h-full min-h-0 bg-[var(--color-surface)] flex flex-col items-center justify-center p-6 text-center">
         <Package className="w-12 h-12 text-gray-300 mb-3" />
         <h1 className="text-xl font-bold text-gray-900 mb-2">Shop unavailable</h1>
         <p className="text-sm text-gray-500 max-w-sm">{error || 'This storefront was not found.'}</p>
@@ -135,7 +135,7 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
   }
 
   return (
-    <div className="min-h-[100dvh] bg-[var(--color-surface)] flex flex-col">
+    <div className="h-full min-h-0 bg-[var(--color-surface)] flex flex-col overflow-hidden">
       <header className="bg-primary text-white px-4 py-4 flex-shrink-0">
         <div className="max-w-3xl mx-auto flex items-center gap-3">
           {catalog.store.logo_url ? (
@@ -170,7 +170,10 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto">
+      <main
+        className="flex-1 min-h-0 overflow-y-auto overscroll-contain"
+        style={{ WebkitOverflowScrolling: 'touch' }}
+      >
         <div className="max-w-3xl mx-auto px-4 py-4 pb-28">
           {error && view !== 'catalog' && (
             <div className="mb-3 px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm">
@@ -205,7 +208,7 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
 
           {view === 'catalog' && (
             <>
-              <div className="flex gap-2 overflow-x-auto no-scrollbar mb-4">
+              <div className="flex gap-2 overflow-x-auto no-scrollbar mb-4 touch-pan-x">
                 {categories.map((cat) => (
                   <button
                     key={cat}
@@ -391,11 +394,11 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
       </main>
 
       {view === 'catalog' && cartCount > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-[var(--color-surface)] via-[var(--color-surface)] to-transparent">
+        <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-[var(--color-surface)] via-[var(--color-surface)] to-transparent pointer-events-none z-30">
           <button
             type="button"
             onClick={() => setView('cart')}
-            className="max-w-3xl mx-auto w-full bg-primary text-white py-3.5 rounded-2xl flex items-center justify-between px-5 shadow-lg font-semibold"
+            className="pointer-events-auto max-w-3xl mx-auto w-full bg-primary text-white py-3.5 rounded-2xl flex items-center justify-between px-5 shadow-lg font-semibold"
           >
             <span>View cart ({cartCount})</span>
             <span>GHS {cartTotal.toFixed(2)}</span>
