@@ -206,7 +206,10 @@ export default function POSPage() {
       playScanBeep('success');
       setPosTab('cart');
     } else if (result.error) {
-      if (result.error.includes('out of stock') || result.error.includes('available')) {
+      if (
+        result.error.includes('out of stock') ||
+        result.error.includes('enough stock')
+      ) {
         flashFeedback({ type: 'warning', message: result.error });
         playScanBeep('warning');
       } else {
@@ -497,11 +500,13 @@ export default function POSPage() {
                           GHS {toMoney(product.selling_price).toFixed(2)}
                           {packSize > 1 ? <span className="text-[10px] text-gray-400 font-medium"> / unit</span> : null}
                         </p>
-                        <p className="text-[10px] text-gray-500 mt-0.5">
-                          Stock: {stockHere}
-                          {product.track_expiry === 1 ? ' · Expiry tracked' : ''}
-                          {wholesaleOk ? ' · Wholesale ready' : ''}
-                        </p>
+                        {(product.track_expiry === 1 || wholesaleOk) && (
+                          <p className="text-[10px] text-gray-500 mt-0.5">
+                            {product.track_expiry === 1 ? 'Expiry tracked' : ''}
+                            {product.track_expiry === 1 && wholesaleOk ? ' · ' : ''}
+                            {wholesaleOk ? 'Wholesale ready' : ''}
+                          </p>
+                        )}
                         {outOfStock && (
                           <p className="text-[10px] font-semibold text-red-600 mt-0.5">
                             Out of stock
@@ -590,11 +595,6 @@ export default function POSPage() {
                           {item.sale_mode === 'wholesale' && (
                             <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-medium">
                               Wholesale
-                            </span>
-                          )}
-                          {item.base_quantity >= item.available_stock && (
-                            <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">
-                              Max stock
                             </span>
                           )}
                         </div>

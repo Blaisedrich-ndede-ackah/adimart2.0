@@ -34,7 +34,6 @@ export interface CartItem {
   sale_mode: SaleMode;
   pack_size: number;
   subtotal: number;
-  available_stock: number;
   image_url?: string;
   price_label?: string;
 }
@@ -130,7 +129,6 @@ function buildCartLine(
   saleMode: SaleMode,
   unitType: UnitType,
   quantity: number,
-  availableStock: number,
   existingId?: string
 ): CartItem {
   const priced = resolveSalePrice({ product, saleMode, quantity, unitType });
@@ -146,7 +144,6 @@ function buildCartLine(
     sale_mode: saleMode,
     pack_size: Math.max(1, Number(product.pack_size) || 1),
     subtotal: roundMoney(unitPrice * quantity),
-    available_stock: availableStock,
     image_url: product.image_url,
     price_label: priced.label,
   };
@@ -227,7 +224,7 @@ export const useCartStore = create<CartState>((set, get) => ({
     if (nextBase > available) {
       return {
         success: false,
-        error: `Only ${available} unit(s) of ${product.name} available here`,
+        error: `Not enough stock of ${product.name} to add more`,
       };
     }
 
@@ -239,14 +236,13 @@ export const useCartStore = create<CartState>((set, get) => ({
           s.saleMode,
           unitType,
           nextQty,
-          available,
           existing.id
         );
         items = s.items.map((i) => (i.id === existing.id ? line : i));
       } else {
         items = [
           ...s.items,
-          buildCartLine(product, s.saleMode, unitType, addQty, available),
+          buildCartLine(product, s.saleMode, unitType, addQty),
         ];
       }
       return { ...withDiscount(s, items), items };
@@ -277,13 +273,13 @@ export const useCartStore = create<CartState>((set, get) => ({
     const packSize = Math.max(1, Number(product.pack_size) || 1);
     const baseQty = item.unit_type === 'pack' ? qty * packSize : qty;
     if (baseQty > available) {
-      return { success: false, error: `Only ${available} unit(s) available` };
+      return { success: false, error: 'Not enough stock to add more of this item' };
     }
 
     set((s) => {
       const items = s.items.map((i) =>
         i.id === itemId
-          ? buildCartLine(product, i.sale_mode, i.unit_type, qty, available, i.id)
+          ? buildCartLine(product, i.sale_mode, i.unit_type, qty, i.id)
           : i
       );
       return { ...withDiscount(s, items), items };
@@ -432,9 +428,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       const afterMap = await getLocationStockMap(storeId, locationId);
       const after = afterMap[productId] || 0;
       if (after < need.qty) {
-        throw new Error(
-          `Insufficient stock for "${need.name}". Only ${after} available.`
-        );
+        throw new Error(`Insufficient stock for "${need.name}".`);
       }
     }
 
