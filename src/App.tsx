@@ -73,7 +73,7 @@ export default function App() {
   useEffect(() => {
     // Cashiers cannot stay on owner-only pages after switch/login
     if (currentUser?.role !== 'cashier') return;
-    const ownerOnly = ['inventory', 'reports', 'settings', 'warehouse', 'cashbook'];
+    const ownerOnly = ['inventory', 'reports', 'settings', 'warehouse', 'cashbook', 'subscription'];
     const ecommerceOk = (currentUser.can_manage_ecommerce ?? 0) === 1;
     if (ownerOnly.includes(currentPage) || (currentPage === 'ecommerce' && !ecommerceOk)) {
       setCurrentPage('pos');
@@ -185,7 +185,7 @@ export default function App() {
       case 'devices':
         return <DevicesPage />;
       case 'subscription':
-        return <SubscriptionPage />;
+        return role === 'owner' ? <SubscriptionPage /> : <POSPage />;
       case 'inventory':
         return role === 'owner' ? <InventoryPage /> : <POSPage />;
       case 'warehouse':
@@ -220,7 +220,11 @@ export default function App() {
       <AppNav currentPage={currentPage} onNavigate={setCurrentPage} />
       <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
         <PWAInstallBanner />
-        <SubscriptionWarningBanner onOpenPlan={() => setCurrentPage('subscription')} />
+        <SubscriptionWarningBanner
+          onOpenPlan={
+            currentUser?.role === 'owner' ? () => setCurrentPage('subscription') : undefined
+          }
+        />
         <StoreBrandingBar />
         <div className="flex-1 min-h-0 overflow-hidden pb-16 md:pb-0">
           {renderPage()}
