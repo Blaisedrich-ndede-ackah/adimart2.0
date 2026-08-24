@@ -48,7 +48,7 @@ function formatMoney(amount: number): string {
 }
 
 /**
- * Owner-only cash book (Cash Flow):
+ * Store cash book (Cash Flow):
  * manual income/expense ledger with weekly net cash flow.
  */
 export default function CashBookPage() {
@@ -162,7 +162,7 @@ export default function CashBookPage() {
           <BookOpen className="w-5 h-5 text-white shrink-0" />
           <div>
             <h1 className="text-white font-bold text-lg">Cash Flow</h1>
-            <p className="text-emerald-200 text-xs">Owner cash book</p>
+            <p className="text-emerald-200 text-xs">Store cash book</p>
           </div>
         </div>
       </div>
