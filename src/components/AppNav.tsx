@@ -34,7 +34,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         { id: 'expenses', label: 'Expenses', icon: PiggyBank, show: true },
         { id: 'cashbook', label: 'Cash Book', icon: BookOpen, show: isOwner },
         { id: 'devices', label: 'Devices', icon: Bluetooth, show: true },
-        { id: 'subscription', label: 'Plan', icon: CalendarClock, show: true },
+        { id: 'subscription', label: 'Plan', icon: CalendarClock, show: isOwner },
         { id: 'inventory', label: 'Inventory', icon: Package, show: isOwner },
         {
           id: 'ecommerce',

@@ -71,13 +71,19 @@ export default function SubscriptionWarningBanner({ onOpenPlan }: SubscriptionWa
         {isExpired ? (
           <p>
             <span className="font-bold">Subscription expired</span>
-            {daysText ? ` (${daysText})` : ''}. Open Plan to renew online with Paystack.
+            {daysText ? ` (${daysText})` : ''}.{' '}
+            {onOpenPlan
+              ? 'Open Plan to renew online with Paystack.'
+              : 'Ask the store owner to renew.'}
           </p>
         ) : (
           <p>
             <span className="font-bold">Subscription ending soon</span>
             {daysText ? ` — expires ${daysText}` : ''} (
-            {formatSubscriptionDate(info.expiresAt)}). Open Plan to renew online with Paystack.
+            {formatSubscriptionDate(info.expiresAt)}).{' '}
+            {onOpenPlan
+              ? 'Open Plan to renew online with Paystack.'
+              : 'Ask the store owner to renew.'}
           </p>
         )}
         {onOpenPlan && (
