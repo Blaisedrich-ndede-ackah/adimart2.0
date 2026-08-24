@@ -211,7 +211,7 @@ export interface LocalExpense {
   synced: number;
 }
 
-/** Owner cash book ledger (manual income / expense entries) */
+/** Store cash book ledger (manual income / expense entries) */
 export interface LocalCashBookEntry {
   id: string;
   store_id: string;

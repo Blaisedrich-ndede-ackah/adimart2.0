@@ -32,7 +32,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         { id: 'pos', label: 'POS', icon: ScanBarcode, show: true },
         { id: 'transactions', label: isOwner ? 'Sales' : 'My Sales', icon: Receipt, show: true },
         { id: 'expenses', label: 'Expenses', icon: PiggyBank, show: true },
-        { id: 'cashbook', label: 'Cash Book', icon: BookOpen, show: isOwner },
+        { id: 'cashbook', label: 'Cash Book', icon: BookOpen, show: true },
         { id: 'devices', label: 'Devices', icon: Bluetooth, show: true },
         { id: 'subscription', label: 'Plan', icon: CalendarClock, show: isOwner },
         { id: 'inventory', label: 'Inventory', icon: Package, show: isOwner },
@@ -49,10 +49,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   );
 
   // Keep bottom bar to a few primary destinations; rest live under More
-  const primaryIds = useMemo(() => {
-    if (isOwner) return ['pos', 'transactions', 'cashbook'] as const;
-    return ['pos', 'transactions', 'expenses'] as const;
-  }, [isOwner]);
+  const primaryIds = ['pos', 'transactions', 'cashbook'] as const;
 
   const primaryItems = navItems.filter((item) =>
     (primaryIds as readonly string[]).includes(item.id)
