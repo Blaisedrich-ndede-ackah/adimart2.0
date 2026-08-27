@@ -21,6 +21,13 @@ import {
   reconcileProductStockBatches,
   toQty,
 } from '@/lib/warehouse';
+import {
+  getOtherChargeCategory,
+  otherChargesTotal,
+  serializeOtherCharges,
+  type OtherCharge,
+  type OtherChargeCategoryId,
+} from '@/lib/otherCharges';
 
 export interface CartItem {
   id: string;
@@ -48,6 +55,8 @@ interface CartState {
   discountPercent: number;
   discountFixed: number;
   discountAmount: number;
+  otherCharges: OtherCharge[];
+  otherChargesTotal: number;
   subtotal: number;
   total: number;
 
@@ -65,6 +74,9 @@ interface CartState {
   setDiscountPercent: (percent: number) => void;
   setDiscountFixed: (amount: number) => void;
   clearDiscount: () => void;
+  setOtherCharge: (categoryId: OtherChargeCategoryId, amount: number, customLabel?: string) => void;
+  removeOtherCharge: (categoryId: OtherChargeCategoryId) => void;
+  clearOtherCharges: () => void;
   clearCart: () => void;
 
   completeSale: (
@@ -79,6 +91,8 @@ interface CartState {
     items: CartItem[];
     subtotal: number;
     discount: number;
+    otherCharges: OtherCharge[];
+    otherChargesTotal: number;
     total: number;
     stockChanges: StockChange[];
     locationId: string;
@@ -89,7 +103,8 @@ function recalculate(
   items: CartItem[],
   discountKind: CartDiscountKind,
   discountPercent: number,
-  discountFixed: number
+  discountFixed: number,
+  otherCharges: OtherCharge[]
 ) {
   const subtotal = roundMoney(items.reduce((sum, i) => sum + i.subtotal, 0));
   let kind = discountKind;
@@ -109,10 +124,13 @@ function recalculate(
     discountAmount = 0;
   }
 
-  const total = roundMoney(subtotal - discountAmount);
+  const chargesTotal = otherChargesTotal(otherCharges);
+  const total = roundMoney(subtotal - discountAmount + chargesTotal);
   return {
     subtotal,
     discountAmount,
+    otherCharges,
+    otherChargesTotal: chargesTotal,
     total,
     discountKind: kind,
     discountPercent: percent,
@@ -121,7 +139,13 @@ function recalculate(
 }
 
 function withDiscount(state: CartState, items: CartItem[]) {
-  return recalculate(items, state.discountKind, state.discountPercent, state.discountFixed);
+  return recalculate(
+    items,
+    state.discountKind,
+    state.discountPercent,
+    state.discountFixed,
+    state.otherCharges
+  );
 }
 
 function buildCartLine(
@@ -182,6 +206,8 @@ export const useCartStore = create<CartState>((set, get) => ({
   discountPercent: 0,
   discountFixed: 0,
   discountAmount: 0,
+  otherCharges: [],
+  otherChargesTotal: 0,
   subtotal: 0,
   total: 0,
 
@@ -309,23 +335,78 @@ export const useCartStore = create<CartState>((set, get) => ({
 
   setDiscountPercent: (percent) => {
     set((state) => {
-      const calcs = recalculate(state.items, 'percentage', percent, 0);
+      const calcs = recalculate(state.items, 'percentage', percent, 0, state.otherCharges);
       return calcs;
     });
   },
 
   setDiscountFixed: (amount) => {
     set((state) => {
-      const calcs = recalculate(state.items, 'fixed', 0, amount);
+      const calcs = recalculate(state.items, 'fixed', 0, amount, state.otherCharges);
       return calcs;
     });
   },
 
   clearDiscount: () => {
     set((state) => {
-      const calcs = recalculate(state.items, 'none', 0, 0);
+      const calcs = recalculate(state.items, 'none', 0, 0, state.otherCharges);
       return calcs;
     });
+  },
+
+  setOtherCharge: (categoryId, amount, customLabel) => {
+    const category = getOtherChargeCategory(categoryId);
+    if (!category) return;
+    const value = toMoneyAmount(amount);
+    set((state) => {
+      const without = state.otherCharges.filter((c) => c.id !== categoryId);
+      const nextCharges =
+        value > 0
+          ? [
+              ...without,
+              {
+                id: category.id,
+                label:
+                  category.id === 'other'
+                    ? (customLabel || '').trim() || category.label
+                    : category.label,
+                amount: roundMoney(value),
+              },
+            ]
+          : without;
+      return recalculate(
+        state.items,
+        state.discountKind,
+        state.discountPercent,
+        state.discountFixed,
+        nextCharges
+      );
+    });
+  },
+
+  removeOtherCharge: (categoryId) => {
+    set((state) => {
+      const nextCharges = state.otherCharges.filter((c) => c.id !== categoryId);
+      return recalculate(
+        state.items,
+        state.discountKind,
+        state.discountPercent,
+        state.discountFixed,
+        nextCharges
+      );
+    });
+  },
+
+  clearOtherCharges: () => {
+    set((state) =>
+      recalculate(
+        state.items,
+        state.discountKind,
+        state.discountPercent,
+        state.discountFixed,
+        []
+      )
+    );
   },
 
   clearCart: () => {
@@ -335,6 +416,8 @@ export const useCartStore = create<CartState>((set, get) => ({
       discountPercent: 0,
       discountFixed: 0,
       discountAmount: 0,
+      otherCharges: [],
+      otherChargesTotal: 0,
       subtotal: 0,
       total: 0,
     });
@@ -365,7 +448,8 @@ export const useCartStore = create<CartState>((set, get) => ({
       state.items,
       state.discountKind,
       state.discountPercent,
-      state.discountFixed
+      state.discountFixed,
+      state.otherCharges
     );
 
     if (!isOwner && !cashierCanDiscount && priced.discountAmount > 0) {
@@ -449,6 +533,8 @@ export const useCartStore = create<CartState>((set, get) => ({
           cashier_name: cashierName,
           total_amount: priced.total,
           discount_applied: priced.discountAmount,
+          other_charges_json: serializeOtherCharges(priced.otherCharges),
+          other_charges_total: priced.otherChargesTotal,
           payment_method: paymentMethod,
           cash_amount: cash,
           paystack_amount: paystack,
@@ -506,6 +592,8 @@ export const useCartStore = create<CartState>((set, get) => ({
       items: [...state.items],
       subtotal: priced.subtotal,
       discount: priced.discountAmount,
+      otherCharges: [...priced.otherCharges],
+      otherChargesTotal: priced.otherChargesTotal,
       total: priced.total,
       stockChanges,
       locationId,
@@ -517,6 +605,8 @@ export const useCartStore = create<CartState>((set, get) => ({
       discountPercent: 0,
       discountFixed: 0,
       discountAmount: 0,
+      otherCharges: [],
+      otherChargesTotal: 0,
       subtotal: 0,
       total: 0,
     });

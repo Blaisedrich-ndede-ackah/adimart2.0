@@ -125,6 +125,8 @@ CREATE TABLE IF NOT EXISTS transactions (
   cashier_name VARCHAR(255) DEFAULT '',
   total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
   discount_applied DECIMAL(12,2) DEFAULT 0,
+  other_charges_json TEXT DEFAULT '[]',
+  other_charges_total DECIMAL(12,2) DEFAULT 0,
   payment_method VARCHAR(20) NOT NULL CHECK (payment_method IN ('cash', 'split', 'paystack')),
   cash_amount DECIMAL(12,2) DEFAULT 0,
   paystack_amount DECIMAL(12,2) DEFAULT 0,

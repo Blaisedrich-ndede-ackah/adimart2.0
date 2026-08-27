@@ -29,6 +29,7 @@ import {
 } from '@/lib/reportAnalytics';
 import { getExpiringBatches } from '@/lib/warehouse';
 import FinancialDonutChart from '@/components/FinancialDonutChart';
+import { parseOtherCharges } from '@/lib/otherCharges';
 
 type ReportTab = 'overview' | 'products' | 'expenses' | 'locations';
 
@@ -510,6 +511,12 @@ export default function ReportsPage() {
                             <div key={item.id} className="flex justify-between py-1 text-xs">
                               <span>{item.product_name} × {item.quantity}</span>
                               <span>GH₵{item.subtotal.toFixed(2)}</span>
+                            </div>
+                          ))}
+                          {parseOtherCharges(txn.other_charges_json).map((charge) => (
+                            <div key={charge.id} className="flex justify-between py-1 text-xs text-gray-600">
+                              <span>{charge.label}</span>
+                              <span>GH₵{charge.amount.toFixed(2)}</span>
                             </div>
                           ))}
                         </div>

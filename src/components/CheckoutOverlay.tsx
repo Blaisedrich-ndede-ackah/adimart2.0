@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   X, Banknote, CreditCard, Split, Percent, Shield,
   CheckCircle2, Loader2, Printer, AlertTriangle, Share2, Download,
-  Smartphone, MessageCircle
+  Smartphone, MessageCircle, CirclePlus, Trash2
 } from 'lucide-react';
 import { useCartStore, CartItem } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -10,6 +10,11 @@ import { generatePaystackReference, initializePaystack, isPaystackConfigured, is
 import { printReceipt, type ReceiptData } from '@/lib/printService';
 import { shareReceipt, downloadReceipt, shareViaWhatsApp, PDFReceiptData } from '@/lib/receiptGenerator';
 import ProductImage from '@/components/ProductImage';
+import {
+  OTHER_CHARGE_CATEGORIES,
+  type OtherCharge,
+  type OtherChargeCategoryId,
+} from '@/lib/otherCharges';
 
 interface CheckoutOverlayProps {
   isOpen: boolean;
@@ -17,13 +22,15 @@ interface CheckoutOverlayProps {
   onComplete: (receiptNumber: string) => void;
 }
 
-type Step = 'method' | 'discount' | 'pin-verify' | 'split-input' | 'paystack' | 'processing' | 'success';
+type Step = 'method' | 'discount' | 'charges' | 'pin-verify' | 'split-input' | 'paystack' | 'processing' | 'success';
 
 interface SaleResult {
   receiptNumber: string;
   items: CartItem[];
   subtotal: number;
   discount: number;
+  otherCharges: OtherCharge[];
+  otherChargesTotal: number;
   total: number;
   paymentMethod?: 'cash' | 'split' | 'paystack';
   cashAmount?: number;
@@ -49,6 +56,10 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
   const [discountMode, setDiscountMode] = useState<'percentage' | 'fixed'>('percentage');
   const [pendingDiscountKind, setPendingDiscountKind] = useState<'percentage' | 'fixed'>('percentage');
   const [pendingDiscountValue, setPendingDiscountValue] = useState(0);
+  const [chargeCategoryId, setChargeCategoryId] = useState<OtherChargeCategoryId | null>(null);
+  const [chargeAmount, setChargeAmount] = useState('');
+  const [chargeCustomLabel, setChargeCustomLabel] = useState('');
+  const [chargeError, setChargeError] = useState('');
 
   const discountCap = currentStore?.discount_cap_percentage ?? 10;
   const pinOnDiscount = currentStore?.pin_on_discount_enabled === 1;
@@ -74,6 +85,10 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
       setDiscountMode(allowPercentage ? 'percentage' : 'fixed');
       setPendingDiscountKind('percentage');
       setPendingDiscountValue(0);
+      setChargeCategoryId(null);
+      setChargeAmount('');
+      setChargeCustomLabel('');
+      setChargeError('');
       // Cashiers without discount permission cannot keep a leftover cart discount
       if (!canApplyDiscount && cart.discountAmount > 0) {
         cart.clearDiscount();
@@ -98,6 +113,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
       })),
       subtotal: result.subtotal,
       discount: result.discount,
+      otherCharges: result.otherCharges || [],
       total: result.total,
       paymentMethod: method,
       cashAmount: cashAmt,
@@ -148,6 +164,33 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
 
     if (discountMode === 'percentage') cart.setDiscountPercent(value);
     else cart.setDiscountFixed(value);
+    setStep('method');
+  }
+
+  function openChargesStep() {
+    setChargeError('');
+    setChargeCategoryId(null);
+    setChargeAmount('');
+    setChargeCustomLabel('');
+    setStep('charges');
+  }
+
+  function handleChargeApply() {
+    setChargeError('');
+    if (!chargeCategoryId) {
+      setChargeError('Select a charge category.');
+      return;
+    }
+    const value = parseFloat(chargeAmount);
+    if (isNaN(value) || value <= 0) {
+      setChargeError('Enter a valid charge amount.');
+      return;
+    }
+    cart.setOtherCharge(
+      chargeCategoryId,
+      value,
+      chargeCategoryId === 'other' ? chargeCustomLabel : undefined
+    );
     setStep('method');
   }
 
@@ -202,6 +245,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
         items: result.items,
         subtotal: result.subtotal,
         discount: result.discount,
+        otherCharges: result.otherCharges || [],
+        otherChargesTotal: result.otherChargesTotal || 0,
         total: result.total,
         paymentMethod: method,
         cashAmount: cashAmt,
@@ -365,6 +410,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
           <h2 className="text-lg font-bold text-gray-900">
             {step === 'method' && 'Checkout'}
             {step === 'discount' && 'Apply Discount'}
+            {step === 'charges' && 'Add Other Charges'}
             {step === 'pin-verify' && 'Owner Authorization'}
             {step === 'split-input' && 'Split Payment'}
             {step === 'paystack' && 'Processing Payment...'}
@@ -410,8 +456,26 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
                   <span>-GH₵{cart.discountAmount.toFixed(2)}</span>
                 </div>
               )}
+              {cart.otherCharges.map((charge) => (
+                <div key={charge.id} className="flex justify-between items-center text-sm text-gray-700 mb-1">
+                  <span className="truncate pr-2">{charge.label}</span>
+                  <span className="flex items-center gap-1 shrink-0">
+                    GH₵{charge.amount.toFixed(2)}
+                    {step === 'method' && (
+                      <button
+                        type="button"
+                        onClick={() => cart.removeOtherCharge(charge.id)}
+                        className="p-1 rounded-md hover:bg-red-50 touch-target"
+                        title={`Remove ${charge.label}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                      </button>
+                    )}
+                  </span>
+                </div>
+              ))}
               <div className="flex justify-between text-lg font-bold text-gray-900 pt-2 border-t border-gray-200 mt-2">
-                <span>Total</span>
+                <span>Grand Total</span>
                 <span>GH₵{cart.total.toFixed(2)}</span>
               </div>
             </div>
@@ -478,6 +542,26 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
               )}
 
               <button
+                type="button"
+                onClick={openChargesStep}
+                className="w-full flex items-center gap-3 p-4 rounded-xl border border-gray-200 hover:border-primary hover:bg-emerald-50 transition touch-target"
+              >
+                <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center">
+                  <CirclePlus className="w-5 h-5 text-primary" />
+                </div>
+                <div className="text-left flex-1">
+                  <p className="font-semibold text-gray-900">Add Other Charges</p>
+                  <p className="text-xs text-gray-500">
+                    {cart.otherCharges.length > 0
+                      ? cart.otherCharges
+                          .map((c) => `${c.label} GH₵${c.amount.toFixed(2)}`)
+                          .join(' · ')
+                      : 'Delivery, packing, service, or other'}
+                  </p>
+                </div>
+              </button>
+
+              <button
                 onClick={handleCashSale}
                 className="w-full flex items-center gap-3 p-4 rounded-xl border-2 border-primary bg-emerald-50 hover:bg-emerald-100 transition touch-target"
               >
@@ -538,6 +622,98 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
                   ⚠️ Paystack not configured. Add VITE_PAYSTACK_PUBLIC_KEY to enable.
                 </p>
               )}
+            </div>
+          )}
+
+          {step === 'charges' && (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">
+                Select a fee category, then enter the amount to add under the subtotal.
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {OTHER_CHARGE_CATEGORIES.map((cat) => {
+                  const applied = cart.otherCharges.find((c) => c.id === cat.id);
+                  const selected = chargeCategoryId === cat.id;
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => {
+                        setChargeCategoryId(cat.id);
+                        setChargeError('');
+                        setChargeAmount(applied ? String(applied.amount) : '');
+                        setChargeCustomLabel(cat.id === 'other' ? applied?.label || '' : '');
+                      }}
+                      className={`p-3 rounded-xl border text-left touch-target ${
+                        selected
+                          ? 'border-primary bg-emerald-50'
+                          : 'border-gray-200 bg-white hover:border-primary/60'
+                      }`}
+                    >
+                      <p className="text-sm font-semibold text-gray-900">{cat.label}</p>
+                      {applied && (
+                        <p className="text-[11px] text-primary mt-0.5">
+                          GH₵{applied.amount.toFixed(2)} applied
+                        </p>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              {chargeCategoryId === 'other' && (
+                <input
+                  value={chargeCustomLabel}
+                  onChange={(e) => setChargeCustomLabel(e.target.value)}
+                  placeholder="Custom charge name (optional)"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
+                />
+              )}
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">
+                  Charge amount (GH₵)
+                </label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={chargeAmount}
+                  onChange={(e) => setChargeAmount(e.target.value)}
+                  placeholder="0.00"
+                  min="0"
+                  step="0.01"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl text-lg font-semibold text-center focus:ring-2 focus:ring-primary outline-none"
+                  autoFocus={Boolean(chargeCategoryId)}
+                />
+              </div>
+              {chargeError && <p className="text-xs text-red-600">{chargeError}</p>}
+              {chargeCategoryId && cart.otherCharges.some((c) => c.id === chargeCategoryId) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    cart.removeOtherCharge(chargeCategoryId);
+                    setChargeAmount('');
+                    setStep('method');
+                  }}
+                  className="w-full py-2.5 text-sm text-red-600 font-medium"
+                >
+                  Remove this charge
+                </button>
+              )}
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setStep('method')}
+                  className="flex-1 py-3 border border-gray-300 rounded-xl text-gray-700 font-medium touch-target"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleChargeApply}
+                  className="flex-1 py-3 bg-primary text-white rounded-xl font-medium touch-target"
+                >
+                  Apply
+                </button>
+              </div>
             </div>
           )}
 

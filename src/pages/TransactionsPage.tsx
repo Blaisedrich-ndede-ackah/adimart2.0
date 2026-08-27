@@ -12,6 +12,7 @@ import {
 import { useAuthStore } from '@/store/useAuthStore';
 import { reprintTransactionReceipt } from '@/lib/receiptReprint';
 import { isPrinterConnected } from '@/lib/bluetoothPeripherals';
+import { parseOtherCharges } from '@/lib/otherCharges';
 
 export default function TransactionsPage() {
   const { currentUser } = useAuthStore();
@@ -171,6 +172,11 @@ export default function TransactionsPage() {
                     {txn.discount_applied > 0 && (
                       <p className="text-xs text-red-500">Discount: -GH₵{txn.discount_applied.toFixed(2)}</p>
                     )}
+                    {parseOtherCharges(txn.other_charges_json).map((charge) => (
+                      <p key={charge.id} className="text-xs text-gray-600">
+                        {charge.label}: GH₵{charge.amount.toFixed(2)}
+                      </p>
+                    ))}
                     <button
                       onClick={() => void handleReprint(txn)}
                       disabled={printingId === txn.id}
