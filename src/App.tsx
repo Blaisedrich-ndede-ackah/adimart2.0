@@ -13,6 +13,7 @@ import AddPhonePrompt from '@/components/AddPhonePrompt';
 import StoreSetupPage from '@/pages/StoreSetupPage';
 import LoginPage from '@/pages/LoginPage';
 import CashierBlockedPage from '@/pages/CashierBlockedPage';
+import StoreAccessBlockedPage from '@/pages/StoreAccessBlockedPage';
 import POSPage from '@/pages/POSPage';
 import InventoryPage from '@/pages/InventoryPage';
 import ReportsPage from '@/pages/ReportsPage';
@@ -27,6 +28,7 @@ import EcommercePage from '@/pages/EcommercePage';
 import PublicShopPage from '@/pages/PublicShopPage';
 import AdminLoginPage from '@/pages/AdminLoginPage';
 import AdminDashboardPage from '@/pages/AdminDashboardPage';
+import { isStoreAccessBlocked } from '@/lib/subscription';
 import { checkAndSendSubscriptionExpirySms } from '@/lib/subscriptionReminders';
 
 type AppMode = 'store' | 'admin-login' | 'admin';
@@ -152,6 +154,17 @@ export default function App() {
             onOpenAdmin={() => setAppMode('admin-login')}
             onWarehouseLoginSuccess={() => setCurrentPage('warehouse')}
           />
+        </div>
+      </div>
+    );
+  }
+
+  if (isStoreAccessBlocked(currentStore)) {
+    return (
+      <div className="h-screen flex flex-col">
+        <PWAInstallBanner />
+        <div className="flex-1 overflow-y-auto">
+          <StoreAccessBlockedPage />
         </div>
       </div>
     );

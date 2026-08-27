@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS stores (
   subscription_started_at TIMESTAMPTZ,
   subscription_expires_at TIMESTAMPTZ,
   subscription_months_granted INTEGER DEFAULT 0,
+  /** Admin can lock a store that refuses to pay until they buy a package */
+  access_blocked BOOLEAN DEFAULT FALSE,
   logo_url TEXT DEFAULT '',
   warehouse_enabled BOOLEAN DEFAULT FALSE,
   max_shops INTEGER DEFAULT 1,
@@ -408,6 +410,7 @@ CREATE POLICY "subscription_payments_update" ON subscription_payments FOR UPDATE
 
 CREATE INDEX IF NOT EXISTS idx_subscription_payments_store ON subscription_payments(store_id);
 CREATE INDEX IF NOT EXISTS idx_stores_subscription_expires ON stores(subscription_expires_at);
+CREATE INDEX IF NOT EXISTS idx_stores_access_blocked ON stores(access_blocked);
 
 -- ============================================================
 -- PLATFORM SETTINGS (global admin contact + SMS config)

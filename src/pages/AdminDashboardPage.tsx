@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import {
   Building2, Users, Package, Wallet, RefreshCcw, LogOut, ChevronLeft, ChevronRight,
   Smartphone, CheckCircle2, AlertCircle, Loader2, Store, CreditCard, CalendarClock, Mail,
-  FileBarChart, Download, FileText
+  FileBarChart, Download, FileText, Ban
 } from 'lucide-react';
 import {
   AdminDashboardData,
@@ -14,6 +14,7 @@ import {
   grantStoreSubscription,
   loadAdminDashboard,
   markWeeklyPayoutSent,
+  setStoreAccessBlocked,
   shiftWeek,
   updateStoreEcommerce,
   updateStoreWarehouseLimits,
@@ -318,6 +319,30 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
     setTimeout(() => setStatusMsg(''), 6000);
   };
 
+  const handleToggleStoreBlock = async (row: StoreSubscriptionUsage) => {
+    const blocking = !row.store.access_blocked;
+    const confirmMsg = blocking
+      ? `Block ${row.store.name}? Staff will be locked out until they pay a subscription package or you unblock them.`
+      : `Unblock ${row.store.name}? Staff will regain access to the POS immediately.`;
+    if (!confirm(confirmMsg)) return;
+
+    setBusyStoreId(row.store.id);
+    setStatusMsg('');
+    const result = await setStoreAccessBlocked(row.store.id, blocking);
+    if (!result.success) {
+      setStatusMsg(result.error || 'Failed to update store access');
+    } else {
+      setStatusMsg(
+        blocking
+          ? `${row.store.name} is blocked. They must pay a package before using the platform.`
+          : `${row.store.name} is unblocked.`
+      );
+      await refresh();
+    }
+    setBusyStoreId(null);
+    setTimeout(() => setStatusMsg(''), 6000);
+  };
+
   const storeName = (storeId: string) =>
     data?.stores.find((s) => s.id === storeId)?.name || 'Unknown store';
 
@@ -434,9 +459,10 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm mb-3">
             {error}
-            {(error.includes('momo_') || error.includes('payouts') || error.includes('subscription') || error.includes('platform_settings') || error.includes('column')) && (
+            {(error.includes('momo_') || error.includes('payouts') || error.includes('subscription') || error.includes('platform_settings') || error.includes('access_blocked') || error.includes('column')) && (
               <p className="text-xs mt-2">
                 Run <code>supabase-migrate-admin.sql</code> / <code>supabase-migrate-subscriptions.sql</code> /{' '}
+                <code>supabase-migrate-store-access-block.sql</code> /{' '}
                 <code>supabase-migrate-platform-settings.sql</code> (or the latest <code>supabase-init.sql</code>) in your Supabase SQL Editor.
               </p>
             )}
@@ -497,6 +523,10 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                   <p className="text-[11px] text-slate-500">No subscription</p>
                   <p className="font-semibold text-slate-700">{data.totals.subsNone}</p>
                 </div>
+                <div>
+                  <p className="text-[11px] text-slate-500">Blocked (unpaid)</p>
+                  <p className="font-semibold text-red-700">{data.totals.storesBlocked}</p>
+                </div>
               </div>
             </div>
 
@@ -510,15 +540,16 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         {data && tab === 'subscriptions' && (
           <div className="space-y-3">
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-700">
-              Grant monthly access to each store owner. When a subscription is within 7 days of expiry
-              (or already expired), the store app shows a warning to contact the system administrator to renew.
+              Grant monthly access to each store owner. Block a store that refuses to pay — they will
+              see the subscription packages and must pay before using the POS. Paying or granting months
+              unblocks them automatically.
             </div>
 
             <div className="grid grid-cols-2 gap-2">
               <StatCard icon={<CheckCircle2 className="w-4 h-4" />} label="Active" value={String(data.totals.subsActive)} />
               <StatCard icon={<AlertCircle className="w-4 h-4" />} label="Expiring soon" value={String(data.totals.subsExpiringSoon)} />
               <StatCard icon={<AlertCircle className="w-4 h-4" />} label="Expired" value={String(data.totals.subsExpired)} />
-              <StatCard icon={<CalendarClock className="w-4 h-4" />} label="No subscription" value={String(data.totals.subsNone)} />
+              <StatCard icon={<Ban className="w-4 h-4" />} label="Blocked" value={String(data.totals.storesBlocked)} />
             </div>
 
             {data.subscriptions.length === 0 && (
@@ -571,6 +602,12 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                       {row.isExpiringSoon ? ' · soon' : ''}
                     </span>
                   </div>
+                  {row.store.access_blocked && (
+                    <p className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-red-700 bg-red-50 border border-red-100 rounded-lg px-2 py-1">
+                      <Ban className="w-3.5 h-3.5" />
+                      Access blocked — paywall shown in store app
+                    </p>
+                  )}
 
                   <div className="grid grid-cols-2 gap-2 mt-3 text-[11px]">
                     <div className="bg-slate-50 rounded-lg p-2">
@@ -628,6 +665,23 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                       {busyStoreId === row.store.id ? 'Saving…' : 'Grant'}
                     </button>
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={() => void handleToggleStoreBlock(row)}
+                    disabled={busyStoreId === row.store.id}
+                    className={`mt-2 w-full px-3 py-2 rounded-xl text-xs font-semibold touch-target disabled:opacity-50 ${
+                      row.store.access_blocked
+                        ? 'bg-emerald-700 text-white'
+                        : 'bg-red-600 text-white'
+                    }`}
+                  >
+                    {busyStoreId === row.store.id
+                      ? 'Saving…'
+                      : row.store.access_blocked
+                        ? 'Unblock store'
+                        : 'Block store (unpaid)'}
+                  </button>
 
                   <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
                     <p className="text-[11px] font-semibold text-slate-700">
@@ -1348,6 +1402,11 @@ function StoreRevenueCard({ row, compact = false }: { row: StorePerformance; com
         </div>
         <div className="flex-1 min-w-0">
           <p className="font-bold text-slate-900 truncate">{row.store.name}</p>
+          {row.store.access_blocked && (
+            <p className="text-[10px] font-bold uppercase tracking-wide text-red-600 mt-0.5">
+              Access blocked
+            </p>
+          )}
           {!compact && row.store.address && (
             <p className="text-[11px] text-slate-500 truncate">{row.store.address}</p>
           )}

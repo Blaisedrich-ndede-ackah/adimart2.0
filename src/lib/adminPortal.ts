@@ -28,6 +28,8 @@ export interface AdminStoreRow {
   subscription_started_at: string | null;
   subscription_expires_at: string | null;
   subscription_months_granted: number;
+  /** Admin lock pending subscription payment */
+  access_blocked: boolean;
   /** Admin-managed warehouse / multi-location capability */
   warehouse_enabled: boolean;
   max_shops: number;
@@ -59,6 +61,7 @@ export interface StoreSubscriptionUsage {
   monthsGranted: number;
   grantCount: number;
   lastGrantedAt: string | null;
+  accessBlocked: boolean;
   /** Completed sales during the current subscription window */
   periodSales: number;
   periodRevenue: number;
@@ -149,6 +152,7 @@ export interface AdminDashboardData {
     subsExpiringSoon: number;
     subsExpired: number;
     subsNone: number;
+    storesBlocked: number;
   };
   weekStart: string;
   weekEnd: string;
@@ -255,6 +259,7 @@ export async function loadAdminDashboard(weekStart = getWeekStart()): Promise<Ad
       subscription_started_at: s.subscription_started_at ? String(s.subscription_started_at) : null,
       subscription_expires_at: s.subscription_expires_at ? String(s.subscription_expires_at) : null,
       subscription_months_granted: Number(s.subscription_months_granted) || 0,
+      access_blocked: Boolean(s.access_blocked),
       warehouse_enabled: quota.warehouse_enabled,
       ecommerce_enabled: Boolean(s.ecommerce_enabled),
       ecommerce_slug: String(s.ecommerce_slug || ''),
@@ -381,6 +386,7 @@ export async function loadAdminDashboard(weekStart = getWeekStart()): Promise<Ad
       monthsGranted: store.subscription_months_granted,
       grantCount: storeGrants.length,
       lastGrantedAt: storeGrants[0]?.granted_at || null,
+      accessBlocked: store.access_blocked,
       periodSales: periodTx.length,
       periodRevenue: periodTx.reduce((s, t) => s + t.total_amount, 0),
       userCount: users.filter((u) => u.store_id === store.id).length,
@@ -416,6 +422,7 @@ export async function loadAdminDashboard(weekStart = getWeekStart()): Promise<Ad
       subsExpiringSoon: subscriptions.filter((s) => s.isExpiringSoon).length,
       subsExpired: subscriptions.filter((s) => s.status === 'expired').length,
       subsNone: subscriptions.filter((s) => s.status === 'none').length,
+      storesBlocked: stores.filter((s) => s.access_blocked).length,
     },
     weekStart,
     weekEnd,
@@ -442,6 +449,42 @@ export async function grantStoreSubscription(
     currentStartedAt: store.subscription_started_at,
     currentMonthsGranted: store.subscription_months_granted,
   });
+}
+
+/**
+ * Admin: lock or unlock a store. Blocked stores must pay a package before using the POS.
+ */
+export async function setStoreAccessBlocked(
+  storeId: string,
+  blocked: boolean
+): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: 'Supabase not configured' };
+  }
+  const { error } = await supabase
+    .from('stores')
+    .update({ access_blocked: blocked })
+    .eq('id', storeId);
+
+  if (error) {
+    return {
+      success: false,
+      error: error.message.includes('access_blocked')
+        ? `${error.message} — run supabase-migrate-store-access-block.sql in Supabase.`
+        : error.message,
+    };
+  }
+
+  const { db } = await import('./dexie');
+  const local = await db.stores.get(storeId);
+  if (local) {
+    await db.stores.put({
+      ...local,
+      access_blocked: blocked ? 1 : 0,
+    });
+  }
+
+  return { success: true };
 }
 
 /**

@@ -80,3 +80,11 @@ export function subscriptionStatusLabel(status: SubscriptionStatus): string {
       return 'None';
   }
 }
+
+/** True when an administrator has locked the store pending subscription payment. */
+export function isStoreAccessBlocked(store?: {
+  access_blocked?: number | boolean | null;
+} | null): boolean {
+  if (!store) return false;
+  return store.access_blocked === 1 || store.access_blocked === true;
+}

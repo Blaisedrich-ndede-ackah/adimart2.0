@@ -30,6 +30,8 @@ export interface LocalStore {
   subscription_expires_at?: string | null;
   /** Cumulative months granted by admin */
   subscription_months_granted?: number;
+  /** Admin lock: store must pay a package before using the POS (0/1) */
+  access_blocked?: number;
   /** Optional compressed JPEG data URL for store logo */
   logo_url?: string;
   warehouse_enabled?: number;
@@ -479,6 +481,7 @@ export async function createStoreWithOwner(
     subscription_started_at: null,
     subscription_expires_at: null,
     subscription_months_granted: 0,
+    access_blocked: 0,
     logo_url: '',
     warehouse_enabled: 0,
     max_shops: 1,
@@ -530,19 +533,33 @@ export async function pullAdminStoreLimits(storeId: string): Promise<LocalStore 
     const { data, error } = await supabase
       .from('stores')
       .select(
-        'warehouse_enabled, max_shops, max_warehouses, max_stores, ecommerce_enabled, ecommerce_slug, ecommerce_tagline, subscription_started_at, subscription_expires_at, subscription_months_granted'
+        'warehouse_enabled, max_shops, max_warehouses, max_stores, ecommerce_enabled, ecommerce_slug, ecommerce_tagline, subscription_started_at, subscription_expires_at, subscription_months_granted, access_blocked'
       )
       .eq('id', storeId)
       .maybeSingle();
 
-    if (error && !quota) return local;
+    let storeRow = (data ?? null) as Record<string, unknown> | null;
+    let storeError = error;
+    if (storeError?.message?.includes('access_blocked')) {
+      const retry = await supabase
+        .from('stores')
+        .select(
+          'warehouse_enabled, max_shops, max_warehouses, max_stores, ecommerce_enabled, ecommerce_slug, ecommerce_tagline, subscription_started_at, subscription_expires_at, subscription_months_granted'
+        )
+        .eq('id', storeId)
+        .maybeSingle();
+      storeRow = (retry.data ?? null) as Record<string, unknown> | null;
+      storeError = retry.error;
+    }
 
-    const fromStore = data
+    if (storeError && !quota) return local;
+
+    const fromStore = storeRow
       ? {
-          warehouse_enabled: data.warehouse_enabled ? 1 : 0,
-          max_shops: Math.max(1, Number(data.max_shops) || 1),
-          max_warehouses: Math.max(0, Number(data.max_warehouses) || 0),
-          max_stores: Math.max(1, Number(data.max_stores) || 1),
+          warehouse_enabled: storeRow.warehouse_enabled ? 1 : 0,
+          max_shops: Math.max(1, Number(storeRow.max_shops) || 1),
+          max_warehouses: Math.max(0, Number(storeRow.max_warehouses) || 0),
+          max_stores: Math.max(1, Number(storeRow.max_stores) || 1),
         }
       : {
           warehouse_enabled: local.warehouse_enabled ?? 0,
@@ -563,17 +580,23 @@ export async function pullAdminStoreLimits(storeId: string): Promise<LocalStore 
     const updated: LocalStore = {
       ...local,
       ...limits,
-      ecommerce_enabled: data?.ecommerce_enabled ? 1 : local.ecommerce_enabled ?? 0,
-      ecommerce_slug: String(data?.ecommerce_slug || local.ecommerce_slug || ''),
-      ecommerce_tagline: String(data?.ecommerce_tagline || local.ecommerce_tagline || ''),
-      subscription_started_at: data?.subscription_started_at
-        ? String(data.subscription_started_at)
+      ecommerce_enabled: storeRow?.ecommerce_enabled ? 1 : local.ecommerce_enabled ?? 0,
+      ecommerce_slug: String(storeRow?.ecommerce_slug || local.ecommerce_slug || ''),
+      ecommerce_tagline: String(storeRow?.ecommerce_tagline || local.ecommerce_tagline || ''),
+      subscription_started_at: storeRow?.subscription_started_at
+        ? String(storeRow.subscription_started_at)
         : local.subscription_started_at ?? null,
-      subscription_expires_at: data?.subscription_expires_at
-        ? String(data.subscription_expires_at)
+      subscription_expires_at: storeRow?.subscription_expires_at
+        ? String(storeRow.subscription_expires_at)
         : local.subscription_expires_at ?? null,
       subscription_months_granted:
-        Number(data?.subscription_months_granted) || local.subscription_months_granted || 0,
+        Number(storeRow?.subscription_months_granted) || local.subscription_months_granted || 0,
+      access_blocked:
+        storeRow && 'access_blocked' in storeRow
+          ? storeRow.access_blocked
+            ? 1
+            : 0
+          : local.access_blocked ?? 0,
     };
     await db.stores.put(updated);
     return updated;
@@ -1851,6 +1874,7 @@ export async function syncFromSupabase(opts?: {
           ? String(remoteStore.subscription_expires_at)
           : null,
         subscription_months_granted: Number(remoteStore.subscription_months_granted) || 0,
+        access_blocked: remoteStore.access_blocked ? 1 : 0,
         logo_url: remoteStore.logo_url || localStore?.logo_url || '',
         warehouse_enabled: quota
           ? quota.warehouse_enabled
