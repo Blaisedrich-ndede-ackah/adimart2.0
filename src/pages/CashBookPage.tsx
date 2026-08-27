@@ -15,6 +15,15 @@ import { roundMoney, toMoneyAmount } from '@/lib/money';
 const INCOME_CATEGORIES = ['Cash sales', 'Capital', 'Loan', 'Refund', 'Other'];
 const EXPENSE_CATEGORIES = ['Rent', 'Utilities', 'Supplier', 'Salaries', 'Transport', 'Withdrawal', 'Other'];
 
+type CashBookPeriod = 'today' | 'week' | 'month' | 'custom';
+
+const PERIOD_TABS: { key: CashBookPeriod; label: string }[] = [
+  { key: 'today', label: 'Today' },
+  { key: 'week', label: 'Week' },
+  { key: 'month', label: 'Month' },
+  { key: 'custom', label: 'Custom' },
+];
+
 function toDateOnly(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -32,14 +41,29 @@ function getWeekStart(date = new Date()): Date {
   return d;
 }
 
+function getMonthStart(date = new Date()): Date {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
 function addDays(date: Date, days: number): Date {
   const d = new Date(date);
   d.setDate(d.getDate() + days);
   return d;
 }
 
+function addMonths(date: Date, months: number): Date {
+  return new Date(date.getFullYear(), date.getMonth() + months, 1);
+}
+
+function monthEnd(monthStart: Date): Date {
+  return new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
+}
+
 function formatRangeLabel(start: Date, end: Date): string {
   const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric' };
+  if (toDateOnly(start) === toDateOnly(end)) {
+    return start.toLocaleDateString('en-GB', opts);
+  }
   return `${start.toLocaleDateString('en-GB', opts)} - ${end.toLocaleDateString('en-GB', opts)}`;
 }
 
@@ -47,13 +71,22 @@ function formatMoney(amount: number): string {
   return `GH₵${amount.toFixed(2)}`;
 }
 
+function parseDateOnly(value: string): Date {
+  const [y, m, d] = value.split('-').map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+}
+
 /**
  * Store cash book (Cash Flow):
- * manual income/expense ledger with weekly net cash flow.
+ * manual income/expense ledger with Today / Week / Month / Custom filters.
  */
 export default function CashBookPage() {
   const { currentUser } = useAuthStore();
+  const [period, setPeriod] = useState<CashBookPeriod>('today');
   const [weekStart, setWeekStart] = useState(() => getWeekStart());
+  const [monthStart, setMonthStart] = useState(() => getMonthStart());
+  const [customFrom, setCustomFrom] = useState(() => toDateOnly(new Date()));
+  const [customTo, setCustomTo] = useState(() => toDateOnly(new Date()));
   const [entries, setEntries] = useState<LocalCashBookEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [composer, setComposer] = useState<'income' | 'expense' | null>(null);
@@ -65,11 +98,30 @@ export default function CashBookPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const weekEnd = useMemo(() => addDays(weekStart, 6), [weekStart]);
-  const fromDate = toDateOnly(weekStart);
-  const toDate = toDateOnly(weekEnd);
   const today = toDateOnly(new Date());
-  const canGoNext = fromDate < toDateOnly(getWeekStart());
+  const currentWeekStart = toDateOnly(getWeekStart());
+  const currentMonthStart = toDateOnly(getMonthStart());
+
+  const { rangeStart, rangeEnd } = useMemo(() => {
+    if (period === 'today') {
+      const d = parseDateOnly(today);
+      return { rangeStart: d, rangeEnd: d };
+    }
+    if (period === 'week') {
+      return { rangeStart: weekStart, rangeEnd: addDays(weekStart, 6) };
+    }
+    if (period === 'month') {
+      return { rangeStart: monthStart, rangeEnd: monthEnd(monthStart) };
+    }
+    const from = customFrom <= customTo ? customFrom : customTo;
+    const to = customFrom <= customTo ? customTo : customFrom;
+    return { rangeStart: parseDateOnly(from), rangeEnd: parseDateOnly(to) };
+  }, [period, today, weekStart, monthStart, customFrom, customTo]);
+
+  const fromDate = toDateOnly(rangeStart);
+  const toDate = toDateOnly(rangeEnd);
+  const canGoNextWeek = toDateOnly(weekStart) < currentWeekStart;
+  const canGoNextMonth = toDateOnly(monthStart) < currentMonthStart;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -102,6 +154,15 @@ export default function CashBookPage() {
       net: roundMoney(income - expense),
     };
   }, [entries]);
+
+  const emptyLabel =
+    period === 'today'
+      ? 'today'
+      : period === 'week'
+        ? 'this week'
+        : period === 'month'
+          ? 'this month'
+          : 'this date range';
 
   const openComposer = (type: 'income' | 'expense') => {
     setComposer(type);
@@ -158,42 +219,110 @@ export default function CashBookPage() {
   return (
     <div className="page-shell">
       <div className="page-header">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 mb-3">
           <BookOpen className="w-5 h-5 text-white shrink-0" />
           <div>
             <h1 className="text-white font-bold text-lg">Cash Flow</h1>
             <p className="text-emerald-200 text-xs">Store cash book</p>
           </div>
         </div>
+
+        <div className="flex bg-white/15 rounded-xl p-0.5">
+          {PERIOD_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => {
+                setPeriod(tab.key);
+                if (tab.key === 'week') setWeekStart(getWeekStart());
+                if (tab.key === 'month') setMonthStart(getMonthStart());
+                if (tab.key === 'today') {
+                  /* range is derived from today */
+                }
+              }}
+              className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${
+                period === tab.key ? 'bg-white text-primary' : 'text-white/80'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {period === 'custom' && (
+          <div className="bg-white/10 rounded-xl p-3 mt-2 space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block">
+                <span className="text-[10px] uppercase tracking-wide text-emerald-100/80">From</span>
+                <input
+                  type="date"
+                  value={customFrom}
+                  max={customTo}
+                  onChange={(e) => setCustomFrom(e.target.value)}
+                  className="mt-1 w-full rounded-lg border-0 px-2 py-2 text-sm text-slate-900"
+                />
+              </label>
+              <label className="block">
+                <span className="text-[10px] uppercase tracking-wide text-emerald-100/80">To</span>
+                <input
+                  type="date"
+                  value={customTo}
+                  min={customFrom}
+                  max={today}
+                  onChange={(e) => setCustomTo(e.target.value)}
+                  className="mt-1 w-full rounded-lg border-0 px-2 py-2 text-sm text-slate-900"
+                />
+              </label>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="page-body no-scrollbar space-y-3">
-        {/* Week navigator */}
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-2 py-2 flex items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={() => setWeekStart((w) => addDays(w, -7))}
-            className="p-2.5 rounded-lg touch-target text-slate-600 hover:bg-slate-50"
-            aria-label="Previous week"
-          >
-            <ChevronLeft className="w-5 h-5" />
-          </button>
-          <div className="flex items-center gap-2 min-w-0">
+        {(period === 'week' || period === 'month') && (
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-2 py-2 flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                period === 'week'
+                  ? setWeekStart((w) => addDays(w, -7))
+                  : setMonthStart((m) => addMonths(m, -1))
+              }
+              className="p-2.5 rounded-lg touch-target text-slate-600 hover:bg-slate-50"
+              aria-label={period === 'week' ? 'Previous week' : 'Previous month'}
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <div className="flex items-center gap-2 min-w-0">
+              <Calendar className="w-4 h-4 text-primary shrink-0" />
+              <p className="text-sm font-semibold text-slate-800 truncate">
+                {formatRangeLabel(rangeStart, rangeEnd)}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                period === 'week'
+                  ? setWeekStart((w) => addDays(w, 7))
+                  : setMonthStart((m) => addMonths(m, 1))
+              }
+              disabled={period === 'week' ? !canGoNextWeek : !canGoNextMonth}
+              className="p-2.5 rounded-lg touch-target text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+              aria-label={period === 'week' ? 'Next week' : 'Next month'}
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          </div>
+        )}
+
+        {(period === 'today' || period === 'custom') && (
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-2.5 flex items-center justify-center gap-2">
             <Calendar className="w-4 h-4 text-primary shrink-0" />
             <p className="text-sm font-semibold text-slate-800 truncate">
-              {formatRangeLabel(weekStart, weekEnd)}
+              {formatRangeLabel(rangeStart, rangeEnd)}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setWeekStart((w) => addDays(w, 7))}
-            disabled={!canGoNext}
-            className="p-2.5 rounded-lg touch-target text-slate-600 hover:bg-slate-50 disabled:opacity-40"
-            aria-label="Next week"
-          >
-            <ChevronRight className="w-5 h-5" />
-          </button>
-        </div>
+        )}
 
         {/* Net + income/expense summary */}
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -230,7 +359,7 @@ export default function CashBookPage() {
             <p className="text-sm text-slate-400 leading-relaxed">
               No Expense/Income Entries for
               <br />
-              this week
+              {emptyLabel}
             </p>
             <p className="text-sm text-slate-400 mt-2">Click on + Button to add</p>
           </div>

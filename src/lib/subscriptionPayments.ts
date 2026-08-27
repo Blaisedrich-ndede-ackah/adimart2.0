@@ -85,15 +85,29 @@ export async function applySubscriptionGrant(params: {
       subscription_started_at: newStartedAt,
       subscription_expires_at: periodEnd,
       subscription_months_granted: monthsGranted,
+      access_blocked: false,
     })
     .eq('id', params.storeId);
 
-  if (updateError) {
+  let grantUpdateError = updateError;
+  if (grantUpdateError?.message?.includes('access_blocked')) {
+    const retry = await supabase
+      .from('stores')
+      .update({
+        subscription_started_at: newStartedAt,
+        subscription_expires_at: periodEnd,
+        subscription_months_granted: monthsGranted,
+      })
+      .eq('id', params.storeId);
+    grantUpdateError = retry.error;
+  }
+
+  if (grantUpdateError) {
     return {
       success: false,
-      error: updateError.message.includes('subscription_')
-        ? `${updateError.message} — run supabase-migrate-subscriptions.sql in Supabase.`
-        : updateError.message,
+      error: grantUpdateError.message.includes('subscription_')
+        ? `${grantUpdateError.message} — run supabase-migrate-subscriptions.sql in Supabase.`
+        : grantUpdateError.message,
     };
   }
 
@@ -105,6 +119,7 @@ export async function applySubscriptionGrant(params: {
       subscription_started_at: newStartedAt,
       subscription_expires_at: periodEnd,
       subscription_months_granted: monthsGranted,
+      access_blocked: 0,
       synced: 0,
     });
   }
