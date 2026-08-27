@@ -131,6 +131,9 @@ export interface LocalTransaction {
   cashier_name: string;
   total_amount: number;
   discount_applied: number;
+  /** JSON array of extra checkout fees (delivery, packing, service, other) */
+  other_charges_json?: string;
+  other_charges_total?: number;
   payment_method: 'cash' | 'split' | 'paystack';
   cash_amount: number;
   paystack_amount: number;
@@ -1408,6 +1411,25 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
       ignoreDuplicates: appendOnly,
     });
     if (error) {
+      if (
+        table === 'transactions' &&
+        /other_charges/i.test(error.message)
+      ) {
+        const stripped = rows.map((row) => {
+          const copy = { ...(row as Record<string, unknown>) };
+          delete copy.other_charges_json;
+          delete copy.other_charges_total;
+          return copy;
+        });
+        const retry = await supabase.from(table).upsert(stripped, {
+          onConflict: 'id',
+          ignoreDuplicates: appendOnly,
+        });
+        if (!retry.error) {
+          await markSynced();
+          return rows.length;
+        }
+      }
       errors.push(formatSyncError(label, error));
       return 0;
     }
@@ -1671,6 +1693,8 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         cashier_name: t.cashier_name,
         total_amount: t.total_amount,
         discount_applied: t.discount_applied,
+        other_charges_json: t.other_charges_json || '[]',
+        other_charges_total: Number(t.other_charges_total) || 0,
         payment_method: t.payment_method,
         cash_amount: t.cash_amount,
         paystack_amount: t.paystack_amount,
@@ -1995,6 +2019,11 @@ export async function syncFromSupabase(opts?: {
           cashier_name: (row.cashier_name as string) || '',
           total_amount: Number(row.total_amount) || 0,
           discount_applied: Number(row.discount_applied) || 0,
+          other_charges_json:
+            typeof row.other_charges_json === 'string'
+              ? row.other_charges_json
+              : JSON.stringify(row.other_charges_json ?? []),
+          other_charges_total: Number(row.other_charges_total) || 0,
           payment_method: row.payment_method as 'cash' | 'split' | 'paystack',
           cash_amount: Number(row.cash_amount) || 0,
           paystack_amount: Number(row.paystack_amount) || 0,

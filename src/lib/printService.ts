@@ -33,6 +33,7 @@ export interface EscPosReceiptData {
   items: EscPosReceiptItem[];
   subtotal: number;
   discount: number;
+  otherCharges?: Array<{ label: string; amount: number }>;
   total: number;
   paymentMethod: string;
   cashAmount?: number;
@@ -136,6 +137,12 @@ export async function buildEscPosReceipt(data: EscPosReceiptData): Promise<Uint8
 
   if (data.discount > 0) {
     bytes.push(...textToBytes(rightAlign('Discount:', `-GH₵${data.discount.toFixed(2)}`)));
+    bytes.push(LF);
+  }
+
+  for (const charge of data.otherCharges || []) {
+    if (!charge?.amount) continue;
+    bytes.push(...textToBytes(rightAlign(`${charge.label}:`, `GH₵${charge.amount.toFixed(2)}`)));
     bytes.push(LF);
   }
 

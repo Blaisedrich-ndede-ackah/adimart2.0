@@ -9,6 +9,7 @@ import {
 } from './dexie';
 import type { ReceiptData } from './printService';
 import { printReceipt } from './printService';
+import { parseOtherCharges } from './otherCharges';
 
 export async function buildReceiptDataFromTransaction(
   txn: LocalTransaction
@@ -17,6 +18,7 @@ export async function buildReceiptDataFromTransaction(
   const items = await getTransactionItems(txn.id);
   const lineSubtotal = items.reduce((sum, i) => sum + i.subtotal, 0);
   const discount = txn.discount_applied || 0;
+  const otherCharges = parseOtherCharges(txn.other_charges_json);
 
   return {
     storeName: store?.name || 'Store',
@@ -34,6 +36,7 @@ export async function buildReceiptDataFromTransaction(
     })),
     subtotal: Math.round(lineSubtotal * 100) / 100,
     discount,
+    otherCharges,
     total: txn.total_amount,
     paymentMethod: txn.payment_method,
     cashAmount: txn.cash_amount,

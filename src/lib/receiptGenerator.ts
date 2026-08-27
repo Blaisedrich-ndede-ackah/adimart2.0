@@ -17,6 +17,7 @@ export interface ReceiptData {
   }>;
   subtotal: number;
   discount: number;
+  otherCharges?: Array<{ label: string; amount: number }>;
   total: number;
   paymentMethod: string;
   cashAmount?: number;
@@ -164,6 +165,12 @@ function generateReceiptPDF(data: ReceiptData): jsPDF {
     doc.setTextColor(200, 50, 50);
     leftRightText('Discount:', '-GHS ' + data.discount.toFixed(2), y, 9);
     doc.setTextColor(0);
+    y += 4;
+  }
+
+  for (const charge of data.otherCharges || []) {
+    if (!charge?.amount) continue;
+    leftRightText(charge.label + ':', 'GHS ' + charge.amount.toFixed(2), y, 9);
     y += 4;
   }
 
@@ -353,6 +360,10 @@ function generateReceiptText(data: ReceiptData): string {
   lines.push(leftRight('Subtotal:', 'GHS ' + data.subtotal.toFixed(2)));
   if (data.discount > 0) {
     lines.push(leftRight('Discount:', '-GHS ' + data.discount.toFixed(2)));
+  }
+  for (const charge of data.otherCharges || []) {
+    if (!charge?.amount) continue;
+    lines.push(leftRight(charge.label + ':', 'GHS ' + charge.amount.toFixed(2)));
   }
   lines.push(line('='));
   lines.push(leftRight('TOTAL:', 'GHS ' + data.total.toFixed(2)));
