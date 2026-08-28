@@ -5,6 +5,7 @@ import {
 import { createStoreWithOwner, restoreStoreFromCloud } from '@/lib/dexie';
 import { isValidGhanaPhone } from '@/lib/platformSettings';
 import { useAuthStore } from '@/store/useAuthStore';
+import CommunityChatButton from '@/components/CommunityChatButton';
 
 type SetupMode = 'choose' | 'new-store' | 'new-owner' | 'restore';
 
@@ -160,6 +161,7 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
                 Administrator portal
               </button>
             )}
+            <CommunityChatButton variant="setup" />
           </div>
         )}
 

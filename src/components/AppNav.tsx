@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt,
-  CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen,
+  CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
+import { COMMUNITY_CHAT_URL } from '@/lib/community';
 
 interface AppNavProps {
   currentPage: string;
@@ -16,6 +17,8 @@ interface NavItem {
   label: string;
   icon: LucideIcon;
   show: boolean;
+  /** External destination opened in a new tab instead of in-app navigation. */
+  href?: string;
 }
 
 export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
@@ -44,6 +47,13 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         },
         { id: 'reports', label: 'Reports', icon: BarChart3, show: isOwner },
         { id: 'settings', label: 'Settings', icon: Settings, show: isOwner },
+        {
+          id: 'community',
+          label: 'Community',
+          icon: MessagesSquare,
+          show: true,
+          href: COMMUNITY_CHAT_URL,
+        },
       ].filter((item) => item.show),
     [isOwner, ecommerceEnabled, canManageEcommerce]
   );
@@ -87,20 +97,40 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-1">
           {navItems.map((item) => {
             const Icon = item.icon;
-            const isActive = currentPage === item.id;
+            const isActive = !item.href && currentPage === item.id;
+            const className = `w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors touch-target ${
+              isActive
+                ? 'bg-white text-primary shadow-sm'
+                : 'text-emerald-50 hover:bg-white/10'
+            }`;
+            const content = (
+              <>
+                <Icon className="w-5 h-5 flex-shrink-0" />
+                <span className="truncate">{item.label}</span>
+              </>
+            );
+            if (item.href) {
+              return (
+                <a
+                  key={item.id}
+                  href={item.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Join the Adimat community chat on Telegram"
+                  className={className}
+                >
+                  {content}
+                </a>
+              );
+            }
             return (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => onNavigate(item.id)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors touch-target ${
-                  isActive
-                    ? 'bg-white text-primary shadow-sm'
-                    : 'text-emerald-50 hover:bg-white/10'
-                }`}
+                className={className}
               >
-                <Icon className="w-5 h-5 flex-shrink-0" />
-                <span className="truncate">{item.label}</span>
+                {content}
               </button>
             );
           })}
@@ -198,18 +228,14 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
             <div className="grid grid-cols-3 gap-2 p-4">
               {moreItems.map((item) => {
                 const Icon = item.icon;
-                const isActive = currentPage === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => go(item.id)}
-                    className={`flex flex-col items-center justify-center gap-2 rounded-2xl border px-2 py-4 touch-target transition-colors ${
-                      isActive
-                        ? 'border-emerald-200 bg-emerald-50 text-primary'
-                        : 'border-slate-100 bg-slate-50 text-slate-700 active:bg-emerald-50'
-                    }`}
-                  >
+                const isActive = !item.href && currentPage === item.id;
+                const className = `flex flex-col items-center justify-center gap-2 rounded-2xl border px-2 py-4 touch-target transition-colors ${
+                  isActive
+                    ? 'border-emerald-200 bg-emerald-50 text-primary'
+                    : 'border-slate-100 bg-slate-50 text-slate-700 active:bg-emerald-50'
+                }`;
+                const content = (
+                  <>
                     <span
                       className={`flex h-11 w-11 items-center justify-center rounded-2xl ${
                         isActive ? 'bg-primary text-white' : 'bg-white text-primary shadow-sm'
@@ -220,6 +246,31 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
                     <span className={`text-xs ${isActive ? 'font-bold' : 'font-semibold'}`}>
                       {item.label}
                     </span>
+                  </>
+                );
+                if (item.href) {
+                  return (
+                    <a
+                      key={item.id}
+                      href={item.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label="Join the Adimat community chat on Telegram"
+                      onClick={() => setMoreOpen(false)}
+                      className={className}
+                    >
+                      {content}
+                    </a>
+                  );
+                }
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => go(item.id)}
+                    className={className}
+                  >
+                    {content}
                   </button>
                 );
               })}

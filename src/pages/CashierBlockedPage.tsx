@@ -1,5 +1,6 @@
 import { Ban, LogOut } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
+import CommunityChatButton from '@/components/CommunityChatButton';
 
 /**
  * Shown after a blocked cashier successfully authenticates.
@@ -30,6 +31,7 @@ export default function CashierBlockedPage() {
           <LogOut className="w-4 h-4" />
           Back to login
         </button>
+        <CommunityChatButton variant="blocked" className="mt-3" />
       </div>
     </div>
   );
