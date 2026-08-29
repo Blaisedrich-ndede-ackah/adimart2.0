@@ -801,3 +801,126 @@ export async function updateAdminProduct(
   if (error) return { success: false, error: error.message };
   return { success: true };
 }
+
+export interface AdminCreateStoreInput {
+  storeName: string;
+  address: string;
+  supportNumber: string;
+  ownerName: string;
+  ownerPhone: string;
+  ownerPin: string;
+}
+
+export interface AdminCreatedStore {
+  storeId: string;
+  storeName: string;
+  ownerName: string;
+  ownerPhone: string;
+}
+
+/**
+ * Super-admin: create a store and owner account in the cloud.
+ * The owner restores it on a device with the Store ID + PIN.
+ */
+export async function createAdminStore(
+  input: AdminCreateStoreInput
+): Promise<{ success: boolean; error?: string; created?: AdminCreatedStore }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: 'Supabase not configured' };
+  }
+
+  const storeName = input.storeName.trim();
+  const address = input.address.trim();
+  const supportNumber = input.supportNumber.trim();
+  const ownerName = input.ownerName.trim();
+  const ownerPhone = input.ownerPhone.trim();
+  const ownerPin = input.ownerPin.trim();
+
+  if (!storeName) return { success: false, error: 'Enter a store name' };
+  if (!address) return { success: false, error: 'Enter a store address' };
+  if (!supportNumber) return { success: false, error: 'Enter a support phone number' };
+  if (!ownerName) return { success: false, error: 'Enter the owner name' };
+  if (!/^\d{4}$/.test(ownerPin)) return { success: false, error: 'Owner PIN must be 4 digits' };
+
+  const storeId = generateId();
+  const ownerId = generateId();
+  const now = new Date().toISOString();
+
+  const storeRow = {
+    id: storeId,
+    name: storeName,
+    address,
+    support_number: supportNumber,
+    discount_cap_percentage: 10,
+    pin_on_discount_enabled: true,
+    discount_allow_percentage: true,
+    discount_allow_fixed: true,
+    cashier_can_discount: true,
+    momo_account_name: '',
+    momo_number: '',
+    momo_network: '',
+    subscription_months_granted: 0,
+    access_blocked: false,
+    logo_url: '',
+    warehouse_enabled: false,
+    max_shops: 1,
+    max_warehouses: 0,
+    max_stores: 1,
+    ecommerce_enabled: false,
+    ecommerce_slug: '',
+    ecommerce_tagline: '',
+    created_at: now,
+  };
+
+  const { error: storeError } = await supabase.from('stores').insert(storeRow);
+  if (storeError) {
+    return { success: false, error: storeError.message };
+  }
+
+  const userRow = {
+    id: ownerId,
+    store_id: storeId,
+    name: ownerName,
+    role: 'owner' as const,
+    pin_hash: hashPin(ownerPin),
+    is_active: true,
+    phone: ownerPhone,
+    assigned_location_id: null,
+    can_wholesale: true,
+    can_sell_from_warehouse: true,
+    can_manage_ecommerce: true,
+    created_at: now,
+  };
+
+  const { error: userError } = await supabase.from('users').insert(userRow);
+  if (userError) {
+    await supabase.from('stores').delete().eq('id', storeId);
+    return {
+      success: false,
+      error: userError.message.includes('phone')
+        ? `${userError.message} — run supabase-migrate-user-phone-admin-otp.sql`
+        : userError.message,
+    };
+  }
+
+  try {
+    await saveStoreQuotas(storeId, {
+      warehouse_enabled: false,
+      max_shops: 1,
+      max_warehouses: 0,
+      max_stores: 1,
+    });
+  } catch {
+    // Quota table is optional; store is still usable.
+  }
+
+  return {
+    success: true,
+    created: {
+      storeId,
+      storeName,
+      ownerName,
+      ownerPhone,
+    },
+  };
+}

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   BookOpen, ChevronLeft, ChevronRight, Calendar, Plus, Minus, Trash2, Loader2, X,
+  FileSpreadsheet, Landmark, Download,
 } from 'lucide-react';
 import {
   LocalCashBookEntry,
@@ -11,6 +12,11 @@ import {
 import { useAuthStore } from '@/store/useAuthStore';
 import { triggerAutoSync } from '@/lib/sync';
 import { roundMoney, toMoneyAmount } from '@/lib/money';
+import {
+  buildStoreFinancialStatements,
+  exportFinancialStatementsPdf,
+  type StoreFinancialStatements,
+} from '@/lib/financialStatements';
 
 const INCOME_CATEGORIES = ['Cash sales', 'Capital', 'Loan', 'Refund', 'Other'];
 const EXPENSE_CATEGORIES = ['Rent', 'Utilities', 'Supplier', 'Salaries', 'Transport', 'Withdrawal', 'Other'];
@@ -97,6 +103,10 @@ export default function CashBookPage() {
   const [entryDate, setEntryDate] = useState(() => toDateOnly(new Date()));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [view, setView] = useState<'ledger' | 'statements'>('ledger');
+  const [statements, setStatements] = useState<StoreFinancialStatements | null>(null);
+  const [statementsLoading, setStatementsLoading] = useState(false);
+  const [statementsError, setStatementsError] = useState('');
 
   const today = toDateOnly(new Date());
   const currentWeekStart = toDateOnly(getWeekStart());
@@ -140,6 +150,26 @@ export default function CashBookPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const periodLabel = formatRangeLabel(rangeStart, rangeEnd);
+
+  const loadStatements = useCallback(async () => {
+    setStatementsLoading(true);
+    setStatementsError('');
+    try {
+      const data = await buildStoreFinancialStatements(fromDate, toDate, periodLabel);
+      setStatements(data);
+    } catch (err) {
+      setStatements(null);
+      setStatementsError(err instanceof Error ? err.message : 'Could not build statements');
+    }
+    setStatementsLoading(false);
+  }, [fromDate, toDate, periodLabel]);
+
+  useEffect(() => {
+    if (view !== 'statements') return;
+    void loadStatements();
+  }, [view, loadStatements]);
 
   const totals = useMemo(() => {
     let income = 0;
@@ -225,6 +255,27 @@ export default function CashBookPage() {
             <h1 className="text-white font-bold text-lg">Cash Flow</h1>
             <p className="text-emerald-200 text-xs">Store cash book</p>
           </div>
+        </div>
+
+        <div className="flex bg-white/15 rounded-xl p-0.5 mb-2">
+          <button
+            type="button"
+            onClick={() => setView('ledger')}
+            className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${
+              view === 'ledger' ? 'bg-white text-primary' : 'text-white/80'
+            }`}
+          >
+            Ledger
+          </button>
+          <button
+            type="button"
+            onClick={() => setView('statements')}
+            className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${
+              view === 'statements' ? 'bg-white text-primary' : 'text-white/80'
+            }`}
+          >
+            Statements
+          </button>
         </div>
 
         <div className="flex bg-white/15 rounded-xl p-0.5">
@@ -324,6 +375,17 @@ export default function CashBookPage() {
           </div>
         )}
 
+        {view === 'statements' && (
+          <StatementsPanel
+            loading={statementsLoading}
+            error={statementsError}
+            data={statements}
+            onRefresh={() => void loadStatements()}
+          />
+        )}
+
+        {view === 'ledger' && (
+        <>
         {/* Net + income/expense summary */}
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
           <div className="px-4 py-5 text-center border-b border-slate-100">
@@ -422,9 +484,12 @@ export default function CashBookPage() {
             })}
           </div>
         )}
+        </>
+        )}
       </div>
 
       {/* Bottom income / expense actions */}
+      {view === 'ledger' && (
       <div className="shrink-0 grid grid-cols-2 border-t border-slate-200">
         <button
           type="button"
@@ -443,6 +508,7 @@ export default function CashBookPage() {
           Expense
         </button>
       </div>
+      )}
 
       {/* Add entry sheet */}
       {composer && (
@@ -528,6 +594,136 @@ export default function CashBookPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function StatementsPanel({
+  loading,
+  error,
+  data,
+  onRefresh,
+}: {
+  loading: boolean;
+  error: string;
+  data: StoreFinancialStatements | null;
+  onRefresh: () => void;
+}) {
+  if (loading && !data) {
+    return (
+      <div className="flex justify-center py-16 text-slate-400">
+        <Loader2 className="w-6 h-6 animate-spin" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-5 text-sm text-red-700">
+        {error}
+        <button type="button" onClick={onRefresh} className="block mt-2 font-semibold underline">
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  if (!data) return null;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-semibold text-slate-700 touch-target"
+        >
+          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+          Refresh
+        </button>
+        <button
+          type="button"
+          onClick={() => exportFinancialStatementsPdf(data)}
+          className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-white touch-target"
+        >
+          <Download className="w-4 h-4" />
+          Download PDF
+        </button>
+      </div>
+
+      <StatementCard
+        icon={<FileSpreadsheet className="w-4 h-4" />}
+        title="Income statement"
+        subtitle={`${data.incomeStatement.fromDate} to ${data.incomeStatement.toDate}`}
+        lines={data.incomeStatement.lines}
+      />
+      <StatementCard
+        icon={<Landmark className="w-4 h-4" />}
+        title="Statement of financial position"
+        subtitle={`As of ${data.financialPosition.asOfDate}`}
+        lines={data.financialPosition.lines}
+      />
+      <p className="text-[11px] text-slate-500 leading-relaxed px-1">
+        Built from POS sales, expenses, cash-book entries, and current inventory at cost.
+        Capital and loans stay on the balance sheet. Cash-book “Cash sales” is not added again
+        on top of POS sales.
+      </p>
+    </div>
+  );
+}
+
+function StatementCard({
+  icon,
+  title,
+  subtitle,
+  lines,
+}: {
+  icon: ReactNode;
+  title: string;
+  subtitle: string;
+  lines: { label: string; amount: number; emphasis?: 'total' | 'subtotal' | 'muted' }[];
+}) {
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="px-4 py-3 border-b border-slate-100 flex items-start gap-2">
+        <span className="text-primary mt-0.5">{icon}</span>
+        <div>
+          <p className="text-sm font-bold text-slate-900">{title}</p>
+          <p className="text-[11px] text-slate-500">{subtitle}</p>
+        </div>
+      </div>
+      <div className="divide-y divide-slate-50">
+        {lines.map((line) => {
+          const strong = line.emphasis === 'total' || line.emphasis === 'subtotal';
+          return (
+            <div
+              key={line.label}
+              className={`flex items-center justify-between gap-3 px-4 py-2.5 ${
+                line.emphasis === 'total' ? 'bg-emerald-50/70' : ''
+              }`}
+            >
+              <p
+                className={`text-sm ${
+                  strong ? 'font-bold text-slate-900' : line.emphasis === 'muted' ? 'text-slate-500' : 'text-slate-700'
+                }`}
+              >
+                {line.label}
+              </p>
+              <p
+                className={`text-sm tabular-nums ${
+                  strong
+                    ? 'font-bold text-slate-900'
+                    : line.amount < 0
+                      ? 'text-red-600'
+                      : 'text-slate-800'
+                }`}
+              >
+                {formatMoney(line.amount)}
+              </p>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
