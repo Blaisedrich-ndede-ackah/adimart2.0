@@ -289,7 +289,7 @@ export class FormalPdf {
     this.y += 6;
   }
 
-  private drawChrome(page: number): void {
+  private drawChrome(_page: number): void {
     this.doc.setFillColor(...HEADER_BG);
     this.doc.rect(0, 0, PAGE_W, HEADER_H, 'F');
 
