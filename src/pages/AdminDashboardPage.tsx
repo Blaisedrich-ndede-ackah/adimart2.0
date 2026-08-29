@@ -1067,9 +1067,9 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
           </div>
         )}
 
-        {data && tab === 'stores' && (
+        {tab === 'stores' && (
           <div className="space-y-2">
-            {selectedStoreId && data.stores.find((s) => s.id === selectedStoreId) ? (
+            {data && selectedStoreId && data.stores.find((s) => s.id === selectedStoreId) ? (
               <AdminStoreWorkspace
                 store={data.stores.find((s) => s.id === selectedStoreId)!}
                 data={data}
@@ -1079,33 +1079,37 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
             ) : (
               <>
                 <AdminCreateStoreForm onCreated={refresh} />
-                <div className="relative">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    value={storeQuery}
-                    onChange={(e) => setStoreQuery(e.target.value)}
-                    placeholder="Search stores or paste a Store ID"
-                    className="w-full rounded-2xl border border-slate-200 bg-white pl-9 pr-3 py-3 text-sm"
-                  />
-                </div>
-                <p className="text-xs text-slate-500 px-1">
-                  {filteredStores.length} store{filteredStores.length === 1 ? '' : 's'} · tap a card to open inventory &amp; staff
-                </p>
-                {filteredStores.map((row) => (
-                  <button
-                    key={row.store.id}
-                    type="button"
-                    onClick={() => setSelectedStoreId(row.store.id)}
-                    className="w-full text-left"
-                  >
-                    <StoreRevenueCard row={row} />
-                  </button>
-                ))}
-                {data.stores.length === 0 && (
-                  <p className="text-sm text-slate-500 text-center py-10">No stores in the cloud yet. Create one above.</p>
-                )}
-                {data.stores.length > 0 && filteredStores.length === 0 && (
-                  <p className="text-sm text-slate-500 text-center py-8">No stores match that search.</p>
+                {data && (
+                  <>
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        value={storeQuery}
+                        onChange={(e) => setStoreQuery(e.target.value)}
+                        placeholder="Search stores or paste a Store ID"
+                        className="w-full rounded-2xl border border-slate-200 bg-white pl-9 pr-3 py-3 text-sm"
+                      />
+                    </div>
+                    <p className="text-xs text-slate-500 px-1">
+                      {filteredStores.length} store{filteredStores.length === 1 ? '' : 's'} · tap a card to open inventory &amp; staff
+                    </p>
+                    {filteredStores.map((row) => (
+                      <button
+                        key={row.store.id}
+                        type="button"
+                        onClick={() => setSelectedStoreId(row.store.id)}
+                        className="w-full text-left"
+                      >
+                        <StoreRevenueCard row={row} />
+                      </button>
+                    ))}
+                    {data.stores.length === 0 && (
+                      <p className="text-sm text-slate-500 text-center py-10">No stores in the cloud yet. Create one above.</p>
+                    )}
+                    {data.stores.length > 0 && filteredStores.length === 0 && (
+                      <p className="text-sm text-slate-500 text-center py-8">No stores match that search.</p>
+                    )}
+                  </>
                 )}
               </>
             )}
