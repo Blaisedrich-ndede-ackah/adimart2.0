@@ -271,6 +271,13 @@ export class FormalPdf {
       this.doc.text(this.meta.period, MARGIN_X, this.y);
       this.y += 5;
     }
+    if (this.org.reference) {
+      this.doc.setFont('helvetica', 'normal');
+      this.doc.setFontSize(8);
+      this.doc.setTextColor(...MUTED);
+      this.doc.text(this.org.reference, MARGIN_X, this.y);
+      this.y += 5;
+    }
     this.doc.setTextColor(...INK);
     this.y += 3;
   }
@@ -307,11 +314,7 @@ export class FormalPdf {
 
     this.doc.setFont('helvetica', 'bold');
     this.doc.setFontSize(7);
-    this.doc.text(this.meta.documentLabel || 'OFFICIAL DOCUMENT', RIGHT, 11, { align: 'right' });
-    if (this.org.reference) {
-      this.doc.setFont('helvetica', 'normal');
-      this.doc.text(this.org.reference, RIGHT, 16, { align: 'right' });
-    }
+    this.doc.text(this.meta.documentLabel || 'OFFICIAL DOCUMENT', RIGHT, 12.5, { align: 'right' });
 
     this.doc.setFillColor(217, 119, 6);
     this.doc.rect(0, HEADER_H, PAGE_W, 1.2, 'F');
