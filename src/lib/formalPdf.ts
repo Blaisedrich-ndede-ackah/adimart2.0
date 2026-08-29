@@ -326,10 +326,13 @@ export class FormalPdf {
     this.doc.setFillColor(217, 119, 6);
     this.doc.rect(0, HEADER_H, PAGE_W, 1.2, 'F');
 
-    this.drawFooter(page);
+    // Footer text is written once in finishPages so "Page n of m" is not stacked.
+    this.doc.setDrawColor(...RULE);
+    this.doc.setLineWidth(0.25);
+    this.doc.line(MARGIN_X, PAGE_H - FOOTER_H, RIGHT, PAGE_H - FOOTER_H);
   }
 
-  private drawFooter(page: number, total?: number): void {
+  private drawFooter(page: number, total: number): void {
     this.doc.setDrawColor(...RULE);
     this.doc.setLineWidth(0.25);
     this.doc.line(MARGIN_X, PAGE_H - FOOTER_H, RIGHT, PAGE_H - FOOTER_H);
@@ -343,30 +346,27 @@ export class FormalPdf {
       this.doc.text(`Store reference  ${this.org.storeId}`, MARGIN_X, PAGE_H - 4.5);
     }
     this.doc.setFontSize(7);
-    const pageLabel = total ? `Page ${page} of ${total}` : `Page ${page}`;
-    this.doc.text(pageLabel, RIGHT, PAGE_H - 8.5, { align: 'right' });
+    this.doc.text(`Page ${page} of ${total}`, RIGHT, PAGE_H - 8.5, { align: 'right' });
   }
 
   private finishPages(): void {
     const notes = this.meta.notes || [];
     if (notes.length) {
-      this.ensureSpace(10 + notes.length * 5);
-      this.y += 2;
+      this.section('Notes');
       this.doc.setFont('helvetica', 'italic');
-      this.doc.setFontSize(7.5);
+      this.doc.setFontSize(8);
       this.doc.setTextColor(...MUTED);
       for (const note of notes) {
+        this.ensureSpace(8);
         const lines = this.doc.splitTextToSize(note, RIGHT - MARGIN_X);
         this.doc.text(lines, MARGIN_X, this.y);
-        this.y += lines.length * 3.6 + 1.5;
+        this.y += lines.length * 3.8 + 2;
       }
     }
 
     const total = this.doc.getNumberOfPages();
     for (let i = 1; i <= total; i++) {
       this.doc.setPage(i);
-      this.doc.setFillColor(...WHITE);
-      this.doc.rect(0, PAGE_H - FOOTER_H + 0.4, PAGE_W, FOOTER_H - 0.4, 'F');
       this.drawFooter(i, total);
     }
   }
