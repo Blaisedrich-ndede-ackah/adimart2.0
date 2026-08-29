@@ -57,6 +57,7 @@ import {
   clearWarehouseUnlock,
   getUnlockedWarehouseLocationId,
 } from '@/lib/warehouseAccess';
+import { orgFromStore } from '@/lib/formalPdf';
 
 type HubMode = 'hub' | 'workspace';
 type WorkspaceTab = 'stock' | 'receive' | 'transfer' | 'expiry' | 'adjust' | 'history' | 'report';
@@ -1275,7 +1276,10 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
                     <button
                       type="button"
                       disabled={!locationReport || reportBusy}
-                      onClick={() => locationReport && exportLocationReportPdf(locationReport)}
+                      onClick={() =>
+                        locationReport &&
+                        exportLocationReportPdf(locationReport, orgFromStore(currentStore))
+                      }
                       className="inline-flex items-center gap-1 px-2.5 py-2 rounded-lg bg-slate-100 text-slate-700 text-xs font-semibold touch-target disabled:opacity-40"
                     >
                       <FileText className="w-3.5 h-3.5" />

@@ -30,6 +30,7 @@ import {
 import { getExpiringBatches } from '@/lib/warehouse';
 import FinancialDonutChart from '@/components/FinancialDonutChart';
 import { parseOtherCharges } from '@/lib/otherCharges';
+import { orgFromStore } from '@/lib/formalPdf';
 
 type ReportTab = 'overview' | 'products' | 'expenses' | 'locations';
 
@@ -181,7 +182,7 @@ export default function ReportsPage() {
 
   const handleExportPdf = () => {
     if (!summary || !currentStore) return;
-    exportReportPdf(summary, periodLabel, currentStore.name);
+    exportReportPdf(summary, periodLabel, currentStore.name, orgFromStore(currentStore));
   };
 
   const handleExportLocation = async (locationId: string, format: 'csv' | 'pdf') => {
@@ -199,7 +200,7 @@ export default function ReportsPage() {
         period
       );
       if (format === 'csv') exportLocationReportCsv(locSummary);
-      else exportLocationReportPdf(locSummary);
+      else exportLocationReportPdf(locSummary, orgFromStore(currentStore));
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to export location report');
     }
