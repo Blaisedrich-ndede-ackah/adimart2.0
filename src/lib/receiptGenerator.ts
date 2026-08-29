@@ -1,4 +1,5 @@
 import jsPDF from 'jspdf';
+import { FormalPdf, formatGhsOfficial, formatOfficialDate, orgFromStore } from './formalPdf';
 
 export interface ReceiptData {
   storeName: string;
@@ -230,14 +231,90 @@ function generateReceiptPDF(data: ReceiptData): jsPDF {
   return doc;
 }
 
+function generateOfficialReceiptPdf(data: ReceiptData): FormalPdf {
+  const pdf = new FormalPdf(
+    orgFromStore({
+      name: data.storeName,
+      address: data.storeAddress,
+      support_number: data.supportNumber,
+      logo_url: data.storeLogoUrl,
+    }),
+    {
+      title: 'Official receipt',
+      subtitle: `Receipt ${data.receiptNumber}`,
+      period: `Date of sale: ${data.dateTime}`,
+      documentLabel: 'OFFICIAL RECEIPT',
+      notes: [
+        'This document is an official receipt for goods sold. Please retain it for your records.',
+        'Thank you for your custom.',
+      ],
+    }
+  );
+
+  pdf.section('Sale details');
+  pdf.kvTable([
+    { label: 'Receipt number', value: data.receiptNumber },
+    { label: 'Date and time', value: data.dateTime },
+    { label: 'Served by', value: data.cashierName || '—' },
+    { label: 'Document date', value: formatOfficialDate(new Date()), emphasis: 'muted' },
+  ]);
+
+  pdf.section('Items');
+  pdf.dataTable(
+    ['Description', 'Qty', 'Unit price', 'Amount'],
+    data.items.map((item) => [
+      item.name,
+      String(item.quantity),
+      formatGhsOfficial(item.unitPrice),
+      formatGhsOfficial(item.subtotal),
+    ]),
+    [4, 1, 2, 2]
+  );
+
+  const totalRows = [
+    { label: 'Subtotal', value: formatGhsOfficial(data.subtotal) },
+    ...(data.discount > 0
+      ? [{ label: 'Discount', value: formatGhsOfficial(-data.discount) }]
+      : []),
+    ...(data.otherCharges || [])
+      .filter((c) => c?.amount)
+      .map((c) => ({ label: c.label, value: formatGhsOfficial(c.amount) })),
+    { label: 'Amount payable', value: formatGhsOfficial(data.total), emphasis: 'total' as const },
+  ];
+  pdf.section('Totals');
+  pdf.kvTable(totalRows);
+
+  const methodLabel =
+    data.paymentMethod === 'cash'
+      ? 'Cash'
+      : data.paymentMethod === 'paystack'
+        ? 'Mobile money / card'
+        : 'Split payment';
+  const paymentRows = [
+    { label: 'Method', value: methodLabel },
+    ...(data.paymentMethod === 'split' && data.cashAmount
+      ? [{ label: 'Cash portion', value: formatGhsOfficial(data.cashAmount) }]
+      : []),
+    ...(data.paymentMethod === 'split' && data.paystackAmount
+      ? [{ label: 'Mobile money / card portion', value: formatGhsOfficial(data.paystackAmount) }]
+      : []),
+    ...(data.paystackReference
+      ? [{ label: 'Payment reference', value: data.paystackReference, emphasis: 'muted' as const }]
+      : []),
+  ];
+  pdf.section('Payment');
+  pdf.kvTable(paymentRows);
+  pdf.signatureBlock('Received by (store)', 'Customer acknowledgement');
+  return pdf;
+}
+
 export function downloadReceipt(data: ReceiptData): void {
   try {
-    const doc = generateReceiptPDF(data);
+    const pdf = generateOfficialReceiptPdf(data);
     const filename = 'receipt-' + data.receiptNumber.replace('#', '').replace(/\s/g, '') + '.pdf';
-    doc.save(filename);
+    pdf.save(filename);
   } catch (error) {
     console.error('Error generating PDF:', error);
-    // Fallback: download as text
     downloadReceiptAsText(data);
   }
 }
@@ -261,8 +338,8 @@ export async function shareReceipt(data: ReceiptData): Promise<boolean> {
   // Try to generate PDF for sharing
   let pdfBlob: Blob | null = null;
   try {
-    const doc = generateReceiptPDF(data);
-    pdfBlob = doc.output('blob');
+    const official = generateOfficialReceiptPdf(data);
+    pdfBlob = official.outputBlob();
   } catch (error) {
     console.error('Error generating PDF for sharing:', error);
   }

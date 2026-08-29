@@ -1,10 +1,10 @@
-import jsPDF from 'jspdf';
 import {
   db,
   LocalExpense,
   LocalLocation,
   LocalTransaction,
 } from './dexie';
+import { FormalPdf, formatGhsOfficial, orgFromStore, type FormalOrg } from './formalPdf';
 import { getLocationInventory, listLocations, toMoney, toQty } from './warehouse';
 import { lineBaseQty, roundMoney } from './money';
 
@@ -289,53 +289,78 @@ export function exportReportCsv(
 export function exportReportPdf(
   summary: ReportSummary,
   periodLabel: string,
-  storeName: string
+  storeName: string,
+  org?: FormalOrg
 ): void {
-  const doc = new jsPDF();
-  let y = 14;
-
-  const line = (left: string, right = '') => {
-    doc.setFontSize(10);
-    doc.text(left, 14, y);
-    if (right) doc.text(right, 196, y, { align: 'right' });
-    y += 6;
-  };
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
-  doc.text('Adimat POS Report', 14, y);
-  y += 8;
-  doc.setFontSize(11);
-  doc.text(`${storeName} • ${periodLabel}`, 14, y);
-  y += 10;
-
-  doc.setFont('helvetica', 'normal');
-  line('Revenue', `GH₵${summary.revenue.toFixed(2)}`);
-  line('Cost of Goods', `GH₵${summary.costOfGoods.toFixed(2)}`);
-  line('Gross Profit', `GH₵${summary.grossProfit.toFixed(2)}`);
-  line('Expenses', `GH₵${summary.expenses.toFixed(2)}`);
-  line('Net Profit', `GH₵${summary.netProfit.toFixed(2)}`);
-  line('Transactions', String(summary.transactionCount));
-  y += 4;
-
-  doc.setFont('helvetica', 'bold');
-  doc.text('Top Products', 14, y);
-  y += 6;
-  doc.setFont('helvetica', 'normal');
-  summary.topProducts.forEach(p => {
-    line(`${p.product_name} (${p.quantity})`, `GH₵${p.revenue.toFixed(2)}`);
+  const letterhead = org || orgFromStore({ name: storeName });
+  const pdf = new FormalPdf(letterhead, {
+    title: 'Management report',
+    subtitle: storeName,
+    period: `Reporting period: ${periodLabel}`,
+    documentLabel: 'OFFICIAL REPORT',
+    notes: [
+      'This report summarises completed point-of-sale transactions and recorded operating expenses for the selected period.',
+      'Cost of goods is estimated from product cost prices. Figures are management accounts and are not audited.',
+    ],
   });
 
-  y += 4;
-  doc.setFont('helvetica', 'bold');
-  doc.text('Sales by Category', 14, y);
-  y += 6;
-  doc.setFont('helvetica', 'normal');
-  summary.categories.forEach(c => {
-    line(c.category, `GH₵${c.revenue.toFixed(2)}`);
-  });
+  pdf.section('Financial summary');
+  pdf.kvTable([
+    { label: 'Sales revenue', value: formatGhsOfficial(summary.revenue) },
+    { label: 'Cost of goods sold', value: formatGhsOfficial(summary.costOfGoods) },
+    { label: 'Gross profit', value: formatGhsOfficial(summary.grossProfit), emphasis: 'subtotal' },
+    { label: 'Operating expenses', value: formatGhsOfficial(summary.expenses) },
+    { label: 'Net profit', value: formatGhsOfficial(summary.netProfit), emphasis: 'total' },
+    { label: 'Completed transactions', value: String(summary.transactionCount), emphasis: 'muted' },
+  ]);
 
-  doc.save(`adimat-report-${periodLabel.toLowerCase().replace(/\s+/g, '-')}.pdf`);
+  if (summary.topProducts.length > 0) {
+    pdf.section('Top products');
+    pdf.dataTable(
+      ['Product', 'Qty', 'Revenue', 'Profit'],
+      summary.topProducts.map((p) => [
+        p.product_name,
+        String(p.quantity),
+        formatGhsOfficial(p.revenue),
+        formatGhsOfficial(p.profit),
+      ]),
+      [4, 1, 2, 2]
+    );
+  }
+
+  if (summary.categories.length > 0) {
+    pdf.section('Sales by category');
+    pdf.dataTable(
+      ['Category', 'Qty', 'Revenue', 'Profit'],
+      summary.categories.map((c) => [
+        c.category,
+        String(c.quantity),
+        formatGhsOfficial(c.revenue),
+        formatGhsOfficial(c.profit),
+      ]),
+      [4, 1, 2, 2]
+    );
+  }
+
+  if (summary.cashiers.length > 0) {
+    pdf.section('Sales by cashier');
+    pdf.dataTable(
+      ['Cashier', 'Transactions', 'Revenue'],
+      summary.cashiers.map((c) => [
+        c.cashier_name,
+        String(c.transactions),
+        formatGhsOfficial(c.revenue),
+      ]),
+      [4, 2, 2]
+    );
+  }
+
+  pdf.signatureBlock('Prepared by', 'Reviewed by');
+  pdf.save(`${safeFilePart(storeName)}-report-${periodLabel.toLowerCase().replace(/\s+/g, '-')}.pdf`);
+}
+
+function safeFilePart(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'store';
 }
 
 export interface LocationReportSummary {
@@ -492,69 +517,58 @@ export function exportLocationReportCsv(summary: LocationReportSummary): void {
   URL.revokeObjectURL(url);
 }
 
-export function exportLocationReportPdf(summary: LocationReportSummary): void {
-  const doc = new jsPDF();
-  let y = 14;
-  const line = (left: string, right = '') => {
-    doc.setFontSize(10);
-    doc.text(left, 14, y);
-    if (right) doc.text(right, 196, y, { align: 'right' });
-    y += 6;
-  };
+export function exportLocationReportPdf(summary: LocationReportSummary, org?: FormalOrg): void {
+  const locLabel = `${summary.location.name} (${summary.location.location_type})`;
+  const pdf = new FormalPdf(org || orgFromStore({ name: summary.storeName }), {
+    title: 'Location report',
+    subtitle: `${summary.storeName} — ${locLabel}`,
+    period: `Reporting period: ${summary.periodLabel}`,
+    documentLabel: 'OFFICIAL REPORT',
+    notes: [
+      'Sales figures cover completed transactions recorded at this location for the selected period.',
+      'Stock valuation is the on-hand inventory at the time of this report, at cost and selling price.',
+    ],
+  });
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
-  doc.text('Adimat Location Report', 14, y);
-  y += 8;
-  doc.setFontSize(11);
-  doc.text(`${summary.storeName}`, 14, y);
-  y += 6;
-  doc.setFont('helvetica', 'normal');
-  doc.text(
-    `${summary.location.name} (${summary.location.location_type}) • ${summary.periodLabel}`,
-    14,
-    y
-  );
-  y += 10;
+  pdf.section('Sales financials');
+  pdf.kvTable([
+    { label: 'Cost of goods sold', value: formatGhsOfficial(summary.costPrice) },
+    { label: 'Selling value', value: formatGhsOfficial(summary.sellingPrice) },
+    { label: 'Profit estimate', value: formatGhsOfficial(summary.profitEstimate), emphasis: 'total' },
+    { label: 'Completed transactions', value: String(summary.transactionCount), emphasis: 'muted' },
+  ]);
 
-  doc.setFont('helvetica', 'bold');
-  doc.text('Sales financials', 14, y);
-  y += 6;
-  doc.setFont('helvetica', 'normal');
-  line('Cost price', `GHS ${summary.costPrice.toFixed(2)}`);
-  line('Selling price', `GHS ${summary.sellingPrice.toFixed(2)}`);
-  line('Profit Estimate', `GHS ${summary.profitEstimate.toFixed(2)}`);
-  line('Transactions', String(summary.transactionCount));
-  y += 4;
-
-  doc.setFont('helvetica', 'bold');
-  doc.text('Stock valuation (on hand)', 14, y);
-  y += 6;
-  doc.setFont('helvetica', 'normal');
-  line('SKUs', String(summary.stockSkuCount));
-  line('Units', String(summary.stockUnits));
-  line('Stock cost value', `GHS ${summary.stockCostValue.toFixed(2)}`);
-  line('Stock selling value', `GHS ${summary.stockSellingValue.toFixed(2)}`);
-  line('Stock profit estimate', `GHS ${summary.stockProfitEstimate.toFixed(2)}`);
-  y += 4;
+  pdf.section('Stock valuation (on hand)');
+  pdf.kvTable([
+    { label: 'SKUs', value: String(summary.stockSkuCount) },
+    { label: 'Units on hand', value: String(summary.stockUnits) },
+    { label: 'Stock at cost', value: formatGhsOfficial(summary.stockCostValue) },
+    { label: 'Stock at selling price', value: formatGhsOfficial(summary.stockSellingValue) },
+    {
+      label: 'Unrealised profit estimate',
+      value: formatGhsOfficial(summary.stockProfitEstimate),
+      emphasis: 'total',
+    },
+  ]);
 
   if (summary.topProducts.length > 0) {
-    doc.setFont('helvetica', 'bold');
-    doc.text('Top products', 14, y);
-    y += 6;
-    doc.setFont('helvetica', 'normal');
-    summary.topProducts.forEach((p) => {
-      line(`${p.product_name} (${p.quantity})`, `GHS ${p.revenue.toFixed(2)}`);
-      if (y > 280) {
-        doc.addPage();
-        y = 14;
-      }
-    });
+    pdf.section('Top products at this location');
+    pdf.dataTable(
+      ['Product', 'Qty', 'Revenue', 'Profit'],
+      summary.topProducts.map((p) => [
+        p.product_name,
+        String(p.quantity),
+        formatGhsOfficial(p.revenue),
+        formatGhsOfficial(p.profit),
+      ]),
+      [4, 1, 2, 2]
+    );
   }
 
-  const safeName = summary.location.name.toLowerCase().replace(/\s+/g, '-');
-  doc.save(
-    `adimat-${summary.location.location_type}-${safeName}-${summary.periodLabel.toLowerCase().replace(/\s+/g, '-')}.pdf`
+  pdf.signatureBlock('Prepared by', 'Location supervisor');
+  const safeName = summary.location.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  pdf.save(
+    `${safeFilePart(summary.storeName)}-${summary.location.location_type}-${safeName}-${summary.periodLabel.toLowerCase().replace(/\s+/g, '-')}.pdf`
   );
 }
 

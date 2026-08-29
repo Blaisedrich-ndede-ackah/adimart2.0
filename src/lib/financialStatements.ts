@@ -3,7 +3,6 @@
  * These are management statements for SMEs — not a full double-entry ledger.
  */
 
-import jsPDF from 'jspdf';
 import {
   db,
   getCurrentStoreCashBookEntries,
@@ -13,6 +12,7 @@ import {
   type LocalExpense,
   type LocalTransaction,
 } from './dexie';
+import { FormalPdf, formatGhsOfficial, formatOfficialDate, orgFromStore, type FormalOrg } from './formalPdf';
 import { lineBaseQty, roundMoney } from './money';
 import { toMoney, toQty } from './warehouse';
 
@@ -63,6 +63,7 @@ export interface FinancialPosition {
 
 export interface StoreFinancialStatements {
   storeName: string;
+  org: FormalOrg;
   incomeStatement: IncomeStatement;
   financialPosition: FinancialPosition;
 }
@@ -90,11 +91,6 @@ function groupAmounts(
   return [...map.entries()]
     .map(([category, amount]) => ({ category, amount }))
     .sort((a, b) => b.amount - a.amount);
-}
-
-function money(n: number): string {
-  const abs = Math.abs(n).toFixed(2);
-  return n < 0 ? `(GH₵${abs})` : `GH₵${abs}`;
 }
 
 export async function buildStoreFinancialStatements(
@@ -209,7 +205,12 @@ export async function buildStoreFinancialStatements(
     productMap,
   });
 
-  return { storeName, incomeStatement, financialPosition: position };
+  return {
+    storeName,
+    org: orgFromStore(store),
+    incomeStatement,
+    financialPosition: position,
+  };
 }
 
 function buildPosition(params: {
@@ -324,64 +325,48 @@ function buildPosition(params: {
 }
 
 export function exportFinancialStatementsPdf(data: StoreFinancialStatements): void {
-  const doc = new jsPDF();
-  let y = 16;
+  const period = `${formatOfficialDate(data.incomeStatement.fromDate)} to ${formatOfficialDate(data.incomeStatement.toDate)}`;
+  const pdf = new FormalPdf(data.org, {
+    title: 'Financial statements',
+    subtitle: data.storeName,
+    period,
+    documentLabel: 'OFFICIAL STATEMENTS',
+    notes: [
+      'These statements were prepared from point-of-sale records, the store cash book, recorded expenses, and current inventory valued at cost.',
+      'They are management accounts for internal and filing use. They are not audited financial statements.',
+      'Cash-book Capital and Loan entries are presented on the statement of financial position. Cash-book “Cash sales” is not added again on top of POS sales.',
+    ],
+  });
 
-  const writeTitle = (text: string) => {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(14);
-    doc.text(text, 14, y);
-    y += 8;
-  };
+  const toRows = (lines: StatementLine[]) =>
+    lines.map((line) => ({
+      label: line.label,
+      value: formatGhsOfficial(line.amount),
+      emphasis: line.emphasis,
+    }));
 
-  const writeSub = (text: string) => {
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.text(text, 14, y);
-    y += 7;
-  };
+  pdf.section('Income statement');
+  pdf.paragraph(`For the period ${period}.`, true);
+  pdf.kvTable(toRows(data.incomeStatement.lines));
 
-  const writeLines = (lines: StatementLine[]) => {
-    for (const line of lines) {
-      if (y > 280) {
-        doc.addPage();
-        y = 16;
-      }
-      const isTotal = line.emphasis === 'total';
-      const isSub = line.emphasis === 'subtotal';
-      doc.setFont('helvetica', isTotal || isSub ? 'bold' : 'normal');
-      doc.setFontSize(isTotal ? 11 : 10);
-      doc.setTextColor(line.emphasis === 'muted' ? 100 : 20);
-      doc.text(line.label, 14, y);
-      doc.text(money(line.amount), 196, y, { align: 'right' });
-      y += isTotal ? 8 : 6;
-      doc.setTextColor(20);
-    }
-  };
+  if (data.incomeStatement.expenseByCategory.length > 0) {
+    pdf.section('Operating expenses by category');
+    pdf.dataTable(
+      ['Category', 'Amount'],
+      data.incomeStatement.expenseByCategory.map((r) => [r.category, formatGhsOfficial(r.amount)]),
+      [3, 1]
+    );
+  }
 
-  writeTitle('Income Statement');
-  writeSub(`${data.storeName}  •  ${data.incomeStatement.periodLabel}`);
-  writeSub(`${data.incomeStatement.fromDate} to ${data.incomeStatement.toDate}`);
-  y += 2;
-  writeLines(data.incomeStatement.lines);
-
-  y += 8;
-  writeTitle('Statement of Financial Position');
-  writeSub(`${data.storeName}  •  As of ${data.financialPosition.asOfDate}`);
-  y += 2;
-  writeLines(data.financialPosition.lines);
-
-  y += 8;
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(90);
-  doc.text(
-    'Prepared from POS sales, expenses, cash book, and current inventory. Management statement, not audited accounts.',
-    14,
-    y,
-    { maxWidth: 180 }
-  );
+  pdf.section('Statement of financial position');
+  pdf.paragraph(`As at ${formatOfficialDate(data.financialPosition.asOfDate)}.`, true);
+  pdf.kvTable(toRows(data.financialPosition.lines));
+  pdf.signatureBlock('Prepared by', 'Authorised by');
 
   const slug = data.incomeStatement.periodLabel.toLowerCase().replace(/\s+/g, '-');
-  doc.save(`adimat-statements-${slug}.pdf`);
+  pdf.save(`${safeFilePart(data.storeName)}-financial-statements-${slug}.pdf`);
+}
+
+function safeFilePart(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'store';
 }

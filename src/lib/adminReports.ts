@@ -1,6 +1,5 @@
-import jsPDF from 'jspdf';
 import { isSupabaseConfigured, supabase } from './supabase';
-import { formatGhs } from './adminPortal';
+import { FormalPdf, formatGhsOfficial, formatOfficialDate } from './formalPdf';
 
 export interface AdminStorePeriodStats {
   storeId: string;
@@ -192,82 +191,57 @@ export function exportAdminSystemReportCsv(report: AdminSystemReport): void {
 }
 
 export function exportAdminSystemReportPdf(report: AdminSystemReport): void {
-  const doc = new jsPDF();
-  let y = 14;
-  const periodLabel = `${report.fromDate} → ${report.toDate}`;
-
-  const ensureSpace = (needed = 10) => {
-    if (y + needed > 280) {
-      doc.addPage();
-      y = 14;
+  const period = `${formatOfficialDate(report.fromDate)} to ${formatOfficialDate(report.toDate)}`;
+  const pdf = new FormalPdf(
+    { name: 'Adimat', reference: 'Platform administration' },
+    {
+      title: 'Whole-system report',
+      subtitle: 'Consolidated activity across all stores',
+      period: `Reporting period: ${period}`,
+      documentLabel: 'ADMINISTRATOR REPORT',
+      generatedAt: new Date(report.generatedAt),
+      notes: [
+        'This report aggregates completed sales and recorded expenses from every store on the platform for the selected period.',
+        'User and product counts are a snapshot at the time of generation. Figures are for administration and are not audited accounts.',
+      ],
     }
-  };
+  );
 
-  const line = (left: string, right = '') => {
-    ensureSpace();
-    doc.setFontSize(10);
-    doc.text(left, 14, y);
-    if (right) doc.text(right, 196, y, { align: 'right' });
-    y += 6;
-  };
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
-  doc.text('Adimat Admin — Whole System Report', 14, y);
-  y += 8;
-  doc.setFontSize(11);
-  doc.text(periodLabel, 14, y);
-  y += 6;
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.text(`Generated ${new Date(report.generatedAt).toLocaleString()}`, 14, y);
-  y += 10;
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.text('Platform totals', 14, y);
-  y += 7;
-  doc.setFont('helvetica', 'normal');
-
-  line('Stores', String(report.totals.stores));
-  line('Stores with activity', String(report.totals.storesWithActivity));
-  line('Users (snapshot)', String(report.totals.users));
-  line('Products (snapshot)', String(report.totals.products));
-  line('Sales', String(report.totals.sales));
-  line('Revenue', formatGhs(report.totals.revenue));
-  line('Cash revenue', formatGhs(report.totals.cashRevenue));
-  line('Paystack revenue', formatGhs(report.totals.paystackRevenue));
-  line('Expenses', formatGhs(report.totals.expenses));
-  line('Expense entries', String(report.totals.expenseCount));
-  y += 4;
-
-  doc.setFont('helvetica', 'bold');
-  doc.text('By store', 14, y);
-  y += 7;
-  doc.setFont('helvetica', 'normal');
+  pdf.section('Platform totals');
+  pdf.kvTable([
+    { label: 'Stores', value: String(report.totals.stores) },
+    { label: 'Stores with activity', value: String(report.totals.storesWithActivity) },
+    { label: 'Users (snapshot)', value: String(report.totals.users) },
+    { label: 'Products (snapshot)', value: String(report.totals.products) },
+    { label: 'Completed sales', value: String(report.totals.sales) },
+    { label: 'Revenue', value: formatGhsOfficial(report.totals.revenue) },
+    { label: 'Cash revenue', value: formatGhsOfficial(report.totals.cashRevenue) },
+    { label: 'Paystack revenue', value: formatGhsOfficial(report.totals.paystackRevenue) },
+    { label: 'Expenses', value: formatGhsOfficial(report.totals.expenses) },
+    { label: 'Expense entries', value: String(report.totals.expenseCount), emphasis: 'muted' },
+  ]);
 
   const activeStores = report.byStore.filter((s) => s.sales > 0 || s.expenseCount > 0);
-  const rows = activeStores.length > 0 ? activeStores : report.byStore.slice(0, 20);
+  const rows = activeStores.length > 0 ? activeStores : report.byStore;
 
+  pdf.section('Activity by store');
   if (rows.length === 0) {
-    line('No stores found.');
+    pdf.paragraph('No stores were found for this period.', true);
   } else {
-    rows.forEach((row) => {
-      ensureSpace(16);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.text(row.storeName.slice(0, 48), 14, y);
-      y += 5;
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
-      doc.text(
-        `${row.sales} sales · Rev ${formatGhs(row.revenue)} · Cash ${formatGhs(row.cashRevenue)} · Paystack ${formatGhs(row.paystackRevenue)} · Exp ${formatGhs(row.expenses)}`,
-        14,
-        y
-      );
-      y += 7;
-    });
+    pdf.dataTable(
+      ['Store', 'Sales', 'Revenue', 'Cash', 'Paystack', 'Expenses'],
+      rows.map((row) => [
+        row.storeName,
+        String(row.sales),
+        formatGhsOfficial(row.revenue),
+        formatGhsOfficial(row.cashRevenue),
+        formatGhsOfficial(row.paystackRevenue),
+        formatGhsOfficial(row.expenses),
+      ]),
+      [3.2, 1, 1.6, 1.4, 1.6, 1.6]
+    );
   }
 
-  doc.save(`adimat-system-report-${report.fromDate}-to-${report.toDate}.pdf`);
+  pdf.signatureBlock('Prepared by administrator', 'Reviewed by');
+  pdf.save(`adimat-system-report-${report.fromDate}-to-${report.toDate}.pdf`);
 }
