@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import {
   Building2, Users, Package, Wallet, RefreshCcw, LogOut, ChevronLeft, ChevronRight,
   Smartphone, CheckCircle2, AlertCircle, Loader2, Store, CreditCard, CalendarClock, Mail,
-  FileBarChart, Download, FileText, Ban
+  FileBarChart, Download, FileText, Ban, LayoutDashboard, MoreHorizontal, X, Search,
 } from 'lucide-react';
 import {
   AdminDashboardData,
@@ -37,6 +37,8 @@ import {
   type PlatformSettings,
 } from '@/lib/platformSettings';
 import AdminStoreWorkspace from '@/components/AdminStoreWorkspace';
+import AdminCreateStoreForm from '@/components/AdminCreateStoreForm';
+import CopyableStoreId from '@/components/CopyableStoreId';
 
 type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact';
 
@@ -85,6 +87,8 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
   const [systemReport, setSystemReport] = useState<AdminSystemReport | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState('');
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [storeQuery, setStoreQuery] = useState('');
 
   const weekEnd = useMemo(() => getWeekEnd(weekStart), [weekStart]);
 
@@ -367,16 +371,49 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
 
   const tabs = (
     [
-      ['overview', 'Overview'],
-      ['stores', 'Stores'],
-      ['users', 'Users'],
-      ['subscriptions', 'Subs'],
-      ['payouts', 'Payouts'],
-      ['products', 'Products'],
-      ['reports', 'Reports'],
-      ['contact', 'Contact'],
+      ['overview', 'Overview', LayoutDashboard],
+      ['stores', 'Stores', Store],
+      ['users', 'Users', Users],
+      ['subscriptions', 'Subs', CalendarClock],
+      ['payouts', 'Payouts', Wallet],
+      ['products', 'Products', Package],
+      ['reports', 'Reports', FileBarChart],
+      ['contact', 'Contact', Mail],
     ] as const
   );
+
+  const primaryTabIds = ['overview', 'stores', 'subscriptions', 'payouts'] as const;
+  const primaryTabs = tabs.filter((t) => (primaryTabIds as readonly string[]).includes(t[0]));
+  const moreTabs = tabs.filter((t) => !(primaryTabIds as readonly string[]).includes(t[0]));
+  const moreActive = moreTabs.some(([id]) => id === tab);
+
+  const filteredStores = useMemo(() => {
+    if (!data) return [];
+    const q = storeQuery.trim().toLowerCase();
+    const rows = data.performance;
+    if (!q) return rows;
+    return rows.filter((row) => {
+      const name = row.store.name.toLowerCase();
+      const id = row.store.id.toLowerCase();
+      const phone = (row.store.support_number || '').toLowerCase();
+      return name.includes(q) || id.includes(q) || phone.includes(q);
+    });
+  }, [data, storeQuery]);
+
+  const goTab = (id: Tab) => {
+    setTab(id);
+    setMoreOpen(false);
+    if (id !== 'stores') setSelectedStoreId(null);
+  };
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMoreOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [moreOpen]);
 
   return (
     <div className="h-dvh bg-[var(--color-surface)] flex flex-col overflow-hidden md:max-w-6xl md:mx-auto md:border-x md:border-emerald-100 md:shadow-xl">
@@ -384,7 +421,9 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             <p className="text-emerald-200 text-[10px] font-semibold uppercase tracking-wide">Adimat Admin</p>
-            <h1 className="text-base sm:text-lg md:text-xl font-bold truncate">Platform Overview</h1>
+            <h1 className="text-base sm:text-lg md:text-xl font-bold truncate">
+              {tabs.find(([id]) => id === tab)?.[1] || 'Admin'}
+            </h1>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <button
@@ -432,10 +471,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         {tabs.map(([id, label]) => (
           <button
             key={id}
-            onClick={() => {
-              setTab(id);
-              if (id !== 'stores') setSelectedStoreId(null);
-            }}
+            onClick={() => goTab(id)}
             className={`px-3 py-2.5 rounded-xl text-xs font-semibold whitespace-nowrap touch-target ${
               tab === id ? 'bg-primary text-white' : 'text-slate-600 bg-emerald-50/70'
             }`}
@@ -446,7 +482,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       </nav>
 
       <main
-        className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 md:px-6 py-3 md:py-5 pb-24 sm:pb-8"
+        className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 md:px-6 py-3 md:py-5 pb-28 sm:pb-8"
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
         {loading && !data && tab !== 'contact' && tab !== 'reports' && (
@@ -582,6 +618,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="font-bold text-slate-900 truncate">{row.store.name}</p>
+                      <CopyableStoreId storeId={row.store.id} />
                       <p className="text-[11px] text-slate-500 mt-0.5">
                         {row.userCount} users · {row.productCount} products
                       </p>
@@ -1041,10 +1078,20 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
               />
             ) : (
               <>
+                <AdminCreateStoreForm onCreated={refresh} />
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    value={storeQuery}
+                    onChange={(e) => setStoreQuery(e.target.value)}
+                    placeholder="Search stores or paste a Store ID"
+                    className="w-full rounded-2xl border border-slate-200 bg-white pl-9 pr-3 py-3 text-sm"
+                  />
+                </div>
                 <p className="text-xs text-slate-500 px-1">
-                  Open a store to view its inventory and manage staff.
+                  {filteredStores.length} store{filteredStores.length === 1 ? '' : 's'} · tap a card to open inventory &amp; staff
                 </p>
-                {data.performance.map((row) => (
+                {filteredStores.map((row) => (
                   <button
                     key={row.store.id}
                     type="button"
@@ -1055,7 +1102,10 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                   </button>
                 ))}
                 {data.stores.length === 0 && (
-                  <p className="text-sm text-slate-500 text-center py-10">No stores synced to the cloud yet.</p>
+                  <p className="text-sm text-slate-500 text-center py-10">No stores in the cloud yet. Create one above.</p>
+                )}
+                {data.stores.length > 0 && filteredStores.length === 0 && (
+                  <p className="text-sm text-slate-500 text-center py-8">No stores match that search.</p>
                 )}
               </>
             )}
@@ -1127,6 +1177,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                           {storeName(user.store_id)}
                           {user.phone ? ` · ${user.phone}` : ' · no phone'}
                         </p>
+                        <p className="text-[10px] font-mono text-slate-400 truncate">{user.store_id}</p>
                       </div>
                       <div className="text-right shrink-0">
                         <span className="text-[10px] uppercase font-bold tracking-wide text-slate-500">
@@ -1341,44 +1392,95 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
 
       {/* Mobile bottom tabs */}
       <nav
-        className="sm:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-emerald-100 bg-white/95 backdrop-blur-md"
+        className="sm:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-emerald-100 bg-white/95 backdrop-blur-md shadow-[0_-8px_24px_rgba(15,23,42,0.06)]"
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
-        <div className="grid grid-cols-4 gap-0.5 px-1 py-1">
-          {tabs.slice(0, 4).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => {
-                setTab(id);
-                if (id !== 'stores') setSelectedStoreId(null);
-              }}
-              className={`flex flex-col items-center justify-center rounded-xl px-1 py-2 touch-target ${
-                tab === id ? 'bg-emerald-50 text-primary' : 'text-slate-500'
-              }`}
-            >
-              <span className={`text-[11px] ${tab === id ? 'font-bold' : 'font-medium'}`}>{label}</span>
-            </button>
-          ))}
-        </div>
-        <div className="grid grid-cols-4 gap-0.5 px-1 pb-1">
-          {tabs.slice(4).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => {
-                setTab(id);
-                if (id !== 'stores') setSelectedStoreId(null);
-              }}
-              className={`flex flex-col items-center justify-center rounded-xl px-1 py-2 touch-target ${
-                tab === id ? 'bg-emerald-50 text-primary' : 'text-slate-500'
-              }`}
-            >
-              <span className={`text-[11px] ${tab === id ? 'font-bold' : 'font-medium'}`}>{label}</span>
-            </button>
-          ))}
+        <div className="grid grid-cols-5 gap-0.5 px-1.5 py-1.5">
+          {primaryTabs.map(([id, label, Icon]) => {
+            const active = tab === id && !moreOpen;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => goTab(id)}
+                className={`flex flex-col items-center justify-center gap-0.5 rounded-2xl px-1 py-2 touch-target ${
+                  active ? 'bg-emerald-50 text-primary' : 'text-slate-500'
+                }`}
+              >
+                <Icon className={`h-5 w-5 ${active ? 'stroke-[2.5]' : ''}`} />
+                <span className={`text-[10px] leading-none ${active ? 'font-bold' : 'font-medium'}`}>
+                  {label}
+                </span>
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setMoreOpen((v) => !v)}
+            className={`flex flex-col items-center justify-center gap-0.5 rounded-2xl px-1 py-2 touch-target ${
+              moreOpen || moreActive ? 'bg-emerald-50 text-primary' : 'text-slate-500'
+            }`}
+            aria-expanded={moreOpen}
+            aria-label="More admin tools"
+          >
+            <MoreHorizontal className={`h-5 w-5 ${moreOpen || moreActive ? 'stroke-[2.5]' : ''}`} />
+            <span className={`text-[10px] leading-none ${moreOpen || moreActive ? 'font-bold' : 'font-medium'}`}>
+              More
+            </span>
+          </button>
         </div>
       </nav>
+
+      {moreOpen && (
+        <div className="sm:hidden fixed inset-0 z-50 flex flex-col justify-end">
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-900/40"
+            aria-label="Close menu"
+            onClick={() => setMoreOpen(false)}
+          />
+          <div
+            className="relative rounded-t-3xl bg-white shadow-2xl animate-slide-up"
+            style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+              <p className="text-sm font-bold text-slate-900">More</p>
+              <button
+                type="button"
+                onClick={() => setMoreOpen(false)}
+                className="rounded-full bg-slate-100 p-2 text-slate-600 touch-target"
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2 p-4">
+              {moreTabs.map(([id, label, Icon]) => {
+                const active = tab === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => goTab(id)}
+                    className={`flex items-center gap-3 rounded-2xl border px-3 py-4 text-left touch-target ${
+                      active
+                        ? 'border-emerald-200 bg-emerald-50 text-primary'
+                        : 'border-slate-100 bg-slate-50 text-slate-800'
+                    }`}
+                  >
+                    <span className={`flex h-10 w-10 items-center justify-center rounded-2xl ${
+                      active ? 'bg-primary text-white' : 'bg-white text-primary shadow-sm'
+                    }`}>
+                      <Icon className="h-5 w-5" />
+                    </span>
+                    <span className={`text-sm ${active ? 'font-bold' : 'font-semibold'}`}>{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1402,6 +1504,7 @@ function StoreRevenueCard({ row, compact = false }: { row: StorePerformance; com
         </div>
         <div className="flex-1 min-w-0">
           <p className="font-bold text-slate-900 truncate">{row.store.name}</p>
+          <CopyableStoreId storeId={row.store.id} />
           {row.store.access_blocked && (
             <p className="text-[10px] font-bold uppercase tracking-wide text-red-600 mt-0.5">
               Access blocked

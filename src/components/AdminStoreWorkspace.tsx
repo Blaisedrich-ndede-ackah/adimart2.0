@@ -13,6 +13,7 @@ import {
   type AdminStoreRow,
   type AdminUserRow,
 } from '@/lib/adminPortal';
+import CopyableStoreId from '@/components/CopyableStoreId';
 
 interface AdminStoreWorkspaceProps {
   store: AdminStoreRow;
@@ -144,6 +145,7 @@ export default function AdminStoreWorkspace({
       <div className="bg-white rounded-2xl border border-slate-200 p-4">
         <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Store workspace</p>
         <h2 className="text-xl font-bold text-slate-900 mt-1">{store.name}</h2>
+        <CopyableStoreId storeId={store.id} />
         <p className="text-xs text-slate-500 mt-1">
           {[store.address, store.support_number].filter(Boolean).join(' · ') || 'No profile details'}
         </p>
