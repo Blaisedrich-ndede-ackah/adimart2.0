@@ -9,7 +9,10 @@ export interface FormalOrg {
   address?: string;
   phone?: string;
   logoDataUrl?: string;
+  /** Short official caption under the title — not a system UUID. */
   reference?: string;
+  /** Internal store identifier, printed only in the footer. */
+  storeId?: string;
 }
 
 export interface FormalDocMeta {
@@ -272,15 +275,18 @@ export class FormalPdf {
       this.doc.text(this.meta.period, MARGIN_X, this.y);
       this.y += 5;
     }
-    if (this.org.reference) {
+    if (this.org.reference && !looksLikeStoreId(this.org.reference)) {
       this.doc.setFont('helvetica', 'normal');
       this.doc.setFontSize(8);
       this.doc.setTextColor(...MUTED);
       this.doc.text(this.org.reference, MARGIN_X, this.y);
       this.y += 5;
     }
+    this.doc.setDrawColor(...RULE);
+    this.doc.setLineWidth(0.2);
+    this.doc.line(MARGIN_X, this.y, RIGHT, this.y);
     this.doc.setTextColor(...INK);
-    this.y += 3;
+    this.y += 6;
   }
 
   private drawChrome(page: number): void {
@@ -320,6 +326,10 @@ export class FormalPdf {
     this.doc.setFillColor(217, 119, 6);
     this.doc.rect(0, HEADER_H, PAGE_W, 1.2, 'F');
 
+    this.drawFooter(page);
+  }
+
+  private drawFooter(page: number, total?: number): void {
     this.doc.setDrawColor(...RULE);
     this.doc.setLineWidth(0.25);
     this.doc.line(MARGIN_X, PAGE_H - FOOTER_H, RIGHT, PAGE_H - FOOTER_H);
@@ -327,8 +337,14 @@ export class FormalPdf {
     this.doc.setFontSize(7);
     this.doc.setTextColor(...MUTED);
     const generated = formatOfficialDate(this.meta.generatedAt || new Date());
-    this.doc.text(`Prepared ${generated}  ·  Adimat POS`, MARGIN_X, PAGE_H - 7);
-    this.doc.text(`Page ${page}`, RIGHT, PAGE_H - 7, { align: 'right' });
+    this.doc.text(`Prepared ${generated}  ·  Official copy  ·  Adimat POS`, MARGIN_X, PAGE_H - 8.5);
+    if (this.org.storeId) {
+      this.doc.setFontSize(6.5);
+      this.doc.text(`Store reference  ${this.org.storeId}`, MARGIN_X, PAGE_H - 4.5);
+    }
+    this.doc.setFontSize(7);
+    const pageLabel = total ? `Page ${page} of ${total}` : `Page ${page}`;
+    this.doc.text(pageLabel, RIGHT, PAGE_H - 8.5, { align: 'right' });
   }
 
   private finishPages(): void {
@@ -349,12 +365,16 @@ export class FormalPdf {
     const total = this.doc.getNumberOfPages();
     for (let i = 1; i <= total; i++) {
       this.doc.setPage(i);
-      this.doc.setFont('helvetica', 'normal');
-      this.doc.setFontSize(7);
-      this.doc.setTextColor(...MUTED);
-      this.doc.text(`Page ${i} of ${total}`, RIGHT, PAGE_H - 7, { align: 'right' });
+      this.doc.setFillColor(...WHITE);
+      this.doc.rect(0, PAGE_H - FOOTER_H + 0.4, PAGE_W, FOOTER_H - 0.4, 'F');
+      this.drawFooter(i, total);
     }
   }
+}
+
+function looksLikeStoreId(value: string): boolean {
+  return /store id\s+[0-9a-f-]{8,}/i.test(value.trim())
+    || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim());
 }
 
 export function orgFromStore(store?: {
@@ -369,6 +389,6 @@ export function orgFromStore(store?: {
     address: store?.address?.trim() || '',
     phone: store?.support_number?.trim() || '',
     logoDataUrl: store?.logo_url?.startsWith('data:image/') ? store.logo_url : '',
-    reference: store?.id ? `Store ID ${store.id}` : '',
+    storeId: store?.id || '',
   };
 }
