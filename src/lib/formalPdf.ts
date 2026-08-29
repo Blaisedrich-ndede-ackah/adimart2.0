@@ -45,11 +45,12 @@ const WHITE: [number, number, number] = [255, 255, 255];
 
 export function formatGhsOfficial(amount: number): string {
   const n = Number.isFinite(amount) ? amount : 0;
-  const formatted = Math.abs(n).toLocaleString('en-GH', {
+  const formatted = Math.abs(n).toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-  return n < 0 ? `(GH₵${formatted})` : `GH₵${formatted}`;
+  // ISO code — Helvetica in jsPDF cannot reliably draw the cedi glyph.
+  return n < 0 ? `(GHS ${formatted})` : `GHS ${formatted}`;
 }
 
 export function formatOfficialDate(value: Date | string = new Date()): string {
