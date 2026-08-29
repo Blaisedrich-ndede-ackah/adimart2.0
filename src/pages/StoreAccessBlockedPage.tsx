@@ -10,6 +10,7 @@ import {
 import { syncFromSupabase } from '@/lib/dexie';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import SubscriptionPackagesCard from '@/components/SubscriptionPackagesCard';
+import CommunityChatButton from '@/components/CommunityChatButton';
 
 /**
  * Shown after login when an administrator has blocked the store for unpaid
@@ -133,11 +134,11 @@ export default function StoreAccessBlockedPage() {
               Loading contact details…
             </div>
           ) : !whatsappDigits && !contact.email ? (
-            <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3 text-xs">
+            <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3 text-xs mb-2">
               Customer care contacts are not set yet.
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-2 mb-2">
               {whatsappDigits && (
                 <a
                   href={`https://wa.me/${whatsappDigits}?text=${careMessage}`}
@@ -180,6 +181,7 @@ export default function StoreAccessBlockedPage() {
               )}
             </div>
           )}
+          <CommunityChatButton variant="care" label="Community chat" />
         </div>
 
         <button

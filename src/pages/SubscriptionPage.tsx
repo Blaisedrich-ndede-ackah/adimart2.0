@@ -17,6 +17,7 @@ import {
 import { syncFromSupabase } from '@/lib/dexie';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import SubscriptionPackagesCard from '@/components/SubscriptionPackagesCard';
+import CommunityChatButton from '@/components/CommunityChatButton';
 
 /**
  * Store-side subscription: self-serve Paystack renew + customer care contacts.
@@ -196,12 +197,12 @@ export default function SubscriptionPage() {
               Loading contact details…
             </div>
           ) : !whatsappDigits && !contact.email ? (
-            <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3 text-xs">
+            <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3 text-xs mb-2">
               Customer care contacts are not set yet. Ask the platform administrator to add WhatsApp
               and email under Admin → Contact.
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-2 mb-2">
               {whatsappDigits && (
                 <a
                   href={`https://wa.me/${whatsappDigits}?text=${careMessage}`}
@@ -246,6 +247,7 @@ export default function SubscriptionPage() {
               )}
             </div>
           )}
+          <CommunityChatButton variant="care" label="Community chat" />
         </div>
 
         <p className="text-[11px] text-gray-500 text-center px-4 pb-2">

@@ -6,6 +6,7 @@ import { db, listLocalStores, type LocalLocation, type LocalStore } from '@/lib/
 import { hasStoreLogo } from '@/lib/productImage';
 import { confirmPinResetWithOtp, requestPinResetOtp } from '@/lib/pinReset';
 import { listLocations, verifyLocationAccessPin } from '@/lib/warehouse';
+import CommunityChatButton from '@/components/CommunityChatButton';
 import {
   clearPendingWarehouseLogin,
   getPendingWarehouseLogin,
@@ -373,6 +374,8 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
         )}
 
         {!warehouseMode && <ForgotPinSection />}
+
+        <CommunityChatButton variant="auth" className="mt-6" />
 
         {onOpenAdmin && (
           <button
