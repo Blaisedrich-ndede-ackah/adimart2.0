@@ -13,9 +13,13 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { reprintTransactionReceipt } from '@/lib/receiptReprint';
 import { isPrinterConnected } from '@/lib/bluetoothPeripherals';
 import { parseOtherCharges } from '@/lib/otherCharges';
+import { useFormatMoney } from '@/lib/currency';
+import { useT } from '@/lib/i18n';
 
 export default function TransactionsPage() {
   const { currentUser } = useAuthStore();
+  const money = useFormatMoney();
+  const t = useT();
   const isOwner = currentUser?.role === 'owner';
   const [transactions, setTransactions] = useState<LocalTransaction[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -78,7 +82,7 @@ export default function TransactionsPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-white font-bold text-lg">
-              {isOwner ? 'Transactions' : 'My Sales'}
+              {isOwner ? t('sales.title') : t('sales.myTitle')}
             </h1>
             <p className="text-emerald-200 text-xs">
               {isOwner
@@ -146,7 +150,7 @@ export default function TransactionsPage() {
                     </p>
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <p className="text-sm font-bold text-gray-900">GH₵{txn.total_amount.toFixed(2)}</p>
+                    <p className="text-sm font-bold text-gray-900">{money(txn.total_amount)}</p>
                     {expanded ? (
                       <ChevronUp className="w-4 h-4 text-gray-400 ml-auto" />
                     ) : (
@@ -165,16 +169,16 @@ export default function TransactionsPage() {
                           <span className="truncate pr-2">
                             {item.quantity}× {item.product_name}
                           </span>
-                          <span className="font-medium flex-shrink-0">GH₵{item.subtotal.toFixed(2)}</span>
+                          <span className="font-medium flex-shrink-0">{money(item.subtotal)}</span>
                         </div>
                       ))
                     )}
                     {txn.discount_applied > 0 && (
-                      <p className="text-xs text-red-500">Discount: -GH₵{txn.discount_applied.toFixed(2)}</p>
+                      <p className="text-xs text-red-500">Discount: -{money(txn.discount_applied)}</p>
                     )}
                     {parseOtherCharges(txn.other_charges_json).map((charge) => (
                       <p key={charge.id} className="text-xs text-gray-600">
-                        {charge.label}: GH₵{charge.amount.toFixed(2)}
+                        {charge.label}: {money(charge.amount)}
                       </p>
                     ))}
                     <button

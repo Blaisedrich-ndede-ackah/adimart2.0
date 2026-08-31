@@ -12,23 +12,23 @@ import {
 import { useAuthStore } from '@/store/useAuthStore';
 import { triggerAutoSync } from '@/lib/sync';
 import { roundMoney, toMoneyAmount } from '@/lib/money';
+import { useFormatMoney } from '@/lib/currency';
+import {
+  cashbookCategoryLabel,
+  CASHBOOK_EXPENSE_STORED,
+  CASHBOOK_INCOME_STORED,
+  useT,
+} from '@/lib/i18n';
 import {
   buildStoreFinancialStatements,
   exportFinancialStatementsPdf,
   type StoreFinancialStatements,
 } from '@/lib/financialStatements';
 
-const INCOME_CATEGORIES = ['Cash sales', 'Capital', 'Loan', 'Refund', 'Other'];
-const EXPENSE_CATEGORIES = ['Rent', 'Utilities', 'Supplier', 'Salaries', 'Transport', 'Withdrawal', 'Other'];
+const INCOME_CATEGORIES = [...CASHBOOK_INCOME_STORED];
+const EXPENSE_CATEGORIES = [...CASHBOOK_EXPENSE_STORED];
 
 type CashBookPeriod = 'today' | 'week' | 'month' | 'custom';
-
-const PERIOD_TABS: { key: CashBookPeriod; label: string }[] = [
-  { key: 'today', label: 'Today' },
-  { key: 'week', label: 'Week' },
-  { key: 'month', label: 'Month' },
-  { key: 'custom', label: 'Custom' },
-];
 
 function toDateOnly(d: Date): string {
   const y = d.getFullYear();
@@ -73,10 +73,6 @@ function formatRangeLabel(start: Date, end: Date): string {
   return `${start.toLocaleDateString('en-GB', opts)} - ${end.toLocaleDateString('en-GB', opts)}`;
 }
 
-function formatMoney(amount: number): string {
-  return `GH₵${amount.toFixed(2)}`;
-}
-
 function parseDateOnly(value: string): Date {
   const [y, m, d] = value.split('-').map(Number);
   return new Date(y, (m || 1) - 1, d || 1);
@@ -88,6 +84,8 @@ function parseDateOnly(value: string): Date {
  */
 export default function CashBookPage() {
   const { currentUser } = useAuthStore();
+  const t = useT();
+  const money = useFormatMoney();
   const [period, setPeriod] = useState<CashBookPeriod>('today');
   const [weekStart, setWeekStart] = useState(() => getWeekStart());
   const [monthStart, setMonthStart] = useState(() => getMonthStart());
@@ -252,7 +250,7 @@ export default function CashBookPage() {
         <div className="flex items-center gap-2 mb-3">
           <BookOpen className="w-5 h-5 text-white shrink-0" />
           <div>
-            <h1 className="text-white font-bold text-lg">Cash Flow</h1>
+            <h1 className="text-white font-bold text-lg">{t('cashbook.title')}</h1>
             <p className="text-emerald-200 text-xs">Store cash book</p>
           </div>
         </div>
@@ -265,7 +263,7 @@ export default function CashBookPage() {
               view === 'ledger' ? 'bg-white text-primary' : 'text-white/80'
             }`}
           >
-            Ledger
+            {t('cashbook.ledger')}
           </button>
           <button
             type="button"
@@ -274,28 +272,25 @@ export default function CashBookPage() {
               view === 'statements' ? 'bg-white text-primary' : 'text-white/80'
             }`}
           >
-            Statements
+            {t('cashbook.statements')}
           </button>
         </div>
 
         <div className="flex bg-white/15 rounded-xl p-0.5">
-          {PERIOD_TABS.map((tab) => (
+          {(['today', 'week', 'month', 'custom'] as const).map((key) => (
             <button
-              key={tab.key}
+              key={key}
               type="button"
               onClick={() => {
-                setPeriod(tab.key);
-                if (tab.key === 'week') setWeekStart(getWeekStart());
-                if (tab.key === 'month') setMonthStart(getMonthStart());
-                if (tab.key === 'today') {
-                  /* range is derived from today */
-                }
+                setPeriod(key);
+                if (key === 'week') setWeekStart(getWeekStart());
+                if (key === 'month') setMonthStart(getMonthStart());
               }}
-              className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${
-                period === tab.key ? 'bg-white text-primary' : 'text-white/80'
+              className={`flex-1 py-2 rounded-lg text-xs font-medium transition ${
+                period === key ? 'bg-white text-primary' : 'text-white/80'
               }`}
             >
-              {tab.label}
+              {t(`common.${key}`)}
             </button>
           ))}
         </div>
@@ -395,18 +390,18 @@ export default function CashBookPage() {
                 totals.net >= 0 ? 'text-slate-900' : 'text-red-600'
               }`}
             >
-              {formatMoney(totals.net)}
+              {money(totals.net)}
             </p>
             <p className="text-[11px] text-slate-400 mt-1">(Total Income − Total Expense)</p>
           </div>
           <div className="grid grid-cols-2 divide-x divide-slate-100">
             <div className="px-4 py-4 text-center">
               <p className="text-sm text-slate-500">Income</p>
-              <p className="text-xl font-bold text-emerald-600 mt-1">{formatMoney(totals.income)}</p>
+              <p className="text-xl font-bold text-emerald-600 mt-1">{money(totals.income)}</p>
             </div>
             <div className="px-4 py-4 text-center">
               <p className="text-sm text-slate-500">Expense</p>
-              <p className="text-xl font-bold text-red-500 mt-1">{formatMoney(totals.expense)}</p>
+              <p className="text-xl font-bold text-red-500 mt-1">{money(totals.expense)}</p>
             </div>
           </div>
         </div>
@@ -452,7 +447,7 @@ export default function CashBookPage() {
                       </p>
                     </div>
                     <p className="text-xs text-slate-500 mt-1 pl-8">
-                      {entry.category} · {entry.entry_date}
+                      {cashbookCategoryLabel(entry.category, t)} · {entry.entry_date}
                       {entry.created_by ? ` · ${entry.created_by}` : ''}
                     </p>
                     {entry.notes ? (
@@ -468,7 +463,7 @@ export default function CashBookPage() {
                       }`}
                     >
                       {isIncome ? '+' : '−'}
-                      {formatMoney(entry.amount)}
+                      {money(entry.amount)}
                     </span>
                     <button
                       type="button"
@@ -550,7 +545,7 @@ export default function CashBookPage() {
                 >
                   {categories.map((c) => (
                     <option key={c} value={c}>
-                      {c}
+                      {cashbookCategoryLabel(c, t)}
                     </option>
                   ))}
                 </select>
@@ -681,8 +676,9 @@ function StatementCard({
   icon: ReactNode;
   title: string;
   subtitle: string;
-  lines: { label: string; amount: number; emphasis?: 'total' | 'subtotal' | 'muted' }[];
+  lines: StoreFinancialStatements['incomeStatement']['lines'];
 }) {
+  const money = useFormatMoney();
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
       <div className="px-4 py-3 border-b border-slate-100 flex items-start gap-2">
@@ -718,7 +714,7 @@ function StatementCard({
                       : 'text-slate-800'
                 }`}
               >
-                {formatMoney(line.amount)}
+                {money(line.amount)}
               </p>
             </div>
           );

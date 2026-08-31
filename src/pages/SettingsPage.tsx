@@ -32,6 +32,10 @@ import { isValidGhanaPhone } from '@/lib/platformSettings';
 import { fileToStoreLogoDataUrl, hasStoreLogo } from '@/lib/productImage';
 import StoresPortalSection from '@/components/StoresPortalSection';
 import WarehousePortalSection from '@/components/WarehousePortalSection';
+import LanguageSwitcher from '@/components/LanguageSwitcher';
+import CurrencySelect from '@/components/CurrencySelect';
+import { useI18nStore, useT } from '@/lib/i18n';
+import { DEFAULT_CURRENCY, normalizeCurrencyCode, getStoreCurrency } from '@/lib/currency';
 
 interface SettingsPageProps {
   onNavigate?: (page: string) => void;
@@ -39,6 +43,8 @@ interface SettingsPageProps {
 
 export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const { currentUser, currentStore, refreshStore } = useAuthStore();
+  const t = useT();
+  const language = useI18nStore((s) => s.language);
   const logoInputRef = useRef<HTMLInputElement>(null);
   
   const [storeName, setStoreName] = useState('');
@@ -54,6 +60,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [momoAccountName, setMomoAccountName] = useState('');
   const [momoNumber, setMomoNumber] = useState('');
   const [momoNetwork, setMomoNetwork] = useState('');
+  const [currencyCode, setCurrencyCode] = useState(DEFAULT_CURRENCY);
   
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -98,6 +105,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
       setMomoAccountName(currentStore.momo_account_name || '');
       setMomoNumber(currentStore.momo_number || '');
       setMomoNetwork(currentStore.momo_network || '');
+      setCurrencyCode(normalizeCurrencyCode(currentStore.currency_code));
       await ensureStoreLocations(currentStore.id);
       setLocations(await listLocations(currentStore.id));
     }
@@ -130,27 +138,27 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
     
     try {
       if (!storeName.trim()) {
-        setSaveError('Store name is required.');
+        setSaveError(t('settings.storeNameRequired'));
         setSaving(false);
         return;
       }
       if (!storeAddress.trim()) {
-        setSaveError('Store address is required.');
+        setSaveError(t('settings.addressRequired'));
         setSaving(false);
         return;
       }
       if (!supportNumber.trim()) {
-        setSaveError('Support phone number is required.');
+        setSaveError(t('settings.phoneRequired'));
         setSaving(false);
         return;
       }
       if (!isValidGhanaPhone(supportNumber)) {
-        setSaveError('Enter a valid Ghana phone number (e.g. 024XXXXXXX or +23324XXXXXXX).');
+        setSaveError(t('settings.validPhone'));
         setSaving(false);
         return;
       }
       if (!allowPercentage && !allowFixed) {
-        setSaveError('Enable at least one discount type (percentage or fixed).');
+        setSaveError(t('settings.discountType'));
         setSaving(false);
         return;
       }
@@ -168,6 +176,8 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         momo_account_name: momoAccountName.trim(),
         momo_number: momoNumber.trim(),
         momo_network: momoNetwork.trim(),
+        currency_code: normalizeCurrencyCode(currencyCode),
+        preferred_language: language,
         synced: 0,
       });
       
@@ -176,7 +186,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      setSaveError('Failed to save: ' + msg);
+      setSaveError(t('settings.saveFailed', { error: msg }));
     }
     
     setSaving(false);
@@ -354,13 +364,24 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   return (
     <div className="page-shell">
       <div className="page-header">
-        <h1 className="text-white font-bold text-lg">Settings</h1>
-        <p className="text-emerald-200 text-xs">Manage your store configuration</p>
+        <h1 className="text-white font-bold text-lg">{t('settings.title')}</h1>
+        <p className="text-emerald-200 text-xs">{t('settings.subtitle')}</p>
       </div>
 
       <div className="page-body no-scrollbar">
         <StoresPortalSection />
         <WarehousePortalSection />
+
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">
+          <div className="flex items-center gap-2 mb-3">
+            <h3 className="font-bold text-gray-900">{t('settings.languageCurrency')}</h3>
+          </div>
+          <LanguageSwitcher />
+          <p className="text-[11px] text-gray-500 mt-2 mb-4">{t('settings.languageHint')}</p>
+          <label className="text-sm font-medium text-gray-800 mb-2 block">{t('settings.currency')}</label>
+          <CurrencySelect value={currencyCode} onChange={setCurrencyCode} />
+          <p className="text-[11px] text-gray-500 mt-2">{t('settings.currencyHint')}</p>
+        </div>
 
         {/* Store Profile */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">
@@ -522,7 +543,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-gray-700">Allow fixed-amount discounts</p>
-                <p className="text-xs text-gray-500">e.g. GH₵5 off the cart</p>
+                <p className="text-xs text-gray-500">e.g. {getStoreCurrency(currencyCode).symbol}5 off the cart</p>
               </div>
               <button
                 onClick={() => setAllowFixed(!allowFixed)}
@@ -1009,12 +1030,12 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
           ) : saveSuccess ? (
             <>
               <CheckCircle2 className="w-5 h-5" />
-              Settings Saved!
+              {t('settings.savedBanner')}
             </>
           ) : (
             <>
               <Save className="w-5 h-5" />
-              Save All Settings
+              {t('settings.saveAll')}
             </>
           )}
         </button>

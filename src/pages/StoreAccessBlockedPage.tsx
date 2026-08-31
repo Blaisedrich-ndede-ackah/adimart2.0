@@ -11,6 +11,7 @@ import { syncFromSupabase } from '@/lib/dexie';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import SubscriptionPackagesCard from '@/components/SubscriptionPackagesCard';
 import CommunityChatButton from '@/components/CommunityChatButton';
+import LanguageSwitcher from '@/components/LanguageSwitcher';
 
 /**
  * Shown after login when an administrator has blocked the store for unpaid
@@ -181,6 +182,7 @@ export default function StoreAccessBlockedPage() {
               )}
             </div>
           )}
+          <LanguageSwitcher compact />
           <CommunityChatButton variant="care" label="Community chat" />
         </div>
 

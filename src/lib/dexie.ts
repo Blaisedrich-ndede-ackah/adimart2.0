@@ -44,6 +44,10 @@ export interface LocalStore {
   /** Public URL slug: #/shop/{slug} */
   ecommerce_slug?: string;
   ecommerce_tagline?: string;
+  /** Display currency for this store only (prices, receipts, reports). */
+  currency_code?: string;
+  /** Default language for devices that have not chosen one yet. */
+  preferred_language?: string;
   created_at: string;
   synced: number;
 }
@@ -461,7 +465,13 @@ export async function createStoreWithOwner(
   storeName: string,
   ownerName: string,
   ownerPin: string,
-  profile?: { address?: string; supportNumber?: string; ownerPhone?: string }
+  profile?: {
+    address?: string;
+    supportNumber?: string;
+    ownerPhone?: string;
+    currencyCode?: string;
+    preferredLanguage?: string;
+  }
 ): Promise<{ store: LocalStore; owner: LocalUser }> {
   const storeId = generateId();
   const ownerId = generateId();
@@ -493,6 +503,8 @@ export async function createStoreWithOwner(
     ecommerce_enabled: 0,
     ecommerce_slug: '',
     ecommerce_tagline: '',
+    currency_code: profile?.currencyCode || 'GHS',
+    preferred_language: profile?.preferredLanguage === 'fr' ? 'fr' : 'en',
     created_at: now,
     synced: 0,
   };
@@ -536,18 +548,18 @@ export async function pullAdminStoreLimits(storeId: string): Promise<LocalStore 
     const { data, error } = await supabase
       .from('stores')
       .select(
-        'warehouse_enabled, max_shops, max_warehouses, max_stores, ecommerce_enabled, ecommerce_slug, ecommerce_tagline, subscription_started_at, subscription_expires_at, subscription_months_granted, access_blocked'
+        'warehouse_enabled, max_shops, max_warehouses, max_stores, ecommerce_enabled, ecommerce_slug, ecommerce_tagline, currency_code, preferred_language, subscription_started_at, subscription_expires_at, subscription_months_granted, access_blocked'
       )
       .eq('id', storeId)
       .maybeSingle();
 
     let storeRow = (data ?? null) as Record<string, unknown> | null;
     let storeError = error;
-    if (storeError?.message?.includes('access_blocked')) {
+    if (storeError?.message?.includes('access_blocked') || storeError?.message?.includes('currency_code') || storeError?.message?.includes('preferred_language')) {
       const retry = await supabase
         .from('stores')
         .select(
-          'warehouse_enabled, max_shops, max_warehouses, max_stores, ecommerce_enabled, ecommerce_slug, ecommerce_tagline, subscription_started_at, subscription_expires_at, subscription_months_granted'
+          'warehouse_enabled, max_shops, max_warehouses, max_stores, ecommerce_enabled, ecommerce_slug, ecommerce_tagline, subscription_started_at, subscription_expires_at, subscription_months_granted, access_blocked'
         )
         .eq('id', storeId)
         .maybeSingle();
@@ -586,6 +598,9 @@ export async function pullAdminStoreLimits(storeId: string): Promise<LocalStore 
       ecommerce_enabled: storeRow?.ecommerce_enabled ? 1 : local.ecommerce_enabled ?? 0,
       ecommerce_slug: String(storeRow?.ecommerce_slug || local.ecommerce_slug || ''),
       ecommerce_tagline: String(storeRow?.ecommerce_tagline || local.ecommerce_tagline || ''),
+      currency_code: String(storeRow?.currency_code || local.currency_code || 'GHS'),
+      preferred_language:
+        storeRow?.preferred_language === 'fr' || local.preferred_language === 'fr' ? 'fr' : 'en',
       subscription_started_at: storeRow?.subscription_started_at
         ? String(storeRow.subscription_started_at)
         : local.subscription_started_at ?? null,
@@ -1513,6 +1528,8 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
           momo_number: store.momo_number || '',
           momo_network: store.momo_network || '',
           logo_url: store.logo_url || '',
+          currency_code: store.currency_code || 'GHS',
+          preferred_language: store.preferred_language === 'fr' ? 'fr' : 'en',
           created_at: store.created_at,
         }],
         async () => { await db.stores.update(storeId, { synced: 1 }); },
@@ -1913,6 +1930,8 @@ export async function syncFromSupabase(opts?: {
         ecommerce_enabled: remoteStore.ecommerce_enabled ? 1 : 0,
         ecommerce_slug: remoteStore.ecommerce_slug || localStore?.ecommerce_slug || '',
         ecommerce_tagline: remoteStore.ecommerce_tagline || localStore?.ecommerce_tagline || '',
+        currency_code: String(remoteStore.currency_code || localStore?.currency_code || 'GHS'),
+        preferred_language: remoteStore.preferred_language === 'fr' || localStore?.preferred_language === 'fr' ? 'fr' : 'en',
         created_at: remoteStore.created_at,
         synced: localStore?.synced === 0 ? 0 : 1,
       });

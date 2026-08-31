@@ -20,6 +20,7 @@ import StockAdjustment from '@/components/StockAdjustment';
 import CsvImportModal from '@/components/CsvImportModal';
 import { downloadBarcodeLabel, printBarcodeLabel } from '@/lib/barcodeLabels';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useFormatMoney } from '@/lib/currency';
 import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 import { playScanBeep } from '@/lib/scanBeep';
 import ProductImage from '@/components/ProductImage';
@@ -28,6 +29,7 @@ type SortMode = 'recent' | 'alpha' | 'stock-low' | 'stock-high';
 
 export default function InventoryPage() {
   const { currentStore } = useAuthStore();
+  const money = useFormatMoney();
   const [products, setProducts] = useState<LocalProduct[]>([]);
   const [filteredProducts, setFilteredProducts] = useState<LocalProduct[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
@@ -231,12 +233,7 @@ export default function InventoryPage() {
     0
   );
 
-  const formatInventoryMoney = (amount: number) => {
-    const n = Number.isFinite(amount) && amount >= 0 ? amount : 0;
-    const rounded = Math.round(n);
-    const withCommas = String(rounded).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-    return `GH₵${withCommas}`;
-  };
+  const formatInventoryMoney = (amount: number) => money(amount);
 
   const formatStockQty = (value: unknown) => String(toQty(value));
 
@@ -263,10 +260,10 @@ export default function InventoryPage() {
   const handlePrintLabel = async (product: LocalProduct) => {
     setLabelStatus('');
     try {
-      await printBarcodeLabel(product, currentStore?.name || 'Store');
+      await printBarcodeLabel(product, currentStore?.name || 'Store', currentStore?.currency_code);
       setLabelStatus(`Printed label for ${product.name}`);
     } catch {
-      downloadBarcodeLabel(product, currentStore?.name || 'Store');
+      downloadBarcodeLabel(product, currentStore?.name || 'Store', currentStore?.currency_code);
       setLabelStatus(`Downloaded label PDF for ${product.name}`);
     }
     setTimeout(() => setLabelStatus(''), 3000);
@@ -491,10 +488,10 @@ export default function InventoryPage() {
                       <div className="flex sm:flex-col sm:text-right items-end justify-between sm:justify-start gap-3 sm:gap-0.5 shrink-0">
                         <div className="text-left sm:text-right">
                           <p className="text-sm font-bold text-primary">
-                            GH₵{toMoney(product.selling_price).toFixed(2)}
+                            {money(toMoney(product.selling_price))}
                           </p>
                           <p className="text-[10px] text-gray-400">
-                            Cost: GH₵{toMoney(product.cost_price).toFixed(2)}
+                            Cost: {money(toMoney(product.cost_price))}
                           </p>
                         </div>
                         <p

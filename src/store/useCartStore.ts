@@ -12,6 +12,7 @@ import { triggerPushSync } from '@/lib/sync';
 import { resolveSalePrice, type SaleMode, type UnitType } from '@/lib/bulkPricing';
 import type { StockChange } from '@/lib/stockEvents';
 import { moneyEquals, roundMoney, toMoneyAmount } from '@/lib/money';
+import { formatStoreMoneyNow } from '@/lib/currency';
 import {
   deductSaleStockForItems,
   getLocationStock,
@@ -459,7 +460,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       const capAmount = roundMoney((priced.subtotal * discountCap) / 100);
       if (priced.discountAmount > capAmount + 0.009 && !isOwner) {
         throw new Error(
-          `Discount exceeds the store cap of ${discountCap}% (max GH₵${capAmount.toFixed(2)}).`
+          `Discount exceeds the store cap of ${discountCap}% (max ${formatStoreMoneyNow(capAmount)}).`
         );
       }
     }
@@ -476,7 +477,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       // split
       if (!moneyEquals(cash + paystack, priced.total)) {
         throw new Error(
-          `Split payment must equal total. Cash GH₵${cash.toFixed(2)} + MoMo GH₵${paystack.toFixed(2)} ≠ GH₵${priced.total.toFixed(2)}.`
+          `Split payment must equal total. Cash ${formatStoreMoneyNow(cash)} + MoMo ${formatStoreMoneyNow(paystack)} ≠ ${formatStoreMoneyNow(priced.total)}.`
         );
       }
     }

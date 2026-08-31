@@ -1,4 +1,5 @@
 import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
+import { useFormatMoney } from '@/lib/currency';
 
 export interface FinancialDonutMetrics {
   costPrice: number;
@@ -33,6 +34,7 @@ export default function FinancialDonutChart({
   title = 'Cost · Selling · Profit',
   className = '',
 }: FinancialDonutChartProps) {
+  const money = useFormatMoney();
   const costPrice = Number(metrics.costPrice) || 0;
   const sellingPrice = Number(metrics.sellingPrice) || 0;
   const profitEstimate =
@@ -97,7 +99,7 @@ export default function FinancialDonutChart({
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center px-6">
           <p className="text-[11px] font-semibold text-gray-500 leading-tight">Selling price</p>
           <p className="text-base font-bold text-gray-900 mt-0.5 tabular-nums leading-tight">
-            {formatGhs(sellingPrice)}
+            {money(sellingPrice)}
           </p>
         </div>
       </div>
@@ -112,7 +114,7 @@ export default function FinancialDonutChart({
             />
             <span className="text-gray-700 font-medium truncate">{row.name}</span>
             <span className="ml-auto font-semibold text-gray-900 tabular-nums whitespace-nowrap">
-              {formatGhs(row.amount)}
+              {money(row.amount)}
             </span>
           </li>
         ))}

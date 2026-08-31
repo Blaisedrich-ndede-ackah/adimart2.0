@@ -13,6 +13,7 @@ import {
 } from '@/lib/ecommerce';
 import { subscribeStockChanges } from '@/lib/stockEvents';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useFormatMoney } from '@/lib/currency';
 
 const STATUS_FLOW: OnlineOrderStatus[] = ['new', 'confirmed', 'fulfilled', 'cancelled'];
 
@@ -20,6 +21,7 @@ type OrderRow = LocalOnlineOrder & { items: LocalOnlineOrderItem[] };
 
 export default function EcommercePage() {
   const { currentStore, currentUser, refreshStore } = useAuthStore();
+  const money = useFormatMoney();
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [catalog, setCatalog] = useState<Awaited<ReturnType<typeof listOnlineCatalogProducts>>>([]);
   const [busy, setBusy] = useState(false);
@@ -282,7 +284,7 @@ export default function EcommercePage() {
                     </div>
                     <div className="text-right">
                       <p className="text-lg font-bold text-primary">
-                        GH₵ {Number(order.total_amount).toFixed(2)}
+                        {money(Number(order.total_amount))}
                       </p>
                       <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                         {order.status}
@@ -296,7 +298,7 @@ export default function EcommercePage() {
                         <span>
                           {item.product_name} × {item.quantity}
                         </span>
-                        <span>GH₵ {Number(item.subtotal).toFixed(2)}</span>
+                        <span>{money(Number(item.subtotal))}</span>
                       </li>
                     ))}
                   </ul>
@@ -345,7 +347,7 @@ export default function EcommercePage() {
                       <div className="min-w-0">
                         <p className="truncate font-semibold text-gray-900">{p.name}</p>
                         <p className="text-xs text-gray-500">
-                          GH₵ {Number(p.selling_price).toFixed(2)}
+                          {money(Number(p.selling_price))}
                         </p>
                       </div>
                       <button
@@ -376,7 +378,7 @@ export default function EcommercePage() {
                       <div className="min-w-0">
                         <p className="truncate font-semibold text-gray-900">{p.name}</p>
                         <p className="text-xs text-gray-500">
-                          GH₵ {Number(p.selling_price).toFixed(2)}
+                          {money(Number(p.selling_price))}
                         </p>
                       </div>
                       <button

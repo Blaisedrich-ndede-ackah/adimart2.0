@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS stores (
   ecommerce_enabled BOOLEAN DEFAULT FALSE,
   ecommerce_slug VARCHAR(80) DEFAULT '',
   ecommerce_tagline TEXT DEFAULT '',
+  currency_code VARCHAR(8) DEFAULT 'GHS',
+  preferred_language VARCHAR(8) DEFAULT 'en',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );

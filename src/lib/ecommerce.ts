@@ -33,6 +33,7 @@ export interface PublicShopCatalog {
     logo_url: string;
     tagline: string;
     slug: string;
+    currency_code?: string;
   };
   products: PublicShopProduct[];
 }
@@ -154,7 +155,7 @@ export async function fetchPublicShopCatalog(slug: string): Promise<PublicShopCa
   const clean = slug.trim().toLowerCase();
   const { data: store, error: storeError } = await supabase
     .from('stores')
-    .select('id, name, address, support_number, logo_url, ecommerce_enabled, ecommerce_slug, ecommerce_tagline')
+    .select('id, name, address, support_number, logo_url, ecommerce_enabled, ecommerce_slug, ecommerce_tagline, currency_code')
     .eq('ecommerce_slug', clean)
     .maybeSingle();
 
@@ -182,6 +183,7 @@ export async function fetchPublicShopCatalog(slug: string): Promise<PublicShopCa
       logo_url: store.logo_url || '',
       tagline: store.ecommerce_tagline || 'Shop online',
       slug: store.ecommerce_slug || clean,
+      currency_code: store.currency_code || 'GHS',
     },
     products: (products || []).map((p) => ({
       id: p.id,

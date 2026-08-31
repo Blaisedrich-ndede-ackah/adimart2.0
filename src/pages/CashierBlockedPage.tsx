@@ -1,6 +1,8 @@
 import { Ban, LogOut } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
 import CommunityChatButton from '@/components/CommunityChatButton';
+import LanguageSwitcher from '@/components/LanguageSwitcher';
+import { useT } from '@/lib/i18n';
 
 /**
  * Shown after a blocked cashier successfully authenticates.
@@ -8,6 +10,7 @@ import CommunityChatButton from '@/components/CommunityChatButton';
  */
 export default function CashierBlockedPage() {
   const { currentUser, switchUser } = useAuthStore();
+  const t = useT();
 
   return (
     <div className="auth-shell">
@@ -15,7 +18,7 @@ export default function CashierBlockedPage() {
         <div className="w-16 h-16 rounded-2xl bg-amber-500/20 flex items-center justify-center mx-auto mb-5 border border-amber-400/30">
           <Ban className="w-8 h-8 text-amber-300" />
         </div>
-        <h1 className="text-2xl font-bold text-white mb-2">Account blocked</h1>
+        <h1 className="text-2xl font-bold text-white mb-2">{t('blocked.cashierTitle')}</h1>
         <p className="text-emerald-100/90 text-sm leading-relaxed mb-1">
           {currentUser?.name ? `Hi ${currentUser.name}. ` : ''}
           Your cashier account has been blocked.
@@ -31,6 +34,7 @@ export default function CashierBlockedPage() {
           <LogOut className="w-4 h-4" />
           Back to login
         </button>
+        <LanguageSwitcher variant="onPrimary" className="mt-4" compact />
         <CommunityChatButton variant="blocked" className="mt-3" />
       </div>
     </div>

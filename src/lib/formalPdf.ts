@@ -3,6 +3,7 @@
  */
 
 import jsPDF from 'jspdf';
+import { formatOfficialMoney } from './currency';
 
 export interface FormalOrg {
   name: string;
@@ -13,6 +14,7 @@ export interface FormalOrg {
   reference?: string;
   /** Internal store identifier, printed only in the footer. */
   storeId?: string;
+  currencyCode?: string;
 }
 
 export interface FormalDocMeta {
@@ -46,14 +48,8 @@ const BAND: [number, number, number] = [236, 253, 245];
 const TABLE_HEAD: [number, number, number] = [241, 245, 249];
 const WHITE: [number, number, number] = [255, 255, 255];
 
-export function formatGhsOfficial(amount: number): string {
-  const n = Number.isFinite(amount) ? amount : 0;
-  const formatted = Math.abs(n).toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  // ISO code — Helvetica in jsPDF cannot reliably draw the cedi glyph.
-  return n < 0 ? `(GHS ${formatted})` : `GHS ${formatted}`;
+export function formatGhsOfficial(amount: number, currencyCode?: string | null): string {
+  return formatOfficialMoney(amount, currencyCode);
 }
 
 export function formatOfficialDate(value: Date | string = new Date()): string {
@@ -383,6 +379,7 @@ export function orgFromStore(store?: {
   support_number?: string;
   logo_url?: string;
   id?: string;
+  currency_code?: string;
 } | null): FormalOrg {
   return {
     name: store?.name?.trim() || 'Store',
@@ -390,5 +387,6 @@ export function orgFromStore(store?: {
     phone: store?.support_number?.trim() || '',
     logoDataUrl: store?.logo_url?.startsWith('data:image/') ? store.logo_url : '',
     storeId: store?.id || '',
+    currencyCode: store?.currency_code || 'GHS',
   };
 }

@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf';
 import { LocalProduct } from './dexie';
 import { isPrinterConnected, sendRawBytes } from './bluetoothPeripherals';
+import { formatOfficialMoney } from './currency';
 
 export function ensureProductBarcode(product: LocalProduct): string {
   if (product.barcode?.trim()) return product.barcode.trim();
@@ -16,7 +17,11 @@ function buildCode128Bytes(data: string): number[] {
   return bytes;
 }
 
-export async function printBarcodeLabel(product: LocalProduct, storeName: string): Promise<void> {
+export async function printBarcodeLabel(
+  product: LocalProduct,
+  storeName: string,
+  currencyCode?: string
+): Promise<void> {
   const barcode = ensureProductBarcode(product);
   const bytes: number[] = [];
 
@@ -26,7 +31,7 @@ export async function printBarcodeLabel(product: LocalProduct, storeName: string
   bytes.push(0x0a);
   bytes.push(...Array.from(new TextEncoder().encode(product.name.slice(0, 24))));
   bytes.push(0x0a);
-  bytes.push(...Array.from(new TextEncoder().encode(`GH₵${product.selling_price.toFixed(2)}`)));
+  bytes.push(...Array.from(new TextEncoder().encode(formatOfficialMoney(product.selling_price, currencyCode))));
   bytes.push(0x0a);
   bytes.push(0x1b, 0x61, 0x01);
   bytes.push(0x1d, 0x68, 60);
@@ -43,7 +48,11 @@ export async function printBarcodeLabel(product: LocalProduct, storeName: string
   await sendRawBytes(new Uint8Array(bytes));
 }
 
-export function downloadBarcodeLabel(product: LocalProduct, storeName: string): void {
+export function downloadBarcodeLabel(
+  product: LocalProduct,
+  storeName: string,
+  currencyCode?: string
+): void {
   const barcode = ensureProductBarcode(product);
   const doc = new jsPDF({
     orientation: 'landscape',
@@ -59,7 +68,7 @@ export function downloadBarcodeLabel(product: LocalProduct, storeName: string): 
   doc.text(product.name.slice(0, 28), 29, 12, { align: 'center' });
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
-  doc.text(`GH₵${product.selling_price.toFixed(2)}`, 29, 18, { align: 'center' });
+  doc.text(formatOfficialMoney(product.selling_price, currencyCode), 29, 18, { align: 'center' });
   doc.setFont('courier', 'normal');
   doc.setFontSize(10);
   doc.text(barcode, 29, 28, { align: 'center' });

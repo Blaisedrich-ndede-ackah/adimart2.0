@@ -16,6 +16,8 @@ import {
   type WholesaleTier,
 } from '@/lib/bulkPricing';
 import { toMoneyAmount } from '@/lib/money';
+import { getStoreCurrency } from '@/lib/currency';
+import { useAuthStore } from '@/store/useAuthStore';
 
 interface AddProductProps {
   isOpen: boolean;
@@ -36,6 +38,7 @@ const WHOLESALE_MODES: { value: WholesaleMode; label: string }[] = [
 ];
 
 export default function AddProduct({ isOpen, onClose, onSaved, editProduct, initialBarcode }: AddProductProps) {
+  const currencySymbol = getStoreCurrency(useAuthStore((s) => s.currentStore?.currency_code)).symbol;
   const [name, setName] = useState('');
   const [category, setCategory] = useState('Food');
   const [barcode, setBarcode] = useState('');
@@ -551,7 +554,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-sm font-medium text-gray-700 mb-1.5 block">Cost Price (GH₵) *</label>
+              <label className="text-sm font-medium text-gray-700 mb-1.5 block">Cost Price ({currencySymbol}) *</label>
               <input
                 type="number"
                 value={costPrice}
@@ -563,7 +566,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
               />
             </div>
             <div>
-              <label className="text-sm font-medium text-gray-700 mb-1.5 block">Selling Price (GH₵) *</label>
+              <label className="text-sm font-medium text-gray-700 mb-1.5 block">Selling Price ({currencySymbol}) *</label>
               <input
                 type="number"
                 value={sellingPrice}
@@ -677,7 +680,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
             {wholesaleMode === 'pack' && (
               <div>
                 <label className="text-sm font-medium text-gray-700 mb-1.5 block">
-                  Wholesale pack price (GH₵)
+                  Wholesale pack price ({currencySymbol})
                 </label>
                 <input
                   type="number"
@@ -697,7 +700,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
             {wholesaleMode === 'unit_discount' && (
               <div>
                 <label className="text-sm font-medium text-gray-700 mb-1.5 block">
-                  Wholesale unit price (GH₵)
+                  Wholesale unit price ({currencySymbol})
                 </label>
                 <input
                   type="number"

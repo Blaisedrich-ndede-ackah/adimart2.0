@@ -293,6 +293,7 @@ export function exportReportPdf(
   org?: FormalOrg
 ): void {
   const letterhead = org || orgFromStore({ name: storeName });
+  const money = (n: number) => formatGhsOfficial(n, letterhead.currencyCode);
   const pdf = new FormalPdf(letterhead, {
     title: 'Management report',
     subtitle: storeName,
@@ -306,11 +307,11 @@ export function exportReportPdf(
 
   pdf.section('Financial summary');
   pdf.kvTable([
-    { label: 'Sales revenue', value: formatGhsOfficial(summary.revenue) },
-    { label: 'Cost of goods sold', value: formatGhsOfficial(summary.costOfGoods) },
-    { label: 'Gross profit', value: formatGhsOfficial(summary.grossProfit), emphasis: 'subtotal' },
-    { label: 'Operating expenses', value: formatGhsOfficial(summary.expenses) },
-    { label: 'Net profit', value: formatGhsOfficial(summary.netProfit), emphasis: 'total' },
+    { label: 'Sales revenue', value: money(summary.revenue) },
+    { label: 'Cost of goods sold', value: money(summary.costOfGoods) },
+    { label: 'Gross profit', value: money(summary.grossProfit), emphasis: 'subtotal' },
+    { label: 'Operating expenses', value: money(summary.expenses) },
+    { label: 'Net profit', value: money(summary.netProfit), emphasis: 'total' },
     { label: 'Completed transactions', value: String(summary.transactionCount), emphasis: 'muted' },
   ]);
 
@@ -321,8 +322,8 @@ export function exportReportPdf(
       summary.topProducts.map((p) => [
         p.product_name,
         String(p.quantity),
-        formatGhsOfficial(p.revenue),
-        formatGhsOfficial(p.profit),
+        money(p.revenue),
+        money(p.profit),
       ]),
       [4, 1, 2, 2]
     );
@@ -335,8 +336,8 @@ export function exportReportPdf(
       summary.categories.map((c) => [
         c.category,
         String(c.quantity),
-        formatGhsOfficial(c.revenue),
-        formatGhsOfficial(c.profit),
+        money(c.revenue),
+        money(c.profit),
       ]),
       [4, 1, 2, 2]
     );
@@ -349,7 +350,7 @@ export function exportReportPdf(
       summary.cashiers.map((c) => [
         c.cashier_name,
         String(c.transactions),
-        formatGhsOfficial(c.revenue),
+        money(c.revenue),
       ]),
       [4, 2, 2]
     );
@@ -519,7 +520,9 @@ export function exportLocationReportCsv(summary: LocationReportSummary): void {
 
 export function exportLocationReportPdf(summary: LocationReportSummary, org?: FormalOrg): void {
   const locLabel = `${summary.location.name} (${summary.location.location_type})`;
-  const pdf = new FormalPdf(org || orgFromStore({ name: summary.storeName }), {
+  const letterhead = org || orgFromStore({ name: summary.storeName });
+  const money = (n: number) => formatGhsOfficial(n, letterhead.currencyCode);
+  const pdf = new FormalPdf(letterhead, {
     title: 'Location report',
     subtitle: `${summary.storeName} — ${locLabel}`,
     period: `Reporting period: ${summary.periodLabel}`,
@@ -532,9 +535,9 @@ export function exportLocationReportPdf(summary: LocationReportSummary, org?: Fo
 
   pdf.section('Sales financials');
   pdf.kvTable([
-    { label: 'Cost of goods sold', value: formatGhsOfficial(summary.costPrice) },
-    { label: 'Selling value', value: formatGhsOfficial(summary.sellingPrice) },
-    { label: 'Profit estimate', value: formatGhsOfficial(summary.profitEstimate), emphasis: 'total' },
+    { label: 'Cost of goods sold', value: money(summary.costPrice) },
+    { label: 'Selling value', value: money(summary.sellingPrice) },
+    { label: 'Profit estimate', value: money(summary.profitEstimate), emphasis: 'total' },
     { label: 'Completed transactions', value: String(summary.transactionCount), emphasis: 'muted' },
   ]);
 
@@ -542,11 +545,11 @@ export function exportLocationReportPdf(summary: LocationReportSummary, org?: Fo
   pdf.kvTable([
     { label: 'SKUs', value: String(summary.stockSkuCount) },
     { label: 'Units on hand', value: String(summary.stockUnits) },
-    { label: 'Stock at cost', value: formatGhsOfficial(summary.stockCostValue) },
-    { label: 'Stock at selling price', value: formatGhsOfficial(summary.stockSellingValue) },
+    { label: 'Stock at cost', value: money(summary.stockCostValue) },
+    { label: 'Stock at selling price', value: money(summary.stockSellingValue) },
     {
       label: 'Unrealised profit estimate',
-      value: formatGhsOfficial(summary.stockProfitEstimate),
+      value: money(summary.stockProfitEstimate),
       emphasis: 'total',
     },
   ]);
@@ -558,8 +561,8 @@ export function exportLocationReportPdf(summary: LocationReportSummary, org?: Fo
       summary.topProducts.map((p) => [
         p.product_name,
         String(p.quantity),
-        formatGhsOfficial(p.revenue),
-        formatGhsOfficial(p.profit),
+        money(p.revenue),
+        money(p.profit),
       ]),
       [4, 1, 2, 2]
     );

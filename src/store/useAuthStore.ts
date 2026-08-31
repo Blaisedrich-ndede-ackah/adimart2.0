@@ -18,6 +18,7 @@ import {
   updateUserPhone,
 } from '@/lib/dexie';
 import { clearAllWarehouseSessions, clearWarehouseUnlock } from '@/lib/warehouseAccess';
+import { applyStoreLanguageDefault, tNow } from '@/lib/i18n';
 
 interface AuthState {
   currentUser: LocalUser | null;
@@ -69,6 +70,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     let store = await getCurrentStore();
     if (store?.id) {
       store = (await pullAdminStoreLimits(store.id)) || store;
+      applyStoreLanguageDefault(store.preferred_language);
     }
 
     const persistedUser = await getPersistedCurrentUser();
@@ -97,7 +99,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   login: async (pin: string) => {
     const storeId = await getCurrentStoreId();
     if (!storeId) {
-      set({ loginError: 'No store configured. Please set up your store first.' });
+      set({ loginError: tNow('login.noStore') });
       return false;
     }
 
@@ -116,7 +118,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return true;
     }
     
-    set({ loginError: 'Invalid PIN. Please try again.' });
+    set({ loginError: tNow('login.invalidPin') });
     return false;
   },
 
@@ -159,6 +161,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const store = await switchToStore(storeId);
     // switchToStore clears persisted user via setCurrentStoreId
     const refreshed = (await pullAdminStoreLimits(storeId)) || store;
+    applyStoreLanguageDefault(refreshed.preferred_language);
     set({
       currentStore: refreshed,
       currentUser: null,

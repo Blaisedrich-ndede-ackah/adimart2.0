@@ -6,6 +6,8 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { COMMUNITY_CHAT_URL } from '@/lib/community';
+import LanguageSwitcher from '@/components/LanguageSwitcher';
+import { useT } from '@/lib/i18n';
 
 interface AppNavProps {
   currentPage: string;
@@ -23,6 +25,7 @@ interface NavItem {
 
 export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const { currentUser, currentStore, switchUser } = useAuthStore();
+  const t = useT();
   const [moreOpen, setMoreOpen] = useState(false);
   const isOwner = currentUser?.role === 'owner';
   const ecommerceEnabled = (currentStore?.ecommerce_enabled ?? 0) === 1;
@@ -32,30 +35,30 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const navItems = useMemo<NavItem[]>(
     () =>
       [
-        { id: 'pos', label: 'POS', icon: ScanBarcode, show: true },
-        { id: 'transactions', label: isOwner ? 'Sales' : 'My Sales', icon: Receipt, show: true },
-        { id: 'expenses', label: 'Expenses', icon: PiggyBank, show: true },
-        { id: 'cashbook', label: 'Cash Book', icon: BookOpen, show: true },
-        { id: 'devices', label: 'Devices', icon: Bluetooth, show: true },
-        { id: 'subscription', label: 'Plan', icon: CalendarClock, show: isOwner },
-        { id: 'inventory', label: 'Inventory', icon: Package, show: isOwner },
+        { id: 'pos', label: t('nav.pos'), icon: ScanBarcode, show: true },
+        { id: 'transactions', label: isOwner ? t('nav.sales') : t('nav.mySales'), icon: Receipt, show: true },
+        { id: 'expenses', label: t('nav.expenses'), icon: PiggyBank, show: true },
+        { id: 'cashbook', label: t('nav.cashbook'), icon: BookOpen, show: true },
+        { id: 'devices', label: t('nav.devices'), icon: Bluetooth, show: true },
+        { id: 'subscription', label: t('nav.plan'), icon: CalendarClock, show: isOwner },
+        { id: 'inventory', label: t('nav.inventory'), icon: Package, show: isOwner },
         {
           id: 'ecommerce',
-          label: 'Online',
+          label: t('nav.online'),
           icon: ShoppingBag,
           show: ecommerceEnabled && canManageEcommerce,
         },
-        { id: 'reports', label: 'Reports', icon: BarChart3, show: isOwner },
-        { id: 'settings', label: 'Settings', icon: Settings, show: isOwner },
+        { id: 'reports', label: t('nav.reports'), icon: BarChart3, show: isOwner },
+        { id: 'settings', label: t('nav.settings'), icon: Settings, show: isOwner },
         {
           id: 'community',
-          label: 'Community',
+          label: t('nav.community'),
           icon: MessagesSquare,
           show: true,
           href: COMMUNITY_CHAT_URL,
         },
       ].filter((item) => item.show),
-    [isOwner, ecommerceEnabled, canManageEcommerce]
+    [isOwner, ecommerceEnabled, canManageEcommerce, t]
   );
 
   // Keep bottom bar to a few primary destinations; rest live under More
@@ -91,7 +94,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
           <p className="text-emerald-200 text-[10px] font-semibold uppercase tracking-[0.14em]">Adimat</p>
           <p className="font-bold text-xl tracking-tight truncate mt-1">{currentStore?.name || 'Store'}</p>
           <p className="text-emerald-100/80 text-xs mt-1 truncate capitalize">
-            {currentUser?.name} · {currentUser?.role}
+            {currentUser?.name} · {currentUser?.role === 'owner' ? t('role.owner') : t('role.cashier')}
           </p>
         </div>
         <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-1">
@@ -116,7 +119,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
                   href={item.href}
                   target="_blank"
                   rel="noopener noreferrer"
-                  aria-label="Join the Adimat community chat on Telegram"
+                  aria-label={t('community.aria')}
                   className={className}
                 >
                   {content}
@@ -135,14 +138,15 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
             );
           })}
         </nav>
-        <div className="p-2 border-t border-white/10">
+        <div className="p-2 border-t border-white/10 space-y-2">
+          <LanguageSwitcher variant="onPrimary" compact />
           <button
             type="button"
             onClick={switchUser}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-emerald-50 hover:bg-white/10 touch-target"
           >
             <LogOut className="w-5 h-5" />
-            Switch user
+            {t('nav.switchUser')}
           </button>
         </div>
       </aside>
@@ -183,11 +187,11 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
                 : 'text-slate-500 active:bg-slate-50'
             }`}
             aria-expanded={moreOpen}
-            aria-label="More menu"
+            aria-label={t('nav.moreMenu')}
           >
             <MoreHorizontal className={`h-5 w-5 ${moreOpen || moreActive ? 'stroke-[2.5]' : ''}`} />
             <span className={`text-[11px] leading-none ${moreOpen || moreActive ? 'font-bold' : 'font-medium'}`}>
-              More
+              {t('common.more')}
             </span>
           </button>
         </div>
@@ -199,7 +203,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
           <button
             type="button"
             className="absolute inset-0 bg-slate-900/40"
-            aria-label="Close menu"
+            aria-label={t('common.close')}
             onClick={() => setMoreOpen(false)}
           />
           <div
@@ -209,10 +213,10 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
             <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white px-4 py-3 rounded-t-3xl">
               <div className="min-w-0">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-primary">
-                  Menu
+                  {t('common.menu')}
                 </p>
                 <p className="truncate text-sm font-bold text-slate-900">
-                  {currentStore?.name || 'Store'}
+                  {currentStore?.name || t('common.store')}
                 </p>
               </div>
               <button
@@ -255,7 +259,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
                       href={item.href}
                       target="_blank"
                       rel="noopener noreferrer"
-                      aria-label="Join the Adimat community chat on Telegram"
+                      aria-label={t('community.aria')}
                       onClick={() => setMoreOpen(false)}
                       className={className}
                     >
@@ -276,7 +280,8 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
               })}
             </div>
 
-            <div className="px-4 pb-2">
+            <div className="px-4 pb-2 space-y-2">
+              <LanguageSwitcher compact />
               <button
                 type="button"
                 onClick={() => {
@@ -286,7 +291,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
                 className="flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3.5 text-sm font-semibold text-rose-700 touch-target"
               >
                 <LogOut className="h-4 w-4" />
-                Switch user
+                {t('nav.switchUser')}
               </button>
             </div>
           </div>
