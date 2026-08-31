@@ -286,7 +286,7 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
                   onClick={handleStoreNext}
                   className="flex-1 py-3 bg-primary text-white rounded-xl font-bold flex items-center justify-center gap-2"
                 >
-                  Continue
+                  {t('setup.continue')}
                   <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
@@ -301,7 +301,7 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
                 <User className="w-5 h-5 text-primary" />
               </div>
               <div>
-                <h2 className="font-bold text-gray-900">Owner Account</h2>
+                <h2 className="font-bold text-gray-900">{t('setup.ownerAccount')}</h2>
                 <p className="text-xs text-gray-500">Create your login credentials</p>
               </div>
             </div>
@@ -314,7 +314,7 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
 
             <div className="space-y-4">
               <div>
-                <label className="text-sm font-medium text-gray-700 mb-2 block">Your Name *</label>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">{t('setup.yourName')} *</label>
                 <input
                   type="text"
                   value={ownerName}
@@ -328,7 +328,7 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
               <div>
                 <label className="text-sm font-medium text-gray-700 mb-2 block">
                   <Lock className="w-3.5 h-3.5 inline mr-1" />
-                  Create 4-Digit PIN *
+                  {t('setup.createPin')} *
                 </label>
                 <input
                   type="password"

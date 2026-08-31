@@ -60,8 +60,10 @@ export function formatStoreMoney(
   const formatted = formatAmount(n, language);
   const negative = n < 0;
   const withSymbol =
-    language === 'fr'
-      ? `${formatted} ${currency.symbol}`
+    language === 'fr' || /[A-Za-z]/.test(currency.symbol)
+      ? language === 'fr'
+        ? `${formatted} ${currency.symbol}`
+        : `${currency.symbol} ${formatted}`
       : `${currency.symbol}${formatted}`;
   return negative ? `-${withSymbol}` : withSymbol;
 }

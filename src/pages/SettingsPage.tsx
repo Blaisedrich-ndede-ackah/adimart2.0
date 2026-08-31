@@ -1030,12 +1030,12 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
           ) : saveSuccess ? (
             <>
               <CheckCircle2 className="w-5 h-5" />
-              Settings Saved!
+              {t('settings.savedBanner')}
             </>
           ) : (
             <>
               <Save className="w-5 h-5" />
-              Save All Settings
+              {t('settings.saveAll')}
             </>
           )}
         </button>
