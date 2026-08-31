@@ -9,6 +9,7 @@ import {
   getConnectedPrinterName,
 } from './bluetoothPeripherals';
 import { buildEscPosLogoRaster } from './escPosImage';
+import { formatOfficialMoney } from './currency';
 
 const ESC = 0x1b;
 const GS = 0x1d;
@@ -38,10 +39,15 @@ export interface EscPosReceiptData {
   paymentMethod: string;
   cashAmount?: number;
   paystackAmount?: number;
+  currencyCode?: string;
 }
 
 /** Alias used by checkout / existing call sites */
 export type ReceiptData = EscPosReceiptData;
+
+function amt(data: EscPosReceiptData, n: number): string {
+  return formatOfficialMoney(n, data.currencyCode);
+}
 
 function textToBytes(text: string): number[] {
   const bytes: number[] = [];
@@ -123,8 +129,8 @@ export async function buildEscPosReceipt(data: EscPosReceiptData): Promise<Uint8
     const nameLine = item.name.length > 20 ? item.name.substring(0, 20) : item.name;
     bytes.push(...textToBytes(nameLine));
     bytes.push(LF);
-    const detail = `  ${item.quantity} x GH₵${item.unitPrice.toFixed(2)}`;
-    const subtotalStr = `GH₵${item.subtotal.toFixed(2)}`;
+    const detail = `  ${item.quantity} x ${amt(data, item.unitPrice)}`;
+    const subtotalStr = amt(data, item.subtotal);
     bytes.push(...textToBytes(rightAlign(detail, subtotalStr)));
     bytes.push(LF);
   }
@@ -132,17 +138,17 @@ export async function buildEscPosReceipt(data: EscPosReceiptData): Promise<Uint8
   bytes.push(...textToBytes(line('-')));
   bytes.push(LF);
 
-  bytes.push(...textToBytes(rightAlign('Subtotal:', `GH₵${data.subtotal.toFixed(2)}`)));
+  bytes.push(...textToBytes(rightAlign('Subtotal:', amt(data, data.subtotal))));
   bytes.push(LF);
 
   if (data.discount > 0) {
-    bytes.push(...textToBytes(rightAlign('Discount:', `-GH₵${data.discount.toFixed(2)}`)));
+    bytes.push(...textToBytes(rightAlign('Discount:', `-${amt(data, data.discount)}`)));
     bytes.push(LF);
   }
 
   for (const charge of data.otherCharges || []) {
     if (!charge?.amount) continue;
-    bytes.push(...textToBytes(rightAlign(`${charge.label}:`, `GH₵${charge.amount.toFixed(2)}`)));
+    bytes.push(...textToBytes(rightAlign(`${charge.label}:`, amt(data, charge.amount))));
     bytes.push(LF);
   }
 
@@ -150,7 +156,7 @@ export async function buildEscPosReceipt(data: EscPosReceiptData): Promise<Uint8
   bytes.push(LF);
   bytes.push(...cmd(ESC, 0x45, 1));
   bytes.push(...cmd(GS, 0x21, 0x11));
-  bytes.push(...textToBytes(rightAlign('TOTAL:', `GH₵${data.total.toFixed(2)}`)));
+  bytes.push(...textToBytes(rightAlign('TOTAL:', amt(data, data.total))));
   bytes.push(LF);
   bytes.push(...cmd(GS, 0x21, 0x00));
   bytes.push(...cmd(ESC, 0x45, 0));
@@ -166,11 +172,11 @@ export async function buildEscPosReceipt(data: EscPosReceiptData): Promise<Uint8
 
   if (data.paymentMethod === 'split') {
     if (data.cashAmount) {
-      bytes.push(...textToBytes(rightAlign('  Cash:', `GH₵${data.cashAmount.toFixed(2)}`)));
+      bytes.push(...textToBytes(rightAlign('  Cash:', amt(data, data.cashAmount))));
       bytes.push(LF);
     }
     if (data.paystackAmount) {
-      bytes.push(...textToBytes(rightAlign('  Paystack:', `GH₵${data.paystackAmount.toFixed(2)}`)));
+      bytes.push(...textToBytes(rightAlign('  Paystack:', amt(data, data.paystackAmount))));
       bytes.push(LF);
     }
   }

@@ -7,6 +7,8 @@ import { hasStoreLogo } from '@/lib/productImage';
 import { confirmPinResetWithOtp, requestPinResetOtp } from '@/lib/pinReset';
 import { listLocations, verifyLocationAccessPin } from '@/lib/warehouse';
 import CommunityChatButton from '@/components/CommunityChatButton';
+import LanguageSwitcher from '@/components/LanguageSwitcher';
+import { useT } from '@/lib/i18n';
 import {
   clearPendingWarehouseLogin,
   getPendingWarehouseLogin,
@@ -34,6 +36,7 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
     () => getPendingWarehouseLogin()
   );
   const { login, loginAsStoreOwner, loginError, currentStore, switchStore } = useAuthStore();
+  const t = useT();
   const storeLogo = currentStore?.logo_url;
   const storeName = currentStore?.name?.trim();
   const warehouseMode = Boolean(pendingWarehouse);
@@ -103,7 +106,7 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
     const ok = await verifyLocationAccessPin(pendingWarehouse.locationId, fullPin);
     if (!ok) {
       setIsLoading(false);
-      useAuthStore.setState({ loginError: 'Invalid warehouse PIN. Please try again.' });
+      useAuthStore.setState({ loginError: t('login.invalidWarehousePin') });
       setShake(true);
       setTimeout(() => {
         setShake(false);
@@ -144,10 +147,10 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
           loginError: '',
         });
       } else {
-        setBiometricError('User not found for this store. Please login with PIN.');
+        setBiometricError(t('login.userNotFound'));
       }
     } else {
-      setBiometricError(result.error || 'Biometric login failed');
+      setBiometricError(result.error || t('login.biometricFailed'));
     }
 
     setIsLoading(false);
@@ -207,15 +210,15 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
           </div>
           <h1 className="text-3xl md:text-4xl font-bold text-white tracking-tight">
             {warehouseMode
-              ? pendingWarehouse?.name || 'Warehouse'
+              ? pendingWarehouse?.name || t('login.warehouse')
               : hasStoreLogo(storeLogo) && storeName
                 ? storeName
                 : 'Adimat'}
           </h1>
           <p className="text-emerald-100/90 text-sm mt-2">
             {warehouseMode
-              ? 'Enter warehouse PIN to open and manage'
-              : 'Enter your PIN to continue'}
+              ? t('login.warehousePin')
+              : t('login.enterPin')}
           </p>
 
           {showPicker && (
@@ -233,8 +236,8 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
                   )}
                   <span className="truncate text-sm font-semibold">
                     {warehouseMode
-                      ? pendingWarehouse?.name || 'Warehouse'
-                      : currentStore?.name || 'Select store'}
+              ? pendingWarehouse?.name || t('login.warehouse')
+              : currentStore?.name || t('login.selectStore')}
                   </span>
                 </span>
                 <ChevronDown className={`w-4 h-4 flex-shrink-0 transition-transform ${pickerOpen ? 'rotate-180' : ''}`} />
@@ -375,7 +378,9 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
 
         {!warehouseMode && <ForgotPinSection />}
 
-        <CommunityChatButton variant="auth" className="mt-6" />
+        <LanguageSwitcher variant="onPrimary" className="mt-6 max-w-[280px] md:max-w-[300px]" compact />
+
+        <CommunityChatButton variant="auth" className="mt-4" />
 
         {onOpenAdmin && (
           <button

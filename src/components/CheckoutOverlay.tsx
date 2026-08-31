@@ -15,6 +15,7 @@ import {
   type OtherCharge,
   type OtherChargeCategoryId,
 } from '@/lib/otherCharges';
+import { useFormatMoney, getStoreCurrency } from '@/lib/currency';
 
 interface CheckoutOverlayProps {
   isOpen: boolean;
@@ -40,6 +41,8 @@ interface SaleResult {
 export default function CheckoutOverlay({ isOpen, onClose, onComplete }: CheckoutOverlayProps) {
   const cart = useCartStore();
   const { currentUser, currentStore, verifyOwnerPin } = useAuthStore();
+  const money = useFormatMoney();
+  const currencySymbol = getStoreCurrency(currentStore?.currency_code).symbol;
 
   const [step, setStep] = useState<Step>('method');
   const [discountInput, setDiscountInput] = useState('');
@@ -102,6 +105,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
       storeAddress: currentStore?.address || '',
       supportNumber: currentStore?.support_number || '',
       storeLogoUrl: currentStore?.logo_url || '',
+      currencyCode: currentStore?.currency_code || 'GHS',
       receiptNumber: result.receiptNumber,
       cashierName: currentUser?.name || '',
       dateTime: new Date().toLocaleString('en-GH'),
@@ -435,13 +439,13 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
                       <p className="text-xs font-medium text-gray-800 truncate">{item.name}</p>
                       <p className="text-[10px] text-gray-500">×{item.quantity}</p>
                     </div>
-                    <p className="text-xs font-semibold text-gray-800">GH₵{item.subtotal.toFixed(2)}</p>
+                    <p className="text-xs font-semibold text-gray-800">{money(item.subtotal)}</p>
                   </div>
                 ))}
               </div>
               <div className="flex justify-between text-sm text-gray-600 mb-1">
                 <span>Subtotal ({cart.items.length} items)</span>
-                <span>GH₵{cart.subtotal.toFixed(2)}</span>
+                <span>{money(cart.subtotal)}</span>
               </div>
               {cart.discountAmount > 0 && (
                 <div className="flex justify-between text-sm text-red-500 mb-1">
@@ -453,14 +457,14 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
                         ? ' (fixed)'
                         : ''}
                   </span>
-                  <span>-GH₵{cart.discountAmount.toFixed(2)}</span>
+                  <span>-{money(cart.discountAmount)}</span>
                 </div>
               )}
               {cart.otherCharges.map((charge) => (
                 <div key={charge.id} className="flex justify-between items-center text-sm text-gray-700 mb-1">
                   <span className="truncate pr-2">{charge.label}</span>
                   <span className="flex items-center gap-1 shrink-0">
-                    GH₵{charge.amount.toFixed(2)}
+                    {money(charge.amount)}
                     {step === 'method' && (
                       <button
                         type="button"
@@ -476,7 +480,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
               ))}
               <div className="flex justify-between text-lg font-bold text-gray-900 pt-2 border-t border-gray-200 mt-2">
                 <span>Grand Total</span>
-                <span>GH₵{cart.total.toFixed(2)}</span>
+                <span>{money(cart.total)}</span>
               </div>
             </div>
           )}
@@ -533,7 +537,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
                         ? 'Disabled — only the store owner can apply discounts'
                         : cart.discountAmount > 0
                           ? cart.discountKind === 'fixed'
-                            ? `GH₵${cart.discountAmount.toFixed(2)} off`
+                            ? `${money(cart.discountAmount)} off`
                             : `${cart.discountPercent}% applied`
                           : 'Percentage or fixed amount'}
                     </p>
@@ -554,7 +558,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
                   <p className="text-xs text-gray-500">
                     {cart.otherCharges.length > 0
                       ? cart.otherCharges
-                          .map((c) => `${c.label} GH₵${c.amount.toFixed(2)}`)
+                          .map((c) => `${c.label} ${money(c.amount)}`)
                           .join(' · ')
                       : 'Delivery, packing, service, or other'}
                   </p>
@@ -653,7 +657,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
                       <p className="text-sm font-semibold text-gray-900">{cat.label}</p>
                       {applied && (
                         <p className="text-[11px] text-primary mt-0.5">
-                          GH₵{applied.amount.toFixed(2)} applied
+                          {money(applied.amount)} applied
                         </p>
                       )}
                     </button>
@@ -670,7 +674,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
               )}
               <div>
                 <label className="text-sm font-medium text-gray-700 mb-2 block">
-                  Charge amount (GH₵)
+                  Charge amount ({currencySymbol})
                 </label>
                 <input
                   type="number"
@@ -743,7 +747,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
               )}
               <div>
                 <label className="text-sm font-medium text-gray-700 mb-2 block">
-                  {discountMode === 'percentage' ? 'Discount Percentage (%)' : 'Discount Amount (GH₵)'}
+                  {discountMode === 'percentage' ? 'Discount Percentage (%)' : `Discount Amount (${currencySymbol})`}
                 </label>
                 <input
                   type="number"
@@ -758,7 +762,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
                 />
                 <p className="text-xs text-gray-500 mt-2">
                   Cap: {discountCap}% of subtotal
-                  {discountMode === 'fixed' ? ` (GH₵${((cart.subtotal * discountCap) / 100).toFixed(2)})` : ''}.
+                  {discountMode === 'fixed' ? ` (${money(((cart.subtotal * discountCap) / 100))})` : ''}.
                   {pinOnDiscount ? ' Exceeding requires owner PIN.' : ''}
                 </p>
               </div>
@@ -829,7 +833,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
           {step === 'split-input' && (
             <div className="space-y-4">
               <div>
-                <label className="text-sm font-medium text-gray-700 mb-2 block">Cash Amount (GH₵)</label>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">Cash Amount ({currencySymbol})</label>
                 <input
                   type="number"
                   value={cashAmount}
@@ -844,12 +848,12 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
               <div className="bg-blue-50 rounded-xl p-4 space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600">Cash</span>
-                  <span className="font-medium">GH₵{(parseFloat(cashAmount) || 0).toFixed(2)}</span>
+                  <span className="font-medium">{money((parseFloat(cashAmount) || 0))}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600">Mobile Money</span>
                   <span className="font-medium">
-                    GH₵{Math.max(0, cart.total - (parseFloat(cashAmount) || 0)).toFixed(2)}
+                    {money(Math.max(0, cart.total - (parseFloat(cashAmount) || 0)))}
                   </span>
                 </div>
               </div>
@@ -900,7 +904,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
               </div>
               <h3 className="text-xl font-bold text-gray-900 mb-1">Sale Complete!</h3>
               <p className="text-primary font-mono font-bold text-lg mb-1">{saleResult.receiptNumber}</p>
-              <p className="text-2xl font-bold text-gray-900 mb-4">GH₵{saleResult.total.toFixed(2)}</p>
+              <p className="text-2xl font-bold text-gray-900 mb-4">{money(saleResult.total)}</p>
 
               {isPrinting && (
                 <div className="flex items-center gap-2 text-gray-500 text-sm mb-4">

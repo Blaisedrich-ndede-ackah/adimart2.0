@@ -25,6 +25,8 @@ import {
   toQty,
 } from '@/lib/warehouse';
 import { triggerAutoSync } from '@/lib/sync';
+import { useFormatMoney } from '@/lib/currency';
+import { useT } from '@/lib/i18n';
 
 type PosTab = 'products' | 'cart';
 
@@ -32,6 +34,8 @@ export default function POSPage() {
   const cart = useCartStore();
   const setSaleContext = useCartStore((s) => s.setSaleContext);
   const { currentUser, currentStore } = useAuthStore();
+  const money = useFormatMoney();
+  const t = useT();
   const [posTab, setPosTab] = useState<PosTab>('products');
   const [scannerActive, setScannerActive] = useState(true);
   const [showCameraScanner, setShowCameraScanner] = useState(false);
@@ -431,7 +435,7 @@ export default function POSPage() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search products or barcode..."
+                placeholder={t('pos.search') + '...'}
                 data-allow-typing="true"
                 className="w-full pl-9 pr-4 py-2.5 bg-white border border-emerald-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary"
               />
@@ -448,7 +452,7 @@ export default function POSPage() {
                       : 'bg-white text-gray-600 border border-gray-200'
                   }`}
                 >
-                  {cat}
+                  {cat === 'All' ? t('common.all') : cat}
                 </button>
               ))}
             </div>
@@ -497,7 +501,7 @@ export default function POSPage() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-gray-900 truncate">{product.name}</p>
                         <p className="text-sm font-semibold text-primary mt-0.5">
-                          GHS {toMoney(product.selling_price).toFixed(2)}
+                          {money(toMoney(product.selling_price))}
                           {packSize > 1 ? <span className="text-[10px] text-gray-400 font-medium"> / unit</span> : null}
                         </p>
                         {(product.track_expiry === 1 || wholesaleOk) && (
@@ -590,7 +594,7 @@ export default function POSPage() {
                         <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
                         <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                           <p className="text-xs text-gray-500">
-                            GH₵{item.unit_price.toFixed(2)} / {item.unit_type === 'pack' ? 'pack' : 'unit'}
+                            {money(item.unit_price)} / {item.unit_type === 'pack' ? 'pack' : 'unit'}
                           </p>
                           {item.sale_mode === 'wholesale' && (
                             <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-medium">
@@ -626,7 +630,7 @@ export default function POSPage() {
                       </div>
 
                       <div className="text-right min-w-[70px]">
-                        <p className="text-sm font-bold text-gray-900">GH₵{item.subtotal.toFixed(2)}</p>
+                        <p className="text-sm font-bold text-gray-900">{money(item.subtotal)}</p>
                       </div>
 
                       <button
@@ -656,10 +660,10 @@ export default function POSPage() {
               >
                 <div className="flex items-center gap-2">
                   <ShoppingCart className="w-5 h-5" />
-                  <span className="font-bold text-base">Checkout</span>
+                  <span className="font-bold text-base">{t('pos.checkout')}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-lg font-bold">GH₵{cart.total.toFixed(2)}</span>
+                  <span className="text-lg font-bold">{money(cart.total)}</span>
                   <ChevronRight className="w-5 h-5" />
                 </div>
               </button>
@@ -681,10 +685,10 @@ export default function POSPage() {
           >
             <div className="flex items-center gap-2">
               <ShoppingCart className="w-5 h-5" />
-              <span className="font-bold text-lg">Checkout</span>
+              <span className="font-bold text-lg">{t('pos.checkout')}</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-xl font-bold">GH₵{cart.total.toFixed(2)}</span>
+              <span className="text-xl font-bold">{money(cart.total)}</span>
               <ChevronRight className="w-5 h-5" />
             </div>
           </button>

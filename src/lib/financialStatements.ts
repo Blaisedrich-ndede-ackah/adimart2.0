@@ -341,7 +341,7 @@ export function exportFinancialStatementsPdf(data: StoreFinancialStatements): vo
   const toRows = (lines: StatementLine[]) =>
     lines.map((line) => ({
       label: line.label,
-      value: formatGhsOfficial(line.amount),
+      value: formatGhsOfficial(line.amount, data.org.currencyCode),
       emphasis: line.emphasis,
     }));
 
@@ -353,7 +353,7 @@ export function exportFinancialStatementsPdf(data: StoreFinancialStatements): vo
     pdf.section('Operating expenses by category');
     pdf.dataTable(
       ['Category', 'Amount'],
-      data.incomeStatement.expenseByCategory.map((r) => [r.category, formatGhsOfficial(r.amount)]),
+      data.incomeStatement.expenseByCategory.map((r) => [r.category, formatGhsOfficial(r.amount, data.org.currencyCode)]),
       [3, 1]
     );
   }

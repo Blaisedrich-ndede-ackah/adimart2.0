@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf';
 import { FormalPdf, formatGhsOfficial, formatOfficialDate, orgFromStore } from './formalPdf';
+import { formatOfficialMoney } from './currency';
 
 export interface ReceiptData {
   storeName: string;
@@ -24,6 +25,11 @@ export interface ReceiptData {
   cashAmount?: number;
   paystackAmount?: number;
   paystackReference?: string;
+  currencyCode?: string;
+}
+
+function amt(data: ReceiptData, n: number): string {
+  return formatOfficialMoney(n, data.currencyCode);
 }
 
 function generateReceiptPDF(data: ReceiptData): jsPDF {
@@ -148,8 +154,8 @@ function generateReceiptPDF(data: ReceiptData): jsPDF {
 
     // Quantity x Price = Subtotal
     doc.setFontSize(8);
-    const detail = '  ' + item.quantity + ' x GHS ' + item.unitPrice.toFixed(2);
-    const subtotalStr = 'GHS ' + item.subtotal.toFixed(2);
+    const detail = '  ' + item.quantity + ' x ' + amt(data, item.unitPrice);
+    const subtotalStr = amt(data, item.subtotal);
     leftRightText(detail, subtotalStr, y, 8);
     y += 5;
   });
@@ -159,19 +165,19 @@ function generateReceiptPDF(data: ReceiptData): jsPDF {
 
   // ===== TOTALS =====
   doc.setFontSize(9);
-  leftRightText('Subtotal:', 'GHS ' + data.subtotal.toFixed(2), y, 9);
+  leftRightText('Subtotal:', amt(data, data.subtotal), y, 9);
   y += 4;
 
   if (data.discount > 0) {
     doc.setTextColor(200, 50, 50);
-    leftRightText('Discount:', '-GHS ' + data.discount.toFixed(2), y, 9);
+    leftRightText('Discount:', '-' + amt(data, data.discount), y, 9);
     doc.setTextColor(0);
     y += 4;
   }
 
   for (const charge of data.otherCharges || []) {
     if (!charge?.amount) continue;
-    leftRightText(charge.label + ':', 'GHS ' + charge.amount.toFixed(2), y, 9);
+    leftRightText(charge.label + ':', amt(data, charge.amount), y, 9);
     y += 4;
   }
 
@@ -182,7 +188,7 @@ function generateReceiptPDF(data: ReceiptData): jsPDF {
   // ===== GRAND TOTAL =====
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
-  leftRightText('TOTAL:', 'GHS ' + data.total.toFixed(2), y, 12);
+  leftRightText('TOTAL:', amt(data, data.total), y, 12);
   y += 5;
   
   drawLine(y);
@@ -202,11 +208,11 @@ function generateReceiptPDF(data: ReceiptData): jsPDF {
 
   if (data.paymentMethod === 'split') {
     if (data.cashAmount && data.cashAmount > 0) {
-      leftRightText('  Cash:', 'GHS ' + data.cashAmount.toFixed(2), y, 8);
+      leftRightText('  Cash:', amt(data, data.cashAmount), y, 8);
       y += 4;
     }
     if (data.paystackAmount && data.paystackAmount > 0) {
-      leftRightText('  MoMo/Card:', 'GHS ' + data.paystackAmount.toFixed(2), y, 8);
+      leftRightText('  MoMo/Card:', amt(data, data.paystackAmount), y, 8);
       y += 4;
     }
   }
@@ -238,6 +244,7 @@ function generateOfficialReceiptPdf(data: ReceiptData): FormalPdf {
       address: data.storeAddress,
       support_number: data.supportNumber,
       logo_url: data.storeLogoUrl,
+      currency_code: data.currencyCode,
     }),
     {
       title: 'Official receipt',
@@ -265,21 +272,21 @@ function generateOfficialReceiptPdf(data: ReceiptData): FormalPdf {
     data.items.map((item) => [
       item.name,
       String(item.quantity),
-      formatGhsOfficial(item.unitPrice),
-      formatGhsOfficial(item.subtotal),
+      formatGhsOfficial(item.unitPrice, data.currencyCode),
+      formatGhsOfficial(item.subtotal, data.currencyCode),
     ]),
     [4, 1, 2, 2]
   );
 
   const totalRows = [
-    { label: 'Subtotal', value: formatGhsOfficial(data.subtotal) },
+    { label: 'Subtotal', value: formatGhsOfficial(data.subtotal, data.currencyCode) },
     ...(data.discount > 0
-      ? [{ label: 'Discount', value: formatGhsOfficial(-data.discount) }]
+      ? [{ label: 'Discount', value: formatGhsOfficial(-data.discount, data.currencyCode) }]
       : []),
     ...(data.otherCharges || [])
       .filter((c) => c?.amount)
-      .map((c) => ({ label: c.label, value: formatGhsOfficial(c.amount) })),
-    { label: 'Amount payable', value: formatGhsOfficial(data.total), emphasis: 'total' as const },
+      .map((c) => ({ label: c.label, value: formatGhsOfficial(c.amount, data.currencyCode) })),
+    { label: 'Amount payable', value: formatGhsOfficial(data.total, data.currencyCode), emphasis: 'total' as const },
   ];
   pdf.section('Totals');
   pdf.kvTable(totalRows);
@@ -293,10 +300,10 @@ function generateOfficialReceiptPdf(data: ReceiptData): FormalPdf {
   const paymentRows = [
     { label: 'Method', value: methodLabel },
     ...(data.paymentMethod === 'split' && data.cashAmount
-      ? [{ label: 'Cash portion', value: formatGhsOfficial(data.cashAmount) }]
+      ? [{ label: 'Cash portion', value: formatGhsOfficial(data.cashAmount, data.currencyCode) }]
       : []),
     ...(data.paymentMethod === 'split' && data.paystackAmount
-      ? [{ label: 'Mobile money / card portion', value: formatGhsOfficial(data.paystackAmount) }]
+      ? [{ label: 'Mobile money / card portion', value: formatGhsOfficial(data.paystackAmount, data.currencyCode) }]
       : []),
     ...(data.paystackReference
       ? [{ label: 'Payment reference', value: data.paystackReference, emphasis: 'muted' as const }]
@@ -355,7 +362,7 @@ export async function shareReceipt(data: ReceiptData): Promise<boolean> {
       
       const shareData = {
         title: 'Receipt ' + data.receiptNumber,
-        text: 'Receipt from ' + data.storeName + ' - Total: GHS ' + data.total.toFixed(2),
+        text: 'Receipt from ' + data.storeName + ' - Total: ' + amt(data, data.total),
         files: [file],
       };
 
@@ -428,22 +435,22 @@ function generateReceiptText(data: ReceiptData): string {
   data.items.forEach(item => {
     lines.push(item.name);
     lines.push(leftRight(
-      '  ' + item.quantity + ' x GHS ' + item.unitPrice.toFixed(2),
-      'GHS ' + item.subtotal.toFixed(2)
+      '  ' + item.quantity + ' x ' + amt(data, item.unitPrice),
+      amt(data, item.subtotal)
     ));
   });
   
   lines.push(line('-'));
-  lines.push(leftRight('Subtotal:', 'GHS ' + data.subtotal.toFixed(2)));
+  lines.push(leftRight('Subtotal:', amt(data, data.subtotal)));
   if (data.discount > 0) {
-    lines.push(leftRight('Discount:', '-GHS ' + data.discount.toFixed(2)));
+    lines.push(leftRight('Discount:', '-' + amt(data, data.discount)));
   }
   for (const charge of data.otherCharges || []) {
     if (!charge?.amount) continue;
-    lines.push(leftRight(charge.label + ':', 'GHS ' + charge.amount.toFixed(2)));
+    lines.push(leftRight(charge.label + ':', amt(data, charge.amount)));
   }
   lines.push(line('='));
-  lines.push(leftRight('TOTAL:', 'GHS ' + data.total.toFixed(2)));
+  lines.push(leftRight('TOTAL:', amt(data, data.total)));
   lines.push(line('='));
   
   const methodLabel = 
@@ -453,8 +460,8 @@ function generateReceiptText(data: ReceiptData): string {
   lines.push(leftRight('Payment:', methodLabel));
   
   if (data.paymentMethod === 'split') {
-    if (data.cashAmount) lines.push(leftRight('  Cash:', 'GHS ' + data.cashAmount.toFixed(2)));
-    if (data.paystackAmount) lines.push(leftRight('  MoMo:', 'GHS ' + data.paystackAmount.toFixed(2)));
+    if (data.cashAmount) lines.push(leftRight('  Cash:', amt(data, data.cashAmount)));
+    if (data.paystackAmount) lines.push(leftRight('  MoMo:', amt(data, data.paystackAmount)));
   }
   
   lines.push('');

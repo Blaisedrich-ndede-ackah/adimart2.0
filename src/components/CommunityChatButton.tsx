@@ -1,6 +1,7 @@
 import { MessagesSquare } from 'lucide-react';
 import { COMMUNITY_CHAT_URL } from '@/lib/community';
 import { cn } from '@/utils/cn';
+import { useT } from '@/lib/i18n';
 
 type Variant = 'auth' | 'setup' | 'blocked' | 'care';
 
@@ -24,24 +25,26 @@ interface CommunityChatButtonProps {
 export default function CommunityChatButton({
   variant,
   className,
-  label = 'Join community chat',
+  label,
 }: CommunityChatButtonProps) {
+  const t = useT();
+  const text = label || t('community.join');
   return (
     <a
       href={COMMUNITY_CHAT_URL}
       target="_blank"
       rel="noopener noreferrer"
-      aria-label="Join the Adimat community chat on Telegram"
+      aria-label={t('community.aria')}
       className={cn(VARIANT_CLASS[variant], className)}
     >
       <MessagesSquare className="w-4 h-4 flex-shrink-0" />
       {variant === 'care' ? (
         <div className="min-w-0 text-left">
-          <p className="text-sm font-semibold">{label}</p>
-          <p className="text-xs opacity-80 truncate">Telegram group for all users</p>
+          <p className="text-sm font-semibold">{text}</p>
+          <p className="text-xs opacity-80 truncate">{t('community.telegram')}</p>
         </div>
       ) : (
-        <span>{label}</span>
+        <span>{text}</span>
       )}
     </a>
   );

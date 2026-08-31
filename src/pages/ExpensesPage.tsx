@@ -8,6 +8,8 @@ import {
 } from '@/lib/dexie';
 import { useAuthStore } from '@/store/useAuthStore';
 import { toMoneyAmount } from '@/lib/money';
+import { useFormatMoney } from '@/lib/currency';
+import { cashbookCategoryLabel, useT } from '@/lib/i18n';
 
 const EXPENSE_CATEGORIES = ['Rent', 'Utilities', 'Supplier', 'Salaries', 'Transport', 'Other'];
 
@@ -17,6 +19,8 @@ const EXPENSE_CATEGORIES = ['Rent', 'Utilities', 'Supplier', 'Salaries', 'Transp
  */
 export default function ExpensesPage() {
   const { currentUser } = useAuthStore();
+  const money = useFormatMoney();
+  const t = useT();
   const isOwner = currentUser?.role === 'owner';
 
   const [expenses, setExpenses] = useState<LocalExpense[]>([]);
@@ -98,7 +102,7 @@ export default function ExpensesPage() {
           <div className="flex items-center gap-2 min-w-0">
             <PiggyBank className="w-5 h-5 text-white shrink-0" />
             <div className="min-w-0">
-              <h1 className="text-white font-bold text-lg">Expenses</h1>
+              <h1 className="text-white font-bold text-lg">{t('expenses.title')}</h1>
               <p className="text-emerald-200 text-xs truncate">
                 {isOwner
                   ? 'Record and manage store expenses'
@@ -134,7 +138,7 @@ export default function ExpensesPage() {
         <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex items-center justify-between">
           <div>
             <p className="text-xs text-gray-500">All recorded expenses</p>
-            <p className="text-lg font-bold text-red-500">GH₵{total.toFixed(2)}</p>
+            <p className="text-lg font-bold text-red-500">{money(total)}</p>
           </div>
           <p className="text-xs text-gray-400">{expenses.length} item{expenses.length === 1 ? '' : 's'}</p>
         </div>
@@ -234,7 +238,7 @@ export default function ExpensesPage() {
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   <span className="text-sm font-bold text-red-500">
-                    GH₵{expense.amount.toFixed(2)}
+                    {money(expense.amount)}
                   </span>
                   {isOwner && (
                     <button

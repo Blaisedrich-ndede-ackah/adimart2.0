@@ -6,6 +6,10 @@ import { createStoreWithOwner, restoreStoreFromCloud } from '@/lib/dexie';
 import { isValidGhanaPhone } from '@/lib/platformSettings';
 import { useAuthStore } from '@/store/useAuthStore';
 import CommunityChatButton from '@/components/CommunityChatButton';
+import LanguageSwitcher from '@/components/LanguageSwitcher';
+import CurrencySelect from '@/components/CurrencySelect';
+import { useI18nStore, useT } from '@/lib/i18n';
+import { DEFAULT_CURRENCY } from '@/lib/currency';
 
 type SetupMode = 'choose' | 'new-store' | 'new-owner' | 'restore';
 
@@ -23,25 +27,28 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
   const [confirmPin, setConfirmPin] = useState('');
   const [restoreStoreId, setRestoreStoreId] = useState('');
   const [restorePin, setRestorePin] = useState('');
+  const [currencyCode, setCurrencyCode] = useState(DEFAULT_CURRENCY);
   const [error, setError] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const { setStoreSetup, initialize } = useAuthStore();
+  const t = useT();
+  const language = useI18nStore((s) => s.language);
 
   const handleStoreNext = () => {
     if (!storeName.trim()) {
-      setError('Please enter your store name');
+      setError(t('setup.needName'));
       return;
     }
     if (!storeAddress.trim()) {
-      setError('Please enter your store address');
+      setError(t('setup.needAddress'));
       return;
     }
     if (!supportNumber.trim()) {
-      setError('Please enter a support phone number');
+      setError(t('setup.needPhone'));
       return;
     }
     if (!isValidGhanaPhone(supportNumber)) {
-      setError('Enter a valid Ghana phone number (e.g. 024XXXXXXX or +23324XXXXXXX)');
+      setError(t('setup.needValidPhone'));
       return;
     }
     setError('');
@@ -52,23 +59,23 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
     setError('');
 
     if (!ownerName.trim()) {
-      setError('Please enter your name');
+      setError(t('setup.needOwner'));
       return;
     }
 
     if (ownerPin.length !== 4) {
-      setError('PIN must be exactly 4 digits');
+      setError(t('setup.pinLength'));
       return;
     }
 
     if (ownerPin !== confirmPin) {
-      setError('PINs do not match');
+      setError(t('setup.pinMismatch'));
       return;
     }
 
     // Re-validate profile in case user navigated back/forward
     if (!storeName.trim() || !storeAddress.trim() || !isValidGhanaPhone(supportNumber)) {
-      setError('Complete store profile details first');
+      setError(t('setup.completeProfile'));
       setMode('new-store');
       return;
     }
@@ -80,11 +87,13 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
         address: storeAddress.trim(),
         supportNumber: supportNumber.trim(),
         ownerPhone: supportNumber.trim(),
+        currencyCode,
+        preferredLanguage: language,
       });
       setStoreSetup(true);
       await initialize();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to create store');
+      setError(err instanceof Error ? err.message : t('setup.createFailed'));
     }
 
     setIsCreating(false);
@@ -94,12 +103,12 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
     setError('');
 
     if (!restoreStoreId.trim()) {
-      setError('Enter your Store ID from Settings');
+      setError(t('setup.needStoreId'));
       return;
     }
 
     if (restorePin.length !== 4) {
-      setError('Enter your 4-digit owner PIN');
+      setError(t('setup.needOwnerPin'));
       return;
     }
 
@@ -114,7 +123,7 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
         await initialize();
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Restore failed');
+      setError(err instanceof Error ? err.message : t('setup.restoreFailed'));
     }
 
     setIsCreating(false);
@@ -129,8 +138,10 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
           </div>
           <h1 className="text-3xl md:text-4xl font-bold text-white tracking-tight">Adimat</h1>
           <p className="text-emerald-100/90 text-sm mt-2 text-center">
-            {mode === 'choose' ? 'Set up a new store or restore from cloud' : "Let's set up your store"}
+            {mode === 'choose' ? t('setup.chooseTitle') : t('setup.letsSetup')}
           </p>
+          <LanguageSwitcher variant="onPrimary" className="mt-4 max-w-sm" compact />
+          <p className="text-emerald-100/80 text-[11px] mt-2 text-center max-w-sm">{t('setup.languageHint')}</p>
         </div>
 
         {mode === 'choose' && (
@@ -140,14 +151,14 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
               className="w-full py-4 bg-primary text-white rounded-xl font-bold flex items-center justify-center gap-2"
             >
               <Store className="w-5 h-5" />
-              Create New Store
+              {t('setup.createStore')}
             </button>
             <button
               onClick={() => setMode('restore')}
               className="w-full py-4 border-2 border-primary text-primary rounded-xl font-bold flex items-center justify-center gap-2"
             >
               <CloudDownload className="w-5 h-5" />
-              Restore from Cloud
+              {t('setup.restore')}
             </button>
             <p className="text-xs text-gray-500 text-center pt-2">
               Use restore if you already have a store synced to Supabase
@@ -211,8 +222,8 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
                 <Store className="w-5 h-5 text-primary" />
               </div>
               <div>
-                <h2 className="font-bold text-gray-900">Store Profile</h2>
-                <p className="text-xs text-gray-500">All fields are required</p>
+                <h2 className="font-bold text-gray-900">{t('settings.profile')}</h2>
+                <p className="text-xs text-gray-500">{t('common.required')}</p>
               </div>
             </div>
 
@@ -259,6 +270,12 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
                 <p className="text-[11px] text-gray-500 mt-1">
                   Used for receipts, subscriptions SMS, and customer contact
                 </p>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">{t('setup.currency')}</label>
+                <CurrencySelect value={currencyCode} onChange={setCurrencyCode} />
+                <p className="text-[11px] text-gray-500 mt-1">{t('setup.currencyHint')}</p>
               </div>
 
               {error && <p className="text-red-500 text-sm">{error}</p>}

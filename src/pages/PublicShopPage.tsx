@@ -10,6 +10,8 @@ import {
   type PublicShopCatalog,
   type PublicShopProduct,
 } from '@/lib/ecommerce';
+import { formatStoreMoney } from '@/lib/currency';
+import { useI18nStore } from '@/lib/i18n';
 
 interface PublicShopPageProps {
   slug: string;
@@ -18,9 +20,11 @@ interface PublicShopPageProps {
 type View = 'catalog' | 'cart' | 'checkout' | 'success';
 
 export default function PublicShopPage({ slug }: PublicShopPageProps) {
+  const language = useI18nStore((s) => s.language);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [catalog, setCatalog] = useState<PublicShopCatalog | null>(null);
+  const money = (n: number) => formatStoreMoney(n, catalog?.store.currency_code, language);
   const [cart, setCart] = useState<OnlineCartItem[]>([]);
   const [view, setView] = useState<View>('catalog');
   const [category, setCategory] = useState('All');
@@ -244,7 +248,7 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
                         {product.name}
                       </p>
                       <p className="text-primary font-bold mt-1">
-                        GHS {product.selling_price.toFixed(2)}
+                        {money(product.selling_price)}
                       </p>
                       <p className="text-[10px] text-gray-500 mt-0.5 mb-2">
                         {product.in_stock ? 'In stock' : 'Out of stock'}
@@ -291,7 +295,7 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold truncate">{item.product_name}</p>
                         <p className="text-xs text-primary font-bold mt-0.5">
-                          GHS {item.unit_price.toFixed(2)}
+                          {money(item.unit_price)}
                         </p>
                       </div>
                       <div className="flex items-center gap-1">
@@ -322,7 +326,7 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
                   ))}
                   <div className="bg-white border border-emerald-50 rounded-xl p-4 flex items-center justify-between">
                     <span className="font-semibold text-gray-700">Total</span>
-                    <span className="text-lg font-bold text-primary">GHS {cartTotal.toFixed(2)}</span>
+                    <span className="text-lg font-bold text-primary">{money(cartTotal)}</span>
                   </div>
                   <button
                     type="button"
@@ -376,7 +380,7 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
                   </div>
                   <div className="flex justify-between text-sm font-semibold pt-1">
                     <span>Order total</span>
-                    <span className="text-primary">GHS {cartTotal.toFixed(2)}</span>
+                    <span className="text-primary">{money(cartTotal)}</span>
                   </div>
                   <button
                     type="button"
@@ -401,7 +405,7 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
             className="pointer-events-auto max-w-3xl mx-auto w-full bg-primary text-white py-3.5 rounded-2xl flex items-center justify-between px-5 shadow-lg font-semibold"
           >
             <span>View cart ({cartCount})</span>
-            <span>GHS {cartTotal.toFixed(2)}</span>
+            <span>{money(cartTotal)}</span>
           </button>
         </div>
       )}

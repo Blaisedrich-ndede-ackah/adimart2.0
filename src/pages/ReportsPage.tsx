@@ -31,6 +31,8 @@ import { getExpiringBatches } from '@/lib/warehouse';
 import FinancialDonutChart from '@/components/FinancialDonutChart';
 import { parseOtherCharges } from '@/lib/otherCharges';
 import { orgFromStore } from '@/lib/formalPdf';
+import { useFormatMoney } from '@/lib/currency';
+import { useT } from '@/lib/i18n';
 
 type ReportTab = 'overview' | 'products' | 'expenses' | 'locations';
 
@@ -54,6 +56,8 @@ function monthStartDateOnly(): string {
 
 export default function ReportsPage() {
   const { currentStore, currentUser } = useAuthStore();
+  const money = useFormatMoney();
+  const t = useT();
   const [period, setPeriod] = useState<ReportPeriod>('today');
   const [customFrom, setCustomFrom] = useState(monthStartDateOnly);
   const [customTo, setCustomTo] = useState(todayDateOnly);
@@ -244,7 +248,7 @@ export default function ReportsPage() {
     <div className="page-shell">
       <div className="page-header">
         <div className="flex items-center justify-between mb-3">
-          <h1 className="text-white font-bold text-lg">Reports & Analytics</h1>
+          <h1 className="text-white font-bold text-lg">{t('reports.title')}</h1>
           <div className="flex gap-2">
             <button onClick={handleExportCsv} className="bg-white/20 p-2 rounded-lg" title="Export CSV">
               <Download className="w-4 h-4 text-white" />
@@ -357,18 +361,18 @@ export default function ReportsPage() {
                   <TrendingUp className="w-4 h-4 text-primary" />
                   <span className="text-xs text-gray-500 font-medium">Total Revenue</span>
                 </div>
-                <p className="text-2xl font-bold text-gray-900">GH₵{totalRevenue.toFixed(2)}</p>
+                <p className="text-2xl font-bold text-gray-900">{money(totalRevenue)}</p>
                 <p className="text-xs text-gray-500">{transactions.length} transactions</p>
               </div>
 
               <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100">
                 <p className="text-xs text-gray-500">Gross Profit</p>
-                <p className="text-lg font-bold text-green-600">GH₵{summary.grossProfit.toFixed(2)}</p>
+                <p className="text-lg font-bold text-green-600">{money(summary.grossProfit)}</p>
               </div>
               <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100">
                 <p className="text-xs text-gray-500">Net Profit</p>
                 <p className={`text-lg font-bold ${summary.netProfit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                  GH₵{summary.netProfit.toFixed(2)}
+                  {money(summary.netProfit)}
                 </p>
               </div>
 
@@ -377,19 +381,19 @@ export default function ReportsPage() {
                   <Banknote className="w-4 h-4 text-green-600" />
                   <span className="text-xs text-gray-500">Cash</span>
                 </div>
-                <p className="text-lg font-bold">GH₵{cashRevenue.toFixed(2)}</p>
+                <p className="text-lg font-bold">{money(cashRevenue)}</p>
               </div>
               <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100">
                 <div className="flex items-center gap-2 mb-1">
                   <CreditCard className="w-4 h-4 text-blue-600" />
                   <span className="text-xs text-gray-500">Paystack</span>
                 </div>
-                <p className="text-lg font-bold">GH₵{paystackRevenue.toFixed(2)}</p>
+                <p className="text-lg font-bold">{money(paystackRevenue)}</p>
               </div>
 
               <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 col-span-2">
                 <p className="text-xs text-gray-500">Expenses</p>
-                <p className="text-lg font-bold text-red-500">GH₵{summary.expenses.toFixed(2)}</p>
+                <p className="text-lg font-bold text-red-500">{money(summary.expenses)}</p>
               </div>
             </div>
 
@@ -438,7 +442,7 @@ export default function ReportsPage() {
                   {summary.cashiers.map(c => (
                     <div key={c.cashier_id} className="flex justify-between text-sm">
                       <span>{c.cashier_name} ({c.transactions})</span>
-                      <span className="font-semibold">GH₵{c.revenue.toFixed(2)}</span>
+                      <span className="font-semibold">{money(c.revenue)}</span>
                     </div>
                   ))}
                 </div>
@@ -457,7 +461,7 @@ export default function ReportsPage() {
                   {summary.categories.map(c => (
                     <div key={c.category} className="flex justify-between text-sm">
                       <span>{c.category} ({c.quantity})</span>
-                      <span className="font-semibold">GH₵{c.revenue.toFixed(2)}</span>
+                      <span className="font-semibold">{money(c.revenue)}</span>
                     </div>
                   ))}
                 </div>
@@ -474,8 +478,8 @@ export default function ReportsPage() {
                   <BarChart data={chartData} margin={{ top: 5, right: 5, left: -15, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                     <XAxis dataKey="day" tick={{ fontSize: 10 }} />
-                    <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => `₵${v}`} />
-                    <Tooltip formatter={(value: unknown) => [`GH₵${Number(value).toFixed(2)}`, 'Revenue']} />
+                    <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => String(Math.round(v))} />
+                    <Tooltip formatter={(value: unknown) => [`${money(Number(value))}`, 'Revenue']} />
                     <Bar dataKey="revenue" fill="#065f46" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -502,7 +506,7 @@ export default function ReportsPage() {
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-bold">GH₵{txn.total_amount.toFixed(2)}</span>
+                          <span className="text-sm font-bold">{money(txn.total_amount)}</span>
                           <ChevronDown className={`w-4 h-4 transition-transform ${expandedTxn === txn.id ? 'rotate-180' : ''}`} />
                         </div>
                       </button>
@@ -511,13 +515,13 @@ export default function ReportsPage() {
                           {txnItems[txn.id].map(item => (
                             <div key={item.id} className="flex justify-between py-1 text-xs">
                               <span>{item.product_name} × {item.quantity}</span>
-                              <span>GH₵{item.subtotal.toFixed(2)}</span>
+                              <span>{money(item.subtotal)}</span>
                             </div>
                           ))}
                           {parseOtherCharges(txn.other_charges_json).map((charge) => (
                             <div key={charge.id} className="flex justify-between py-1 text-xs text-gray-600">
                               <span>{charge.label}</span>
-                              <span>GH₵{charge.amount.toFixed(2)}</span>
+                              <span>{money(charge.amount)}</span>
                             </div>
                           ))}
                         </div>
@@ -545,8 +549,8 @@ export default function ReportsPage() {
                       <p className="text-xs text-gray-500">{p.quantity} sold</p>
                     </div>
                     <div className="text-right">
-                      <p className="font-semibold">GH₵{p.revenue.toFixed(2)}</p>
-                      <p className="text-xs text-green-600">Profit GH₵{p.profit.toFixed(2)}</p>
+                      <p className="font-semibold">{money(p.revenue)}</p>
+                      <p className="text-xs text-green-600">Profit {money(p.profit)}</p>
                     </div>
                   </div>
                 ))
@@ -638,7 +642,7 @@ export default function ReportsPage() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-red-500">GH₵{expense.amount.toFixed(2)}</span>
+                    <span className="text-sm font-bold text-red-500">{money(expense.amount)}</span>
                     <button onClick={() => handleDeleteExpense(expense.id)} className="p-1.5 hover:bg-red-50 rounded-lg">
                       <Trash2 className="w-4 h-4 text-red-400" />
                     </button>
