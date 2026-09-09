@@ -1524,7 +1524,8 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
     }
 
     const { refreshRemoteLedgerClearAndApply, shouldPushLedgerRow } = await import('./storeLedgerClear');
-    const ledgerClearedAt = await refreshRemoteLedgerClearAndApply(storeId);
+    const ledgerSync = await refreshRemoteLedgerClearAndApply(storeId);
+    const ledgerClearedAt = ledgerSync.clearedAt;
 
     const store = await db.stores.get(storeId);
     if (store && store.synced === 0) {
@@ -1875,11 +1876,25 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
       last_synced_at: new Date().toISOString(),
     });
 
+    const droppedSales = ledgerSync.dropped.transactions;
+    const clearedNote =
+      droppedSales > 0
+        ? ` Removed ${droppedSales} cleared sale${droppedSales === 1 ? '' : 's'} from this device.`
+        : '';
+
     if (syncedCount === 0) {
-      return { success: true, message: 'Everything is already synced!' };
+      return {
+        success: true,
+        message: droppedSales > 0
+          ? `Cleared trial sales on this device.${clearedNote}`
+          : 'Everything is already synced!',
+      };
     }
 
-    return { success: true, message: `Synced ${syncedCount} records at ${new Date().toLocaleTimeString()}` };
+    return {
+      success: true,
+      message: `Synced ${syncedCount} records at ${new Date().toLocaleTimeString()}.${clearedNote}`,
+    };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes('Load failed') || msg.includes('Failed to fetch')) {
@@ -2325,11 +2340,9 @@ export async function syncFromSupabase(opts?: {
       }
     }
 
-    const storeAfterPull = await db.stores.get(storeId);
-    if (storeAfterPull?.transactions_cleared_at) {
-      const { applyLocalStoreLedgerClear } = await import('./storeLedgerClear');
-      await applyLocalStoreLedgerClear(storeId, storeAfterPull.transactions_cleared_at);
-    }
+    const { refreshRemoteLedgerClearAndApply } = await import('./storeLedgerClear');
+    const ledgerAfterPull = await refreshRemoteLedgerClearAndApply(storeId);
+    const droppedSales = ledgerAfterPull.dropped.transactions;
 
     if (errors.length > 0) {
       return { success: false, message: `Partial pull. Errors: ${errors.join('; ')}`, pulledCount };
@@ -2359,9 +2372,16 @@ export async function syncFromSupabase(opts?: {
       }
     }
 
+    const clearedNote =
+      droppedSales > 0
+        ? ` Removed ${droppedSales} cleared sale${droppedSales === 1 ? '' : 's'} from this device.`
+        : '';
+
     return {
       success: true,
-      message: pulledCount > 0 ? `Pulled ${pulledCount} new records from cloud` : 'Cloud data is up to date',
+      message:
+        (pulledCount > 0 ? `Pulled ${pulledCount} new records from cloud` : 'Cloud data is up to date') +
+        clearedNote,
       pulledCount,
     };
   } catch (err) {
