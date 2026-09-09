@@ -263,6 +263,7 @@ Additional server behavior:
 - `updated_at` triggers on stores, users, products, expenses
 - Unique index on `(store_id, receipt_number)`
 - Trigger `auto_deduct_stock` on `transaction_items` INSERT (server-side stock deduction; client also deducts locally)
+- `stores.transactions_cleared_at` — super-admin trial-sales wipe; devices drop local ledger rows at or before this timestamp on sync
 
 ### 7.3 Entity relationships
 
@@ -507,6 +508,8 @@ No lint/test/CI scripts are present in-repo.
 | `biometric.ts` | WebAuthn helpers |
 | `csvImport.ts` | CSV parsing/import |
 | `reportAnalytics.ts` | Aggregations for reports |
+| `adminPortal.ts` | Super-admin cloud dashboard, grants, store wipe |
+| `storeLedgerClear.ts` | Apply `transactions_cleared_at` locally so trial sales cannot re-sync |
 | `scanBeep.ts` | Success/fail audio feedback |
 
 ### 14.4 Stores
@@ -545,6 +548,18 @@ No lint/test/CI scripts are present in-repo.
 1. Login with cashier PIN  
 2. POS only  
 3. Switch user / logout from POS controls when shift ends  
+
+### 15.5 Clear trial sales (platform admin)
+
+After a store has practised on Adimat, the super-admin can reset that store’s trading history without deleting the shop:
+
+1. Open **Administrator portal → Stores → tap the store**  
+2. Under **Clear trial sales**, type the store name and confirm  
+3. Cloud sales, expenses, cash book, and payout records for that store are deleted; `stores.transactions_cleared_at` is stamped  
+4. Ask the store to **sync** (or wait for auto-sync). The device drops local ledger rows created at or before the stamp so Transactions and Reports start empty  
+5. Products, staff, inventory, and subscriptions are not removed  
+
+If the cloud project predates this column, run `supabase-migrate-clear-store-ledger.sql`.
 
 ---
 

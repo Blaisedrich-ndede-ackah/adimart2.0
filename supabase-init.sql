@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS stores (
   ecommerce_tagline TEXT DEFAULT '',
   currency_code VARCHAR(8) DEFAULT 'GHS',
   preferred_language VARCHAR(8) DEFAULT 'en',
+  /** Super-admin wipe of trial sales; devices drop local ledger rows at or before this time */
+  transactions_cleared_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -47,6 +49,8 @@ ALTER TABLE stores ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "stores_select" ON stores FOR SELECT USING (true);
 CREATE POLICY "stores_insert" ON stores FOR INSERT WITH CHECK (true);
 CREATE POLICY "stores_update" ON stores FOR UPDATE USING (true);
+
+CREATE INDEX IF NOT EXISTS idx_stores_transactions_cleared_at ON stores(transactions_cleared_at);
 
 -- ============================================================
 -- USERS TABLE (linked to stores)
@@ -144,6 +148,7 @@ ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "transactions_select" ON transactions FOR SELECT USING (true);
 CREATE POLICY "transactions_insert" ON transactions FOR INSERT WITH CHECK (true);
 CREATE POLICY "transactions_update" ON transactions FOR UPDATE USING (true);
+CREATE POLICY "transactions_delete" ON transactions FOR DELETE USING (true);
 
 CREATE INDEX IF NOT EXISTS idx_transactions_store ON transactions(store_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON transactions(store_id, created_at);

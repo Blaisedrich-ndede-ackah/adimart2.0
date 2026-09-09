@@ -40,6 +40,8 @@ export interface AdminStoreRow {
   ecommerce_enabled: boolean;
   ecommerce_slug: string;
   created_at: string;
+  /** Super-admin wipe of trial sales; ISO timestamp when last cleared */
+  transactions_cleared_at: string | null;
 }
 
 export interface AdminSubscriptionGrantRow {
@@ -267,6 +269,7 @@ export async function loadAdminDashboard(weekStart = getWeekStart()): Promise<Ad
       max_warehouses: quota.max_warehouses,
       max_stores: quota.max_stores,
       created_at: String(s.created_at || ''),
+      transactions_cleared_at: s.transactions_cleared_at ? String(s.transactions_cleared_at) : null,
     };
   });
 
@@ -485,6 +488,94 @@ export async function setStoreAccessBlocked(
   }
 
   return { success: true };
+}
+
+async function countStoreRows(table: string, storeId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from(table)
+    .select('id', { count: 'exact', head: true })
+    .eq('store_id', storeId);
+  if (error) return 0;
+  return count || 0;
+}
+
+function migrateClearHint(message: string): string {
+  if (
+    message.includes('transactions_cleared_at') ||
+    message.includes('transactions_delete') ||
+    /permission denied|42501/i.test(message)
+  ) {
+    return `${message} — run supabase-migrate-clear-store-ledger.sql in Supabase.`;
+  }
+  return message;
+}
+
+/**
+ * Super-admin: wipe a store's trial sales so reports start empty for live trading.
+ * Deletes cloud transactions, line items, expenses, cash book, and payout records,
+ * then stamps `transactions_cleared_at` so devices drop the same rows on sync.
+ * Products, staff, stock, and subscriptions are left unchanged.
+ */
+export async function clearStoreTrialLedger(storeId: string): Promise<{
+  success: boolean;
+  error?: string;
+  clearedAt?: string;
+  deleted?: { transactions: number; expenses: number; cashBook: number };
+}> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: 'Supabase not configured' };
+  }
+
+  const [transactions, expenses, cashBook] = await Promise.all([
+    countStoreRows('transactions', storeId),
+    countStoreRows('expenses', storeId),
+    countStoreRows('cash_book_entries', storeId),
+  ]);
+
+  const clearedAt = new Date().toISOString();
+
+  const itemDelete = await supabase.from('transaction_items').delete().eq('store_id', storeId);
+  if (itemDelete.error) {
+    return { success: false, error: migrateClearHint(itemDelete.error.message) };
+  }
+
+  const txnDelete = await supabase.from('transactions').delete().eq('store_id', storeId);
+  if (txnDelete.error) {
+    return { success: false, error: migrateClearHint(txnDelete.error.message) };
+  }
+
+  const expenseDelete = await supabase.from('expenses').delete().eq('store_id', storeId);
+  if (expenseDelete.error) {
+    return { success: false, error: migrateClearHint(expenseDelete.error.message) };
+  }
+
+  const cashDelete = await supabase.from('cash_book_entries').delete().eq('store_id', storeId);
+  if (cashDelete.error && !/could not find|does not exist|schema cache/i.test(cashDelete.error.message)) {
+    return { success: false, error: migrateClearHint(cashDelete.error.message) };
+  }
+
+  const payoutDelete = await supabase.from('payouts').delete().eq('store_id', storeId);
+  if (payoutDelete.error && !/could not find|does not exist|schema cache/i.test(payoutDelete.error.message)) {
+    return { success: false, error: migrateClearHint(payoutDelete.error.message) };
+  }
+
+  const stamp = await supabase
+    .from('stores')
+    .update({ transactions_cleared_at: clearedAt })
+    .eq('id', storeId);
+
+  if (stamp.error) {
+    return { success: false, error: migrateClearHint(stamp.error.message) };
+  }
+
+  const { applyLocalStoreLedgerClear } = await import('./storeLedgerClear');
+  await applyLocalStoreLedgerClear(storeId, clearedAt);
+
+  return {
+    success: true,
+    clearedAt,
+    deleted: { transactions, expenses, cashBook },
+  };
 }
 
 /**
