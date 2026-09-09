@@ -116,6 +116,7 @@ The portal loads cloud data and shows:
 - All-time revenue and Paystack (online) totals per store
 - Weekly Paystack collections with each store’s MoMo account name/number for remittance
 - **Mark sent** to record that a weekly payout was transferred
+- **Clear trial sales** — from a store’s workspace, wipe that store’s sales, expenses, cash book, and remittance records so Transactions and Reports start empty after testing. Products, staff, and stock stay. The store must **sync** afterwards. Requires `supabase-migrate-clear-store-ledger.sql` if your project predates this feature.
 
 Store owners and cashiers open **Plan** to view subscription status and contact the administrator (WhatsApp / email loaded from Admin → Contact). SMS alerts via mNotify notify the store’s Support Phone when a subscription is activated and once when it is within 7 days of expiry.
 
@@ -148,7 +149,7 @@ If your Supabase project predates this feature, run `supabase-migrate-ecommerce.
 
 Store owners set their preferred MoMo account under **Settings → Mobile Money Payout**, then sync to Supabase.
 
-If your Supabase project was created before these features, run `supabase-migrate-admin.sql`, `supabase-migrate-subscriptions.sql`, and `supabase-migrate-platform-settings.sql` in the SQL Editor (or re-apply the latest `supabase-init.sql`).
+If your Supabase project was created before these features, run `supabase-migrate-admin.sql`, `supabase-migrate-subscriptions.sql`, `supabase-migrate-platform-settings.sql`, and `supabase-migrate-clear-store-ledger.sql` in the SQL Editor (or re-apply the latest `supabase-init.sql`).
 For self-serve Paystack subscription renewals, also run `supabase-migrate-subscription-payments.sql`.
 
 ### Multi-store on one device

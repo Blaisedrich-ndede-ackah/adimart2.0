@@ -495,10 +495,11 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm mb-3">
             {error}
-            {(error.includes('momo_') || error.includes('payouts') || error.includes('subscription') || error.includes('platform_settings') || error.includes('access_blocked') || error.includes('column')) && (
+            {(error.includes('momo_') || error.includes('payouts') || error.includes('subscription') || error.includes('platform_settings') || error.includes('access_blocked') || error.includes('transactions_cleared_at') || error.includes('column')) && (
               <p className="text-xs mt-2">
                 Run <code>supabase-migrate-admin.sql</code> / <code>supabase-migrate-subscriptions.sql</code> /{' '}
                 <code>supabase-migrate-store-access-block.sql</code> /{' '}
+                <code>supabase-migrate-clear-store-ledger.sql</code> /{' '}
                 <code>supabase-migrate-platform-settings.sql</code> (or the latest <code>supabase-init.sql</code>) in your Supabase SQL Editor.
               </p>
             )}
@@ -1089,7 +1090,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                   />
                 </div>
                 <p className="text-xs text-slate-500 px-1">
-                  {filteredStores.length} store{filteredStores.length === 1 ? '' : 's'} · tap a card to open inventory &amp; staff
+                  {filteredStores.length} store{filteredStores.length === 1 ? '' : 's'} · tap a card to open inventory, staff, or clear trial sales
                 </p>
                 {filteredStores.map((row) => (
                   <button

@@ -48,6 +48,8 @@ export interface LocalStore {
   currency_code?: string;
   /** Default language for devices that have not chosen one yet. */
   preferred_language?: string;
+  /** Super-admin wipe of trial sales; drop local ledger rows at or before this ISO time */
+  transactions_cleared_at?: string | null;
   created_at: string;
   synced: number;
 }
@@ -505,6 +507,7 @@ export async function createStoreWithOwner(
     ecommerce_tagline: '',
     currency_code: profile?.currencyCode || 'GHS',
     preferred_language: profile?.preferredLanguage === 'fr' ? 'fr' : 'en',
+    transactions_cleared_at: null,
     created_at: now,
     synced: 0,
   };
@@ -548,14 +551,19 @@ export async function pullAdminStoreLimits(storeId: string): Promise<LocalStore 
     const { data, error } = await supabase
       .from('stores')
       .select(
-        'warehouse_enabled, max_shops, max_warehouses, max_stores, ecommerce_enabled, ecommerce_slug, ecommerce_tagline, currency_code, preferred_language, subscription_started_at, subscription_expires_at, subscription_months_granted, access_blocked'
+        'warehouse_enabled, max_shops, max_warehouses, max_stores, ecommerce_enabled, ecommerce_slug, ecommerce_tagline, currency_code, preferred_language, subscription_started_at, subscription_expires_at, subscription_months_granted, access_blocked, transactions_cleared_at'
       )
       .eq('id', storeId)
       .maybeSingle();
 
     let storeRow = (data ?? null) as Record<string, unknown> | null;
     let storeError = error;
-    if (storeError?.message?.includes('access_blocked') || storeError?.message?.includes('currency_code') || storeError?.message?.includes('preferred_language')) {
+    if (
+      storeError?.message?.includes('access_blocked') ||
+      storeError?.message?.includes('currency_code') ||
+      storeError?.message?.includes('preferred_language') ||
+      storeError?.message?.includes('transactions_cleared_at')
+    ) {
       const retry = await supabase
         .from('stores')
         .select(
@@ -615,8 +623,15 @@ export async function pullAdminStoreLimits(storeId: string): Promise<LocalStore 
             ? 1
             : 0
           : local.access_blocked ?? 0,
+      transactions_cleared_at: storeRow?.transactions_cleared_at
+        ? String(storeRow.transactions_cleared_at)
+        : local.transactions_cleared_at ?? null,
     };
     await db.stores.put(updated);
+    if (updated.transactions_cleared_at) {
+      const { applyLocalStoreLedgerClear } = await import('./storeLedgerClear');
+      await applyLocalStoreLedgerClear(storeId, updated.transactions_cleared_at);
+    }
     return updated;
   } catch {
     return local;
@@ -1508,6 +1523,9 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
       }
     }
 
+    const { refreshRemoteLedgerClearAndApply, shouldPushLedgerRow } = await import('./storeLedgerClear');
+    const ledgerClearedAt = await refreshRemoteLedgerClearAndApply(storeId);
+
     const store = await db.stores.get(storeId);
     if (store && store.synced === 0) {
       // Do NOT push admin-managed fields — local defaults would overwrite raised limits.
@@ -1698,7 +1716,11 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
       errors
     );
 
-    const unsyncedTxns = await db.transactions.where('store_id').equals(storeId).and(t => t.synced === 0).toArray();
+    const unsyncedTxns = await db.transactions
+      .where('store_id')
+      .equals(storeId)
+      .and((t) => t.synced === 0 && shouldPushLedgerRow(t.created_at, ledgerClearedAt))
+      .toArray();
     syncedCount += await upsertToSupabase(
       'Transactions',
       'transactions',
@@ -1725,7 +1747,14 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
       errors
     );
 
-    const unsyncedItems = await db.transaction_items.where('store_id').equals(storeId).and(i => i.synced === 0).toArray();
+    const keepTxnIds = new Set(
+      (await db.transactions.where('store_id').equals(storeId).toArray()).map((t) => t.id)
+    );
+    const unsyncedItems = await db.transaction_items
+      .where('store_id')
+      .equals(storeId)
+      .and((i) => i.synced === 0 && keepTxnIds.has(i.transaction_id))
+      .toArray();
     syncedCount += await upsertToSupabase(
       'Transaction items',
       'transaction_items',
@@ -1747,7 +1776,11 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
       errors
     );
 
-    const unsyncedExpenses = await db.expenses.where('store_id').equals(storeId).and(e => e.synced === 0).toArray();
+    const unsyncedExpenses = await db.expenses
+      .where('store_id')
+      .equals(storeId)
+      .and((e) => e.synced === 0 && shouldPushLedgerRow(e.created_at, ledgerClearedAt))
+      .toArray();
     syncedCount += await upsertToSupabase(
       'Expenses',
       'expenses',
@@ -1768,7 +1801,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
     const unsyncedCashBook = await db.cash_book_entries
       .where('store_id')
       .equals(storeId)
-      .and((e) => e.synced === 0)
+      .and((e) => e.synced === 0 && shouldPushLedgerRow(e.created_at, ledgerClearedAt))
       .toArray();
     syncedCount += await upsertToSupabase(
       'Cash book',
@@ -1932,10 +1965,17 @@ export async function syncFromSupabase(opts?: {
         ecommerce_tagline: remoteStore.ecommerce_tagline || localStore?.ecommerce_tagline || '',
         currency_code: String(remoteStore.currency_code || localStore?.currency_code || 'GHS'),
         preferred_language: remoteStore.preferred_language === 'fr' || localStore?.preferred_language === 'fr' ? 'fr' : 'en',
+        transactions_cleared_at: remoteStore.transactions_cleared_at
+          ? String(remoteStore.transactions_cleared_at)
+          : localStore?.transactions_cleared_at ?? null,
         created_at: remoteStore.created_at,
         synced: localStore?.synced === 0 ? 0 : 1,
       });
       pulledCount++;
+      if (remoteStore.transactions_cleared_at) {
+        const { applyLocalStoreLedgerClear } = await import('./storeLedgerClear');
+        await applyLocalStoreLedgerClear(storeId, String(remoteStore.transactions_cleared_at));
+      }
     }
     }
 
@@ -2283,6 +2323,12 @@ export async function syncFromSupabase(opts?: {
           if (!existing) pulledCount++;
         }
       }
+    }
+
+    const storeAfterPull = await db.stores.get(storeId);
+    if (storeAfterPull?.transactions_cleared_at) {
+      const { applyLocalStoreLedgerClear } = await import('./storeLedgerClear');
+      await applyLocalStoreLedgerClear(storeId, storeAfterPull.transactions_cleared_at);
     }
 
     if (errors.length > 0) {

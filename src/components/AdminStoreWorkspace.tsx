@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import {
-  ArrowLeft, Package, Users, Loader2, UserPlus, Ban, CheckCircle2, Key,
+  ArrowLeft, Package, Users, Loader2, UserPlus, Ban, CheckCircle2, Key, Eraser,
 } from 'lucide-react';
 import {
   addAdminStoreCashier,
+  clearStoreTrialLedger,
   formatGhs,
   resetAdminUserPin,
   setAdminUserActive,
@@ -38,6 +39,8 @@ export default function AdminStoreWorkspace({
   const [resetPinUserId, setResetPinUserId] = useState<string | null>(null);
   const [resetPin, setResetPin] = useState('');
   const [stockEdits, setStockEdits] = useState<Record<string, string>>({});
+  const [confirmName, setConfirmName] = useState('');
+  const [confirmingClear, setConfirmingClear] = useState(false);
 
   const products = useMemo(
     () =>
@@ -55,9 +58,14 @@ export default function AdminStoreWorkspace({
     [data.users, store.id]
   );
 
-  const flash = (msg: string) => {
+  const performance = useMemo(
+    () => data.performance.find((row) => row.store.id === store.id),
+    [data.performance, store.id]
+  );
+
+  const flash = (msg: string, ms = 5000) => {
     setStatus(msg);
-    setTimeout(() => setStatus(''), 4000);
+    setTimeout(() => setStatus(''), ms);
   };
 
   const toggleProduct = async (product: AdminProductRow) => {
@@ -131,6 +139,32 @@ export default function AdminStoreWorkspace({
     setBusyId(null);
   };
 
+  const nameMatches =
+    confirmName.trim().toLowerCase() === store.name.trim().toLowerCase();
+
+  const clearLedger = async () => {
+    if (!nameMatches) {
+      flash('Type the store name exactly to confirm.');
+      return;
+    }
+    setBusyId('clear-ledger');
+    const result = await clearStoreTrialLedger(store.id);
+    if (!result.success) flash(result.error || 'Could not clear sales');
+    else {
+      const deleted = result.deleted;
+      flash(
+        `Cleared ${deleted?.transactions || 0} sale(s), ${deleted?.expenses || 0} expense(s), and ${
+          deleted?.cashBook || 0
+        } cash book entr${(deleted?.cashBook || 0) === 1 ? 'y' : 'ies'}. Ask the store to sync.`,
+        8000
+      );
+      setConfirmName('');
+      setConfirmingClear(false);
+      await onChanged();
+    }
+    setBusyId(null);
+  };
+
   return (
     <div className="space-y-3">
       <button
@@ -150,8 +184,14 @@ export default function AdminStoreWorkspace({
           {[store.address, store.support_number].filter(Boolean).join(' · ') || 'No profile details'}
         </p>
         <p className="text-[11px] text-slate-500 mt-2">
-          {users.length} staff · {products.length} products · manage inventory &amp; staff for this store
+          {users.length} staff · {products.length} products · {performance?.saleCount || 0} sales ·{' '}
+          {formatGhs(performance?.totalRevenue || 0)} revenue
         </p>
+        {store.transactions_cleared_at && (
+          <p className="text-[11px] text-amber-700 mt-1">
+            Trial sales last cleared {new Date(store.transactions_cleared_at).toLocaleString('en-GH')}
+          </p>
+        )}
       </div>
 
       <div className="flex gap-2 rounded-xl bg-slate-100 p-1">
@@ -346,6 +386,82 @@ export default function AdminStoreWorkspace({
           </div>
         </div>
       )}
+
+      <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 space-y-3">
+        <div className="flex items-start gap-2">
+          <Eraser className="w-4 h-4 text-rose-700 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-bold text-rose-900">Clear trial sales</p>
+            <p className="text-xs text-rose-800 mt-0.5 leading-relaxed">
+              After a store has practised on the system, wipe its sales, expenses, cash book, and
+              remittance records so Transactions and Reports start empty for live trading. Products,
+              staff, and stock are kept. The store must sync afterwards.
+            </p>
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <div className="bg-white/80 rounded-lg py-2">
+            <p className="text-[10px] text-rose-700">Sales</p>
+            <p className="text-xs font-bold text-rose-900">{performance?.saleCount || 0}</p>
+          </div>
+          <div className="bg-white/80 rounded-lg py-2">
+            <p className="text-[10px] text-rose-700">Revenue</p>
+            <p className="text-xs font-bold text-rose-900">{formatGhs(performance?.totalRevenue || 0)}</p>
+          </div>
+          <div className="bg-white/80 rounded-lg py-2">
+            <p className="text-[10px] text-rose-700">Paystack</p>
+            <p className="text-xs font-bold text-rose-900">{formatGhs(performance?.paystackRevenue || 0)}</p>
+          </div>
+        </div>
+        {!confirmingClear ? (
+          <button
+            type="button"
+            onClick={() => {
+              setConfirmingClear(true);
+              setConfirmName('');
+            }}
+            className="w-full rounded-xl bg-rose-700 px-3 py-2.5 text-sm font-semibold text-white touch-target"
+          >
+            Clear all transactions &amp; reports
+          </button>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-xs text-rose-900">
+              Type <span className="font-semibold">{store.name}</span> to confirm. This cannot be undone.
+            </p>
+            <input
+              value={confirmName}
+              onChange={(e) => setConfirmName(e.target.value)}
+              placeholder="Store name"
+              className="w-full rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmingClear(false);
+                  setConfirmName('');
+                }}
+                className="flex-1 rounded-xl border border-rose-200 bg-white px-3 py-2.5 text-sm font-semibold text-rose-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={busyId === 'clear-ledger' || !nameMatches}
+                onClick={() => void clearLedger()}
+                className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-rose-700 px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {busyId === 'clear-ledger' ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  'Clear now'
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
