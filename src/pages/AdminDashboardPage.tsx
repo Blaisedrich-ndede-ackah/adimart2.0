@@ -416,7 +416,14 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
   }, [moreOpen]);
 
   return (
-    <div className="h-dvh bg-[var(--color-surface)] flex flex-col overflow-hidden md:max-w-6xl md:mx-auto md:border-x md:border-emerald-100 md:shadow-xl">
+    <div
+      className="h-full bg-[var(--color-surface)] flex flex-col overflow-hidden lg:max-w-6xl lg:mx-auto lg:border-x lg:border-emerald-100 lg:shadow-xl"
+      style={{
+        paddingTop: 'env(safe-area-inset-top)',
+        paddingLeft: 'env(safe-area-inset-left)',
+        paddingRight: 'env(safe-area-inset-right)',
+      }}
+    >
       <header className="bg-primary text-white px-3 sm:px-4 md:px-6 py-3 flex-shrink-0">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
@@ -467,7 +474,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       </header>
 
       {/* Desktop / tablet top tabs */}
-      <nav className="hidden sm:flex bg-white border-b border-emerald-100 px-2 md:px-4 py-2 gap-1 overflow-x-auto no-scrollbar flex-shrink-0">
+      <nav className="hidden lg:flex bg-white border-b border-emerald-100 px-2 md:px-4 py-2 gap-1 overflow-x-auto no-scrollbar flex-shrink-0">
         {tabs.map(([id, label]) => (
           <button
             key={id}
@@ -482,7 +489,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       </nav>
 
       <main
-        className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 md:px-6 py-3 md:py-5 pb-28 sm:pb-8"
+        className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 md:px-6 py-3 md:py-5 pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-8"
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
         {loading && !data && tab !== 'contact' && tab !== 'reports' && (
@@ -1086,11 +1093,11 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                     value={storeQuery}
                     onChange={(e) => setStoreQuery(e.target.value)}
                     placeholder="Search stores or paste a Store ID"
-                    className="w-full rounded-2xl border border-slate-200 bg-white pl-9 pr-3 py-3 text-sm"
+                    className="w-full rounded-2xl border border-slate-200 bg-white pl-9 pr-3 py-3 text-base"
                   />
                 </div>
                 <p className="text-xs text-slate-500 px-1">
-                  {filteredStores.length} store{filteredStores.length === 1 ? '' : 's'} · tap a card to open inventory, staff, or clear trial sales
+                  {filteredStores.length} store{filteredStores.length === 1 ? '' : 's'} · tap a card to open inventory, staff, invoice, or clear trial sales
                 </p>
                 {filteredStores.map((row) => (
                   <button
@@ -1245,7 +1252,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                     value={reportFrom}
                     max={reportTo}
                     onChange={(e) => setReportFrom(e.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                    className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-base"
                   />
                 </label>
                 <label className="block">
@@ -1256,7 +1263,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                     min={reportFrom}
                     max={defaultReportToDate()}
                     onChange={(e) => setReportTo(e.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                    className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-base"
                   />
                 </label>
               </div>
@@ -1393,8 +1400,12 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
 
       {/* Mobile bottom tabs */}
       <nav
-        className="sm:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-emerald-100 bg-white/95 backdrop-blur-md shadow-[0_-8px_24px_rgba(15,23,42,0.06)]"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+        className="lg:hidden fixed bottom-0 z-40 border-t border-emerald-100 bg-white/95 backdrop-blur-md shadow-[0_-8px_24px_rgba(15,23,42,0.06)]"
+        style={{
+          left: 'env(safe-area-inset-left)',
+          right: 'env(safe-area-inset-right)',
+          paddingBottom: 'env(safe-area-inset-bottom)',
+        }}
       >
         <div className="grid grid-cols-5 gap-0.5 px-1.5 py-1.5">
           {primaryTabs.map(([id, label, Icon]) => {
@@ -1433,7 +1444,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       </nav>
 
       {moreOpen && (
-        <div className="sm:hidden fixed inset-0 z-50 flex flex-col justify-end">
+        <div className="lg:hidden fixed inset-0 z-50 flex flex-col justify-end">
           <button
             type="button"
             className="absolute inset-0 bg-slate-900/40"

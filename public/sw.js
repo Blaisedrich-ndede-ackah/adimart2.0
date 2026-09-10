@@ -1,4 +1,4 @@
-const CACHE_NAME = 'adimat-v9';
+const CACHE_NAME = 'adimat-v10';
 const OFFLINE_URL = '/';
 
 const PRECACHE_ASSETS = [

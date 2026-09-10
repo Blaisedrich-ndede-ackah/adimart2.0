@@ -112,6 +112,7 @@ The portal loads cloud data and shows:
 
 - All stores, users, and products
 - Subscription grants and usage
+- **Create a store** — Admin → Stores creates the shop, owner PIN, and **downloads a subscription invoice PDF immediately** (Aktum / Adimat bill matching the official invoice). Share the Store ID so the owner can open it on their phone.
 - **Contact** settings: WhatsApp number + email shown on every store’s **Plan** tab, plus mNotify SMS API key/sender ID
 - All-time revenue and Paystack (online) totals per store
 - Weekly Paystack collections with each store’s MoMo account name/number for remittance
@@ -160,18 +161,23 @@ Store owners can keep **multiple stores** on the same phone/tablet:
 2. **Login store picker** — when more than one store is on the device, choose which store to open, then enter that store’s PIN  
 3. After opening a store, **Inventory** and **Settings → Staff** apply only to that store  
 
-Platform admins can also **Admin → Stores → tap a store** to view that store’s inventory and manage its staff in the portal.
+Platform admins can also **Admin → Stores → tap a store** to view that store’s inventory, download an invoice PDF, and manage its staff in the portal.
 
+### First launch (phones & tablets)
 
-1. **Enter store profile** — name, address, and support phone (all required)
-2. **Create owner account** with your name and a 4-digit PIN you choose
-3. You're ready to go — sign in with the PIN you created
+Stores are **created by the administrator**, not from the first screen. On a new phone or tablet:
 
-Each store has its own isolated data - products, users, and transactions are all scoped to your store.
+1. Open Adimat
+2. Enter the **Store ID** and **owner PIN** your administrator gave you
+3. Tap **Open store**, then sign in with that PIN
+
+Administrators: open **Administrator portal** on the first screen → **Stores → Create a store**. An invoice PDF downloads as soon as the store is created.
+
+Each store has its own isolated data — products, users, and transactions are all scoped to your store.
 
 ### Setting Up Your Store
 
-1. Login with the owner PIN you created at setup
+1. Login with the owner PIN your administrator set for the store
 2. Go to **Settings** (store name, address, and phone remain required)
 3. Configure discount controls
 4. Add staff members with their own PINs

@@ -388,7 +388,7 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
             className="mt-4 flex items-center gap-2 text-emerald-100/80 text-xs font-medium touch-target"
           >
             <Shield className="w-3.5 h-3.5" />
-            Administrator portal
+            {t('login.adminPortal')}
           </button>
         )}
       </div>
@@ -471,13 +471,13 @@ function ForgotPinSection() {
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="024 XXX XXXX"
-                className="w-full rounded-xl bg-white px-3 py-2.5 text-sm text-slate-900 outline-none"
+                className="w-full rounded-xl bg-white px-3 py-3 text-base text-slate-900 outline-none"
               />
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => void requestCode()}
-                className="w-full rounded-xl bg-white py-2.5 text-sm font-bold text-primary disabled:opacity-50"
+                className="w-full rounded-xl bg-white py-3 text-base font-bold text-primary disabled:opacity-50"
               >
                 {busy ? 'Sending…' : 'Send reset code'}
               </button>
@@ -491,7 +491,7 @@ function ForgotPinSection() {
                 value={code}
                 onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
                 placeholder="SMS code"
-                className="w-full rounded-xl bg-white px-3 py-2.5 text-sm text-center tracking-widest text-slate-900 outline-none"
+                className="w-full rounded-xl bg-white px-3 py-3 text-base text-center tracking-widest text-slate-900 outline-none"
               />
               <input
                 type="password"
@@ -500,7 +500,7 @@ function ForgotPinSection() {
                 value={pin1}
                 onChange={(e) => setPin1(e.target.value.replace(/\D/g, ''))}
                 placeholder="New PIN"
-                className="w-full rounded-xl bg-white px-3 py-2.5 text-sm text-center tracking-widest text-slate-900 outline-none"
+                className="w-full rounded-xl bg-white px-3 py-3 text-base text-center tracking-widest text-slate-900 outline-none"
               />
               <input
                 type="password"
@@ -509,13 +509,13 @@ function ForgotPinSection() {
                 value={pin2}
                 onChange={(e) => setPin2(e.target.value.replace(/\D/g, ''))}
                 placeholder="Confirm new PIN"
-                className="w-full rounded-xl bg-white px-3 py-2.5 text-sm text-center tracking-widest text-slate-900 outline-none"
+                className="w-full rounded-xl bg-white px-3 py-3 text-base text-center tracking-widest text-slate-900 outline-none"
               />
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => void confirmReset()}
-                className="w-full rounded-xl bg-white py-2.5 text-sm font-bold text-primary disabled:opacity-50"
+                className="w-full rounded-xl bg-white py-3 text-base font-bold text-primary disabled:opacity-50"
               >
                 {busy ? 'Saving…' : 'Update PIN'}
               </button>

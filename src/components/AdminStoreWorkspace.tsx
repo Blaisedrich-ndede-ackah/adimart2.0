@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
-  ArrowLeft, Package, Users, Loader2, UserPlus, Ban, CheckCircle2, Key, Eraser,
+  ArrowLeft, Package, Users, Loader2, UserPlus, Ban, CheckCircle2, Key, Eraser, FileText,
 } from 'lucide-react';
 import {
   addAdminStoreCashier,
@@ -15,6 +15,11 @@ import {
   type AdminUserRow,
 } from '@/lib/adminPortal';
 import CopyableStoreId from '@/components/CopyableStoreId';
+import {
+  DEFAULT_INVOICE_PACKAGE_ID,
+  downloadStoreSubscriptionInvoice,
+} from '@/lib/adminInvoicePdf';
+import { SUBSCRIPTION_PACKAGES, formatGhsAmount } from '@/lib/subscriptionPricing';
 
 interface AdminStoreWorkspaceProps {
   store: AdminStoreRow;
@@ -41,6 +46,7 @@ export default function AdminStoreWorkspace({
   const [stockEdits, setStockEdits] = useState<Record<string, string>>({});
   const [confirmName, setConfirmName] = useState('');
   const [confirmingClear, setConfirmingClear] = useState(false);
+  const [invoicePackageId, setInvoicePackageId] = useState(DEFAULT_INVOICE_PACKAGE_ID);
 
   const products = useMemo(
     () =>
@@ -142,6 +148,26 @@ export default function AdminStoreWorkspace({
   const nameMatches =
     confirmName.trim().toLowerCase() === store.name.trim().toLowerCase();
 
+  const downloadInvoice = () => {
+    const owner = users.find((u) => u.role === 'owner');
+    const phones = [store.support_number, owner?.phone].filter(Boolean).join(' / ');
+    try {
+      const result = downloadStoreSubscriptionInvoice({
+        billTo: {
+          ownerName: owner?.name || store.name,
+          storeName: store.name,
+          address: store.address || '',
+          phones,
+          storeId: store.id,
+        },
+        packageId: invoicePackageId,
+      });
+      flash(`Invoice ${result.invoiceNumber} downloaded (${formatGhsAmount(result.amount)}).`);
+    } catch (err: unknown) {
+      flash(err instanceof Error ? err.message : 'Could not generate invoice PDF');
+    }
+  };
+
   const clearLedger = async () => {
     if (!nameMatches) {
       flash('Type the store name exactly to confirm.');
@@ -192,6 +218,32 @@ export default function AdminStoreWorkspace({
             Trial sales last cleared {new Date(store.transactions_cleared_at).toLocaleString('en-GH')}
           </p>
         )}
+        <div className="mt-3 space-y-2">
+          <label className="block">
+            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
+              Invoice package
+            </span>
+            <select
+              value={invoicePackageId}
+              onChange={(e) => setInvoicePackageId(e.target.value)}
+              className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-3 text-base bg-white"
+            >
+              {SUBSCRIPTION_PACKAGES.map((pkg) => (
+                <option key={pkg.id} value={pkg.id}>
+                  {pkg.label} · {formatGhsAmount(pkg.baseGhs)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={downloadInvoice}
+            className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary text-white px-3 py-3 text-sm font-semibold touch-target"
+          >
+            <FileText className="w-4 h-4" />
+            Download invoice PDF
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-2 rounded-xl bg-slate-100 p-1">
