@@ -33,15 +33,12 @@ body {
   -webkit-font-smoothing: antialiased;
   color: var(--color-ink);
   background: var(--color-surface);
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
-  padding-left: env(safe-area-inset-left);
-  padding-right: env(safe-area-inset-right);
   overscroll-behavior: none;
   position: fixed;
   inset: 0;
   width: 100%;
   overflow: hidden;
+  touch-action: manipulation;
 }
 
 #root {
@@ -125,15 +122,22 @@ input[type="number"] {
 
 .auth-shell {
   min-height: 100%;
-  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 1.5rem;
+  justify-content: flex-start;
+  padding: max(1.25rem, env(safe-area-inset-top, 0px)) 1rem max(1.5rem, env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   background:
     radial-gradient(900px 500px at 15% 0%, rgba(5, 150, 105, 0.35), transparent 55%),
     linear-gradient(180deg, var(--color-primary-dark), var(--color-primary));
+}
+
+@media (min-width: 640px) and (min-height: 720px) {
+  .auth-shell {
+    justify-content: center;
+  }
 }
 
 .auth-panel {
@@ -144,6 +148,15 @@ input[type="number"] {
 @media (min-width: 768px) {
   .auth-panel {
     max-width: 26rem;
+  }
+}
+
+/* iOS zooms focused inputs under 16px; keep form controls readable on phones/tablets. */
+@media (max-width: 1023px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
   }
 }
 

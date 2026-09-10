@@ -89,7 +89,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex w-56 lg:w-64 shrink-0 flex-col self-stretch bg-primary text-white border-r border-primary-dark">
+      <aside className="hidden lg:flex w-56 xl:w-64 shrink-0 flex-col self-stretch bg-primary text-white border-r border-primary-dark">
         <div className="px-4 py-5 border-b border-white/10">
           <p className="text-emerald-200 text-[10px] font-semibold uppercase tracking-[0.14em]">Adimat</p>
           <p className="font-bold text-xl tracking-tight truncate mt-1">{currentStore?.name || 'Store'}</p>
@@ -153,10 +153,14 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
 
       {/* Mobile bottom nav — primary destinations only */}
       <nav
-        className="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-emerald-100 bg-white/95 backdrop-blur-md shadow-[0_-8px_24px_rgba(15,23,42,0.06)]"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+        className="lg:hidden fixed bottom-0 z-40 border-t border-emerald-100 bg-white/95 backdrop-blur-md shadow-[0_-8px_24px_rgba(15,23,42,0.06)]"
+        style={{
+          left: 'env(safe-area-inset-left)',
+          right: 'env(safe-area-inset-right)',
+          paddingBottom: 'env(safe-area-inset-bottom)',
+        }}
       >
-        <div className="mx-auto flex max-w-lg items-stretch justify-between gap-1 px-2 py-1.5">
+        <div className="mx-auto flex w-full max-w-3xl items-stretch justify-between gap-1 px-2 py-1.5">
           {primaryItems.map((item) => {
             const Icon = item.icon;
             const isActive = currentPage === item.id && !moreOpen;
@@ -199,7 +203,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
 
       {/* Mobile More sheet */}
       {moreOpen && (
-        <div className="md:hidden fixed inset-0 z-50 flex flex-col justify-end">
+        <div className="lg:hidden fixed inset-0 z-50 flex flex-col justify-end">
           <button
             type="button"
             className="absolute inset-0 bg-slate-900/40"

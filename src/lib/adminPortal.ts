@@ -907,6 +907,8 @@ export interface AdminCreatedStore {
   storeName: string;
   ownerName: string;
   ownerPhone: string;
+  supportNumber: string;
+  address: string;
 }
 
 /**
@@ -1014,6 +1016,8 @@ export async function createAdminStore(
       storeName,
       ownerName,
       ownerPhone,
+      supportNumber,
+      address,
     },
   };
 }

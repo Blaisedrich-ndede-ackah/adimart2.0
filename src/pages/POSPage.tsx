@@ -303,7 +303,7 @@ export default function POSPage() {
       </div>
 
       {/* Products / Cart tabs — mobile only; desktop shows both panes */}
-      <div className="bg-white border-b border-emerald-100 px-3 py-2 flex gap-2 flex-shrink-0 md:hidden">
+      <div className="bg-white border-b border-emerald-100 px-3 py-2 flex gap-2 flex-shrink-0 lg:hidden">
         <button
           type="button"
           onClick={() => setPosTab('products')}
@@ -421,12 +421,12 @@ export default function POSPage() {
         </div>
       )}
 
-      <div className="flex-1 min-h-0 flex flex-col md:flex-row">
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
         {/* Products pane */}
         <section
           className={`${
             posTab === 'products' ? 'flex' : 'hidden'
-          } md:flex flex-col flex-1 min-w-0 min-h-0 md:border-r md:border-emerald-100`}
+          } lg:flex flex-col flex-1 min-w-0 min-h-0 lg:border-r lg:border-emerald-100`}
         >
           <div className="px-3 md:px-4 pt-3 flex-shrink-0 space-y-2">
             <div className="relative">
@@ -437,7 +437,7 @@ export default function POSPage() {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder={t('pos.search') + '...'}
                 data-allow-typing="true"
-                className="w-full pl-9 pr-4 py-2.5 bg-white border border-emerald-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary"
+                className="w-full pl-9 pr-4 py-3 bg-white border border-emerald-100 rounded-xl text-base outline-none focus:ring-2 focus:ring-primary"
               />
             </div>
             <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
@@ -463,7 +463,7 @@ export default function POSPage() {
             </p>
           </div>
 
-          <div className={`flex-1 overflow-y-auto px-3 md:px-4 pt-2 no-scrollbar ${cart.items.length > 0 ? 'pb-28 md:pb-4' : 'pb-4'}`}>
+          <div className={`flex-1 overflow-y-auto px-3 md:px-4 pt-2 no-scrollbar ${cart.items.length > 0 ? 'pb-28 lg:pb-4' : 'pb-4'}`}>
             {loadingProducts ? (
               <div className="flex flex-col items-center justify-center py-16 text-gray-400">
                 <Package className="w-10 h-10 mb-2 animate-pulse" />
@@ -537,9 +537,9 @@ export default function POSPage() {
         <section
           className={`${
             posTab === 'cart' ? 'flex' : 'hidden'
-          } md:flex flex-col w-full md:w-[380px] lg:w-[420px] flex-shrink-0 min-h-0 bg-[var(--color-surface)] md:bg-white`}
+          } lg:flex flex-col w-full lg:w-[420px] flex-shrink-0 min-h-0 bg-[var(--color-surface)] lg:bg-white`}
         >
-          <div className="hidden md:flex items-center justify-between px-4 py-3 border-b border-emerald-100 flex-shrink-0">
+          <div className="hidden lg:flex items-center justify-between px-4 py-3 border-b border-emerald-100 flex-shrink-0">
             <h3 className="text-sm font-bold text-gray-800">
               Cart{cartCount > 0 ? ` (${cartCount})` : ''}
             </h3>
@@ -554,7 +554,7 @@ export default function POSPage() {
             )}
           </div>
 
-          <div className={`flex-1 overflow-y-auto px-3 md:px-4 pt-3 no-scrollbar ${cart.items.length > 0 ? 'pb-28 md:pb-4' : 'pb-4'}`}>
+          <div className={`flex-1 overflow-y-auto px-3 md:px-4 pt-3 no-scrollbar ${cart.items.length > 0 ? 'pb-28 lg:pb-4' : 'pb-4'}`}>
             {cart.items.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-gray-400">
                 <ShoppingCart className="w-12 h-12 mb-3" />
@@ -563,14 +563,14 @@ export default function POSPage() {
                 <button
                   type="button"
                   onClick={() => setPosTab('products')}
-                  className="mt-4 px-4 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold touch-target md:hidden"
+                  className="mt-4 px-4 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold touch-target lg:hidden"
                 >
                   Browse products
                 </button>
               </div>
             ) : (
               <div className="space-y-2">
-                <div className="flex items-center justify-between mb-2 md:hidden">
+                <div className="flex items-center justify-between mb-2 lg:hidden">
                   <h3 className="text-sm font-bold text-gray-700">
                     Cart ({cart.items.length} item{cart.items.length !== 1 ? 's' : ''})
                   </h3>
@@ -586,7 +586,7 @@ export default function POSPage() {
                 {cart.items.map((item) => (
                   <div
                     key={item.id}
-                    className="bg-white md:bg-[var(--color-surface)] rounded-xl p-3 shadow-sm border border-emerald-50"
+                    className="bg-white lg:bg-[var(--color-surface)] rounded-xl p-3 shadow-sm border border-emerald-50"
                   >
                     <div className="flex items-center gap-3">
                       <ProductImage src={item.image_url} alt={item.name} size="md" />
@@ -649,7 +649,7 @@ export default function POSPage() {
 
           {/* Desktop checkout docked in cart column */}
           {cart.items.length > 0 && (
-            <div className="hidden md:block flex-shrink-0 border-t border-emerald-100 p-4 bg-white">
+            <div className="hidden lg:block flex-shrink-0 border-t border-emerald-100 p-4 bg-white">
               <button
                 type="button"
                 onClick={() => {
@@ -674,7 +674,7 @@ export default function POSPage() {
 
       {/* Mobile checkout bar — sits above bottom nav */}
       {cart.items.length > 0 && (
-        <div className="md:hidden absolute bottom-0 left-0 right-0 px-4 pb-3 bg-gradient-to-t from-[var(--color-surface)] via-[var(--color-surface)] to-transparent pt-4 z-30 pointer-events-none">
+        <div className="lg:hidden absolute bottom-0 left-0 right-0 px-4 pb-3 bg-gradient-to-t from-[var(--color-surface)] via-[var(--color-surface)] to-transparent pt-4 z-30 pointer-events-none">
           <button
             type="button"
             onClick={() => {
