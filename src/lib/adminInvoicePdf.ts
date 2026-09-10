@@ -2,7 +2,7 @@
  * Official Aktum / Adimat subscription invoice PDF (matches admin billing letter).
  */
 
-import { FormalPdf, formatOfficialDate, formatGhsOfficial } from './formalPdf';
+import { FormalPdf, formatOfficialDate } from './formalPdf';
 import { getSubscriptionPackage, SUBSCRIPTION_PACKAGES, type SubscriptionPackage } from './subscriptionPricing';
 
 export const DEFAULT_INVOICE_PACKAGE_ID = '1y';
@@ -35,7 +35,7 @@ export function invoiceNumberFor(date = new Date(), storeId?: string): string {
 
 export function packageInvoiceDescription(pkg: SubscriptionPackage): string {
   if (pkg.months === 12) {
-    return '1-Year Subscription (Annual discount applied to standard 70 GH₵/month base rate)';
+    return '1-Year Subscription (Annual discount applied to standard 70 GHS/month base rate)';
   }
   if (pkg.months === 1) return '1-Month Subscription';
   if (pkg.months % 12 === 0) {
@@ -45,17 +45,20 @@ export function packageInvoiceDescription(pkg: SubscriptionPackage): string {
   return `${pkg.months}-Month Subscription`;
 }
 
-export function downloadStoreSubscriptionInvoice(opts: {
+export function buildStoreSubscriptionInvoice(opts: {
   billTo: StoreInvoiceBillTo;
   packageId?: string;
   issuedAt?: Date;
-}): { filename: string; invoiceNumber: string; amount: number } {
+}): { pdf: FormalPdf; filename: string; invoiceNumber: string; amount: number } {
   const issuedAt = opts.issuedAt || new Date();
   const pkg = getSubscriptionPackage(opts.packageId || DEFAULT_INVOICE_PACKAGE_ID)
     || SUBSCRIPTION_PACKAGES.find((p) => p.id === DEFAULT_INVOICE_PACKAGE_ID)!;
   const amount = pkg.baseGhs;
   const invoiceNumber = invoiceNumberFor(issuedAt, opts.billTo.storeId);
-  const money = formatGhsOfficial(amount, 'GHS').replace(/^GH₵\s?/, '');
+  const money = amount.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 
   const pdf = new FormalPdf(
     {
@@ -89,7 +92,7 @@ export function downloadStoreSubscriptionInvoice(opts: {
 
   pdf.section('Service');
   pdf.dataTable(
-    ['Service', 'Description', 'Rate (GH₵)', 'Total (GH₵)'],
+    ['Service', 'Description', 'Rate (GHS)', 'Total (GHS)'],
     [['Adimat POS', packageInvoiceDescription(pkg), money, money]],
     [1.2, 2.6, 1.1, 1.1]
   );
@@ -99,10 +102,19 @@ export function downloadStoreSubscriptionInvoice(opts: {
     { label: 'Method', value: INVOICE_ISSUER.paymentMethod },
     { label: 'Account name', value: INVOICE_ISSUER.accountName },
     { label: 'Number', value: INVOICE_ISSUER.accountNumber },
-    { label: 'Total due', value: `${money} GH₵`, emphasis: 'total' },
+    { label: 'Total due', value: `${money} GHS`, emphasis: 'total' },
   ]);
 
   const filename = `Invoice_${opts.billTo.storeName.replace(/[^\w]+/g, '_').slice(0, 40)}_${invoiceNumber}.pdf`;
+  return { pdf, filename, invoiceNumber, amount };
+}
+
+export function downloadStoreSubscriptionInvoice(opts: {
+  billTo: StoreInvoiceBillTo;
+  packageId?: string;
+  issuedAt?: Date;
+}): { filename: string; invoiceNumber: string; amount: number } {
+  const { pdf, filename, invoiceNumber, amount } = buildStoreSubscriptionInvoice(opts);
   pdf.save(filename);
   return { filename, invoiceNumber, amount };
 }

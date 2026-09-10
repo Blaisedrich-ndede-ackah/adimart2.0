@@ -252,6 +252,11 @@ export class FormalPdf {
     return this.doc.output('blob');
   }
 
+  outputArrayBuffer(): ArrayBuffer {
+    this.finishPages();
+    return this.doc.output('arraybuffer');
+  }
+
   private drawTitleBlock(): void {
     this.doc.setFont('times', 'bold');
     this.doc.setFontSize(18);
