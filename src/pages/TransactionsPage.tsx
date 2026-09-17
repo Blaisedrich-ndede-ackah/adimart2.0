@@ -15,6 +15,7 @@ import { isPrinterConnected } from '@/lib/bluetoothPeripherals';
 import { parseOtherCharges } from '@/lib/otherCharges';
 import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
+import CloudSyncPanel from '@/components/CloudSyncPanel';
 
 export default function TransactionsPage() {
   const { currentUser } = useAuthStore();
@@ -101,6 +102,10 @@ export default function TransactionsPage() {
       </div>
 
       <div className="page-body no-scrollbar">
+        {!isOwner && (
+          <CloudSyncPanel hint={t('sync.cashierHint')} onSynced={() => void load()} />
+        )}
+
         {status && (
           <div className={`mb-3 rounded-xl px-3 py-2 text-xs flex items-center gap-2 ${
             status.includes('fail') || status.includes('No printer')

@@ -184,7 +184,7 @@ Default store settings on create:
 - Session lives in Zustand memory only (refresh returns to login if a store exists)
 - Roles:
   - **owner** — full navigation and admin actions
-  - **cashier** — POS + switch user; settings/inventory/reports hidden in nav
+  - **cashier** — POS + switch user; settings/inventory/reports hidden in nav. Full Sync (Pull + Push) is on **My Sales** and **Devices** so cashiers can send sales and pull stock updates.
 
 ### 6.4 POS / checkout
 
