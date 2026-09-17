@@ -19,6 +19,13 @@ import {
 } from '@/lib/dexie';
 import { clearAllWarehouseSessions, clearWarehouseUnlock } from '@/lib/warehouseAccess';
 import { applyStoreLanguageDefault, tNow } from '@/lib/i18n';
+import {
+  isSessionIdle,
+  markIdleLock,
+  normalizeSessionTimeoutMinutes,
+  touchLastActivity,
+} from '@/lib/sessionTimeout';
+import { useCartStore } from '@/store/useCartStore';
 
 interface AuthState {
   currentUser: LocalUser | null;
@@ -75,6 +82,21 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     const persistedUser = await getPersistedCurrentUser();
     if (persistedUser) {
+      const timeoutMinutes = normalizeSessionTimeoutMinutes(store?.session_timeout_minutes);
+      if (store?.id && isSessionIdle(store.id, timeoutMinutes)) {
+        await setCurrentUserId(null);
+        markIdleLock();
+        useCartStore.getState().clearCart();
+        set({
+          currentStore: store,
+          currentUser: null,
+          isAuthenticated: false,
+          isStoreSetup: true,
+          loginError: '',
+          isLoading: false,
+        });
+        return;
+      }
       set({
         currentStore: store,
         currentUser: persistedUser,
@@ -107,6 +129,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (user) {
       clearAllWarehouseSessions();
       await setCurrentUserId(user.id);
+      touchLastActivity(storeId);
       const store = (await pullAdminStoreLimits(storeId)) || (await getCurrentStore());
       void refreshStockFromCloud();
       set({ 
@@ -130,6 +153,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
     await setCurrentUserId(owner.id);
     const storeId = await getCurrentStoreId();
+    if (storeId) touchLastActivity(storeId);
     const store = storeId
       ? (await pullAdminStoreLimits(storeId)) || (await getCurrentStore())
       : await getCurrentStore();

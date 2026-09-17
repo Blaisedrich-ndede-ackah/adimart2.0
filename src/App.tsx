@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { initAutoSync, startLiveStockSync, stopAutoSync } from '@/lib/sync';
 import { autoReconnectPeripherals } from '@/lib/bluetoothPeripherals';
@@ -10,6 +10,7 @@ import SubscriptionWarningBanner from '@/components/SubscriptionWarningBanner';
 import StoreBrandingBar from '@/components/StoreBrandingBar';
 import AppNav from '@/components/AppNav';
 import AddPhonePrompt from '@/components/AddPhonePrompt';
+import SessionTimeoutGuard from '@/components/SessionTimeoutGuard';
 import StoreSetupPage from '@/pages/StoreSetupPage';
 import LoginPage from '@/pages/LoginPage';
 import CashierBlockedPage from '@/pages/CashierBlockedPage';
@@ -165,8 +166,15 @@ export default function App() {
     );
   }
 
+  const authenticatedChrome = (page: ReactNode) => (
+    <>
+      <SessionTimeoutGuard />
+      {page}
+    </>
+  );
+
   if (isStoreAccessBlocked(currentStore)) {
-    return (
+    return authenticatedChrome(
       <div className="h-full flex flex-col">
         <PWAInstallBanner />
         <div className="flex-1 min-h-0 overflow-y-auto">
@@ -177,7 +185,7 @@ export default function App() {
   }
 
   if (currentUser?.role === 'cashier' && currentUser.is_active === 0) {
-    return (
+    return authenticatedChrome(
       <div className="h-full flex flex-col">
         <PWAInstallBanner />
         <div className="flex-1 min-h-0 overflow-y-auto">
@@ -234,7 +242,7 @@ export default function App() {
     }
   };
 
-  return (
+  return authenticatedChrome(
     <div
       className="h-full flex flex-col lg:flex-row overflow-hidden bg-[var(--color-surface)] lg:max-w-7xl lg:mx-auto lg:shadow-xl lg:border-x lg:border-emerald-100"
       style={{

@@ -16,6 +16,7 @@ import {
   unlockWarehouseLocation,
   type PendingWarehouseLogin,
 } from '@/lib/warehouseAccess';
+import { consumeIdleLock, touchLastActivity } from '@/lib/sessionTimeout';
 
 interface LoginPageProps {
   onOpenAdmin?: () => void;
@@ -35,6 +36,7 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
   const [pendingWarehouse, setPendingWarehouse] = useState<PendingWarehouseLogin | null>(
     () => getPendingWarehouseLogin()
   );
+  const [idleLockNotice, setIdleLockNotice] = useState(() => consumeIdleLock());
   const { login, loginAsStoreOwner, loginError, currentStore, switchStore } = useAuthStore();
   const t = useT();
   const storeLogo = currentStore?.logo_url;
@@ -139,8 +141,10 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
       const user = await db.users.get(result.userId);
       if (user && (!currentStore || user.store_id === currentStore.id)) {
         clearPendingWarehouseLogin();
-        const { setCurrentUserId } = await import('@/lib/dexie');
+        const { setCurrentUserId, getCurrentStoreId } = await import('@/lib/dexie');
         await setCurrentUserId(user.id);
+        const storeId = currentStore?.id || (await getCurrentStoreId());
+        if (storeId) touchLastActivity(storeId);
         useAuthStore.setState({
           currentUser: user,
           isAuthenticated: true,
@@ -158,6 +162,7 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
 
   const handleKeyPress = useCallback(async (key: string) => {
     setBiometricError('');
+    setIdleLockNotice(false);
     useAuthStore.setState({ loginError: '' });
 
     if (key === 'delete') {
@@ -220,6 +225,11 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
               ? t('login.warehousePin')
               : t('login.enterPin')}
           </p>
+          {idleLockNotice && !loginError && !warehouseMode && (
+            <p className="text-amber-200 font-medium text-sm mt-3 text-center px-4 animate-fade-in">
+              {t('login.idleLock')}
+            </p>
+          )}
 
           {showPicker && (
             <div className="relative mt-4 w-full max-w-[280px] md:max-w-[300px]">

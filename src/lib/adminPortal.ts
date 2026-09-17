@@ -950,6 +950,7 @@ export async function createAdminStore(
     discount_allow_percentage: true,
     discount_allow_fixed: true,
     cashier_can_discount: true,
+    session_timeout_minutes: 5,
     momo_account_name: '',
     momo_number: '',
     momo_network: '',
@@ -970,7 +971,19 @@ export async function createAdminStore(
 
   const { error: storeError } = await supabase.from('stores').insert(storeRow);
   if (storeError) {
-    return { success: false, error: storeError.message };
+    if (/session_timeout_minutes/i.test(storeError.message)) {
+      const withoutTimeout = { ...storeRow };
+      delete (withoutTimeout as { session_timeout_minutes?: number }).session_timeout_minutes;
+      const retry = await supabase.from('stores').insert(withoutTimeout);
+      if (retry.error) {
+        return {
+          success: false,
+          error: `${retry.error.message} — run supabase-migrate-session-timeout.sql in Supabase.`,
+        };
+      }
+    } else {
+      return { success: false, error: storeError.message };
+    }
   }
 
   const userRow = {
