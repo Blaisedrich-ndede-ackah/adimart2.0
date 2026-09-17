@@ -39,7 +39,7 @@ A mobile-first Point of Sale (POS) and inventory management Progressive Web App 
 - **User Management** — Add/remove cashiers and owners with 4-digit PINs
 - **Automatic Session Timeout** — Owners set how long the till may sit idle (off, or 1–30 minutes; default 5). Staff are returned to the PIN screen, the cart is cleared, and a refresh cannot restore a stale session.
 - **Thermal Printer** — Connect Bluetooth thermal printers for receipt printing
-- **Cloud Sync** — Manual sync to Supabase with last-synced timestamp
+- **Cloud Sync** — Manual sync to Supabase with last-synced timestamp. Owners use **Settings**; cashiers use **My Sales** or **Devices → Cloud Sync** (Full Sync / Pull / Push) so they can send sales and pick up stock updates.
 
 ### 📱 PWA & Offline Support
 - **Installable** — Add to home screen on mobile devices
@@ -149,9 +149,11 @@ Platform admins can enable a public online shop per store (Admin → Subscriptio
 
 If your Supabase project predates this feature, run `supabase-migrate-ecommerce.sql` in the SQL Editor.
 
+Cashier Cash Book access is toggled by the owner in **Settings → Staff → Perms**. New cashiers start with Cash Book **off**. Existing cashiers keep access until the owner turns it off. If your project predates this column, run `supabase-migrate-cashier-cashbook.sql`.
+
 Store owners set their preferred MoMo account under **Settings → Mobile Money Payout**, then sync to Supabase.
 
-If your Supabase project was created before these features, run `supabase-migrate-admin.sql`, `supabase-migrate-subscriptions.sql`, `supabase-migrate-platform-settings.sql`, and `supabase-migrate-clear-store-ledger.sql` in the SQL Editor (or re-apply the latest `supabase-init.sql`).
+If your Supabase project was created before these features, run `supabase-migrate-admin.sql`, `supabase-migrate-subscriptions.sql`, `supabase-migrate-platform-settings.sql`, `supabase-migrate-clear-store-ledger.sql`, and `supabase-migrate-cashier-cashbook.sql` in the SQL Editor (or re-apply the latest `supabase-init.sql`).
 For self-serve Paystack subscription renewals, also run `supabase-migrate-subscription-payments.sql`.
 For automatic session timeout (idle PIN lock), run `supabase-migrate-session-timeout.sql`.
 
@@ -182,7 +184,7 @@ Each store has its own isolated data — products, users, and transactions are a
 1. Login with the owner PIN your administrator set for the store
 2. Go to **Settings** (store name, address, and phone remain required)
 3. Configure discount controls
-4. Add staff members with their own PINs
+4. Add staff members with their own PINs. Under **Perms**, turn **Can open cash book** on or off for each cashier.
 5. Optionally set up biometric login
 6. Connect a Bluetooth thermal printer under **Devices** / **More**
 7. Go to **Inventory** and add your products
@@ -319,8 +321,7 @@ Example: `#ADM-20240115-0042`
 - PINs are hashed before storage (not plain text)
 - Row Level Security (RLS) enabled on all Supabase tables
 - Discount overrides require owner PIN verification
-- Role-based access control (cashiers vs owners)
-- Automatic session timeout after inactivity (owner-configurable; default 5 minutes)
+- Role-based access control (cashiers vs owners). Owners can allow or deny each cashier **Cash Book** access.
 
 ## Browser Support
 

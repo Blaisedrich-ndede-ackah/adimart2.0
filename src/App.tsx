@@ -31,6 +31,7 @@ import AdminLoginPage from '@/pages/AdminLoginPage';
 import AdminDashboardPage from '@/pages/AdminDashboardPage';
 import { isStoreAccessBlocked } from '@/lib/subscription';
 import { checkAndSendSubscriptionExpirySms } from '@/lib/subscriptionReminders';
+import { canAccessCashbook } from '@/lib/staffAccess';
 
 type AppMode = 'store' | 'admin-login' | 'admin';
 
@@ -78,7 +79,12 @@ export default function App() {
     if (currentUser?.role !== 'cashier') return;
     const ownerOnly = ['inventory', 'reports', 'settings', 'warehouse', 'subscription'];
     const ecommerceOk = (currentUser.can_manage_ecommerce ?? 0) === 1;
-    if (ownerOnly.includes(currentPage) || (currentPage === 'ecommerce' && !ecommerceOk)) {
+    const cashbookOk = canAccessCashbook(currentUser);
+    if (
+      ownerOnly.includes(currentPage) ||
+      (currentPage === 'ecommerce' && !ecommerceOk) ||
+      (currentPage === 'cashbook' && !cashbookOk)
+    ) {
       setCurrentPage('pos');
     }
   }, [currentUser, currentPage]);
@@ -224,7 +230,7 @@ export default function App() {
       case 'expenses':
         return <ExpensesPage />;
       case 'cashbook':
-        return <CashBookPage />;
+        return canAccessCashbook(currentUser) ? <CashBookPage /> : <POSPage />;
       case 'settings':
         return role === 'owner' ? (
           <SettingsPage onNavigate={setCurrentPage} />

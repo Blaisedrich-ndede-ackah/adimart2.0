@@ -185,7 +185,7 @@ Default store settings on create:
 - Signed-in user is persisted in IndexedDB (`app_config.current_user_id`) so a refresh stays on the till unless idle timeout has elapsed
 - Roles:
   - **owner** — full navigation and admin actions
-  - **cashier** — POS + switch user; settings/inventory/reports hidden in nav
+  - **cashier** — POS + switch user; settings/inventory/reports hidden in nav; Cash Book only if the owner enabled **Can open cash book**
 
 ### 6.4 POS / checkout
 
@@ -237,8 +237,8 @@ Default store settings on create:
 
 | Table | Primary key | Notable indexes / fields |
 |-------|-------------|--------------------------|
-| `stores` | `id` | name, address, support_number, discount_cap_percentage, pin_on_discount_enabled (0/1), session_timeout_minutes (0 = never; default 5), created_at, synced |
-| `users` | `id` | store_id, name, role (`owner`\|`cashier`), pin_hash, is_active (0/1), created_at, synced |
+| `stores` | `id` | name, address, support_number, discount_cap_percentage, pin_on_discount_enabled (0/1), created_at, synced |
+| `users` | `id` | store_id, name, role (`owner`\|`cashier`), pin_hash, is_active (0/1), can_access_cashbook, created_at, synced |
 | `products` | `id` | store_id, name, category, sku_type, barcode, cost_price, selling_price, stock_level, is_active, created_at, updated_at, synced |
 | `transactions` | `id` | store_id, receipt_number, cashier_id/name, totals, payment_method, cash/paystack amounts, paystack_reference, status, created_at, synced |
 | `transaction_items` | `id` | store_id, transaction_id, product_id, product_name, quantity, unit_price, subtotal, synced |

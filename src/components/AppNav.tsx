@@ -8,6 +8,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { COMMUNITY_CHAT_URL } from '@/lib/community';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
 import { useT } from '@/lib/i18n';
+import { canAccessCashbook } from '@/lib/staffAccess';
 
 interface AppNavProps {
   currentPage: string;
@@ -31,6 +32,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const ecommerceEnabled = (currentStore?.ecommerce_enabled ?? 0) === 1;
   const canManageEcommerce =
     isOwner || (currentUser?.can_manage_ecommerce ?? 0) === 1;
+  const cashbookOk = canAccessCashbook(currentUser);
 
   const navItems = useMemo<NavItem[]>(
     () =>
@@ -38,7 +40,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         { id: 'pos', label: t('nav.pos'), icon: ScanBarcode, show: true },
         { id: 'transactions', label: isOwner ? t('nav.sales') : t('nav.mySales'), icon: Receipt, show: true },
         { id: 'expenses', label: t('nav.expenses'), icon: PiggyBank, show: true },
-        { id: 'cashbook', label: t('nav.cashbook'), icon: BookOpen, show: true },
+        { id: 'cashbook', label: t('nav.cashbook'), icon: BookOpen, show: cashbookOk },
         { id: 'devices', label: t('nav.devices'), icon: Bluetooth, show: true },
         { id: 'subscription', label: t('nav.plan'), icon: CalendarClock, show: isOwner },
         { id: 'inventory', label: t('nav.inventory'), icon: Package, show: isOwner },
@@ -58,18 +60,16 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
           href: COMMUNITY_CHAT_URL,
         },
       ].filter((item) => item.show),
-    [isOwner, ecommerceEnabled, canManageEcommerce, t]
+    [isOwner, ecommerceEnabled, canManageEcommerce, cashbookOk, t]
   );
 
   // Keep bottom bar to a few primary destinations; rest live under More
-  const primaryIds = ['pos', 'transactions', 'cashbook'] as const;
+  const primaryIds: readonly string[] = cashbookOk
+    ? ['pos', 'transactions', 'cashbook']
+    : ['pos', 'transactions', 'expenses'];
 
-  const primaryItems = navItems.filter((item) =>
-    (primaryIds as readonly string[]).includes(item.id)
-  );
-  const moreItems = navItems.filter(
-    (item) => !(primaryIds as readonly string[]).includes(item.id)
-  );
+  const primaryItems = navItems.filter((item) => primaryIds.includes(item.id));
+  const moreItems = navItems.filter((item) => !primaryIds.includes(item.id));
   const moreActive = moreItems.some((item) => item.id === currentPage);
 
   useEffect(() => {
