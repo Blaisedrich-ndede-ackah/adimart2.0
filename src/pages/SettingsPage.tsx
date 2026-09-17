@@ -1,20 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import {
-  Store, Shield, Percent, RefreshCcw,
-  Save, Loader2, CheckCircle2, WifiOff, UserPlus,
+import { Store, Shield, Percent,
+  Save, Loader2, CheckCircle2, UserPlus,
   Trash2, Users, Fingerprint, AlertCircle, Key, Smartphone, Ban, ImagePlus
 } from 'lucide-react';
 import ChangePinModal from '@/components/ChangePinModal';
 import ResetUserPinModal from '@/components/ResetUserPinModal';
 import BluetoothHardwareSettings from '@/components/BluetoothHardwareSettings';
+import CloudSyncPanel from '@/components/CloudSyncPanel';
 import { 
   db, 
   LocalUser,
   LocalLocation,
-  syncToSupabase,
-  syncFromSupabase,
-  syncBidirectional,
-  getLastSyncTime, 
   getCurrentStoreId,
   getCurrentStoreUsersIncludingBlocked,
   addUserToStore,
@@ -24,10 +20,8 @@ import {
   updateUserPhone,
 } from '@/lib/dexie';
 import { ensureStoreLocations, listLocations } from '@/lib/warehouse';
-import { isAutoSyncEnabled, setAutoSyncEnabled, startAutoSync, stopAutoSync } from '@/lib/sync';
 import { useAuthStore } from '@/store/useAuthStore';
 import { isBiometricAvailable, registerBiometric, hasBiometricRegistered, clearBiometricRegistration } from '@/lib/biometric';
-import { isSupabaseConfigured } from '@/lib/supabase';
 import { isValidGhanaPhone } from '@/lib/platformSettings';
 import { fileToStoreLogoDataUrl, hasStoreLogo } from '@/lib/productImage';
 import StoresPortalSection from '@/components/StoresPortalSection';
@@ -67,13 +61,6 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState('');
   
-  const [syncStatus, setSyncStatus] = useState('');
-  const [lastSync, setLastSync] = useState<string | null>(null);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [supabaseReady, setSupabaseReady] = useState(false);
-  const [autoSync, setAutoSync] = useState(isAutoSyncEnabled());
-  const [storeId, setStoreId] = useState<string | null>(null);
-  
   const [users, setUsers] = useState<LocalUser[]>([]);
   const [showAddUser, setShowAddUser] = useState(false);
   const [newUserName, setNewUserName] = useState('');
@@ -110,12 +97,6 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
       await ensureStoreLocations(currentStore.id);
       setLocations(await listLocations(currentStore.id));
     }
-    
-    const syncTime = await getLastSyncTime();
-    setLastSync(syncTime);
-    setSupabaseReady(isSupabaseConfigured());
-    setStoreId(await getCurrentStoreId());
-    setAutoSync(isAutoSyncEnabled());
 
     const storeUsers = await getCurrentStoreUsersIncludingBlocked();
     setUsers(storeUsers);
@@ -205,53 +186,6 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
     }
     setLogoBusy(false);
     if (logoInputRef.current) logoInputRef.current.value = '';
-  };
-
-  const handleSync = async (mode: 'push' | 'pull' | 'full' = 'push') => {
-    if (!supabaseReady) {
-      setSyncStatus('Supabase not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your environment.');
-      return;
-    }
-    
-    setIsSyncing(true);
-    setSyncStatus(
-      mode === 'pull' ? 'Pulling from cloud...' :
-      mode === 'full' ? 'Running full sync...' :
-      'Pushing to cloud...'
-    );
-    
-    try {
-      const result =
-        mode === 'pull' ? await syncFromSupabase() :
-        mode === 'full' ? await syncBidirectional() :
-        await syncToSupabase();
-      setSyncStatus(result.message);
-      
-      if (result.success) {
-        const syncTime = await getLastSyncTime();
-        setLastSync(syncTime);
-        await refreshStore();
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setSyncStatus('Sync error: ' + msg);
-    }
-    
-    setIsSyncing(false);
-    setTimeout(() => setSyncStatus(''), 8000);
-  };
-
-  const handleAutoSyncToggle = (enabled: boolean) => {
-    setAutoSync(enabled);
-    setAutoSyncEnabled(enabled);
-    if (enabled) {
-      startAutoSync();
-      setSyncStatus('Auto-sync enabled');
-    } else {
-      stopAutoSync();
-      setSyncStatus('Auto-sync disabled');
-    }
-    setTimeout(() => setSyncStatus(''), 4000);
   };
 
   const handleAddUser = async () => {
@@ -936,93 +870,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         {/* Bluetooth also available under Devices for cashiers */}
         <BluetoothHardwareSettings />
 
-        {/* Cloud Sync */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">
-          <div className="flex items-center gap-2 mb-4">
-            <RefreshCcw className="w-5 h-5 text-primary" />
-            <h3 className="font-bold text-gray-900">Cloud Sync</h3>
-          </div>
-
-          {!supabaseReady && (
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3">
-              <p className="text-amber-800 text-xs">
-                <strong>Not configured:</strong> Add Supabase credentials to enable cloud sync.
-              </p>
-            </div>
-          )}
-
-          {storeId && (
-            <div className="bg-gray-50 rounded-lg p-3 mb-3">
-              <p className="text-[10px] text-gray-500 mb-1">
-                Store ID (open this store on another device via My Stores / Restore)
-              </p>
-              <p className="text-xs font-mono text-gray-800 break-all">{storeId}</p>
-            </div>
-          )}
-
-          <label className="flex items-center justify-between py-2 mb-3">
-            <span className="text-sm text-gray-700">Auto-sync when online</span>
-            <button
-              onClick={() => handleAutoSyncToggle(!autoSync)}
-              className={`w-12 h-7 rounded-full transition-colors ${autoSync ? 'bg-primary' : 'bg-gray-300'}`}
-            >
-              <span className={`block w-5 h-5 bg-white rounded-full transition-transform mx-1 ${autoSync ? 'translate-x-5' : ''}`} />
-            </button>
-          </label>
-
-          <div className="grid grid-cols-1 gap-2 mb-2">
-            <button
-              onClick={() => handleSync('full')}
-              disabled={isSyncing}
-              className="w-full py-3 bg-primary text-white rounded-xl font-medium text-sm flex items-center justify-center gap-2 disabled:opacity-50"
-            >
-              {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCcw className="w-4 h-4" />}
-              Full Sync (Pull + Push)
-            </button>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => handleSync('pull')}
-                disabled={isSyncing}
-                className="py-3 border border-primary text-primary rounded-xl font-medium text-xs disabled:opacity-50"
-              >
-                Pull from Cloud
-              </button>
-              <button
-                onClick={() => handleSync('push')}
-                disabled={isSyncing}
-                className="py-3 border border-gray-300 text-gray-700 rounded-xl font-medium text-xs disabled:opacity-50"
-              >
-                Push to Cloud
-              </button>
-            </div>
-          </div>
-
-          {syncStatus && (
-            <p className={`text-xs mt-2 text-center ${
-              syncStatus.includes('error') || syncStatus.includes('failed') || syncStatus.includes('not configured')
-                ? 'text-amber-600'
-                : 'text-green-600'
-            }`}>
-              {syncStatus}
-            </p>
-          )}
-
-          <div className="flex items-center gap-1.5 mt-3 justify-center">
-            {lastSync ? (
-              <>
-                <CheckCircle2 className="w-3 h-3 text-green-500" />
-                <span className="text-[10px] text-gray-500">
-                  Last synced: {new Date(lastSync).toLocaleString()}
-                </span>
-              </>
-            ) : (
-              <>
-                <WifiOff className="w-3 h-3 text-gray-400" />
-                <span className="text-[10px] text-gray-500">Never synced</span>
-              </>
-            )}
-          </div>
-        </div>
+        <CloudSyncPanel showStoreId />
 
         {/* Save Button */}
         {saveError && (

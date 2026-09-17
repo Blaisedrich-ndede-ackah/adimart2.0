@@ -38,7 +38,7 @@ A mobile-first Point of Sale (POS) and inventory management Progressive Web App 
 - **Discount Controls** — Set discount cap percentage and toggle PIN enforcement
 - **User Management** — Add/remove cashiers and owners with 4-digit PINs
 - **Thermal Printer** — Connect Bluetooth thermal printers for receipt printing
-- **Cloud Sync** — Manual sync to Supabase with last-synced timestamp
+- **Cloud Sync** — Manual sync to Supabase with last-synced timestamp. Owners use **Settings**; cashiers use **My Sales** or **Devices → Cloud Sync** (Full Sync / Pull / Push) so they can send sales and pick up stock updates.
 
 ### 📱 PWA & Offline Support
 - **Installable** — Add to home screen on mobile devices
