@@ -51,6 +51,9 @@ export const en: Record<string, string> = {
   'nav.switchUser': 'Switch user',
   'nav.moreMenu': 'More menu',
 
+  'settings.canCashbook': 'Can open cash book',
+  'settings.canCashbookHint': 'When off, this cashier cannot see Cash Book.',
+
   'community.join': 'Join community chat',
   'community.telegram': 'Telegram group for all users',
   'community.aria': 'Join the Adimat community chat on Telegram',
@@ -222,6 +225,9 @@ export const fr: Record<string, string> = {
   'nav.community': 'Communauté',
   'nav.switchUser': 'Changer d’utilisateur',
   'nav.moreMenu': 'Plus d’options',
+
+  'settings.canCashbook': 'Peut ouvrir le livre de caisse',
+  'settings.canCashbookHint': 'Si désactivé, ce caissier ne voit pas le livre de caisse.',
 
   'community.join': 'Rejoindre le chat communautaire',
   'community.telegram': 'Groupe Telegram pour tous les utilisateurs',

@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS users (
   can_wholesale BOOLEAN DEFAULT FALSE,
   can_sell_from_warehouse BOOLEAN DEFAULT FALSE,
   can_manage_ecommerce BOOLEAN DEFAULT FALSE,
+  can_access_cashbook BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );

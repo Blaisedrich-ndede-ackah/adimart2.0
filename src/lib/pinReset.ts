@@ -11,6 +11,7 @@ import {
 import { sendSmsViaMnotify } from '@/lib/mnotify';
 import { isValidGhanaPhone, normalizeGhanaPhone } from '@/lib/platformSettings';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { cashbookAccessFromCloud } from '@/lib/staffAccess';
 
 const OTP_KEY = 'adimat_pin_reset_otp';
 const OTP_TTL_MS = 5 * 60 * 1000;
@@ -84,6 +85,7 @@ async function findUserByPhoneForCurrentStore(phoneRaw: string): Promise<LocalUs
       can_wholesale: row.can_wholesale ? 1 : 0,
       can_sell_from_warehouse: row.can_sell_from_warehouse ? 1 : 0,
       can_manage_ecommerce: row.can_manage_ecommerce || row.role === 'owner' ? 1 : 0,
+      can_access_cashbook: cashbookAccessFromCloud(row.role, row.can_access_cashbook),
       created_at: String(row.created_at || new Date().toISOString()),
       synced: 1,
     };
