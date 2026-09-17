@@ -226,7 +226,7 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
               : t('login.enterPin')}
           </p>
           {idleLockNotice && !loginError && !warehouseMode && (
-            <p className="text-amber-100 text-sm mt-3 text-center px-4 animate-fade-in">
+            <p className="text-amber-200 font-medium text-sm mt-3 text-center px-4 animate-fade-in">
               {t('login.idleLock')}
             </p>
           )}
