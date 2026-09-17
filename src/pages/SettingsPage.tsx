@@ -30,6 +30,7 @@ import LanguageSwitcher from '@/components/LanguageSwitcher';
 import CurrencySelect from '@/components/CurrencySelect';
 import { useI18nStore, useT } from '@/lib/i18n';
 import { DEFAULT_CURRENCY, normalizeCurrencyCode, getStoreCurrency } from '@/lib/currency';
+import { canAccessCashbook } from '@/lib/staffAccess';
 
 interface SettingsPageProps {
   onNavigate?: (page: string) => void;
@@ -251,6 +252,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         | 'can_wholesale'
         | 'can_sell_from_warehouse'
         | 'can_manage_ecommerce'
+        | 'can_access_cashbook'
         | 'phone'
       >
     >
@@ -700,6 +702,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
                         {user.role === 'cashier' && (user.can_wholesale === 1 ? ' · wholesale' : '')}
                         {user.role === 'cashier' && (user.can_sell_from_warehouse === 1 ? ' · warehouse sales' : '')}
                         {user.role === 'cashier' && (user.can_manage_ecommerce === 1 ? ' · online shop' : '')}
+                        {user.role === 'cashier' && canAccessCashbook(user) ? ' · cash book' : ''}
                       </p>
                     </div>
                     <div className="flex items-center gap-1">
@@ -839,6 +842,21 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
                           />
                         </label>
                       )}
+                      <label className="flex items-center justify-between gap-2 py-1">
+                        <span>
+                          <span className="text-gray-700 font-medium block">{t('settings.canCashbook')}</span>
+                          <span className="text-[11px] text-gray-500">{t('settings.canCashbookHint')}</span>
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={canAccessCashbook(user)}
+                          onChange={(e) =>
+                            void updateCashierPerms(user, {
+                              can_access_cashbook: e.target.checked ? 1 : 0,
+                            })
+                          }
+                        />
+                      </label>
                       </>
                       )}
                     </div>

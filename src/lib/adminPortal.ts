@@ -828,6 +828,7 @@ export async function addAdminStoreCashier(
     can_wholesale: false,
     can_sell_from_warehouse: false,
     can_manage_ecommerce: false,
+    can_access_cashbook: false,
     created_at: now,
   };
 
@@ -984,6 +985,7 @@ export async function createAdminStore(
     can_wholesale: true,
     can_sell_from_warehouse: true,
     can_manage_ecommerce: true,
+    can_access_cashbook: true,
     created_at: now,
   };
 
