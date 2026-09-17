@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS stores (
   discount_allow_percentage BOOLEAN DEFAULT TRUE,
   discount_allow_fixed BOOLEAN DEFAULT TRUE,
   cashier_can_discount BOOLEAN DEFAULT TRUE,
+  /** Idle minutes before staff return to the PIN screen. 0 = never. */
+  session_timeout_minutes INTEGER DEFAULT 5 CHECK (session_timeout_minutes >= 0 AND session_timeout_minutes <= 180),
   momo_account_name VARCHAR(255) DEFAULT '',
   momo_number VARCHAR(50) DEFAULT '',
   momo_network VARCHAR(50) DEFAULT '',

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Store, Shield, Percent, RefreshCcw,
+  Store, Shield, Percent, RefreshCcw, Timer,
   Save, Loader2, CheckCircle2, WifiOff, UserPlus,
   Trash2, Users, Fingerprint, AlertCircle, Key, Smartphone, Ban, ImagePlus
 } from 'lucide-react';
@@ -36,6 +36,11 @@ import LanguageSwitcher from '@/components/LanguageSwitcher';
 import CurrencySelect from '@/components/CurrencySelect';
 import { useI18nStore, useT } from '@/lib/i18n';
 import { DEFAULT_CURRENCY, normalizeCurrencyCode, getStoreCurrency } from '@/lib/currency';
+import {
+  DEFAULT_SESSION_TIMEOUT_MINUTES,
+  SESSION_TIMEOUT_OPTIONS,
+  normalizeSessionTimeoutMinutes,
+} from '@/lib/sessionTimeout';
 
 interface SettingsPageProps {
   onNavigate?: (page: string) => void;
@@ -57,6 +62,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [allowPercentage, setAllowPercentage] = useState(true);
   const [allowFixed, setAllowFixed] = useState(true);
   const [cashierCanDiscount, setCashierCanDiscount] = useState(true);
+  const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState(DEFAULT_SESSION_TIMEOUT_MINUTES);
   const [momoAccountName, setMomoAccountName] = useState('');
   const [momoNumber, setMomoNumber] = useState('');
   const [momoNetwork, setMomoNetwork] = useState('');
@@ -102,6 +108,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
       setAllowPercentage((currentStore.discount_allow_percentage ?? 1) === 1);
       setAllowFixed((currentStore.discount_allow_fixed ?? 1) === 1);
       setCashierCanDiscount((currentStore.cashier_can_discount ?? 1) === 1);
+      setSessionTimeoutMinutes(normalizeSessionTimeoutMinutes(currentStore.session_timeout_minutes));
       setMomoAccountName(currentStore.momo_account_name || '');
       setMomoNumber(currentStore.momo_number || '');
       setMomoNetwork(currentStore.momo_network || '');
@@ -173,6 +180,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         discount_allow_percentage: allowPercentage ? 1 : 0,
         discount_allow_fixed: allowFixed ? 1 : 0,
         cashier_can_discount: cashierCanDiscount ? 1 : 0,
+        session_timeout_minutes: normalizeSessionTimeoutMinutes(sessionTimeoutMinutes),
         momo_account_name: momoAccountName.trim(),
         momo_number: momoNumber.trim(),
         momo_network: momoNetwork.trim(),
@@ -626,6 +634,33 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
             </div>
             <span className="text-gray-400">→</span>
           </button>
+
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            <div className="flex items-center gap-2 mb-2">
+              <Timer className="w-4 h-4 text-amber-600" />
+              <p className="text-sm font-medium text-gray-700">{t('settings.sessionTimeout')}</p>
+            </div>
+            <p className="text-xs text-gray-500 mb-3">{t('settings.sessionTimeoutHint')}</p>
+            <select
+              value={sessionTimeoutMinutes}
+              onChange={(e) =>
+                setSessionTimeoutMinutes(normalizeSessionTimeoutMinutes(e.target.value))
+              }
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none bg-white focus:ring-2 focus:ring-primary focus:border-primary"
+            >
+              {SESSION_TIMEOUT_OPTIONS.map((minutes) => (
+                <option key={minutes} value={minutes}>
+                  {minutes === 0
+                    ? t('settings.sessionTimeout.off')
+                    : minutes === 1
+                      ? t('settings.sessionTimeout.minute')
+                      : minutes === DEFAULT_SESSION_TIMEOUT_MINUTES
+                        ? t('settings.sessionTimeout.minutesRecommended', { n: minutes })
+                        : t('settings.sessionTimeout.minutes', { n: minutes })}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* Biometric Settings */}

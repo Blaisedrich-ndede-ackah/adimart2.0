@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { isSupabaseConfigured, supabase, testSupabaseConnection } from './supabase';
 import { toMoneyAmount } from './money';
 import { formatUnknownError, isUuid, uuidOrNull } from './ids';
+import { normalizeSessionTimeoutMinutes } from './sessionTimeout';
 
 // Store represents a business/shop
 export interface LocalStore {
@@ -18,6 +19,8 @@ export interface LocalStore {
   discount_allow_fixed?: number;
   /** Allow cashiers to apply discounts (0/1); owners always can */
   cashier_can_discount?: number;
+  /** Idle minutes before staff return to the PIN screen. 0 = never. Default 5. */
+  session_timeout_minutes?: number;
   /** Preferred Mobile Money account name for Paystack payouts */
   momo_account_name: string;
   /** Preferred Mobile Money number (e.g. 024XXXXXXX) */
@@ -490,6 +493,7 @@ export async function createStoreWithOwner(
     discount_allow_percentage: 1,
     discount_allow_fixed: 1,
     cashier_can_discount: 1,
+    session_timeout_minutes: 5,
     momo_account_name: '',
     momo_number: '',
     momo_network: '',
@@ -1442,6 +1446,24 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
     });
     if (error) {
       if (
+        table === 'stores' &&
+        /session_timeout_minutes/i.test(error.message)
+      ) {
+        const stripped = rows.map((row) => {
+          const copy = { ...(row as Record<string, unknown>) };
+          delete copy.session_timeout_minutes;
+          return copy;
+        });
+        const retry = await supabase.from(table).upsert(stripped, {
+          onConflict: 'id',
+          ignoreDuplicates: appendOnly,
+        });
+        if (!retry.error) {
+          await markSynced();
+          return rows.length;
+        }
+      }
+      if (
         table === 'transactions' &&
         /other_charges/i.test(error.message)
       ) {
@@ -1543,6 +1565,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
           discount_allow_percentage: (store.discount_allow_percentage ?? 1) === 1,
           discount_allow_fixed: (store.discount_allow_fixed ?? 1) === 1,
           cashier_can_discount: (store.cashier_can_discount ?? 1) === 1,
+          session_timeout_minutes: normalizeSessionTimeoutMinutes(store.session_timeout_minutes),
           momo_account_name: store.momo_account_name || '',
           momo_number: store.momo_number || '',
           momo_network: store.momo_network || '',
@@ -1953,6 +1976,10 @@ export async function syncFromSupabase(opts?: {
         discount_allow_percentage: remoteStore.discount_allow_percentage === false ? 0 : 1,
         discount_allow_fixed: remoteStore.discount_allow_fixed === false ? 0 : 1,
         cashier_can_discount: remoteStore.cashier_can_discount === false ? 0 : 1,
+        session_timeout_minutes:
+          remoteStore.session_timeout_minutes == null
+            ? (localStore?.session_timeout_minutes ?? 5)
+            : normalizeSessionTimeoutMinutes(remoteStore.session_timeout_minutes),
         momo_account_name: remoteStore.momo_account_name || '',
         momo_number: remoteStore.momo_number || '',
         momo_network: remoteStore.momo_network || '',

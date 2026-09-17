@@ -37,6 +37,7 @@ A mobile-first Point of Sale (POS) and inventory management Progressive Web App 
 - **Store Profile** — Configure store name, address, and support number
 - **Discount Controls** — Set discount cap percentage and toggle PIN enforcement
 - **User Management** — Add/remove cashiers and owners with 4-digit PINs
+- **Automatic Session Timeout** — Owners set how long the till may sit idle (off, or 1–30 minutes; default 5). Staff are returned to the PIN screen, the cart is cleared, and a refresh cannot restore a stale session.
 - **Thermal Printer** — Connect Bluetooth thermal printers for receipt printing
 - **Cloud Sync** — Manual sync to Supabase with last-synced timestamp
 
@@ -152,6 +153,7 @@ Store owners set their preferred MoMo account under **Settings → Mobile Money 
 
 If your Supabase project was created before these features, run `supabase-migrate-admin.sql`, `supabase-migrate-subscriptions.sql`, `supabase-migrate-platform-settings.sql`, and `supabase-migrate-clear-store-ledger.sql` in the SQL Editor (or re-apply the latest `supabase-init.sql`).
 For self-serve Paystack subscription renewals, also run `supabase-migrate-subscription-payments.sql`.
+For automatic session timeout (idle PIN lock), run `supabase-migrate-session-timeout.sql`.
 
 ### Multi-store on one device
 
@@ -318,6 +320,7 @@ Example: `#ADM-20240115-0042`
 - Row Level Security (RLS) enabled on all Supabase tables
 - Discount overrides require owner PIN verification
 - Role-based access control (cashiers vs owners)
+- Automatic session timeout after inactivity (owner-configurable; default 5 minutes)
 
 ## Browser Support
 

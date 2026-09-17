@@ -176,12 +176,13 @@ Default store settings on create:
 
 - `discount_cap_percentage = 10`
 - `pin_on_discount_enabled = 1` (true)
+- `session_timeout_minutes = 5` (idle PIN lock; 0 = never)
 
 ### 6.3 Authentication
 
 - 4-digit PIN → `hashPin()` → match active user in current store
 - Optional WebAuthn biometric: credential id + `userId` in `localStorage` key `adimat_biometric_credential`
-- Session lives in Zustand memory only (refresh returns to login if a store exists)
+- Signed-in user is persisted in IndexedDB (`app_config.current_user_id`) so a refresh stays on the till unless idle timeout has elapsed
 - Roles:
   - **owner** — full navigation and admin actions
   - **cashier** — POS + switch user; settings/inventory/reports hidden in nav
@@ -218,6 +219,7 @@ Default store settings on create:
 - Store profile (name, address, support number)
 - Discount cap + PIN-on-discount toggle
 - Change PIN, biometrics
+- Automatic session timeout (idle minutes before the PIN screen; default 5, or Never)
 - Staff add / delete / reset PIN
 - Bluetooth printer connect/disconnect
 - Display Store ID
@@ -235,7 +237,7 @@ Default store settings on create:
 
 | Table | Primary key | Notable indexes / fields |
 |-------|-------------|--------------------------|
-| `stores` | `id` | name, address, support_number, discount_cap_percentage, pin_on_discount_enabled (0/1), created_at, synced |
+| `stores` | `id` | name, address, support_number, discount_cap_percentage, pin_on_discount_enabled (0/1), session_timeout_minutes (0 = never; default 5), created_at, synced |
 | `users` | `id` | store_id, name, role (`owner`\|`cashier`), pin_hash, is_active (0/1), created_at, synced |
 | `products` | `id` | store_id, name, category, sku_type, barcode, cost_price, selling_price, stock_level, is_active, created_at, updated_at, synced |
 | `transactions` | `id` | store_id, receipt_number, cashier_id/name, totals, payment_method, cash/paystack amounts, paystack_reference, status, created_at, synced |
@@ -339,9 +341,20 @@ Documented as implemented today:
 2. Supabase RLS is enabled, but policies are open (`USING (true)` / `WITH CHECK (true)`), so the anon key can read/write all tables  
 3. Anon key and Paystack public key ship in the client bundle (expected for public keys; RLS must enforce tenancy for real multi-tenant security)  
 4. Role restrictions are enforced in the UI, not by a server authority  
-5. Session is memory-only; biometric unlock does not re-verify PIN against a remote identity provider  
+5. Session is restored from IndexedDB `app_config.current_user_id` on refresh; idle timeout (see 9.4) refuses that restore when the till has been inactive too long  
+6. Biometric unlock does not re-verify PIN against a remote identity provider  
 
 Operators deploying multi-tenant cloud sync should harden RLS before production exposure.
+
+### 9.4 Automatic session timeout
+
+Store owners set **Settings → Security → Automatic session timeout** (`stores.session_timeout_minutes`). Options: Never, 1, 2, 5 (default), 10, 15, or 30 minutes.
+
+- `SessionTimeoutGuard` watches pointer, key, touch, click, and wheel activity (barcode HID scans usually count as `keydown`)
+- Last activity is stored per store in `localStorage` key `adimat_last_activity_{storeId}` so a refresh cannot restore a stale signed-in user
+- 30 seconds before lock, a warning overlay offers **Stay signed in**
+- On lock: cart is cleared, `current_user_id` is cleared, and the PIN screen shows an inactivity message (`adimat_idle_lock` in sessionStorage)
+- Super-admin portal sessions are not affected
 
 ---
 
@@ -403,6 +416,8 @@ Typed in `src/vite-env.d.ts`. App runs offline without them.
 |-----|---------|---------|
 | `adimat_auto_sync` | localStorage | Auto-sync enable/disable |
 | `adimat_biometric_credential` | localStorage | WebAuthn credential + userId |
+| `adimat_last_activity_{storeId}` | localStorage | Last till activity (idle timeout) |
+| `adimat_idle_lock` | sessionStorage | PIN-screen notice after idle lock |
 | `pwa-banner-dismissed` | sessionStorage | Install banner dismissal |
 
 ### 11.3 Theme tokens
