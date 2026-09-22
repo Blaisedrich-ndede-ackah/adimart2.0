@@ -399,7 +399,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
                     className="inline-flex items-center gap-1.5 px-3 py-2 bg-primary/10 text-primary rounded-lg text-xs font-medium touch-target disabled:opacity-50"
                   >
                     <ImagePlus className="w-3.5 h-3.5" />
-                    {imageBusy ? 'Processing…' : imageUrl ? 'Change photo' : 'Add photo'}
+                    {imageBusy ? 'Processing…' : imageUrl ? 'Choose another photo' : 'Choose from phone'}
                   </button>
                   {imageUrl && (
                     <button
@@ -418,7 +418,6 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
               ref={imageInputRef}
               type="file"
               accept="image/*"
-              capture="environment"
               className="hidden"
               onChange={(e) => void handleImagePick(e.target.files?.[0] || null)}
             />

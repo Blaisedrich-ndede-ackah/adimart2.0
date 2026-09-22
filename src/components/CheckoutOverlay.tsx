@@ -23,7 +23,7 @@ interface CheckoutOverlayProps {
   onComplete: (receiptNumber: string) => void;
 }
 
-type Step = 'method' | 'discount' | 'charges' | 'pin-verify' | 'split-input' | 'paystack' | 'processing' | 'success';
+type Step = 'method' | 'discount' | 'charges' | 'pin-verify' | 'cash-input' | 'split-input' | 'paystack' | 'processing' | 'success';
 
 interface SaleResult {
   receiptNumber: string;
@@ -341,6 +341,17 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
   }
 
   function handleCashSale() {
+    setCashAmount('');
+    setError('');
+    setStep('cash-input');
+  }
+
+  function handleCashConfirm() {
+    const received = Math.round((parseFloat(cashAmount) || 0) * 100) / 100;
+    if (isNaN(received) || received < cart.total) {
+      setError(`Cash received must be at least ${money(cart.total)}.`);
+      return;
+    }
     processSale('cash', cart.total, 0, '');
   }
 
@@ -416,6 +427,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
             {step === 'discount' && 'Apply Discount'}
             {step === 'charges' && 'Add Other Charges'}
             {step === 'pin-verify' && 'Owner Authorization'}
+            {step === 'cash-input' && 'Cash Payment'}
             {step === 'split-input' && 'Split Payment'}
             {step === 'paystack' && 'Processing Payment...'}
             {step === 'processing' && 'Processing...'}
@@ -574,7 +586,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
                 </div>
                 <div className="text-left flex-1">
                   <p className="font-semibold text-gray-900">Cash Payment</p>
-                  <p className="text-xs text-gray-500">Pay full amount in cash</p>
+                  <p className="text-xs text-gray-500">Enter cash received and calculate change</p>
                 </div>
               </button>
 
@@ -870,6 +882,58 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
                   className="flex-1 py-3 bg-primary text-white rounded-xl font-medium touch-target disabled:opacity-50"
                 >
                   Continue to Pay
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === 'cash-input' && (
+            <div className="space-y-4">
+              <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-4 text-center">
+                <p className="text-sm text-gray-600">Amount due</p>
+                <p className="text-2xl font-bold text-gray-900 mt-1">{money(cart.total)}</p>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">
+                  Cash received ({currencySymbol})
+                </label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={cashAmount}
+                  onChange={e => {
+                    setCashAmount(e.target.value);
+                    setError('');
+                  }}
+                  placeholder="0.00"
+                  min={cart.total}
+                  step="0.01"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl text-xl font-semibold text-center focus:ring-2 focus:ring-primary outline-none"
+                  autoFocus
+                />
+              </div>
+              <div className="rounded-xl bg-blue-50 p-4 flex items-center justify-between">
+                <span className="text-sm text-gray-600">Change</span>
+                <span className="text-xl font-bold text-blue-700">
+                  {money(Math.max(0, (parseFloat(cashAmount) || 0) - cart.total))}
+                </span>
+              </div>
+              {error && <p className="text-sm text-red-600 text-center">{error}</p>}
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setError(''); setStep('method'); }}
+                  className="flex-1 py-3 border border-gray-300 rounded-xl text-gray-700 font-medium touch-target"
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCashConfirm}
+                  disabled={!cashAmount || parseFloat(cashAmount) < cart.total}
+                  className="flex-1 py-3 bg-primary text-white rounded-xl font-medium touch-target disabled:opacity-50"
+                >
+                  Complete Sale
                 </button>
               </div>
             </div>
