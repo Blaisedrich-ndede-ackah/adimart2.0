@@ -4,6 +4,7 @@ import { isSupabaseConfigured, supabase, testSupabaseConnection } from './supaba
 import { toMoneyAmount } from './money';
 import { formatUnknownError, isUuid, uuidOrNull } from './ids';
 import { cashbookAccessFromCloud } from './staffAccess';
+import { normalizeSessionTimeoutMinutes } from './sessionTimeout';
 
 // Store represents a business/shop
 export interface LocalStore {

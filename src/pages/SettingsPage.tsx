@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Store, Shield, Percent,
   Save, Loader2, CheckCircle2, UserPlus,
-  Trash2, Users, Fingerprint, AlertCircle, Key, Smartphone, Ban, ImagePlus
+  Trash2, Users, Fingerprint, AlertCircle, Key, Smartphone, Ban, ImagePlus, Timer
 } from 'lucide-react';
 import ChangePinModal from '@/components/ChangePinModal';
 import ResetUserPinModal from '@/components/ResetUserPinModal';
@@ -31,7 +31,11 @@ import CurrencySelect from '@/components/CurrencySelect';
 import { useI18nStore, useT } from '@/lib/i18n';
 import { DEFAULT_CURRENCY, normalizeCurrencyCode, getStoreCurrency } from '@/lib/currency';
 import { canAccessCashbook } from '@/lib/staffAccess';
-import { DEFAULT_SESSION_TIMEOUT_MINUTES, normalizeSessionTimeoutMinutes } from '@/lib/sessionTimeout';
+import {
+  DEFAULT_SESSION_TIMEOUT_MINUTES,
+  SESSION_TIMEOUT_OPTIONS,
+  normalizeSessionTimeoutMinutes,
+} from '@/lib/sessionTimeout';
 
 interface SettingsPageProps {
   onNavigate?: (page: string) => void;
