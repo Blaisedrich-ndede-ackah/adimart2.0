@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Delete, Fingerprint, Shield, Store, ChevronDown, Warehouse } from 'lucide-react';
+import { Delete, Fingerprint, Shield, Store, ChevronDown, Warehouse, FileText } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { authenticateWithBiometric, isBiometricAvailable, hasBiometricRegistered } from '@/lib/biometric';
 import { db, listLocalStores, type LocalLocation, type LocalStore } from '@/lib/dexie';
@@ -391,6 +391,14 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
         <LanguageSwitcher variant="onPrimary" className="mt-6 max-w-[280px] md:max-w-[300px]" compact />
 
         <CommunityChatButton variant="auth" className="mt-4" />
+
+        <a
+          href="#/terms"
+          className="mt-4 inline-flex items-center gap-1.5 text-emerald-100/85 text-xs font-medium touch-target"
+        >
+          <FileText className="w-3.5 h-3.5" />
+          Terms &amp; Conditions
+        </a>
 
         {onOpenAdmin && (
           <button
