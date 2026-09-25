@@ -12,6 +12,9 @@ ALTER TABLE stores
 ALTER TABLE stores
   ADD COLUMN IF NOT EXISTS ecommerce_tagline TEXT DEFAULT '';
 
+ALTER TABLE stores
+  ADD COLUMN IF NOT EXISTS ecommerce_links TEXT DEFAULT '[]';
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_stores_ecommerce_slug
   ON stores (ecommerce_slug)
   WHERE ecommerce_slug IS NOT NULL AND ecommerce_slug <> '';

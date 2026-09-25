@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS stores (
   ecommerce_enabled BOOLEAN DEFAULT FALSE,
   ecommerce_slug VARCHAR(80) DEFAULT '',
   ecommerce_tagline TEXT DEFAULT '',
+  ecommerce_links TEXT DEFAULT '[]',
   currency_code VARCHAR(8) DEFAULT 'GHS',
   preferred_language VARCHAR(8) DEFAULT 'en',
   /** Super-admin wipe of trial sales; devices drop local ledger rows at or before this time */

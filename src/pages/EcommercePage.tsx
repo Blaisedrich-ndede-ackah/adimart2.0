@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Copy, ExternalLink, RefreshCw, ShoppingBag } from 'lucide-react';
+import { Copy, ExternalLink, Plus, RefreshCw, ShoppingBag, Trash2 } from 'lucide-react';
 import { db, type LocalOnlineOrder, type LocalOnlineOrderItem, type OnlineOrderStatus } from '@/lib/dexie';
 import {
   canManageEcommerce,
@@ -9,7 +9,9 @@ import {
   listOnlineCatalogProducts,
   pullOnlineOrdersFromCloud,
   setProductSellOnline,
+  updateEcommerceLinks,
   updateOnlineOrderStatus,
+  type StorefrontLink,
 } from '@/lib/ecommerce';
 import { subscribeStockChanges } from '@/lib/stockEvents';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -27,6 +29,8 @@ export default function EcommercePage() {
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<'orders' | 'catalog'>('orders');
   const [statusMsg, setStatusMsg] = useState('');
+  const [links, setLinks] = useState<StorefrontLink[]>([]);
+  const [savingLinks, setSavingLinks] = useState(false);
 
   const allowed = canManageEcommerce(currentUser, currentStore);
   const enabled = (currentStore?.ecommerce_enabled ?? 0) === 1;
@@ -34,6 +38,19 @@ export default function EcommercePage() {
     currentUser?.role === 'owner' || (currentUser?.can_manage_ecommerce ?? 0) === 1;
   const slug = currentStore?.ecommerce_slug?.trim() || '';
   const shareUrl = slug ? getPublicShopShareUrl(slug) : '';
+
+  useEffect(() => {
+    try {
+      const parsed = JSON.parse(currentStore?.ecommerce_links || '[]') as unknown;
+      setLinks(Array.isArray(parsed) ? parsed.filter((link): link is StorefrontLink =>
+        typeof link === 'object' && link !== null &&
+        typeof (link as StorefrontLink).label === 'string' &&
+        typeof (link as StorefrontLink).url === 'string'
+      ).slice(0, 8) : []);
+    } catch {
+      setLinks([]);
+    }
+  }, [currentStore?.ecommerce_links]);
 
   const onlineProducts = useMemo(
     () => catalog.filter((p) => (p.sell_online ?? 0) === 1),
@@ -122,6 +139,21 @@ export default function EcommercePage() {
     await loadCatalog();
     setStatusMsg(sellOnline ? 'Listed online' : 'Removed from online shop');
     setTimeout(() => setStatusMsg(''), 2500);
+  };
+
+  const saveLinks = async () => {
+    if (!currentStore) return;
+    setSavingLinks(true);
+    try {
+      await updateEcommerceLinks(currentStore.id, links);
+      await refreshStore?.();
+      setStatusMsg('Storefront links saved');
+    } catch (e) {
+      setStatusMsg(e instanceof Error ? e.message : 'Could not save links');
+    } finally {
+      setSavingLinks(false);
+      setTimeout(() => setStatusMsg(''), 3000);
+    }
   };
 
   const setStatus = async (orderId: string, status: OnlineOrderStatus) => {
@@ -239,6 +271,59 @@ export default function EcommercePage() {
               Sync your store after the admin enables e-commerce.
             </p>
           ) : null}
+
+          <section className="mt-4 rounded-xl border border-gray-200 bg-white p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-bold text-gray-900">Storefront links</h2>
+                <p className="mt-1 text-xs text-gray-500">Add WhatsApp, Instagram, delivery info, or another page customers use.</p>
+              </div>
+              {links.length < 8 ? (
+                <button
+                  type="button"
+                  onClick={() => setLinks((current) => [...current, { label: '', url: 'https://' }])}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-700"
+                >
+                  <Plus className="h-3.5 w-3.5" /> Add link
+                </button>
+              ) : null}
+            </div>
+            <div className="mt-3 space-y-2">
+              {links.map((link, index) => (
+                <div key={`${index}-${link.url}`} className="flex items-center gap-2">
+                  <input
+                    value={link.label}
+                    onChange={(event) => setLinks((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, label: event.target.value } : item))}
+                    placeholder="Label"
+                    className="w-1/3 rounded-lg border border-gray-200 px-2.5 py-2 text-sm"
+                  />
+                  <input
+                    value={link.url}
+                    onChange={(event) => setLinks((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, url: event.target.value } : item))}
+                    placeholder="https://..."
+                    className="min-w-0 flex-1 rounded-lg border border-gray-200 px-2.5 py-2 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setLinks((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                    className="rounded-lg p-2 text-rose-600 hover:bg-rose-50"
+                    title="Remove link"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
+              {links.length === 0 ? <p className="text-xs text-gray-500">No links added yet.</p> : null}
+            </div>
+            <button
+              type="button"
+              onClick={() => void saveLinks()}
+              disabled={savingLinks}
+              className="mt-3 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+            >
+              {savingLinks ? 'Saving...' : 'Save links'}
+            </button>
+          </section>
         </div>
 
         <div className="flex gap-2 rounded-xl bg-gray-100 p-1">

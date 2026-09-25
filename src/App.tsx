@@ -27,6 +27,8 @@ import SubscriptionPage from '@/pages/SubscriptionPage';
 import WarehousePage from '@/pages/WarehousePage';
 import EcommercePage from '@/pages/EcommercePage';
 import PublicShopPage from '@/pages/PublicShopPage';
+import TermsPage from '@/pages/TermsPage';
+import NotFoundPage from '@/pages/NotFoundPage';
 import AdminLoginPage from '@/pages/AdminLoginPage';
 import AdminDashboardPage from '@/pages/AdminDashboardPage';
 import { isStoreAccessBlocked } from '@/lib/subscription';
@@ -42,6 +44,15 @@ function readPublicShopSlug(): string | null {
   return match?.[1] ? decodeURIComponent(match[1]).trim().toLowerCase() : null;
 }
 
+function readPublicUtilityRoute(): 'terms' | '404' | null {
+  if (typeof window === 'undefined') return null;
+  const hash = window.location.hash.replace(/^#/, '').replace(/^\//, '').replace(/\/$/, '');
+  if (!hash) return null;
+  if (hash.toLowerCase() === 'terms') return 'terms';
+  if (/^shop\//i.test(hash)) return null;
+  return '404';
+}
+
 function userNeedsPhone(user: { phone?: string | null } | null | undefined): boolean {
   if (!user) return false;
   return !isValidGhanaPhone(user.phone || '');
@@ -55,11 +66,17 @@ export default function App() {
     isAdminSessionActive() ? 'admin' : 'store'
   );
   const [publicShopSlug, setPublicShopSlug] = useState<string | null>(() => readPublicShopSlug());
+  const [publicUtilityRoute, setPublicUtilityRoute] = useState<'terms' | '404' | null>(() => readPublicUtilityRoute());
 
   useEffect(() => {
     const onHashChange = () => setPublicShopSlug(readPublicShopSlug());
+    const onUtilityHashChange = () => setPublicUtilityRoute(readPublicUtilityRoute());
     window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
+    window.addEventListener('hashchange', onUtilityHashChange);
+    return () => {
+      window.removeEventListener('hashchange', onHashChange);
+      window.removeEventListener('hashchange', onUtilityHashChange);
+    };
   }, []);
 
   useEffect(() => {
@@ -107,6 +124,9 @@ export default function App() {
   if (publicShopSlug) {
     return <PublicShopPage slug={publicShopSlug} />;
   }
+
+  if (publicUtilityRoute === 'terms') return <TermsPage />;
+  if (publicUtilityRoute === '404') return <NotFoundPage />;
 
   if (appMode === 'admin-login') {
     return (

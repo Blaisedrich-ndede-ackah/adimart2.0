@@ -964,6 +964,7 @@ export async function createAdminStore(
     ecommerce_enabled: false,
     ecommerce_slug: '',
     ecommerce_tagline: '',
+    ecommerce_links: '[]',
     currency_code: 'GHS',
     preferred_language: 'en',
     created_at: now,

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ShoppingBag, Minus, Plus, Trash2, Loader2, ArrowLeft, CheckCircle2, Package,
+  ShoppingBag, Minus, Plus, Trash2, Loader2, ArrowLeft, CheckCircle2, Package, ExternalLink, MapPin, Phone,
 } from 'lucide-react';
 import ProductImage from '@/components/ProductImage';
 import {
@@ -50,6 +50,29 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!catalog) return;
+    document.title = `${catalog.store.name} | Online shop`;
+    const description = catalog.store.tagline || `Shop ${catalog.store.name} online`;
+    const image = `${window.location.origin}/storefront-social-preview.svg`;
+    const setMeta = (property: string, content: string) => {
+      let tag = document.head.querySelector(`meta[property="${property}"]`);
+      if (!tag) {
+        tag = document.createElement('meta');
+        tag.setAttribute('property', property);
+        document.head.appendChild(tag);
+      }
+      tag.setAttribute('content', content);
+    };
+    setMeta('og:title', catalog.store.name);
+    setMeta('og:description', description);
+    setMeta('og:image', image);
+    setMeta('og:type', 'website');
+    return () => {
+      document.title = 'Adimat POS';
+    };
+  }, [catalog]);
 
   const categories = useMemo(() => {
     if (!catalog) return ['All'];
@@ -139,8 +162,8 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
   }
 
   return (
-    <div className="h-full min-h-0 bg-[var(--color-surface)] flex flex-col overflow-hidden">
-      <header className="bg-primary text-white px-4 py-4 flex-shrink-0">
+    <div className="h-full min-h-0 bg-emerald-50/60 flex flex-col overflow-hidden">
+      <header className="bg-gradient-to-br from-primary-dark via-primary to-emerald-700 text-white px-4 py-5 flex-shrink-0 shadow-lg">
         <div className="max-w-3xl mx-auto flex items-center gap-3">
           {catalog.store.logo_url ? (
             <img
@@ -178,7 +201,24 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
         className="flex-1 min-h-0 overflow-y-auto overscroll-contain"
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
-        <div className="max-w-3xl mx-auto px-4 py-4 pb-28">
+        <div className="max-w-3xl mx-auto w-full px-4 py-5 pb-28">
+          <section className="mb-5 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-emerald-100">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Welcome to {catalog.store.name}</p>
+            <p className="mt-1 text-sm text-gray-600">{catalog.store.tagline}</p>
+            <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-600">
+              {catalog.store.address ? <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5 text-primary" />{catalog.store.address}</span> : null}
+              {catalog.store.support_number ? <a href={`tel:${catalog.store.support_number}`} className="inline-flex items-center gap-1 text-primary"><Phone className="h-3.5 w-3.5" />{catalog.store.support_number}</a> : null}
+            </div>
+            {catalog.store.links.length > 0 ? (
+              <div className="mt-4 flex flex-wrap gap-2 border-t border-gray-100 pt-3">
+                {catalog.store.links.map((link) => (
+                  <a key={`${link.label}-${link.url}`} href={link.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-2 text-xs font-semibold text-primary hover:bg-emerald-100">
+                    {link.label}<ExternalLink className="h-3 w-3" />
+                  </a>
+                ))}
+              </div>
+            ) : null}
+          </section>
           {error && view !== 'catalog' && (
             <div className="mb-3 px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm">
               {error}
@@ -239,7 +279,7 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
                   {filtered.map((product) => (
                     <div
                       key={product.id}
-                      className={`bg-white rounded-xl border border-emerald-50 p-3 flex flex-col ${
+                      className={`bg-white rounded-2xl border border-emerald-100 p-3 flex flex-col shadow-sm transition-shadow hover:shadow-md ${
                         product.in_stock ? '' : 'opacity-60'
                       }`}
                     >
@@ -394,6 +434,13 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
               )}
             </div>
           )}
+
+          {view === 'catalog' ? (
+            <footer className="mt-8 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-gray-500">
+              <a href="#/terms" className="font-semibold text-primary">Terms & conditions</a>
+              <span>Powered by Adimat</span>
+            </footer>
+          ) : null}
         </div>
       </main>
 

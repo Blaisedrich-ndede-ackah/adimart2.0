@@ -34,8 +34,14 @@ export interface PublicShopCatalog {
     tagline: string;
     slug: string;
     currency_code?: string;
+    links: StorefrontLink[];
   };
   products: PublicShopProduct[];
+}
+
+export interface StorefrontLink {
+  label: string;
+  url: string;
 }
 
 export interface OnlineCartItem {
@@ -133,6 +139,19 @@ export async function updateEcommerceTagline(storeId: string, tagline: string): 
   });
 }
 
+export async function updateEcommerceLinks(storeId: string, links: StorefrontLink[]): Promise<void> {
+  const cleanLinks = links
+    .map((link) => ({ label: link.label.trim(), url: link.url.trim() }))
+    .filter((link) => link.label && /^https?:\/\//i.test(link.url))
+    .slice(0, 8);
+  const value = JSON.stringify(cleanLinks);
+  if (isSupabaseConfigured()) {
+    const { error } = await supabase.from('stores').update({ ecommerce_links: value }).eq('id', storeId);
+    if (error) throw new Error(error.message);
+  }
+  await db.stores.update(storeId, { ecommerce_links: value, synced: isSupabaseConfigured() ? 1 : 0 });
+}
+
 function generateOrderNumber(): string {
   const now = new Date();
   const stamp = [
@@ -155,7 +174,7 @@ export async function fetchPublicShopCatalog(slug: string): Promise<PublicShopCa
   const clean = slug.trim().toLowerCase();
   const { data: store, error: storeError } = await supabase
     .from('stores')
-    .select('id, name, address, support_number, logo_url, ecommerce_enabled, ecommerce_slug, ecommerce_tagline, currency_code')
+    .select('id, name, address, support_number, logo_url, ecommerce_enabled, ecommerce_slug, ecommerce_tagline, ecommerce_links, currency_code')
     .eq('ecommerce_slug', clean)
     .maybeSingle();
 
@@ -174,6 +193,20 @@ export async function fetchPublicShopCatalog(slug: string): Promise<PublicShopCa
 
   if (productError) throw new Error(productError.message);
 
+  let links: StorefrontLink[] = [];
+  try {
+    const parsed = JSON.parse(store.ecommerce_links || '[]') as unknown;
+    if (Array.isArray(parsed)) {
+      links = parsed.filter((link): link is StorefrontLink =>
+        typeof link === 'object' && link !== null &&
+        typeof (link as StorefrontLink).label === 'string' &&
+        /^https?:\/\//i.test((link as StorefrontLink).url || '')
+      ).slice(0, 8);
+    }
+  } catch {
+    links = [];
+  }
+
   return {
     store: {
       id: store.id,
@@ -184,6 +217,7 @@ export async function fetchPublicShopCatalog(slug: string): Promise<PublicShopCa
       tagline: store.ecommerce_tagline || 'Shop online',
       slug: store.ecommerce_slug || clean,
       currency_code: store.currency_code || 'GHS',
+      links,
     },
     products: (products || []).map((p) => ({
       id: p.id,
