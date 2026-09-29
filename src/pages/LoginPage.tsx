@@ -176,7 +176,7 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
       return;
     }
 
-    const newPin = pin + key;
+    const newPin = key.length > 1 ? key : pin + key;
     if (newPin.length > 4) return;
 
     setPin(newPin);
@@ -314,7 +314,7 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
           )}
         </div>
 
-        <div className={`flex gap-3 mb-6 ${shake ? 'animate-[shake_0.5s_ease-in-out]' : ''}`}>
+        <div className={`relative flex gap-3 mb-6 ${shake ? 'animate-[shake_0.5s_ease-in-out]' : ''}`}>
           {[0, 1, 2, 3].map(i => (
             <div
               key={i}
@@ -325,6 +325,22 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
               }`}
             />
           ))}
+          <input
+            type="password"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={4}
+            autoComplete="off"
+            autoFocus
+            aria-label={warehouseMode ? 'Warehouse PIN' : 'Store PIN'}
+            value={pin}
+            onChange={event => {
+              const nextPin = event.target.value.replace(/\D/g, '').slice(0, 4);
+              setPin(nextPin);
+              if (nextPin.length === 4) void handleKeyPress(nextPin);
+            }}
+            className="absolute inset-0 h-full w-full cursor-text opacity-0"
+          />
         </div>
 
         {(loginError || biometricError) && (

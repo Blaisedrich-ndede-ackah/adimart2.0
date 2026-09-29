@@ -146,7 +146,7 @@ export default function AdminLoginPage({ onSuccess, onBack }: AdminLoginPageProp
             <span className={`h-1.5 w-10 rounded-full ${step === 'otp' ? 'bg-white' : 'bg-white/30'}`} />
           </div>
 
-          <div className="mt-4 mb-4 tracking-[0.5em] text-2xl font-mono text-white min-h-[2rem]">
+          <div className="relative mt-4 mb-4 tracking-[0.5em] text-2xl font-mono text-white min-h-[2rem]">
             {loading ? (
               <Loader2 className="w-6 h-6 animate-spin text-emerald-400 mx-auto" />
             ) : (
@@ -156,6 +156,27 @@ export default function AdminLoginPage({ onSuccess, onBack }: AdminLoginPageProp
                 </span>
               )
             )}
+            <input
+              type="password"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={activeLen}
+              autoComplete="off"
+              autoFocus
+              aria-label={step === 'pin' ? 'Administrator PIN' : 'SMS verification code'}
+              value={activeValue}
+              onChange={(event) => {
+                const value = event.target.value.replace(/\D/g, '').slice(0, activeLen);
+                if (step === 'pin') {
+                  setPin(value);
+                  if (value.length === pinLength) void submitPin(value);
+                } else {
+                  setOtp(value);
+                  if (value.length === 4) void submitOtp(value);
+                }
+              }}
+              className="absolute inset-0 h-full w-full cursor-text opacity-0"
+            />
           </div>
 
           {error && (
