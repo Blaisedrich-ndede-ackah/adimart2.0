@@ -1636,7 +1636,37 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
       errors
     );
 
-    // Push batches BEFORE products so catalog stock_level never arrives without matching batches
+    const unsyncedProducts = await db.products.where('store_id').equals(storeId).and(p => p.synced === 0).toArray();
+    syncedCount += await upsertToSupabase(
+      'Products',
+      'products',
+      unsyncedProducts.map(p => ({
+        id: p.id,
+        store_id: p.store_id,
+        name: p.name,
+        category: p.category,
+        sku_type: p.sku_type,
+        barcode: p.barcode,
+        cost_price: p.cost_price,
+        selling_price: p.selling_price,
+        stock_level: p.stock_level,
+        is_active: p.is_active === 1,
+        image_url: p.image_url || '',
+        pack_size: p.pack_size ?? 1,
+        track_expiry: (p.track_expiry ?? 0) === 1,
+        wholesale_mode: p.wholesale_mode || 'none',
+        wholesale_pack_price: p.wholesale_pack_price ?? 0,
+        wholesale_unit_price: p.wholesale_unit_price ?? 0,
+        wholesale_tiers_json: p.wholesale_tiers_json || '[]',
+        sell_online: (p.sell_online ?? 0) === 1,
+        created_at: p.created_at,
+        updated_at: p.updated_at,
+      })),
+      async () => { await Promise.all(unsyncedProducts.map(p => db.products.update(p.id, { synced: 1 }))); },
+      errors
+    );
+
+    // Products and locations must exist before batches; batches must exist before movements.
     const unsyncedBatches = await db.stock_batches.where('store_id').equals(storeId).and(b => b.synced === 0).toArray();
     const batchesToPush: LocalStockBatch[] = [];
     const openingUnsynced = unsyncedBatches.filter(
@@ -1718,36 +1748,6 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         created_at: m.created_at,
       })),
       async () => { await Promise.all(movementsToPush.map(m => db.stock_movements.update(m.id, { synced: 1 }))); },
-      errors
-    );
-
-    const unsyncedProducts = await db.products.where('store_id').equals(storeId).and(p => p.synced === 0).toArray();
-    syncedCount += await upsertToSupabase(
-      'Products',
-      'products',
-      unsyncedProducts.map(p => ({
-        id: p.id,
-        store_id: p.store_id,
-        name: p.name,
-        category: p.category,
-        sku_type: p.sku_type,
-        barcode: p.barcode,
-        cost_price: p.cost_price,
-        selling_price: p.selling_price,
-        stock_level: p.stock_level,
-        is_active: p.is_active === 1,
-        image_url: p.image_url || '',
-        pack_size: p.pack_size ?? 1,
-        track_expiry: (p.track_expiry ?? 0) === 1,
-        wholesale_mode: p.wholesale_mode || 'none',
-        wholesale_pack_price: p.wholesale_pack_price ?? 0,
-        wholesale_unit_price: p.wholesale_unit_price ?? 0,
-        wholesale_tiers_json: p.wholesale_tiers_json || '[]',
-        sell_online: (p.sell_online ?? 0) === 1,
-        created_at: p.created_at,
-        updated_at: p.updated_at,
-      })),
-      async () => { await Promise.all(unsyncedProducts.map(p => db.products.update(p.id, { synced: 1 }))); },
       errors
     );
 
