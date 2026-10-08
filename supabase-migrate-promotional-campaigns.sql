@@ -4,10 +4,10 @@
 -- This migration creates campaign metadata and a public media bucket
 -- for flyers/videos shown in FlyerShowcase.
 --
--- IMPORTANT: Writes require a Supabase Auth JWT whose trusted
--- app_metadata contains { "is_platform_admin": true }. The existing
--- browser PIN/SMS session does not provide that identity. Keep these
--- policies locked; do not grant campaign writes to anon.
+-- Direct table/storage writes require a trusted Supabase Auth JWT whose
+-- app_metadata contains { "is_platform_admin": true }. The portal UI uses
+-- the campaign-admin Edge Function, which verifies its PIN/SMS session on
+-- the server and never exposes the service-role key. Keep these policies locked.
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION public.is_adimat_campaign_admin()
@@ -232,5 +232,5 @@ NOTIFY storage, 'reload config';
 -- SELECT id, name, public, file_size_limit, allowed_mime_types
 -- FROM storage.buckets WHERE id = 'promotional-campaigns';
 
--- IMPORTANT: The FlyerShowcase/admin upload UI must authenticate with Supabase
--- Auth and a trusted is_platform_admin app_metadata claim before it can write.
+-- Portal campaign CRUD is performed by the campaign-admin Edge Function.
+-- Keep direct anonymous/authenticated writes prohibited.

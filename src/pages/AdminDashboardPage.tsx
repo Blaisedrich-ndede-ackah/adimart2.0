@@ -958,8 +958,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                   className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
                 />
                 <p className="text-[10px] text-slate-400 mt-1">
-                  Required for admin SMS verification after PIN. Falls back to WhatsApp number or
-                  VITE_ADMIN_PHONE.
+                  Required for admin SMS verification after PIN. Falls back to the WhatsApp number.
                 </p>
               </div>
             </div>

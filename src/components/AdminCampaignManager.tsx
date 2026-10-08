@@ -7,7 +7,6 @@ import {
   EyeOff,
   Image as ImageIcon,
   Loader2,
-  LogOut,
   Megaphone,
   Pencil,
   Plus,
@@ -34,8 +33,6 @@ import {
   getCampaignAdminAccess,
   isCampaignMigrationMissing,
   normalizeCampaignCtaUrl,
-  signInCampaignAdmin,
-  signOutCampaignAdmin,
   updatePromotionCampaign,
   validateCampaignDateWindow,
   validateCampaignMedia,
@@ -76,7 +73,6 @@ export default function AdminCampaignManager() {
     data: access,
     error: accessError,
     isLoading: accessLoading,
-    mutate: refreshAccess,
   } = useSWR<CampaignAdminAccess>(CAMPAIGN_ADMIN_STATUS_KEY, getCampaignAdminAccess, {
     revalidateOnFocus: false,
     shouldRetryOnError: false,
@@ -94,10 +90,6 @@ export default function AdminCampaignManager() {
   );
 
   const campaigns = campaignData || [];
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [authError, setAuthError] = useState('');
-  const [authBusy, setAuthBusy] = useState(false);
   const [draft, setDraft] = useState<CampaignDraft>(EMPTY_DRAFT);
   const [editingCampaign, setEditingCampaign] = useState<PromotionCampaign | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -117,34 +109,6 @@ export default function AdminCampaignManager() {
       if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl);
     };
   }, [localPreviewUrl]);
-
-  const submitAdminLogin = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setAuthBusy(true);
-    setAuthError('');
-    try {
-      await signInCampaignAdmin(email, password);
-      setPassword('');
-      await refreshAccess('authorized', { revalidate: false });
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Campaign administrator sign-in failed.');
-    } finally {
-      setAuthBusy(false);
-    }
-  };
-
-  const handleCampaignSignOut = async () => {
-    setAuthBusy(true);
-    setAuthError('');
-    try {
-      await signOutCampaignAdmin();
-      await refreshAccess('signed-out', { revalidate: false });
-    } catch {
-      setAuthError('Could not end the campaign administrator session. Please try again.');
-    } finally {
-      setAuthBusy(false);
-    }
-  };
 
   const resetEditor = () => {
     setEditingCampaign(null);
@@ -319,84 +283,10 @@ export default function AdminCampaignManager() {
           <StatusCard title="Campaign tools are unavailable" tone="warning">
             Supabase is not configured in this environment. No credentials or settings were changed.
           </StatusCard>
-        ) : access === 'not-authorized' ? (
-          <div className="max-w-2xl rounded-2xl border border-amber-200 bg-amber-50 p-5 sm:p-6">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
-              <div className="min-w-0 flex-1">
-                <h3 className="font-bold text-amber-950">This account cannot manage campaigns</h3>
-                <p className="mt-1 text-sm leading-6 text-amber-900">
-                  Campaign uploads require a Supabase Auth account with the trusted platform-admin claim. The Adimat PIN/SMS session does not grant database or storage access.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => void handleCampaignSignOut()}
-                  disabled={authBusy}
-                  className="mt-4 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-950 disabled:opacity-60"
-                >
-                  {authBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
-                  Sign out of Supabase
-                </button>
-                {authError && <p role="alert" className="mt-3 text-sm text-red-700">{authError}</p>}
-              </div>
-            </div>
-          </div>
         ) : (
-          <div className="max-w-2xl rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
-            <div className="flex items-start gap-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-800">
-                <ShieldIcon />
-              </span>
-              <div>
-                <h3 className="font-bold text-slate-950">Sign in to manage campaigns</h3>
-                <p className="mt-1 text-sm leading-6 text-slate-600">
-                  Use the Supabase Auth email and password for an account already granted the trusted campaign-admin claim. Your existing Adimat PIN/SMS login remains separate.
-                </p>
-              </div>
-            </div>
-            <form onSubmit={(event) => void submitAdminLogin(event)} className="mt-5 grid gap-4 sm:grid-cols-2">
-              <label className="grid gap-1.5 text-sm font-semibold text-slate-700">
-                Supabase Auth email
-                <input
-                  type="email"
-                  autoComplete="username"
-                  required
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  className="min-h-11 rounded-xl border border-slate-300 bg-white px-3 font-normal text-slate-900 outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/15"
-                />
-              </label>
-              <label className="grid gap-1.5 text-sm font-semibold text-slate-700">
-                Password
-                <input
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  className="min-h-11 rounded-xl border border-slate-300 bg-white px-3 font-normal text-slate-900 outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/15"
-                />
-              </label>
-              {authError && (
-                <p role="alert" className="sm:col-span-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-                  {authError}
-                </p>
-              )}
-              <div className="sm:col-span-2 flex flex-wrap items-center gap-3">
-                <button
-                  type="submit"
-                  disabled={authBusy}
-                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {authBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldIcon />}
-                  Sign in securely
-                </button>
-                <p className="text-xs leading-5 text-slate-500">
-                  Unverified accounts cannot upload or publish. The migration remains unapplied until you run it.
-                </p>
-              </div>
-            </form>
-          </div>
+          <StatusCard title="Admin session required" tone="warning">
+            Sign in to the admin portal again to renew campaign access. Campaign access expires with the admin session.
+          </StatusCard>
         )}
       </section>
     );
@@ -415,15 +305,6 @@ export default function AdminCampaignManager() {
           >
             <RefreshCw className={`h-4 w-4 ${campaignsValidating ? 'animate-spin' : ''}`} />
             Refresh
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleCampaignSignOut()}
-            disabled={authBusy}
-            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-          >
-            <LogOut className="h-4 w-4" />
-            Sign out
           </button>
         </div>
       </div>
@@ -754,10 +635,6 @@ function CampaignManagerHeading() {
       </p>
     </div>
   );
-}
-
-function ShieldIcon() {
-  return <span aria-hidden="true" className="text-base leading-none">●</span>;
 }
 
 function StatusCard({

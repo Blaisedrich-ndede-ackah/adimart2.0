@@ -1,4 +1,5 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { getCampaignAdminSessionToken } from '@/lib/adminAuth';
 
 export const CAMPAIGN_BUCKET = 'promotional-campaigns';
 export const PUBLIC_CAMPAIGNS_KEY = 'promotional-campaigns:public-active';
@@ -59,51 +60,24 @@ export type CampaignFields = Pick<
 
 export type CampaignAdminAccess = 'unconfigured' | 'signed-out' | 'not-authorized' | 'authorized';
 
-function hasCampaignAdminClaim(user: { app_metadata?: Record<string, unknown> } | null | undefined) {
-  const claim = user?.app_metadata?.is_platform_admin;
-  return claim === true || claim === 'true';
-}
-
-export async function getCampaignAdminAccess(): Promise<CampaignAdminAccess> {
+export function getCampaignAdminAccess(): CampaignAdminAccess {
   if (!isSupabaseConfigured()) return 'unconfigured';
-
-  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-  if (sessionError || !sessionData.session) return 'signed-out';
-
-  const { data, error } = await supabase.auth.getUser();
-  if (error || !data.user) return 'signed-out';
-
-  return hasCampaignAdminClaim(data.user) ? 'authorized' : 'not-authorized';
+  return getCampaignAdminSessionToken() ? 'authorized' : 'signed-out';
 }
 
-export async function signInCampaignAdmin(email: string, password: string): Promise<void> {
-  if (!isSupabaseConfigured()) {
-    throw new Error('Supabase is not configured for campaign access in this environment.');
-  }
-
-  const { error } = await supabase.auth.signInWithPassword({
-    email: email.trim(),
-    password,
+async function invokeCampaignAdmin<T>(body: Record<string, unknown>): Promise<T> {
+  const sessionToken = getCampaignAdminSessionToken();
+  if (!sessionToken) throw new Error('Admin session expired. Sign in to the admin portal again.');
+  const { data, error } = await supabase.functions.invoke('campaign-admin', {
+    body: { ...body, sessionToken },
   });
-
   if (error) {
-    throw new Error('Unable to sign in with those credentials. Check them and try again.');
+    const context = (error as Error & { context?: Response }).context;
+    const responseBody = context ? await context.clone().json().catch(() => null) as { error?: string } | null : null;
+    throw new Error(responseBody?.error || error.message || 'Campaign request could not be completed.');
   }
-
-  const { data, error: userError } = await supabase.auth.getUser();
-  if (userError || !data.user) {
-    await supabase.auth.signOut();
-    throw new Error('We could not verify this campaign administrator session. Please sign in again.');
-  }
-
-  if (!hasCampaignAdminClaim(data.user)) {
-    await supabase.auth.signOut();
-    throw new Error('This Supabase account is not authorized to manage platform campaigns.');
-  }
-}
-
-export async function signOutCampaignAdmin(): Promise<void> {
-  await supabase.auth.signOut();
+  if (data?.error) throw new Error(data.error);
+  return data as T;
 }
 
 function presentCampaign(row: CampaignRow): PromotionCampaign {
@@ -147,16 +121,7 @@ export async function fetchActiveCampaigns(): Promise<PromotionCampaign[]> {
 
 export async function fetchAdminCampaigns(): Promise<PromotionCampaign[]> {
   await requireCampaignAdmin();
-
-  const { data, error } = await supabase
-    .from('promotional_campaigns')
-    .select(CAMPAIGN_COLUMNS)
-    .order('sort_order', { ascending: true })
-    .order('created_at', { ascending: false })
-    .limit(200);
-
-  if (error) throwQueryError(error);
-  return ((data || []) as unknown as CampaignRow[]).map(presentCampaign);
+  return invokeCampaignAdmin<PromotionCampaign[]>({ action: 'list' });
 }
 
 export function validateCampaignMedia(file: File): string | null {
@@ -228,45 +193,31 @@ function describeError(error: unknown): { code: string; message: string } {
 }
 
 async function requireCampaignAdmin(): Promise<void> {
-  const access = await getCampaignAdminAccess();
-  if (access !== 'authorized') {
-    throw new Error('Campaign administrator access is required. Sign in with an authorized Supabase Auth account.');
-  }
-}
-
-function extensionForMediaType(mimeType: string): string {
-  switch (mimeType) {
-    case 'image/jpeg': return 'jpg';
-    case 'image/png': return 'png';
-    case 'image/webp': return 'webp';
-    case 'image/gif': return 'gif';
-    case 'video/mp4': return 'mp4';
-    case 'video/webm': return 'webm';
-    case 'video/quicktime': return 'mov';
-    default: throw new Error('This media format is not supported.');
-  }
+  if (!getCampaignAdminSessionToken()) throw new Error('Admin session expired. Sign in to the admin portal again.');
 }
 
 async function uploadCampaignMedia(file: File): Promise<string> {
   await requireCampaignAdmin();
   const validationError = validateCampaignMedia(file);
   if (validationError) throw new Error(validationError);
-
-  const mediaPath = `${crypto.randomUUID()}.${extensionForMediaType(file.type)}`;
-  const { error } = await supabase.storage.from(CAMPAIGN_BUCKET).upload(mediaPath, file, {
-    cacheControl: '3600',
-    contentType: file.type,
-    upsert: false,
+  const upload = await invokeCampaignAdmin<{ path: string; token: string }>({
+    action: 'create-upload',
+    mimeType: file.type,
   });
-
+  const { error } = await supabase.storage.from(CAMPAIGN_BUCKET).uploadToSignedUrl(
+    upload.path,
+    upload.token,
+    file,
+    { cacheControl: '3600', contentType: file.type },
+  );
   if (error) throw new Error(campaignErrorMessage(error));
-  return mediaPath;
+  return upload.path;
 }
 
 async function quietlyRemoveMedia(paths: string[]): Promise<void> {
   const uniquePaths = [...new Set(paths.filter(Boolean))];
   if (uniquePaths.length === 0) return;
-  await supabase.storage.from(CAMPAIGN_BUCKET).remove(uniquePaths);
+  await invokeCampaignAdmin({ action: 'remove-media', paths: uniquePaths });
 }
 
 export async function createPromotionCampaign(
@@ -275,20 +226,9 @@ export async function createPromotionCampaign(
 ): Promise<PromotionCampaign> {
   await requireCampaignAdmin();
   const mediaPath = await uploadCampaignMedia(file);
-  const mediaType: CampaignMediaType = file.type.startsWith('video/') ? 'video' : 'image';
-
-  const { data, error } = await supabase
-    .from('promotional_campaigns')
-    .insert({ ...fields, media_type: mediaType, media_path: mediaPath })
-    .select(CAMPAIGN_COLUMNS)
-    .single();
-
-  if (error || !data) {
-    await quietlyRemoveMedia([mediaPath]);
-    throwQueryError(error || new Error('The campaign record was not returned.'));
-  }
-
-  return presentCampaign(data as unknown as CampaignRow);
+  return invokeCampaignAdmin<PromotionCampaign>({
+    action: 'create', fields, mediaPath, mimeType: file.type,
+  });
 }
 
 export async function updatePromotionCampaign(
@@ -297,55 +237,21 @@ export async function updatePromotionCampaign(
   replacementFile?: File | null
 ): Promise<{ campaign: PromotionCampaign; cleanupWarning: string }> {
   await requireCampaignAdmin();
-
-  let replacementPath = '';
-  const updates: Record<string, unknown> = { ...fields };
-  if (replacementFile) {
-    replacementPath = await uploadCampaignMedia(replacementFile);
-    updates.media_path = replacementPath;
-    updates.media_type = replacementFile.type.startsWith('video/') ? 'video' : 'image';
-    updates.poster_path = null;
-  }
-
-  const { data, error } = await supabase
-    .from('promotional_campaigns')
-    .update(updates)
-    .eq('id', campaign.id)
-    .select(CAMPAIGN_COLUMNS)
-    .single();
-
-  if (error || !data) {
-    if (replacementPath) await quietlyRemoveMedia([replacementPath]);
-    throwQueryError(error || new Error('The campaign update was not returned.'));
-  }
-
-  let cleanupWarning = '';
-  if (replacementPath) {
-    const oldPaths = [campaign.media_path, campaign.poster_path || ''];
-    const { error: cleanupError } = await supabase.storage.from(CAMPAIGN_BUCKET).remove(oldPaths.filter(Boolean));
-    if (cleanupError) cleanupWarning = 'Campaign saved, but the previous media file could not be removed.';
-  }
-
-  return { campaign: presentCampaign(data as unknown as CampaignRow), cleanupWarning };
+  const mediaPath = replacementFile ? await uploadCampaignMedia(replacementFile) : '';
+  return invokeCampaignAdmin({
+    action: 'update',
+    id: campaign.id,
+    fields,
+    ...(mediaPath ? { mediaPath, mimeType: replacementFile?.type } : {}),
+  });
 }
 
 export async function deletePromotionCampaign(
   campaign: PromotionCampaign
 ): Promise<string> {
   await requireCampaignAdmin();
-
-  const { error } = await supabase
-    .from('promotional_campaigns')
-    .delete()
-    .eq('id', campaign.id);
-
-  if (error) throw new Error(campaignErrorMessage(error));
-
-  const mediaPaths = [campaign.media_path, campaign.poster_path || ''].filter(Boolean);
-  if (mediaPaths.length === 0) return '';
-
-  const { error: cleanupError } = await supabase.storage.from(CAMPAIGN_BUCKET).remove(mediaPaths);
-  return cleanupError ? 'Campaign was deleted, but its stored media could not be removed.' : '';
+  const result = await invokeCampaignAdmin<{ cleanupWarning: string }>({ action: 'delete', id: campaign.id });
+  return result.cleanupWarning;
 }
 
 export async function uploadCampaignAdminMedia(file: File): Promise<string> {

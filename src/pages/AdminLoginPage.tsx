@@ -53,7 +53,7 @@ export default function AdminLoginPage({ onSuccess, onBack }: AdminLoginPageProp
       return;
     }
 
-    const challenge = await beginAdminSmsChallenge();
+    const challenge = await beginAdminSmsChallenge(value);
     if (!challenge.success) {
       setError(challenge.error || 'Could not send SMS code');
       setLoading(false);
@@ -69,7 +69,7 @@ export default function AdminLoginPage({ onSuccess, onBack }: AdminLoginPageProp
   const submitOtp = async (value: string) => {
     setLoading(true);
     setError('');
-    const result = verifyAdminSmsOtp(value);
+    const result = await verifyAdminSmsOtp(value);
     if (!result.success) {
       setError(result.error || 'Invalid code');
       setOtp('');
@@ -105,7 +105,7 @@ export default function AdminLoginPage({ onSuccess, onBack }: AdminLoginPageProp
   const resendOtp = async () => {
     setLoading(true);
     setError('');
-    const challenge = await beginAdminSmsChallenge();
+    const challenge = await beginAdminSmsChallenge(pin);
     if (!challenge.success) {
       setError(challenge.error || 'Could not resend code');
     } else {
@@ -238,8 +238,7 @@ export default function AdminLoginPage({ onSuccess, onBack }: AdminLoginPageProp
           )}
 
           <p className="text-emerald-200/70 text-[11px] text-center mt-6 max-w-sm px-2">
-            Set <code className="text-emerald-100">VITE_ADMIN_PIN</code> and admin phone in Contact
-            (or <code className="text-emerald-100">VITE_ADMIN_PHONE</code>).
+            Set <code className="text-emerald-100">VITE_ADMIN_PIN</code> and the admin phone in Contact.
           </p>
         </div>
       </div>

@@ -97,8 +97,7 @@ VITE_PAYSTACK_PUBLIC_KEY=pk_live_your-public-key
 # Administrator portal PIN (platform-wide)
 VITE_ADMIN_PIN=9999
 
-# Optional admin phone for SMS login OTP (also configurable in Admin → Contact)
-# VITE_ADMIN_PHONE=024XXXXXXX
+# Optional mNotify defaults for non-admin SMS alerts
 # VITE_MNOTIFY_API_KEY=
 # VITE_MNOTIFY_SENDER_ID=Adimat
 ```
@@ -108,6 +107,15 @@ VITE_ADMIN_PIN=9999
 ### Administrator Portal
 
 Platform admins can open **Administrator portal** from the store login or first-launch screen, then sign in with `VITE_ADMIN_PIN`.
+
+**Campaigns** in the admin portal uses that same PIN + SMS login; there is no second campaign sign-in. Campaign authorization is verified by the `campaign-admin` Supabase Edge Function. To enable it, apply `supabase-migrate-promotional-campaigns.sql` and `supabase/migrations/20261008000000_campaign_admin_challenges.sql` in the SQL Editor, then link the Supabase CLI to the project and configure the function secrets:
+
+```bash
+supabase secrets set ADMIN_PORTAL_PIN="<same value as VITE_ADMIN_PIN>" CAMPAIGN_SESSION_SECRET="$(openssl rand -hex 32)"
+supabase functions deploy campaign-admin
+```
+
+The SMS function reads the admin phone, mNotify key, and sender ID from platform settings. Set `ADMIN_PHONE`, `MNOTIFY_API_KEY`, or `MNOTIFY_SENDER_ID` as function secrets only when the corresponding value is not configured under **Admin → Contact**. Keep `CAMPAIGN_SESSION_SECRET` and the Supabase service-role key server-side; never add them to `VITE_` variables. Campaign sessions expire after 8 hours.
 
 The portal loads cloud data and shows:
 
