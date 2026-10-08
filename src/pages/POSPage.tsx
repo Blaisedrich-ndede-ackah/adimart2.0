@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   ShoppingCart, Minus, Plus, Trash2, Search, ChevronRight, Package, AlertCircle, Bluetooth,
-  ScanBarcode, MapPin
+  ScanBarcode, MapPin, X
 } from 'lucide-react';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import CheckoutOverlay from '@/components/CheckoutOverlay';
+import FrequentItems from '@/components/FrequentItems';
 import { useCartStore } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { LocalProduct, LocalLocation, getCurrentStoreActiveProducts, getCurrentStoreId } from '@/lib/dexie';
@@ -12,7 +13,7 @@ import { playScanBeep, primeScanBeep } from '@/lib/scanBeep';
 import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 import { getBluetoothHardwareStatus, subscribeBluetoothStatus } from '@/lib/bluetoothPeripherals';
 import ProductImage from '@/components/ProductImage';
-import { getAvailableSaleModes, type SaleMode, type UnitType } from '@/lib/bulkPricing';
+import { getAvailableSaleModes, resolveSalePrice, type SaleMode, type UnitType } from '@/lib/bulkPricing';
 import { subscribeStockChanges } from '@/lib/stockEvents';
 import {
   canUserSellWholesale,
@@ -238,11 +239,40 @@ export default function POSPage() {
     if (result.success) {
       flashFeedback({ type: 'success', message: `Added: ${product.name}` }, 2000);
       playScanBeep('success');
-    } else if (result.error) {
+      return true;
+    }
+
+    if (result.error) {
       setStockError(result.error);
       playScanBeep('error');
       setTimeout(() => setStockError(null), 3000);
     }
+    return false;
+  };
+
+  const handleSearchKeyDown = async (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Escape' && searchQuery) {
+      event.preventDefault();
+      setSearchQuery('');
+      return;
+    }
+
+    if (
+      event.key !== 'Enter' ||
+      event.nativeEvent.isComposing ||
+      event.keyCode === 229 ||
+      !searchQuery.trim() ||
+      filteredProducts.length !== 1
+    ) {
+      return;
+    }
+
+    const product = filteredProducts[0];
+    const available = locationStock[product.id] ?? toQty(product.stock_level);
+    if (available <= 0) return;
+
+    event.preventDefault();
+    if (await handleAddProduct(product)) setSearchQuery('');
   };
 
   const handleIncrement = async (itemId: string) => {
@@ -421,6 +451,9 @@ export default function POSPage() {
         </div>
       )}
 
+      {/* Top 10 Frequently Bought Items */}
+      <FrequentItems onAddProduct={(product) => handleScan(product.barcode || product.id)} />
+
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
         {/* Products pane */}
         <section
@@ -430,15 +463,31 @@ export default function POSPage() {
         >
           <div className="px-3 md:px-4 pt-3 flex-shrink-0 space-y-2">
             <div className="relative">
-              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
                 placeholder={t('pos.search') + '...'}
+                aria-label="Search products by name, barcode, or category"
+                aria-describedby="pos-search-keyboard-hint"
                 data-allow-typing="true"
-                className="w-full pl-9 pr-4 py-3 bg-white border border-emerald-100 rounded-xl text-base outline-none focus:ring-2 focus:ring-primary"
+                className="w-full pl-9 pr-12 py-3 bg-white border border-emerald-100 rounded-xl text-base outline-none focus:ring-2 focus:ring-primary"
               />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  aria-label="Clear product search"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 rounded-lg text-gray-500 hover:bg-gray-100 touch-target"
+                >
+                  <X className="w-4 h-4 mx-auto" aria-hidden="true" />
+                </button>
+              )}
+              <span id="pos-search-keyboard-hint" className="sr-only">
+                Press Enter to add the only matching in-stock product. Press Escape to clear the search.
+              </span>
             </div>
             <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
               {categories.map((cat) => (
@@ -456,11 +505,24 @@ export default function POSPage() {
                 </button>
               ))}
             </div>
-            <p className="text-[11px] text-gray-500 px-0.5">
-              {loadingProducts
-                ? 'Loading products…'
-                : `${filteredProducts.length} product${filteredProducts.length === 1 ? '' : 's'}`}
-            </p>
+            <div className="flex items-center justify-between gap-3 px-0.5 text-[11px] text-gray-500">
+              <p role="status" aria-live="polite">
+                {loadingProducts
+                  ? 'Loading products…'
+                  : searchQuery.trim() || selectedCategory !== 'All'
+                    ? `${filteredProducts.length} of ${products.length} products`
+                    : `${products.length} products`}
+              </p>
+              {!loadingProducts &&
+                searchQuery.trim() &&
+                filteredProducts.length === 1 &&
+                (locationStock[filteredProducts[0].id] ?? toQty(filteredProducts[0].stock_level)) > 0 && (
+                  <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                    <kbd className="rounded border border-gray-200 bg-white px-1.5 py-0.5 font-semibold text-gray-600">Enter</kbd>
+                    adds match
+                  </span>
+                )}
+            </div>
           </div>
 
           <div className={`flex-1 overflow-y-auto px-3 md:px-4 pt-2 no-scrollbar ${cart.items.length > 0 ? 'pb-28 lg:pb-4' : 'pb-4'}`}>
@@ -480,7 +542,7 @@ export default function POSPage() {
                 </p>
               </div>
             ) : (
-              <div className="space-y-2 md:grid md:grid-cols-1 xl:grid-cols-2 md:gap-2 md:space-y-0">
+              <div className="pos-product-grid">
                 {filteredProducts.map((product) => {
                   const stockHere =
                     locationStock[product.id] !== undefined
@@ -489,43 +551,54 @@ export default function POSPage() {
                   const outOfStock = stockHere <= 0;
                   const packSize = Math.max(1, Number(product.pack_size) || 1);
                   const modes = getAvailableSaleModes(product);
-                  const wholesaleOk = saleMode === 'wholesale' && modes.includes('wholesale');
+                  const productSaleMode = saleMode === 'wholesale' && modes.includes('wholesale') ? 'wholesale' : 'retail';
+                  const displayUnitType: UnitType = unitType === 'pack' && packSize > 1 ? 'pack' : 'base';
+                  const pricePreview = resolveSalePrice({
+                    product,
+                    saleMode: productSaleMode,
+                    quantity: 1,
+                    unitType: displayUnitType,
+                  });
+                  const isWholesalePrice = pricePreview.label.startsWith('Wholesale');
+                  const unitLabel = displayUnitType === 'pack' ? 'pack' : 'unit';
                   return (
-                    <div
+                    <button
                       key={product.id}
-                      className={`bg-white rounded-xl border border-emerald-50 px-3 py-2.5 shadow-sm flex items-center gap-3 ${
-                        outOfStock ? 'opacity-55' : ''
-                      }`}
+                      type="button"
+                      onClick={() => void handleAddProduct(product)}
+                      disabled={outOfStock}
+                      aria-label={
+                        outOfStock
+                          ? `${product.name}, out of stock`
+                          : `Add ${product.name} to cart for ${money(toMoney(pricePreview.unitPrice))} per ${unitLabel}`
+                      }
+                      className="pos-product-card"
                     >
-                      <ProductImage src={product.image_url} alt={product.name} size="md" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">{product.name}</p>
-                        <p className="text-sm font-semibold text-primary mt-0.5">
-                          {money(toMoney(product.selling_price))}
-                          {packSize > 1 ? <span className="text-[10px] text-gray-400 font-medium"> / unit</span> : null}
-                        </p>
-                        {(product.track_expiry === 1 || wholesaleOk) && (
-                          <p className="text-[10px] text-gray-500 mt-0.5">
+                      <ProductImage src={product.image_url} alt="" size="md" />
+                      <span className="flex-1 min-w-0 text-left">
+                        <span className="pos-product-name block text-sm font-semibold leading-snug text-gray-900">
+                          {product.name}
+                        </span>
+                        <span className="mt-1 block text-sm font-bold text-primary">
+                          {money(toMoney(pricePreview.unitPrice))}
+                          <span className="text-[10px] text-gray-500 font-medium"> / {unitLabel}</span>
+                        </span>
+                        {(product.track_expiry === 1 || isWholesalePrice) && (
+                          <span className="mt-1 block text-[10px] leading-4 text-gray-500">
                             {product.track_expiry === 1 ? 'Expiry tracked' : ''}
-                            {product.track_expiry === 1 && wholesaleOk ? ' · ' : ''}
-                            {wholesaleOk ? 'Wholesale ready' : ''}
-                          </p>
+                            {product.track_expiry === 1 && isWholesalePrice ? ' · ' : ''}
+                            {isWholesalePrice ? 'Wholesale price' : ''}
+                          </span>
                         )}
-                        {outOfStock && (
-                          <p className="text-[10px] font-semibold text-red-600 mt-0.5">
-                            Out of stock
-                          </p>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => void handleAddProduct(product)}
-                        disabled={outOfStock}
-                        className="flex-shrink-0 px-3 py-2 rounded-lg border border-primary/30 bg-emerald-50 text-primary text-xs font-semibold touch-target disabled:opacity-40 disabled:cursor-not-allowed active:bg-emerald-100"
-                      >
-                        Add to cart
-                      </button>
-                    </div>
+                        <span className={`mt-1 block text-[10px] font-semibold ${outOfStock ? 'text-red-600' : 'text-gray-500'}`}>
+                          {outOfStock ? 'Out of stock' : `${toQty(stockHere)} available`}
+                        </span>
+                      </span>
+                      <span className="pos-product-add" aria-hidden="true">
+                        <Plus className="h-4 w-4" strokeWidth={2.5} />
+                        <span>Add</span>
+                      </span>
+                    </button>
                   );
                 })}
               </div>
@@ -537,7 +610,7 @@ export default function POSPage() {
         <section
           className={`${
             posTab === 'cart' ? 'flex' : 'hidden'
-          } lg:flex flex-col w-full lg:w-[420px] flex-shrink-0 min-h-0 bg-[var(--color-surface)] lg:bg-white`}
+          } lg:flex flex-col w-full lg:w-[420px] 2xl:w-[460px] flex-shrink-0 min-h-0 bg-[var(--color-surface)] lg:bg-white`}
         >
           <div className="hidden lg:flex items-center justify-between px-4 py-3 border-b border-emerald-100 flex-shrink-0">
             <h3 className="text-sm font-bold text-gray-800">
@@ -588,58 +661,70 @@ export default function POSPage() {
                     key={item.id}
                     className="bg-white lg:bg-[var(--color-surface)] rounded-xl p-3 shadow-sm border border-emerald-50"
                   >
-                    <div className="flex items-center gap-3">
-                      <ProductImage src={item.image_url} alt={item.name} size="md" />
+                    <div className="flex items-start gap-3">
+                      <ProductImage src={item.image_url} alt="" size="md" />
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
-                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                          <p className="text-xs text-gray-500">
-                            {money(item.unit_price)} / {item.unit_type === 'pack' ? 'pack' : 'unit'}
-                          </p>
-                          {item.sale_mode === 'wholesale' && (
-                            <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-medium">
-                              Wholesale
-                            </span>
-                          )}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="pos-product-name text-sm font-semibold leading-snug text-gray-900">
+                              {item.name}
+                            </p>
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              <p className="text-xs text-gray-500">
+                                {money(item.unit_price)} / {item.unit_type === 'pack' ? 'pack' : 'unit'}
+                              </p>
+                              {item.sale_mode === 'wholesale' && (
+                                <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-medium">
+                                  Wholesale
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => cart.removeItem(item.id)}
+                            aria-label={`Remove ${item.name} from cart`}
+                            className="touch-target flex-shrink-0 rounded-lg p-1.5 hover:bg-red-50"
+                          >
+                            <Trash2 className="w-4 h-4 text-red-400" />
+                          </button>
+                        </div>
+
+                        <div className="mt-3 flex items-center justify-between gap-3">
+                          <div role="group" aria-label={`Quantity for ${item.name}`} className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => cart.decrementItem(item.id)}
+                              disabled={item.quantity <= 1}
+                              aria-label={`Decrease quantity of ${item.name}`}
+                              className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center touch-target disabled:opacity-40"
+                            >
+                              <Minus className="w-3.5 h-3.5 text-gray-600" />
+                            </button>
+                            <input
+                              type="number"
+                              value={item.quantity}
+                              onChange={(e) => void handleUpdateQuantity(item.id, parseInt(e.target.value) || 1)}
+                              aria-label={`Quantity of ${item.name}`}
+                              inputMode="numeric"
+                              className="w-10 text-sm font-bold text-center bg-transparent border-b border-gray-200 focus:border-primary outline-none"
+                              min="1"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => void handleIncrement(item.id)}
+                              aria-label={`Increase quantity of ${item.name}`}
+                              className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center touch-target disabled:opacity-40"
+                            >
+                              <Plus className="w-3.5 h-3.5 text-primary" />
+                            </button>
+                          </div>
+                          <div className="text-right min-w-[70px]">
+                            <p className="text-[10px] font-medium text-gray-500">Line total</p>
+                            <p className="text-sm font-bold text-gray-900">{money(item.subtotal)}</p>
+                          </div>
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => cart.decrementItem(item.id)}
-                        disabled={item.quantity <= 1}
-                        className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center touch-target disabled:opacity-40"
-                      >
-                        <Minus className="w-3.5 h-3.5 text-gray-600" />
-                      </button>
-                      <input
-                        type="number"
-                        value={item.quantity}
-                        onChange={(e) => void handleUpdateQuantity(item.id, parseInt(e.target.value) || 1)}
-                        className="w-10 text-sm font-bold text-center bg-transparent border-b border-gray-200 focus:border-primary outline-none"
-                        min="1"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => void handleIncrement(item.id)}
-                        className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center touch-target disabled:opacity-40"
-                      >
-                        <Plus className="w-3.5 h-3.5 text-primary" />
-                      </button>
-                      </div>
-
-                      <div className="text-right min-w-[70px]">
-                        <p className="text-sm font-bold text-gray-900">{money(item.subtotal)}</p>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => cart.removeItem(item.id)}
-                        className="p-1.5 rounded-lg hover:bg-red-50 touch-target"
-                      >
-                        <Trash2 className="w-4 h-4 text-red-400" />
-                      </button>
                     </div>
                   </div>
                 ))}
@@ -650,6 +735,12 @@ export default function POSPage() {
           {/* Desktop checkout docked in cart column */}
           {cart.items.length > 0 && (
             <div className="hidden lg:block flex-shrink-0 border-t border-emerald-100 p-4 bg-white">
+              <div className="mb-2 flex items-center justify-between gap-2 text-xs text-gray-500">
+                <span>{cartCount} item{cartCount === 1 ? '' : 's'} in this sale</span>
+                {cart.discountAmount > 0 && (
+                  <span className="font-semibold text-emerald-700">Saved {money(cart.discountAmount)}</span>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => {

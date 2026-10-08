@@ -163,8 +163,8 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
 
   return (
     <div className="h-full min-h-0 bg-emerald-50/60 flex flex-col overflow-hidden">
-      <header className="bg-gradient-to-br from-primary-dark via-primary to-emerald-700 text-white px-4 py-5 flex-shrink-0 shadow-lg">
-        <div className="max-w-3xl mx-auto flex items-center gap-3">
+      <header className="bg-gradient-to-br from-primary-dark via-primary to-emerald-700 text-white px-4 py-5 xl:px-0 flex-shrink-0 shadow-lg">
+        <div className="mx-auto flex w-full items-center gap-3 xl:px-8 2xl:px-12">
           {catalog.store.logo_url ? (
             <img
               src={catalog.store.logo_url}
@@ -201,7 +201,7 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
         className="flex-1 min-h-0 overflow-y-auto overscroll-contain"
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
-        <div className="max-w-3xl mx-auto w-full px-4 py-5 pb-28">
+        <div className="mx-auto w-full px-4 py-5 pb-28 xl:px-8 2xl:px-12">
           <section className="mb-5 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-emerald-100">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Welcome to {catalog.store.name}</p>
             <p className="mt-1 text-sm text-gray-600">{catalog.store.tagline}</p>
@@ -275,7 +275,7 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
                   <p className="text-sm">No products listed yet</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-6">
                   {filtered.map((product) => (
                     <div
                       key={product.id}
@@ -449,7 +449,7 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
           <button
             type="button"
             onClick={() => setView('cart')}
-            className="pointer-events-auto max-w-3xl mx-auto w-full bg-primary text-white py-3.5 rounded-2xl flex items-center justify-between px-5 shadow-lg font-semibold"
+            className="pointer-events-auto max-w-3xl xl:max-w-5xl 2xl:max-w-6xl mx-auto w-full bg-primary text-white py-3.5 rounded-2xl flex items-center justify-between px-5 shadow-lg font-semibold"
           >
             <span>View cart ({cartCount})</span>
             <span>{money(cartTotal)}</span>

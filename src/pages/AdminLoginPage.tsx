@@ -9,6 +9,7 @@ import {
   clearAdminSmsChallenge,
 } from '@/lib/adminAuth';
 import { isSupabaseConfigured } from '@/lib/supabase';
+import AuthShowcase from '@/components/AuthShowcase';
 
 interface AdminLoginPageProps {
   onSuccess: () => void;
@@ -115,8 +116,14 @@ export default function AdminLoginPage({ onSuccess, onBack }: AdminLoginPageProp
   };
 
   return (
-    <div className="auth-shell">
-      <div className="w-full max-w-md px-1">
+    <div className="auth-shell wide-auth-shell">
+      <AuthShowcase
+        variant="admin"
+        eyebrow="Platform administration"
+        title="Keep every store in sync."
+        description="Manage store access, subscriptions, and payouts from one clear workspace."
+      />
+      <div className="w-full max-w-md px-1 wide-auth-card">
         <button
           onClick={() => {
             clearAdminSmsChallenge();

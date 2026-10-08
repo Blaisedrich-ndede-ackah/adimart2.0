@@ -654,7 +654,7 @@ export default function ReportsPage() {
         )}
 
         {tab === 'locations' && (
-          <div className="space-y-3 md:max-w-3xl md:mx-auto">
+          <div className="space-y-3 md:max-w-3xl md:mx-auto xl:max-w-none xl:mx-0">
             <p className="text-xs text-gray-500 leading-relaxed">
               Export an individual report for each shop or warehouse. Uses the selected period (
               {periodLabel}) for sales, plus on-hand stock valuation.
