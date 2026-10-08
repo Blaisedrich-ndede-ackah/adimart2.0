@@ -7,6 +7,7 @@ import { hasStoreLogo } from '@/lib/productImage';
 import { confirmPinResetWithOtp, requestPinResetOtp } from '@/lib/pinReset';
 import { listLocations, verifyLocationAccessPin } from '@/lib/warehouse';
 import CommunityChatButton from '@/components/CommunityChatButton';
+import AuthShowcase from '@/components/AuthShowcase';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
 import { useT } from '@/lib/i18n';
 import {
@@ -203,14 +204,24 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
   const showPicker = stores.length > 1 || warehouses.length > 0;
 
   return (
-    <div className="auth-shell">
-      <div className="auth-panel flex flex-col items-center animate-fade-in">
-        <div className="flex flex-col items-center mb-6 w-full">
-          <div className="w-20 h-20 md:w-24 md:h-24 bg-white rounded-2xl flex items-center justify-center mb-4 shadow-lg overflow-hidden">
+    <div className="auth-shell wide-auth-shell">
+      <AuthShowcase
+        variant="store"
+        eyebrow={warehouseMode ? 'Warehouse access' : 'Store operations'}
+        title={warehouseMode ? 'Secure access for every location.' : 'A clearer view of your whole store.'}
+        description={
+          warehouseMode
+            ? 'Keep warehouse access connected to your stock and day-to-day store operations.'
+            : 'Keep checkout, stock, and daily performance close at hand as your store grows.'
+        }
+      />
+      <div className="auth-panel wide-auth-card flex flex-col items-center animate-fade-in">
+        <div className="flex flex-col items-center mb-6 lg:mb-4 w-full">
+          <div className="w-20 h-20 md:w-24 md:h-24 lg:w-20 lg:h-20 bg-white rounded-2xl flex items-center justify-center mb-4 lg:mb-3 shadow-lg overflow-hidden">
             {hasStoreLogo(storeLogo) ? (
               <img src={storeLogo!} alt={storeName || 'Store logo'} className="w-full h-full object-cover" />
             ) : (
-              <img src="/logo.png" alt="Adimat" className="w-14 h-14 md:w-16 md:h-16 object-contain" />
+              <img src="/logo.png" alt="Adimat" className="w-14 h-14 md:w-16 md:h-16 lg:w-14 lg:h-14 object-contain" />
             )}
           </div>
           <h1 className="text-3xl md:text-4xl font-bold text-white tracking-tight">
@@ -314,7 +325,7 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
           )}
         </div>
 
-        <div className={`relative flex gap-3 mb-6 ${shake ? 'animate-[shake_0.5s_ease-in-out]' : ''}`}>
+        <div className={`relative flex gap-3 mb-6 lg:mb-4 ${shake ? 'animate-[shake_0.5s_ease-in-out]' : ''}`}>
           {[0, 1, 2, 3].map(i => (
             <div
               key={i}
@@ -361,7 +372,7 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
                   key={key}
                   onClick={() => void handleKeyPress(key)}
                   disabled={!biometricAvailable || warehouseMode}
-                  className={`h-16 md:h-[4.5rem] rounded-2xl flex items-center justify-center touch-target transition-colors ${
+                  className={`h-16 md:h-[4.5rem] lg:h-[3.75rem] rounded-2xl flex items-center justify-center touch-target transition-colors ${
                     biometricAvailable && !warehouseMode
                       ? 'bg-white/20 active:bg-white/30'
                       : 'bg-white/5 opacity-40'
@@ -377,7 +388,7 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
                 <button
                   key={key}
                   onClick={() => void handleKeyPress(key)}
-                  className="h-16 md:h-[4.5rem] rounded-2xl bg-white/10 flex items-center justify-center touch-target active:bg-white/20 transition-colors"
+                  className="h-16 md:h-[4.5rem] lg:h-[3.75rem] rounded-2xl bg-white/10 flex items-center justify-center touch-target active:bg-white/20 transition-colors"
                 >
                   <Delete className="w-6 h-6 text-emerald-200" />
                 </button>
@@ -388,7 +399,7 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
                 key={key}
                 onClick={() => void handleKeyPress(key)}
                 disabled={isLoading}
-                className="h-16 md:h-[4.5rem] rounded-2xl bg-white/15 text-white text-2xl font-semibold touch-target active:bg-white/30 transition-colors disabled:opacity-50"
+                className="h-16 md:h-[4.5rem] lg:h-[3.75rem] rounded-2xl bg-white/15 text-white text-2xl font-semibold touch-target active:bg-white/30 transition-colors disabled:opacity-50"
               >
                 {key}
               </button>
@@ -404,13 +415,13 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
 
         {!warehouseMode && <ForgotPinSection />}
 
-        <LanguageSwitcher variant="onPrimary" className="mt-6 max-w-[280px] md:max-w-[300px]" compact />
+        <LanguageSwitcher variant="onPrimary" className="mt-6 lg:mt-4 max-w-[280px] md:max-w-[300px]" compact />
 
-        <CommunityChatButton variant="auth" className="mt-4" />
+        <CommunityChatButton variant="auth" className="mt-4 lg:mt-3" />
 
         <a
           href="#/terms"
-          className="mt-4 inline-flex items-center gap-1.5 text-emerald-100/85 text-xs font-medium touch-target"
+          className="mt-4 lg:mt-3 inline-flex items-center gap-1.5 text-emerald-100/85 text-xs font-medium touch-target"
         >
           <FileText className="w-3.5 h-3.5" />
           Terms &amp; Conditions
@@ -419,7 +430,7 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
         {onOpenAdmin && (
           <button
             onClick={onOpenAdmin}
-            className="mt-4 flex items-center gap-2 text-emerald-100/80 text-xs font-medium touch-target"
+            className="mt-4 lg:mt-3 flex items-center gap-2 text-emerald-100/80 text-xs font-medium touch-target"
           >
             <Shield className="w-3.5 h-3.5" />
             {t('login.adminPortal')}
@@ -480,7 +491,7 @@ function ForgotPinSection() {
   };
 
   return (
-    <div className="mt-8 w-full max-w-[280px] md:max-w-[300px]">
+    <div className="mt-8 lg:mt-5 w-full max-w-[280px] md:max-w-[300px]">
       <button
         type="button"
         onClick={() => {

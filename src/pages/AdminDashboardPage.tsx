@@ -417,14 +417,14 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
 
   return (
     <div
-      className="h-full bg-[var(--color-surface)] flex flex-col overflow-hidden lg:max-w-6xl lg:mx-auto lg:border-x lg:border-emerald-100 lg:shadow-xl"
+      className="h-full w-full min-w-0 bg-[var(--color-surface)] flex flex-col overflow-hidden"
       style={{
         paddingTop: 'env(safe-area-inset-top)',
         paddingLeft: 'env(safe-area-inset-left)',
         paddingRight: 'env(safe-area-inset-right)',
       }}
     >
-      <header className="bg-primary text-white px-3 sm:px-4 md:px-6 py-3 flex-shrink-0">
+      <header className="bg-primary text-white px-3 sm:px-4 md:px-6 lg:px-8 2xl:px-12 py-3 lg:py-4 2xl:py-5 flex-shrink-0">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             <p className="text-emerald-200 text-[10px] font-semibold uppercase tracking-wide">Adimat Admin</p>
@@ -474,7 +474,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       </header>
 
       {/* Desktop / tablet top tabs */}
-      <nav className="hidden lg:flex bg-white border-b border-emerald-100 px-2 md:px-4 py-2 gap-1 overflow-x-auto no-scrollbar flex-shrink-0">
+      <nav className="hidden lg:flex bg-white border-b border-emerald-100 px-2 md:px-4 lg:px-8 2xl:px-12 py-2 gap-1 overflow-x-auto no-scrollbar flex-shrink-0">
         {tabs.map(([id, label]) => (
           <button
             key={id}
@@ -489,7 +489,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       </nav>
 
       <main
-        className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 md:px-6 py-3 md:py-5 pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-8"
+        className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 md:px-6 lg:px-8 2xl:px-12 py-3 md:py-5 lg:py-6 2xl:py-8 pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-8"
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
         {loading && !data && tab !== 'contact' && tab !== 'reports' && (
@@ -520,8 +520,8 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         )}
 
         {data && tab === 'overview' && (
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-2">
+          <div className="grid gap-3 xl:grid-cols-2 xl:gap-4">
+            <div className="grid grid-cols-2 gap-2 xl:col-span-2 xl:grid-cols-4 xl:gap-3">
               <StatCard icon={<Building2 className="w-4 h-4" />} label="Stores" value={String(data.totals.stores)} />
               <StatCard icon={<Users className="w-4 h-4" />} label="Users" value={String(data.totals.users)} />
               <StatCard icon={<Package className="w-4 h-4" />} label="Products" value={String(data.totals.products)} />
@@ -574,10 +574,14 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
               </div>
             </div>
 
-            <h2 className="text-sm font-bold text-slate-800 pt-1">Stores by weekly Paystack</h2>
-            {data.performance.slice(0, 8).map((row) => (
-              <StoreRevenueCard key={row.store.id} row={row} compact />
-            ))}
+            <section className="xl:col-span-2">
+              <h2 className="text-sm font-bold text-slate-800">Stores by weekly Paystack</h2>
+              <div className="mt-3 grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
+                {data.performance.slice(0, 8).map((row) => (
+                  <StoreRevenueCard key={row.store.id} row={row} compact />
+                ))}
+              </div>
+            </section>
           </div>
         )}
 

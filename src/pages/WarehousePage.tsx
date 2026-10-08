@@ -674,7 +674,7 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
             <span className="text-sm">Loading…</span>
           </div>
         ) : mode === 'hub' ? (
-          <div className="space-y-3 md:max-w-3xl md:mx-auto">
+          <div className="space-y-3 md:max-w-3xl md:mx-auto xl:max-w-none xl:mx-0">
             <div className="bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3 text-xs text-emerald-900 leading-relaxed">
               Create and unlock warehouses from <span className="font-semibold">Settings → My Warehouses</span>.
               You can still add extra shop locations here if your admin raised the shop limit.
@@ -725,7 +725,7 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
             {locations.length === 0 ? (
               <div className="text-center py-12 text-gray-400 text-sm">No locations yet</div>
             ) : (
-              <div className="space-y-2 md:grid md:grid-cols-2 md:gap-3 md:space-y-0">
+              <div className="space-y-2 md:grid md:grid-cols-2 md:gap-3 md:space-y-0 xl:grid-cols-3 2xl:grid-cols-4">
                 {locations.map((loc) => {
                   const stats = locationStats[loc.id];
                   return (
@@ -817,7 +817,7 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
         ) : (
           <>
             {tab === 'stock' && (
-              <div className="space-y-3 md:max-w-3xl md:mx-auto">
+              <div className="space-y-3 md:max-w-3xl md:mx-auto xl:max-w-none xl:mx-0">
                 <div className="relative">
                   <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
@@ -1078,7 +1078,7 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
             )}
 
             {tab === 'expiry' && (
-              <div className="space-y-3 md:max-w-3xl md:mx-auto">
+              <div className="space-y-3 md:max-w-3xl md:mx-auto xl:max-w-none xl:mx-0">
                 <p className="text-xs text-gray-500 px-0.5">
                   Batches at {activeLocation?.name} expiring within 30 days
                 </p>
@@ -1203,7 +1203,7 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
             )}
 
             {tab === 'history' && (
-              <div className="space-y-2 md:max-w-3xl md:mx-auto">
+              <div className="space-y-2 md:max-w-3xl md:mx-auto xl:max-w-none xl:mx-0">
                 <p className="text-xs text-gray-500 px-0.5">
                   Recent movements for {activeLocation?.name}
                 </p>

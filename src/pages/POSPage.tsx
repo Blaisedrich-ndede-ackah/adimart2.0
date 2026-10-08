@@ -480,7 +480,7 @@ export default function POSPage() {
                 </p>
               </div>
             ) : (
-              <div className="space-y-2 md:grid md:grid-cols-1 xl:grid-cols-2 md:gap-2 md:space-y-0">
+              <div className="pos-product-grid">
                 {filteredProducts.map((product) => {
                   const stockHere =
                     locationStock[product.id] !== undefined
@@ -537,7 +537,7 @@ export default function POSPage() {
         <section
           className={`${
             posTab === 'cart' ? 'flex' : 'hidden'
-          } lg:flex flex-col w-full lg:w-[420px] flex-shrink-0 min-h-0 bg-[var(--color-surface)] lg:bg-white`}
+          } lg:flex flex-col w-full lg:w-[420px] 2xl:w-[460px] flex-shrink-0 min-h-0 bg-[var(--color-surface)] lg:bg-white`}
         >
           <div className="hidden lg:flex items-center justify-between px-4 py-3 border-b border-emerald-100 flex-shrink-0">
             <h3 className="text-sm font-bold text-gray-800">

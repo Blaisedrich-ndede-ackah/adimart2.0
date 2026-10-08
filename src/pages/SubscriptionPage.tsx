@@ -114,14 +114,14 @@ export default function SubscriptionPage() {
         </button>
       </div>
 
-      <div className="page-body no-scrollbar space-y-3 md:max-w-3xl md:mx-auto md:w-full">
+      <div className="page-body no-scrollbar space-y-3 md:max-w-3xl md:mx-auto md:w-full xl:max-w-none xl:mx-0 xl:grid xl:grid-cols-2 xl:items-start xl:gap-4 xl:space-y-0">
         {statusMsg && (
-          <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl px-3 py-2 text-xs">
+          <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl px-3 py-2 text-xs xl:col-span-2">
             {statusMsg}
           </div>
         )}
         {errorMsg && (
-          <div className="bg-red-50 border border-red-200 text-red-800 rounded-xl px-3 py-2 text-xs">
+          <div className="bg-red-50 border border-red-200 text-red-800 rounded-xl px-3 py-2 text-xs xl:col-span-2">
             {errorMsg}
           </div>
         )}
@@ -182,7 +182,7 @@ export default function SubscriptionPage() {
           />
         )}
 
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 xl:col-span-2">
           <div className="flex items-center gap-2 mb-1">
             <Headphones className="w-5 h-5 text-slate-700" />
             <h2 className="font-bold text-gray-900">Customer care</h2>
@@ -202,7 +202,7 @@ export default function SubscriptionPage() {
               and email under Admin → Contact.
             </div>
           ) : (
-            <div className="space-y-2 mb-2">
+            <div className="space-y-2 mb-2 xl:grid xl:grid-cols-3 xl:gap-3 xl:space-y-0">
               {whatsappDigits && (
                 <a
                   href={`https://wa.me/${whatsappDigits}?text=${careMessage}`}
@@ -250,7 +250,7 @@ export default function SubscriptionPage() {
           <CommunityChatButton variant="care" label="Community chat" />
         </div>
 
-        <p className="text-[11px] text-gray-500 text-center px-4 pb-2">
+        <p className="text-[11px] text-gray-500 text-center px-4 pb-2 xl:col-span-2">
           Signed in as {currentUser?.name} ({currentUser?.role}).
         </p>
       </div>

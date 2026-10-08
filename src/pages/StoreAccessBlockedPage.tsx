@@ -94,8 +94,8 @@ export default function StoreAccessBlockedPage() {
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3 md:max-w-3xl md:mx-auto md:w-full pb-8">
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
+      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3 md:max-w-3xl md:mx-auto md:w-full pb-8 xl:max-w-none xl:mx-0 xl:grid xl:grid-cols-2 xl:items-start xl:gap-4 xl:space-y-0 xl:px-8 2xl:px-12">
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950 xl:col-span-2">
           <p className="text-sm font-semibold">Pay a package to continue</p>
           <p className="text-xs mt-1 leading-relaxed">
             An administrator locked this store. After a successful payment the lock is removed
@@ -120,7 +120,7 @@ export default function StoreAccessBlockedPage() {
           />
         )}
 
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 xl:col-span-2">
           <div className="flex items-center gap-2 mb-1">
             <Headphones className="w-5 h-5 text-slate-700" />
             <h2 className="font-bold text-gray-900">Customer care</h2>
@@ -139,7 +139,7 @@ export default function StoreAccessBlockedPage() {
               Customer care contacts are not set yet.
             </div>
           ) : (
-            <div className="space-y-2 mb-2">
+            <div className="space-y-2 mb-2 xl:grid xl:grid-cols-3 xl:gap-3 xl:space-y-0">
               {whatsappDigits && (
                 <a
                   href={`https://wa.me/${whatsappDigits}?text=${careMessage}`}

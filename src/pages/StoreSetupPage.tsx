@@ -3,6 +3,7 @@ import { CloudDownload, Shield, Loader2 } from 'lucide-react';
 import { restoreStoreFromCloud } from '@/lib/dexie';
 import { useAuthStore } from '@/store/useAuthStore';
 import CommunityChatButton from '@/components/CommunityChatButton';
+import AuthShowcase from '@/components/AuthShowcase';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
 import { useT } from '@/lib/i18n';
 
@@ -49,20 +50,26 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
   };
 
   return (
-    <div className="auth-shell">
-      <div className="auth-panel">
-        <div className="flex flex-col items-center mb-6 sm:mb-8">
-          <div className="w-[4.5rem] h-[4.5rem] sm:w-20 sm:h-20 md:w-24 md:h-24 bg-white rounded-2xl flex items-center justify-center mb-4 shadow-lg">
-            <img src="/logo.png" alt="Adimat" className="w-12 h-12 sm:w-14 sm:h-14 md:w-16 md:h-16 object-contain" />
+    <div className="auth-shell wide-auth-shell">
+      <AuthShowcase
+        variant="store"
+        eyebrow="Store setup"
+        title="Reconnect your store and carry on."
+        description="Restore your synced workspace with the Store ID and owner PIN set by your administrator."
+      />
+      <div className="auth-panel wide-auth-card">
+        <div className="flex flex-col items-center mb-6 sm:mb-8 lg:mb-4">
+          <div className="w-[4.5rem] h-[4.5rem] sm:w-20 sm:h-20 md:w-24 md:h-24 lg:w-20 lg:h-20 bg-white rounded-2xl flex items-center justify-center mb-4 lg:mb-2 shadow-lg">
+            <img src="/logo.png" alt="Adimat" className="w-12 h-12 sm:w-14 sm:h-14 md:w-16 md:h-16 lg:w-14 lg:h-14 object-contain" />
           </div>
           <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white tracking-tight">Adimat</h1>
           <p className="text-emerald-100/90 text-sm mt-2 text-center px-2">
             {t('setup.chooseTitle')}
           </p>
-          <LanguageSwitcher variant="onPrimary" className="mt-4 w-full max-w-sm" compact />
+          <LanguageSwitcher variant="onPrimary" className="mt-4 lg:mt-2 w-full max-w-sm" compact />
         </div>
 
-        <div className="bg-white rounded-2xl p-5 sm:p-6 shadow-xl animate-fade-in space-y-4">
+        <div className="store-setup-form bg-white rounded-2xl p-5 sm:p-6 shadow-xl animate-fade-in space-y-4">
           <div>
             <p className="text-sm font-bold text-slate-900">{t('setup.restore')}</p>
             <p className="text-xs text-slate-500 mt-1 leading-relaxed">{t('setup.restoreHint')}</p>

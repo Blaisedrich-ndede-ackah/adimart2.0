@@ -207,7 +207,7 @@ export default function EcommercePage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-3xl space-y-4 p-4 pb-24 md:p-6">
+      <div className="mx-auto w-full max-w-3xl space-y-4 p-4 pb-24 md:p-6 xl:max-w-none xl:px-8 2xl:px-12">
         <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-4 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
