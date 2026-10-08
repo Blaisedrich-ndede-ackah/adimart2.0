@@ -35,9 +35,19 @@ async function functionErrorMessage(error: unknown): Promise<string> {
   if (!(error instanceof Error)) return 'Secure admin sign-in could not be completed.';
   const context = (error as Error & { context?: Response }).context;
   const responseBody = context
-    ? await context.clone().json().catch(() => null) as { error?: string } | null
+    ? await context.clone().json().catch(() => null) as { error?: string; message?: string } | null
     : null;
-  return responseBody?.error || error.message;
+  if (context?.status === 404) {
+    return 'The campaign-admin Edge Function was not found. Deploy it to the Supabase project used by this app.';
+  }
+  return responseBody?.error || responseBody?.message || error.message;
+}
+
+function functionRequestError(error: unknown): string {
+  if (error instanceof Error && /failed to fetch|load failed|networkerror|fetch failed/i.test(error.message)) {
+    return 'Could not connect to the campaign-admin Edge Function. Check the network and VITE_SUPABASE_URL, and confirm the function is deployed.';
+  }
+  return error instanceof Error ? error.message : 'Secure admin sign-in could not be completed.';
 }
 
 interface PendingAdminOtp {
@@ -73,13 +83,17 @@ export async function beginAdminSmsChallenge(pin: string): Promise<{
     if (error || !data?.challengeId) {
       return { success: false, error: data?.error || (error ? await functionErrorMessage(error) : 'Could not send SMS code.') };
     }
-    sessionStorage.setItem(ADMIN_OTP_KEY, JSON.stringify({
-      challengeId: data.challengeId,
-      expiresAt: Date.now() + OTP_TTL_MS,
-    }));
+    try {
+      sessionStorage.setItem(ADMIN_OTP_KEY, JSON.stringify({
+        challengeId: data.challengeId,
+        expiresAt: Date.now() + OTP_TTL_MS,
+      }));
+    } catch {
+      return { success: false, error: 'Your browser blocked session storage. Allow site storage, then request a new code.' };
+    }
     return { success: true, maskedPhone: data.maskedPhone };
-  } catch {
-    return { success: false, error: 'Could not reach secure admin sign-in. Try again.' };
+  } catch (error) {
+    return { success: false, error: functionRequestError(error) };
   }
 }
 
@@ -93,11 +107,15 @@ export async function verifyAdminSmsOtp(code: string): Promise<{ success: boolea
     if (error || !data?.sessionToken) {
       return { success: false, error: data?.error || (error ? await functionErrorMessage(error) : 'Could not verify the SMS code.') };
     }
-    sessionStorage.setItem(CAMPAIGN_SESSION_KEY, data.sessionToken);
-    sessionStorage.removeItem(ADMIN_OTP_KEY);
+    try {
+      sessionStorage.setItem(CAMPAIGN_SESSION_KEY, data.sessionToken);
+      sessionStorage.removeItem(ADMIN_OTP_KEY);
+    } catch {
+      return { success: false, error: 'Your browser blocked session storage. Allow site storage and sign in again.' };
+    }
     return { success: true };
-  } catch {
-    return { success: false, error: 'Could not reach secure admin sign-in. Try again.' };
+  } catch (error) {
+    return { success: false, error: functionRequestError(error) };
   }
 }
 
