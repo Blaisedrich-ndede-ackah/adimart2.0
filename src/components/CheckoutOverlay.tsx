@@ -443,15 +443,15 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
         <div className="p-5">
           {step !== 'success' && step !== 'processing' && step !== 'paystack' && (
             <div className="bg-gray-50 rounded-xl p-4 mb-5">
-              <div className="space-y-2 mb-3 max-h-36 overflow-y-auto">
+              <div className="space-y-2 mb-3 max-h-44 sm:max-h-56 overflow-y-auto">
                 {cart.items.map((item) => (
-                  <div key={item.id} className="flex items-center gap-2">
-                    <ProductImage src={item.image_url} alt={item.name} size="sm" />
+                  <div key={item.id} className="flex items-start gap-2">
+                    <ProductImage src={item.image_url} alt="" size="sm" />
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-gray-800 truncate">{item.name}</p>
-                      <p className="text-[10px] text-gray-500">×{item.quantity}</p>
+                      <p className="pos-product-name text-xs font-medium leading-snug text-gray-800">{item.name}</p>
+                      <p className="mt-1 text-[10px] text-gray-500">×{item.quantity}</p>
                     </div>
-                    <p className="text-xs font-semibold text-gray-800">{money(item.subtotal)}</p>
+                    <p className="shrink-0 text-right text-xs font-semibold text-gray-800">{money(item.subtotal)}</p>
                   </div>
                 ))}
               </div>

@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   ShoppingCart, Minus, Plus, Trash2, Search, ChevronRight, Package, AlertCircle, Bluetooth,
-  ScanBarcode, MapPin
+  ScanBarcode, MapPin, X
 } from 'lucide-react';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import CheckoutOverlay from '@/components/CheckoutOverlay';
@@ -12,7 +12,7 @@ import { playScanBeep, primeScanBeep } from '@/lib/scanBeep';
 import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 import { getBluetoothHardwareStatus, subscribeBluetoothStatus } from '@/lib/bluetoothPeripherals';
 import ProductImage from '@/components/ProductImage';
-import { getAvailableSaleModes, type SaleMode, type UnitType } from '@/lib/bulkPricing';
+import { getAvailableSaleModes, resolveSalePrice, type SaleMode, type UnitType } from '@/lib/bulkPricing';
 import { subscribeStockChanges } from '@/lib/stockEvents';
 import {
   canUserSellWholesale,
@@ -238,11 +238,40 @@ export default function POSPage() {
     if (result.success) {
       flashFeedback({ type: 'success', message: `Added: ${product.name}` }, 2000);
       playScanBeep('success');
-    } else if (result.error) {
+      return true;
+    }
+
+    if (result.error) {
       setStockError(result.error);
       playScanBeep('error');
       setTimeout(() => setStockError(null), 3000);
     }
+    return false;
+  };
+
+  const handleSearchKeyDown = async (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Escape' && searchQuery) {
+      event.preventDefault();
+      setSearchQuery('');
+      return;
+    }
+
+    if (
+      event.key !== 'Enter' ||
+      event.nativeEvent.isComposing ||
+      event.keyCode === 229 ||
+      !searchQuery.trim() ||
+      filteredProducts.length !== 1
+    ) {
+      return;
+    }
+
+    const product = filteredProducts[0];
+    const available = locationStock[product.id] ?? toQty(product.stock_level);
+    if (available <= 0) return;
+
+    event.preventDefault();
+    if (await handleAddProduct(product)) setSearchQuery('');
   };
 
   const handleIncrement = async (itemId: string) => {
@@ -430,15 +459,31 @@ export default function POSPage() {
         >
           <div className="px-3 md:px-4 pt-3 flex-shrink-0 space-y-2">
             <div className="relative">
-              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
                 placeholder={t('pos.search') + '...'}
+                aria-label="Search products by name, barcode, or category"
+                aria-describedby="pos-search-keyboard-hint"
                 data-allow-typing="true"
-                className="w-full pl-9 pr-4 py-3 bg-white border border-emerald-100 rounded-xl text-base outline-none focus:ring-2 focus:ring-primary"
+                className="w-full pl-9 pr-12 py-3 bg-white border border-emerald-100 rounded-xl text-base outline-none focus:ring-2 focus:ring-primary"
               />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  aria-label="Clear product search"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 rounded-lg text-gray-500 hover:bg-gray-100 touch-target"
+                >
+                  <X className="w-4 h-4 mx-auto" aria-hidden="true" />
+                </button>
+              )}
+              <span id="pos-search-keyboard-hint" className="sr-only">
+                Press Enter to add the only matching in-stock product. Press Escape to clear the search.
+              </span>
             </div>
             <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
               {categories.map((cat) => (
@@ -456,11 +501,24 @@ export default function POSPage() {
                 </button>
               ))}
             </div>
-            <p className="text-[11px] text-gray-500 px-0.5">
-              {loadingProducts
-                ? 'Loading products…'
-                : `${filteredProducts.length} product${filteredProducts.length === 1 ? '' : 's'}`}
-            </p>
+            <div className="flex items-center justify-between gap-3 px-0.5 text-[11px] text-gray-500">
+              <p role="status" aria-live="polite">
+                {loadingProducts
+                  ? 'Loading products…'
+                  : searchQuery.trim() || selectedCategory !== 'All'
+                    ? `${filteredProducts.length} of ${products.length} products`
+                    : `${products.length} products`}
+              </p>
+              {!loadingProducts &&
+                searchQuery.trim() &&
+                filteredProducts.length === 1 &&
+                (locationStock[filteredProducts[0].id] ?? toQty(filteredProducts[0].stock_level)) > 0 && (
+                  <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                    <kbd className="rounded border border-gray-200 bg-white px-1.5 py-0.5 font-semibold text-gray-600">Enter</kbd>
+                    adds match
+                  </span>
+                )}
+            </div>
           </div>
 
           <div className={`flex-1 overflow-y-auto px-3 md:px-4 pt-2 no-scrollbar ${cart.items.length > 0 ? 'pb-28 lg:pb-4' : 'pb-4'}`}>
@@ -489,7 +547,16 @@ export default function POSPage() {
                   const outOfStock = stockHere <= 0;
                   const packSize = Math.max(1, Number(product.pack_size) || 1);
                   const modes = getAvailableSaleModes(product);
-                  const wholesaleOk = saleMode === 'wholesale' && modes.includes('wholesale');
+                  const productSaleMode = saleMode === 'wholesale' && modes.includes('wholesale') ? 'wholesale' : 'retail';
+                  const displayUnitType: UnitType = unitType === 'pack' && packSize > 1 ? 'pack' : 'base';
+                  const pricePreview = resolveSalePrice({
+                    product,
+                    saleMode: productSaleMode,
+                    quantity: 1,
+                    unitType: displayUnitType,
+                  });
+                  const isWholesalePrice = pricePreview.label.startsWith('Wholesale');
+                  const unitLabel = displayUnitType === 'pack' ? 'pack' : 'unit';
                   return (
                     <button
                       key={product.id}
@@ -499,7 +566,7 @@ export default function POSPage() {
                       aria-label={
                         outOfStock
                           ? `${product.name}, out of stock`
-                          : `Add ${product.name} to cart for ${money(toMoney(product.selling_price))}`
+                          : `Add ${product.name} to cart for ${money(toMoney(pricePreview.unitPrice))} per ${unitLabel}`
                       }
                       className="pos-product-card"
                     >
@@ -509,21 +576,19 @@ export default function POSPage() {
                           {product.name}
                         </span>
                         <span className="mt-1 block text-sm font-bold text-primary">
-                          {money(toMoney(product.selling_price))}
-                          {packSize > 1 ? <span className="text-[10px] text-gray-400 font-medium"> / unit</span> : null}
+                          {money(toMoney(pricePreview.unitPrice))}
+                          <span className="text-[10px] text-gray-500 font-medium"> / {unitLabel}</span>
                         </span>
-                        {(product.track_expiry === 1 || wholesaleOk) && (
+                        {(product.track_expiry === 1 || isWholesalePrice) && (
                           <span className="mt-1 block text-[10px] leading-4 text-gray-500">
                             {product.track_expiry === 1 ? 'Expiry tracked' : ''}
-                            {product.track_expiry === 1 && wholesaleOk ? ' · ' : ''}
-                            {wholesaleOk ? 'Wholesale ready' : ''}
+                            {product.track_expiry === 1 && isWholesalePrice ? ' · ' : ''}
+                            {isWholesalePrice ? 'Wholesale price' : ''}
                           </span>
                         )}
-                        {outOfStock && (
-                          <span className="mt-1 block text-[10px] font-semibold text-red-600">
-                            Out of stock
-                          </span>
-                        )}
+                        <span className={`mt-1 block text-[10px] font-semibold ${outOfStock ? 'text-red-600' : 'text-gray-500'}`}>
+                          {outOfStock ? 'Out of stock' : `${toQty(stockHere)} available`}
+                        </span>
                       </span>
                       <span className="pos-product-add" aria-hidden="true">
                         <Plus className="h-4 w-4" strokeWidth={2.5} />
@@ -651,6 +716,7 @@ export default function POSPage() {
                             </button>
                           </div>
                           <div className="text-right min-w-[70px]">
+                            <p className="text-[10px] font-medium text-gray-500">Line total</p>
                             <p className="text-sm font-bold text-gray-900">{money(item.subtotal)}</p>
                           </div>
                         </div>
@@ -665,6 +731,12 @@ export default function POSPage() {
           {/* Desktop checkout docked in cart column */}
           {cart.items.length > 0 && (
             <div className="hidden lg:block flex-shrink-0 border-t border-emerald-100 p-4 bg-white">
+              <div className="mb-2 flex items-center justify-between gap-2 text-xs text-gray-500">
+                <span>{cartCount} item{cartCount === 1 ? '' : 's'} in this sale</span>
+                {cart.discountAmount > 0 && (
+                  <span className="font-semibold text-emerald-700">Saved {money(cart.discountAmount)}</span>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => {
