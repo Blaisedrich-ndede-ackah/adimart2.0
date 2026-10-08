@@ -491,41 +491,45 @@ export default function POSPage() {
                   const modes = getAvailableSaleModes(product);
                   const wholesaleOk = saleMode === 'wholesale' && modes.includes('wholesale');
                   return (
-                    <div
+                    <button
                       key={product.id}
-                      className={`bg-white rounded-xl border border-emerald-50 px-3 py-2.5 shadow-sm flex items-center gap-3 ${
-                        outOfStock ? 'opacity-55' : ''
-                      }`}
+                      type="button"
+                      onClick={() => void handleAddProduct(product)}
+                      disabled={outOfStock}
+                      aria-label={
+                        outOfStock
+                          ? `${product.name}, out of stock`
+                          : `Add ${product.name} to cart for ${money(toMoney(product.selling_price))}`
+                      }
+                      className="pos-product-card"
                     >
-                      <ProductImage src={product.image_url} alt={product.name} size="md" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">{product.name}</p>
-                        <p className="text-sm font-semibold text-primary mt-0.5">
+                      <ProductImage src={product.image_url} alt="" size="md" />
+                      <span className="flex-1 min-w-0 text-left">
+                        <span className="pos-product-name block text-sm font-semibold leading-snug text-gray-900">
+                          {product.name}
+                        </span>
+                        <span className="mt-1 block text-sm font-bold text-primary">
                           {money(toMoney(product.selling_price))}
                           {packSize > 1 ? <span className="text-[10px] text-gray-400 font-medium"> / unit</span> : null}
-                        </p>
+                        </span>
                         {(product.track_expiry === 1 || wholesaleOk) && (
-                          <p className="text-[10px] text-gray-500 mt-0.5">
+                          <span className="mt-1 block text-[10px] leading-4 text-gray-500">
                             {product.track_expiry === 1 ? 'Expiry tracked' : ''}
                             {product.track_expiry === 1 && wholesaleOk ? ' · ' : ''}
                             {wholesaleOk ? 'Wholesale ready' : ''}
-                          </p>
+                          </span>
                         )}
                         {outOfStock && (
-                          <p className="text-[10px] font-semibold text-red-600 mt-0.5">
+                          <span className="mt-1 block text-[10px] font-semibold text-red-600">
                             Out of stock
-                          </p>
+                          </span>
                         )}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => void handleAddProduct(product)}
-                        disabled={outOfStock}
-                        className="flex-shrink-0 px-3 py-2 rounded-lg border border-primary/30 bg-emerald-50 text-primary text-xs font-semibold touch-target disabled:opacity-40 disabled:cursor-not-allowed active:bg-emerald-100"
-                      >
-                        Add to cart
-                      </button>
-                    </div>
+                      </span>
+                      <span className="pos-product-add" aria-hidden="true">
+                        <Plus className="h-4 w-4" strokeWidth={2.5} />
+                        <span>Add</span>
+                      </span>
+                    </button>
                   );
                 })}
               </div>
@@ -588,58 +592,69 @@ export default function POSPage() {
                     key={item.id}
                     className="bg-white lg:bg-[var(--color-surface)] rounded-xl p-3 shadow-sm border border-emerald-50"
                   >
-                    <div className="flex items-center gap-3">
-                      <ProductImage src={item.image_url} alt={item.name} size="md" />
+                    <div className="flex items-start gap-3">
+                      <ProductImage src={item.image_url} alt="" size="md" />
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
-                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                          <p className="text-xs text-gray-500">
-                            {money(item.unit_price)} / {item.unit_type === 'pack' ? 'pack' : 'unit'}
-                          </p>
-                          {item.sale_mode === 'wholesale' && (
-                            <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-medium">
-                              Wholesale
-                            </span>
-                          )}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="pos-product-name text-sm font-semibold leading-snug text-gray-900">
+                              {item.name}
+                            </p>
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              <p className="text-xs text-gray-500">
+                                {money(item.unit_price)} / {item.unit_type === 'pack' ? 'pack' : 'unit'}
+                              </p>
+                              {item.sale_mode === 'wholesale' && (
+                                <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-medium">
+                                  Wholesale
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => cart.removeItem(item.id)}
+                            aria-label={`Remove ${item.name} from cart`}
+                            className="touch-target flex-shrink-0 rounded-lg p-1.5 hover:bg-red-50"
+                          >
+                            <Trash2 className="w-4 h-4 text-red-400" />
+                          </button>
+                        </div>
+
+                        <div className="mt-3 flex items-center justify-between gap-3">
+                          <div role="group" aria-label={`Quantity for ${item.name}`} className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => cart.decrementItem(item.id)}
+                              disabled={item.quantity <= 1}
+                              aria-label={`Decrease quantity of ${item.name}`}
+                              className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center touch-target disabled:opacity-40"
+                            >
+                              <Minus className="w-3.5 h-3.5 text-gray-600" />
+                            </button>
+                            <input
+                              type="number"
+                              value={item.quantity}
+                              onChange={(e) => void handleUpdateQuantity(item.id, parseInt(e.target.value) || 1)}
+                              aria-label={`Quantity of ${item.name}`}
+                              inputMode="numeric"
+                              className="w-10 text-sm font-bold text-center bg-transparent border-b border-gray-200 focus:border-primary outline-none"
+                              min="1"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => void handleIncrement(item.id)}
+                              aria-label={`Increase quantity of ${item.name}`}
+                              className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center touch-target disabled:opacity-40"
+                            >
+                              <Plus className="w-3.5 h-3.5 text-primary" />
+                            </button>
+                          </div>
+                          <div className="text-right min-w-[70px]">
+                            <p className="text-sm font-bold text-gray-900">{money(item.subtotal)}</p>
+                          </div>
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => cart.decrementItem(item.id)}
-                        disabled={item.quantity <= 1}
-                        className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center touch-target disabled:opacity-40"
-                      >
-                        <Minus className="w-3.5 h-3.5 text-gray-600" />
-                      </button>
-                      <input
-                        type="number"
-                        value={item.quantity}
-                        onChange={(e) => void handleUpdateQuantity(item.id, parseInt(e.target.value) || 1)}
-                        className="w-10 text-sm font-bold text-center bg-transparent border-b border-gray-200 focus:border-primary outline-none"
-                        min="1"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => void handleIncrement(item.id)}
-                        className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center touch-target disabled:opacity-40"
-                      >
-                        <Plus className="w-3.5 h-3.5 text-primary" />
-                      </button>
-                      </div>
-
-                      <div className="text-right min-w-[70px]">
-                        <p className="text-sm font-bold text-gray-900">{money(item.subtotal)}</p>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => cart.removeItem(item.id)}
-                        className="p-1.5 rounded-lg hover:bg-red-50 touch-target"
-                      >
-                        <Trash2 className="w-4 h-4 text-red-400" />
-                      </button>
                     </div>
                   </div>
                 ))}
