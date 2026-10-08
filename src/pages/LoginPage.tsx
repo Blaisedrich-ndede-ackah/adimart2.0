@@ -7,7 +7,7 @@ import { hasStoreLogo } from '@/lib/productImage';
 import { confirmPinResetWithOtp, requestPinResetOtp } from '@/lib/pinReset';
 import { listLocations, verifyLocationAccessPin } from '@/lib/warehouse';
 import CommunityChatButton from '@/components/CommunityChatButton';
-import AuthShowcase from '@/components/AuthShowcase';
+import FlyerShowcase from '@/components/FlyerShowcase';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
 import { useT } from '@/lib/i18n';
 import {
@@ -205,16 +205,7 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
 
   return (
     <div className="auth-shell wide-auth-shell">
-      <AuthShowcase
-        variant="store"
-        eyebrow={warehouseMode ? 'Warehouse access' : 'Store operations'}
-        title={warehouseMode ? 'Secure access for every location.' : 'A clearer view of your whole store.'}
-        description={
-          warehouseMode
-            ? 'Keep warehouse access connected to your stock and day-to-day store operations.'
-            : 'Keep checkout, stock, and daily performance close at hand as your store grows.'
-        }
-      />
+      <FlyerShowcase />
       <div className="auth-panel wide-auth-card flex flex-col items-center animate-fade-in">
         <div className="flex flex-col items-center mb-6 lg:mb-4 w-full">
           <div className="w-20 h-20 md:w-24 md:h-24 lg:w-20 lg:h-20 bg-white rounded-2xl flex items-center justify-center mb-4 lg:mb-3 shadow-lg overflow-hidden">

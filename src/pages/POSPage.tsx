@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import CheckoutOverlay from '@/components/CheckoutOverlay';
+import FrequentItems from '@/components/FrequentItems';
 import { useCartStore } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { LocalProduct, LocalLocation, getCurrentStoreActiveProducts, getCurrentStoreId } from '@/lib/dexie';
@@ -449,6 +450,9 @@ export default function POSPage() {
           <BarcodeScanner onScan={handleScan} active={scannerActive && !showCheckout} />
         </div>
       )}
+
+      {/* Top 10 Frequently Bought Items */}
+      <FrequentItems onAddProduct={(product) => handleScan(product.barcode || product.id)} />
 
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
         {/* Products pane */}
