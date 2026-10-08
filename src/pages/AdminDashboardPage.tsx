@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import {
   Building2, Users, Package, Wallet, RefreshCcw, LogOut, ChevronLeft, ChevronRight,
   Smartphone, CheckCircle2, AlertCircle, Loader2, Store, CreditCard, CalendarClock, Mail,
-  FileBarChart, Download, FileText, Ban, LayoutDashboard, MoreHorizontal, X, Search,
+  FileBarChart, Download, FileText, Ban, LayoutDashboard, MoreHorizontal, X, Search, Megaphone,
 } from 'lucide-react';
 import {
   AdminDashboardData,
@@ -38,9 +38,10 @@ import {
 } from '@/lib/platformSettings';
 import AdminStoreWorkspace from '@/components/AdminStoreWorkspace';
 import AdminCreateStoreForm from '@/components/AdminCreateStoreForm';
+import AdminCampaignManager from '@/components/AdminCampaignManager';
 import CopyableStoreId from '@/components/CopyableStoreId';
 
-type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact';
+type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact' | 'campaigns';
 
 function defaultReportFromDate(): string {
   const d = new Date();
@@ -379,6 +380,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       ['products', 'Products', Package],
       ['reports', 'Reports', FileBarChart],
       ['contact', 'Contact', Mail],
+      ['campaigns', 'Campaigns', Megaphone],
     ] as const
   );
 
@@ -1206,6 +1208,8 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
             </div>
           </div>
         )}
+
+        {tab === 'campaigns' && <AdminCampaignManager />}
 
         {data && tab === 'products' && (
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
