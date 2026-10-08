@@ -1,143 +1,55 @@
 /**
- * Platform administrator access for the Adimat Admin Portal.
- * Step 1: VITE_ADMIN_PIN · Step 2: SMS OTP to admin phone.
+ * Supabase Auth access for the platform administrator portal.
  */
 
 import { supabase } from './supabase';
 
 const ADMIN_SESSION_KEY = 'adimat_admin_session';
-const ADMIN_OTP_KEY = 'adimat_admin_otp_pending';
-const CAMPAIGN_SESSION_KEY = 'adimat_campaign_admin_session';
-const OTP_TTL_MS = 5 * 60 * 1000;
 
-function normalizePin(value: string | undefined): string {
-  return (value || '').trim();
-}
-
-/** Configured admin PIN, or empty if intentionally unset and no fallback desired in production. */
-export function getConfiguredAdminPin(): string {
-  const fromEnv = normalizePin(import.meta.env.VITE_ADMIN_PIN);
-  if (fromEnv) return fromEnv;
-  // Dev-friendly default — override with VITE_ADMIN_PIN in production
-  return '9999';
-}
-
-export function isAdminPinConfigured(): boolean {
-  return getConfiguredAdminPin().length >= 4;
-}
-
-export function verifyAdminPin(pin: string): boolean {
-  const expected = getConfiguredAdminPin();
-  return pin.trim() === expected;
-}
-
-async function functionErrorMessage(error: unknown): Promise<string> {
-  if (!(error instanceof Error)) return 'Secure admin sign-in could not be completed.';
-  const context = (error as Error & { context?: Response }).context;
-  const responseBody = context && typeof context.clone === 'function'
-    ? await context.clone().json().catch(() => null) as { error?: string; message?: string } | null
-    : null;
-  if (context?.status === 404) {
-    return 'The campaign-admin Edge Function was not found. Deploy it to the Supabase project used by this app.';
+function authErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) return 'Administrator sign-in could not be completed.';
+  if (/invalid login credentials/i.test(error.message)) return 'The email or password is incorrect.';
+  if (/failed to fetch|load failed|networkerror|fetch failed/i.test(error.message)) {
+    return 'Could not reach Supabase. Check the internet connection and VITE_SUPABASE_URL.';
   }
-  return responseBody?.error || responseBody?.message || error.message;
+  return error.message;
 }
 
-function functionRequestError(error: unknown): string {
-  if (error instanceof Error && /failed to fetch|load failed|networkerror|fetch failed/i.test(error.message)) {
-    return 'Could not connect to the campaign-admin Edge Function. Check the network and VITE_SUPABASE_URL, and confirm the function is deployed.';
-  }
-  return error instanceof Error ? error.message : 'Secure admin sign-in could not be completed.';
-}
-
-interface PendingAdminOtp {
-  challengeId: string;
-  expiresAt: number;
-}
-
-function readPendingOtp(): PendingAdminOtp | null {
+export async function signInPlatformAdmin(
+  email: string,
+  password: string
+): Promise<{ success: boolean; error?: string }> {
   try {
-    const raw = sessionStorage.getItem(ADMIN_OTP_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as PendingAdminOtp;
-    if (!parsed?.challengeId || Date.now() > parsed.expiresAt) {
-      sessionStorage.removeItem(ADMIN_OTP_KEY);
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-/** After PIN is verified: send SMS OTP from the trusted server. */
-export async function beginAdminSmsChallenge(pin: string): Promise<{
-  success: boolean;
-  error?: string;
-  maskedPhone?: string;
-}> {
-  try {
-    const { data, error } = await supabase.functions.invoke('campaign-admin', {
-      body: { action: 'begin-login', pin },
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
     });
-    if (error || !data?.challengeId) {
-      return { success: false, error: data?.error || (error ? await functionErrorMessage(error) : 'Could not send SMS code.') };
-    }
-    try {
-      sessionStorage.setItem(ADMIN_OTP_KEY, JSON.stringify({
-        challengeId: data.challengeId,
-        expiresAt: Date.now() + OTP_TTL_MS,
-      }));
-    } catch {
-      return { success: false, error: 'Your browser blocked session storage. Allow site storage, then request a new code.' };
-    }
-    return { success: true, maskedPhone: data.maskedPhone };
-  } catch (error) {
-    return { success: false, error: functionRequestError(error) };
-  }
-}
+    if (error) return { success: false, error: authErrorMessage(error) };
 
-export async function verifyAdminSmsOtp(code: string): Promise<{ success: boolean; error?: string }> {
-  const pending = readPendingOtp();
-  if (!pending) return { success: false, error: 'Code expired. Enter your PIN again.' };
-  try {
-    const { data, error } = await supabase.functions.invoke('campaign-admin', {
-      body: { action: 'verify-login', challengeId: pending.challengeId, code },
-    });
-    if (error || !data?.sessionToken) {
-      return { success: false, error: data?.error || (error ? await functionErrorMessage(error) : 'Could not verify the SMS code.') };
+    if (data.user.app_metadata?.is_platform_admin !== true) {
+      const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' });
+      if (signOutError) {
+        console.error('Could not clear a non-admin Supabase session', signOutError);
+      }
+      return {
+        success: false,
+        error: 'This account is not a platform administrator. Ask the project owner to grant admin access in Supabase.',
+      };
     }
+
     try {
-      sessionStorage.setItem(CAMPAIGN_SESSION_KEY, data.sessionToken);
-      sessionStorage.removeItem(ADMIN_OTP_KEY);
-    } catch {
-      return { success: false, error: 'Your browser blocked session storage. Allow site storage and sign in again.' };
+      startAdminSession();
+    } catch (storageError) {
+      const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' });
+      if (signOutError) console.error('Could not clear admin session after a storage error', signOutError);
+      return {
+        success: false,
+        error: authErrorMessage(storageError) || 'Your browser could not store the administrator session.',
+      };
     }
     return { success: true };
   } catch (error) {
-    return { success: false, error: functionRequestError(error) };
-  }
-}
-
-export function clearAdminSmsChallenge(): void {
-  sessionStorage.removeItem(ADMIN_OTP_KEY);
-}
-
-export function getCampaignAdminSessionToken(): string {
-  try {
-    if (!isAdminSessionActive()) return '';
-    const token = sessionStorage.getItem(CAMPAIGN_SESSION_KEY) || '';
-    const payload = token.split('.')[1];
-    if (!payload) return '';
-    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
-    const claims = JSON.parse(atob(normalized + '='.repeat((4 - normalized.length % 4) % 4))) as { exp?: number };
-    if (!claims.exp || claims.exp * 1000 <= Date.now()) {
-      sessionStorage.removeItem(CAMPAIGN_SESSION_KEY);
-      return '';
-    }
-    return token;
-  } catch {
-    return '';
+    return { success: false, error: authErrorMessage(error) };
   }
 }
 
@@ -147,16 +59,29 @@ export function startAdminSession(): void {
   }));
 }
 
-export function clearAdminSession(): void {
+export async function clearAdminSession(): Promise<void> {
   sessionStorage.removeItem(ADMIN_SESSION_KEY);
-  sessionStorage.removeItem(ADMIN_OTP_KEY);
-  sessionStorage.removeItem(CAMPAIGN_SESSION_KEY);
+  const { error } = await supabase.auth.signOut({ scope: 'local' });
+  if (error) throw new Error(authErrorMessage(error));
+}
+
+export async function restoreAdminSession(): Promise<boolean> {
+  if (!isAdminSessionActive()) return false;
+  const { data, error } = await supabase.auth.getSession();
+  if (error) {
+    await clearAdminSession();
+    throw new Error(authErrorMessage(error));
+  }
+  if (!data.session || data.session.user.app_metadata?.is_platform_admin !== true) {
+    await clearAdminSession();
+    return false;
+  }
+  return true;
 }
 
 export function isAdminSessionActive(): boolean {
   try {
-    const raw = sessionStorage.getItem(ADMIN_SESSION_KEY);
-    return Boolean(raw);
+    return Boolean(sessionStorage.getItem(ADMIN_SESSION_KEY));
   } catch {
     return false;
   }

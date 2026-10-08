@@ -5,9 +5,8 @@
 -- for flyers/videos shown in FlyerShowcase.
 --
 -- Direct table/storage writes require a trusted Supabase Auth JWT whose
--- app_metadata contains { "is_platform_admin": true }. The portal UI uses
--- the campaign-admin Edge Function, which verifies its PIN/SMS session on
--- the server and never exposes the service-role key. Keep these policies locked.
+-- app_metadata contains { "is_platform_admin": true }. The portal signs in
+-- with Supabase Auth; row-level security protects all campaign writes.
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION public.is_adimat_campaign_admin()
@@ -216,10 +215,9 @@ COMMENT ON COLUMN public.promotional_campaigns.poster_path IS
 COMMENT ON COLUMN public.promotional_campaigns.is_published IS
   'Only published campaigns within their optional date window are visible to public clients.';
 
--- Assign is_platform_admin in Supabase Auth app_metadata through a trusted
--- server-side/admin process. Never authorize with user_metadata, which users
--- can edit themselves. The current browser-only PIN/OTP flow is not an RLS
--- credential and must not be used to grant database or Storage writes.
+-- Assign is_platform_admin in Supabase Auth app_metadata through the
+-- Supabase Dashboard or SQL Editor. Never authorize with user_metadata,
+-- which users can edit themselves.
 
 NOTIFY pgrst, 'reload schema';
 NOTIFY pgrst, 'reload config';
@@ -232,5 +230,5 @@ NOTIFY storage, 'reload config';
 -- SELECT id, name, public, file_size_limit, allowed_mime_types
 -- FROM storage.buckets WHERE id = 'promotional-campaigns';
 
--- Portal campaign CRUD is performed by the campaign-admin Edge Function.
--- Keep direct anonymous/authenticated writes prohibited.
+-- Portal campaign CRUD uses the signed-in administrator's JWT. Keep direct
+-- anonymous writes prohibited; authenticated writes remain protected by RLS.

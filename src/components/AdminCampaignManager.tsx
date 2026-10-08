@@ -283,9 +283,13 @@ export default function AdminCampaignManager() {
           <StatusCard title="Campaign tools are unavailable" tone="warning">
             Supabase is not configured in this environment. No credentials or settings were changed.
           </StatusCard>
+        ) : access === 'not-authorized' ? (
+          <StatusCard title="Administrator role required" tone="warning">
+            This Supabase Auth account is not marked as a platform administrator. Ask the project owner to grant the role using the setup instructions in the README.
+          </StatusCard>
         ) : (
           <StatusCard title="Admin session required" tone="warning">
-            Sign in to the admin portal again to renew campaign access. Campaign access expires with the admin session.
+            Sign in to the administrator portal to access campaign management.
           </StatusCard>
         )}
       </section>

@@ -2,7 +2,7 @@ import { useState, useEffect, type ReactNode } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { initAutoSync, startLiveStockSync, stopAutoSync } from '@/lib/sync';
 import { autoReconnectPeripherals } from '@/lib/bluetoothPeripherals';
-import { isAdminSessionActive, clearAdminSession } from '@/lib/adminAuth';
+import { clearAdminSession, restoreAdminSession } from '@/lib/adminAuth';
 import { isValidGhanaPhone } from '@/lib/platformSettings';
 import { getUnlockedWarehouseLocationId } from '@/lib/warehouseAccess';
 import PWAInstallBanner from '@/components/PWAInstallBanner';
@@ -62,11 +62,27 @@ export default function App() {
   const { isAuthenticated, currentUser, currentStore, isStoreSetup, isLoading, initialize, switchUser } =
     useAuthStore();
   const [currentPage, setCurrentPage] = useState('pos');
-  const [appMode, setAppMode] = useState<AppMode>(() =>
-    isAdminSessionActive() ? 'admin' : 'store'
-  );
+  const [appMode, setAppMode] = useState<AppMode>('store');
+  const [adminSessionResolved, setAdminSessionResolved] = useState(false);
   const [publicShopSlug, setPublicShopSlug] = useState<string | null>(() => readPublicShopSlug());
   const [publicUtilityRoute, setPublicUtilityRoute] = useState<'terms' | '404' | null>(() => readPublicUtilityRoute());
+
+  useEffect(() => {
+    let active = true;
+    void restoreAdminSession()
+      .then((isActive) => {
+        if (active && isActive) setAppMode('admin');
+      })
+      .catch((error) => {
+        console.error('Could not restore administrator session', error);
+      })
+      .finally(() => {
+        if (active) setAdminSessionResolved(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     const onHashChange = () => setPublicShopSlug(readPublicShopSlug());
@@ -128,6 +144,14 @@ export default function App() {
   if (publicUtilityRoute === 'terms') return <TermsPage />;
   if (publicUtilityRoute === '404') return <NotFoundPage />;
 
+  if (!adminSessionResolved) {
+    return (
+      <div className="h-full bg-primary flex items-center justify-center">
+        <p className="text-white font-medium tracking-wide">Checking administrator session…</p>
+      </div>
+    );
+  }
+
   if (appMode === 'admin-login') {
     return (
       <AdminLoginPage
@@ -141,7 +165,9 @@ export default function App() {
     return (
       <AdminDashboardPage
         onLogout={() => {
-          clearAdminSession();
+          void clearAdminSession().catch((error) => {
+            console.error('Administrator sign-out failed', error);
+          });
           setAppMode('store');
         }}
       />

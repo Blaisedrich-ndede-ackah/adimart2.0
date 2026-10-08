@@ -94,9 +94,6 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 # Paystack Configuration
 VITE_PAYSTACK_PUBLIC_KEY=pk_live_your-public-key
 
-# Administrator portal PIN (platform-wide)
-VITE_ADMIN_PIN=9999
-
 # Optional mNotify defaults for non-admin SMS alerts
 # VITE_MNOTIFY_API_KEY=
 # VITE_MNOTIFY_SENDER_ID=Adimat
@@ -106,16 +103,22 @@ VITE_ADMIN_PIN=9999
 
 ### Administrator Portal
 
-Platform admins can open **Administrator portal** from the store login or first-launch screen, then sign in with `VITE_ADMIN_PIN`.
+Platform admins can open **Administrator portal** from the store login or first-launch screen, then sign in using a Supabase Auth email and password. Campaign management uses this same Supabase Auth session and database/storage row-level security; it does not require an Edge Function, CLI deployment, SMS provider, or service-role key in the app.
 
-**Campaigns** in the admin portal uses that same PIN + SMS login; there is no second campaign sign-in. Campaign authorization is verified by the `campaign-admin` Supabase Edge Function. To enable it, apply `supabase-migrate-promotional-campaigns.sql` and `supabase/migrations/20261008000000_campaign_admin_challenges.sql` in the SQL Editor, then link the Supabase CLI to the project and configure the function secrets:
+To configure the administrator account once:
 
-```bash
-supabase secrets set ADMIN_PORTAL_PIN="<same value as VITE_ADMIN_PIN>" CAMPAIGN_SESSION_SECRET="$(openssl rand -hex 32)"
-supabase functions deploy campaign-admin
-```
+1. Apply `supabase-migrate-promotional-campaigns.sql` in the Supabase SQL Editor.
+2. In the Supabase Dashboard, open **Authentication → Users** and create the administrator email/password account.
+3. In the SQL Editor, replace the email below with that exact account email and run:
 
-The SMS function reads the admin phone, mNotify key, and sender ID from platform settings. Set `ADMIN_PHONE`, `MNOTIFY_API_KEY`, or `MNOTIFY_SENDER_ID` as function secrets only when the corresponding value is not configured under **Admin → Contact**. Keep `CAMPAIGN_SESSION_SECRET` and the Supabase service-role key server-side; never add them to `VITE_` variables. Campaign sessions expire after 8 hours.
+   ```sql
+   UPDATE auth.users
+   SET raw_app_meta_data = COALESCE(raw_app_meta_data, '{}'::jsonb)
+     || '{"is_platform_admin": true}'::jsonb
+   WHERE email = 'admin@example.com';
+   ```
+
+4. Sign in from the app with that email and password. The `is_platform_admin` claim is checked by the campaign table and storage policies; do not put it in user-editable metadata.
 
 The portal loads cloud data and shows:
 
