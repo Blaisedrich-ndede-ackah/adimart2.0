@@ -73,7 +73,9 @@ async function invokeCampaignAdmin<T>(body: Record<string, unknown>): Promise<T>
   });
   if (error) {
     const context = (error as Error & { context?: Response }).context;
-    const responseBody = context ? await context.clone().json().catch(() => null) as { error?: string } | null : null;
+    const responseBody = context && typeof context.clone === 'function'
+      ? await context.clone().json().catch(() => null) as { error?: string } | null
+      : null;
     throw new Error(responseBody?.error || error.message || 'Campaign request could not be completed.');
   }
   if (data?.error) throw new Error(data.error);

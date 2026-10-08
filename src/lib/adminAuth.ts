@@ -34,7 +34,7 @@ export function verifyAdminPin(pin: string): boolean {
 async function functionErrorMessage(error: unknown): Promise<string> {
   if (!(error instanceof Error)) return 'Secure admin sign-in could not be completed.';
   const context = (error as Error & { context?: Response }).context;
-  const responseBody = context
+  const responseBody = context && typeof context.clone === 'function'
     ? await context.clone().json().catch(() => null) as { error?: string; message?: string } | null
     : null;
   if (context?.status === 404) {
