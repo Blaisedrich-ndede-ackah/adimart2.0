@@ -16,11 +16,13 @@ import {
   type OtherChargeCategoryId,
 } from '@/lib/otherCharges';
 import { useFormatMoney, getStoreCurrency } from '@/lib/currency';
+import { getBluetoothHardwareStatus } from '@/lib/bluetoothPeripherals';
 
 interface CheckoutOverlayProps {
   isOpen: boolean;
   onClose: () => void;
   onComplete: (receiptNumber: string) => void;
+  onConnectPrinter?: () => void;
 }
 
 type Step = 'method' | 'discount' | 'charges' | 'pin-verify' | 'cash-input' | 'split-input' | 'paystack' | 'processing' | 'success';
@@ -38,7 +40,7 @@ interface SaleResult {
   paystackAmount?: number;
 }
 
-export default function CheckoutOverlay({ isOpen, onClose, onComplete }: CheckoutOverlayProps) {
+export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnectPrinter }: CheckoutOverlayProps) {
   const cart = useCartStore();
   const { currentUser, currentStore, verifyOwnerPin } = useAuthStore();
   const money = useFormatMoney();
@@ -272,6 +274,10 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
     paystackAmt?: number
   ) {
     if (!currentStore) return;
+    if (!getBluetoothHardwareStatus().printerConnected) {
+      setPrintError('Printer not connected.');
+      return;
+    }
     setIsPrinting(true);
     setPrintError('');
 
@@ -375,12 +381,21 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
       setPaystackError('Paystack not configured. Add VITE_PAYSTACK_PUBLIC_KEY to environment variables.');
       return;
     }
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setPaystackError('No internet. Choose Cash for this sale, or close checkout and try Mobile Money again when reconnected.');
+      return;
+    }
     
     const ref = generatePaystackReference();
     handlePaystackPayment(cart.total, ref, 0);
   }
 
   async function handlePaystackPayment(amount: number, reference: string, cashPortion: number) {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setPaystackError('No internet. Choose Cash for this sale, or reconnect before using Mobile Money.');
+      setStep('method');
+      return;
+    }
     const email = resolvePaystackEmail(customerEmail, reference);
 
     if (customerEmail.trim() && !isValidPaystackEmail(customerEmail)) {
@@ -1011,7 +1026,12 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete }: Checkou
               </div>
 
               {printError && (
-                <p className="text-red-500 text-[11px] text-center mb-3 px-1">{printError}</p>
+                <div className="mb-3 text-center">
+                  <p className="text-red-700 text-[11px] px-1">{printError}</p>
+                  {!getBluetoothHardwareStatus().printerConnected && onConnectPrinter && (
+                    <button type="button" onClick={onConnectPrinter} className="mt-2 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white">Connect printer</button>
+                  )}
+                </div>
               )}
 
               <button

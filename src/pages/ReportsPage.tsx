@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
 import {
   TrendingUp, Banknote, CreditCard, Calendar, ChevronDown, Receipt,
   Download, FileText, PiggyBank, Package, Users, Tag, Plus, Trash2, Loader2,
-  Warehouse, Store, MapPin
+  Warehouse, Store, MapPin, Camera
 } from 'lucide-react';
 import {
   db, LocalTransaction, LocalTransactionItem, LocalExpense, LocalStockBatch, LocalLocation,
@@ -33,6 +33,7 @@ import { parseOtherCharges } from '@/lib/otherCharges';
 import { orgFromStore } from '@/lib/formalPdf';
 import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
+import { fileToProductImageDataUrl } from '@/lib/productImage';
 
 type ReportTab = 'overview' | 'products' | 'expenses' | 'locations';
 
@@ -76,12 +77,17 @@ export default function ReportsPage() {
   const [expenseAmount, setExpenseAmount] = useState('');
   const [expenseCategory, setExpenseCategory] = useState('Other');
   const [expenseNotes, setExpenseNotes] = useState('');
+  const [expenseReceipt, setExpenseReceipt] = useState('');
+  const [expenseReceiptError, setExpenseReceiptError] = useState('');
+  const [expenseSaveError, setExpenseSaveError] = useState('');
+  const expenseReceiptInput = useRef<HTMLInputElement>(null);
   const [savingExpense, setSavingExpense] = useState(false);
   const [expiringBatches, setExpiringBatches] = useState<LocalStockBatch[]>([]);
   const [productNames, setProductNames] = useState<Record<string, string>>({});
   const [locations, setLocations] = useState<LocalLocation[]>([]);
   const [exportingLocationId, setExportingLocationId] = useState<string | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
   const loadData = useCallback(async () => {
     const storeId = await getCurrentStoreId();
@@ -97,6 +103,7 @@ export default function ReportsPage() {
     }
 
     setLoadingReport(true);
+    setLoadError('');
     try {
       const { start, end } = range;
       const allTxns = (await getCurrentStoreTransactions()).filter(t => t.status === 'completed');
@@ -146,6 +153,9 @@ export default function ReportsPage() {
         });
       }
       setChartData(days);
+    } catch (error) {
+      console.error('[Reports] Could not load report data:', error);
+      setLoadError('Could not load report data from this device. Check storage and try again.');
     } finally {
       setLoadingReport(false);
     }
@@ -213,25 +223,50 @@ export default function ReportsPage() {
 
   const handleAddExpense = async () => {
     const amount = toMoneyAmount(expenseAmount);
-    if (!expenseDesc.trim() || amount <= 0) return;
+    setExpenseSaveError('');
+    if (!expenseDesc.trim() || amount <= 0) {
+      setExpenseSaveError('Enter an expense description and a valid amount.');
+      return;
+    }
     setSavingExpense(true);
     const recordedBy = currentUser?.name?.trim();
     const noteParts = [
       expenseNotes.trim(),
       recordedBy ? `Recorded by ${recordedBy}` : '',
     ].filter(Boolean);
-    await addExpense({
-      description: expenseDesc.trim(),
-      category: expenseCategory,
-      amount,
-      notes: noteParts.join(' · '),
-    });
-    setExpenseDesc('');
-    setExpenseAmount('');
-    setExpenseNotes('');
-    setShowAddExpense(false);
-    setSavingExpense(false);
-    loadData();
+    try {
+      await addExpense({
+        description: expenseDesc.trim(),
+        category: expenseCategory,
+        amount,
+        notes: noteParts.join(' · '),
+        receipt_image_data_url: expenseReceipt || undefined,
+      });
+      setExpenseDesc('');
+      setExpenseAmount('');
+      setExpenseNotes('');
+      setExpenseReceipt('');
+      setShowAddExpense(false);
+      await loadData();
+    } catch (error) {
+      console.error('[Reports] Could not record expense:', error);
+      setExpenseSaveError(error instanceof Error ? error.message : 'Could not save expense. Try again.');
+    } finally {
+      setSavingExpense(false);
+    }
+  };
+
+  const handleExpenseReceiptPick = async (file?: File) => {
+    setExpenseReceiptError('');
+    if (!file) return;
+    try {
+      setExpenseReceipt(await fileToProductImageDataUrl(file));
+    } catch (error) {
+      console.error('[Reports] Could not process receipt photo:', error);
+      setExpenseReceiptError(error instanceof Error ? error.message : 'Could not attach receipt photo.');
+    } finally {
+      if (expenseReceiptInput.current) expenseReceiptInput.current.value = '';
+    }
   };
 
   const handleDeleteExpense = async (id: string) => {
@@ -353,6 +388,25 @@ export default function ReportsPage() {
       </div>
 
       <div className="page-body no-scrollbar">
+        {loadingReport && !summary && (
+          <div className="space-y-3" aria-label="Loading report" aria-busy="true">
+            <div className="grid grid-cols-2 gap-3">
+              {Array.from({ length: 4 }, (_, index) => <div key={index} className="h-24 animate-pulse rounded-xl bg-white shadow-sm" />)}
+            </div>
+            <div className="h-56 animate-pulse rounded-xl bg-white shadow-sm" />
+          </div>
+        )}
+        {loadError && (
+          <div role="alert" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            <p>{loadError}</p>
+            <button type="button" onClick={() => void loadData()} className="mt-2 rounded-lg bg-white px-3 py-2 text-xs font-semibold">Retry report</button>
+          </div>
+        )}
+        {!loadingReport && !loadError && !summary && (
+          <div className="rounded-xl bg-white p-8 text-center text-sm text-gray-600">
+            No report data is available yet. Complete a sale or record an expense to see your store summary.
+          </div>
+        )}
         {tab === 'overview' && summary && (
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 mb-4">
@@ -616,6 +670,14 @@ export default function ReportsPage() {
                   placeholder="Notes (optional)"
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
                 />
+                <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-gray-300 px-3 py-2.5 text-sm text-gray-600">
+                  <Camera className="h-4 w-4" />
+                  {expenseReceipt ? 'Receipt photo attached' : 'Attach receipt photo (optional)'}
+                  <input ref={expenseReceiptInput} type="file" accept="image/*" capture="environment" onChange={(event) => void handleExpenseReceiptPick(event.target.files?.[0])} className="sr-only" />
+                </label>
+                {expenseReceipt && <div className="flex items-center gap-2"><img src={expenseReceipt} alt="Expense receipt preview" className="h-14 w-14 rounded object-cover" /><button type="button" onClick={() => setExpenseReceipt('')} className="text-xs text-red-700">Remove photo</button></div>}
+                {expenseReceiptError && <p role="alert" className="text-xs text-red-700">{expenseReceiptError}</p>}
+                {expenseSaveError && <p role="alert" className="text-xs text-red-700">{expenseSaveError}</p>}
                 <div className="flex gap-2">
                   <button onClick={() => setShowAddExpense(false)} className="flex-1 py-2 border rounded-lg text-sm">Cancel</button>
                   <button

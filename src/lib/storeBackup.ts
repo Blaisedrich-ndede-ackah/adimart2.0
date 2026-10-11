@@ -6,6 +6,8 @@ const BACKUP_TABLES = [
   'transactions',
   'transaction_items',
   'expenses',
+  'recurring_expenses',
+  'expense_budgets',
   'cash_book_entries',
   'locations',
   'stock_batches',
@@ -154,6 +156,7 @@ export async function restoreStoreBackup(file: File, currentStoreId: string): Pr
 export async function getStoreSyncHealth(storeId: string) {
   const syncable = [
     db.users, db.products, db.transactions, db.transaction_items, db.expenses,
+    db.recurring_expenses, db.expense_budgets,
     db.cash_book_entries, db.locations, db.stock_batches, db.stock_movements,
     db.online_orders, db.online_order_items, db.suppliers, db.purchase_orders,
   ];

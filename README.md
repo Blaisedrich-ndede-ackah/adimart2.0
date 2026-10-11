@@ -44,6 +44,15 @@ A mobile-first Point of Sale (POS) and inventory management Progressive Web App 
 - **Cloud Sync** — Manual sync to Supabase with last-synced timestamp. Owners use **Settings**; cashiers use **My Sales** or **Devices → Cloud Sync** (Full Sync / Pull / Push) so they can send sales and pick up stock updates.
 - **Backup & Sync Health** — Daily on-device snapshots, downloadable store backups, restore, pending-change count, and last sync/backup errors
 
+### 📈 Owner dashboard & product search
+- **Owner Home** — Today’s sales, cash and Mobile Money/Paystack totals, low-stock count, and one-tap new sale/product/expense actions; cashiers continue directly to POS
+- **Smarter POS Search** — Typo-tolerant product-name search, partial barcode matching, recently and frequently sold products prioritized, and optional voice input where the browser supports it
+
+### 💸 Expense controls
+- **Recurring Expenses** — Schedule monthly costs such as rent and salaries, which are recorded automatically on or after the chosen day
+- **Receipt Photos** — Attach a compressed photo of an expense receipt
+- **Monthly Budgets** — Set category limits and see an over-budget warning as spending passes the limit
+
 ### 📱 PWA & Offline Support
 - **Installable** — Add to home screen on mobile devices
 - **Offline-First** — All data stored locally in IndexedDB via Dexie.js

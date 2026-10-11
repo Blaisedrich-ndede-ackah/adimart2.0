@@ -1,14 +1,14 @@
-import { useState, useEffect, useCallback, useMemo, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   ShoppingCart, Minus, Plus, Trash2, Search, ChevronRight, Package, AlertCircle, Bluetooth,
-  ScanBarcode, MapPin, X, Settings2, GripVertical, MoveUp, MoveDown
+  ScanBarcode, MapPin, X, Settings2, GripVertical, MoveUp, MoveDown, Mic
 } from 'lucide-react';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import CheckoutOverlay from '@/components/CheckoutOverlay';
 import FrequentItems from '@/components/FrequentItems';
 import { useCartStore } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
-import { LocalProduct, LocalLocation, getActiveStoreOwner, getCurrentStoreActiveProducts, getCurrentStoreId } from '@/lib/dexie';
+import { db, LocalProduct, LocalLocation, getActiveStoreOwner, getCurrentStoreActiveProducts, getCurrentStoreId } from '@/lib/dexie';
 import { playScanBeep, primeScanBeep } from '@/lib/scanBeep';
 import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 import { getBluetoothHardwareStatus, subscribeBluetoothStatus } from '@/lib/bluetoothPeripherals';
@@ -37,6 +37,64 @@ import {
 } from '@/lib/posLayout';
 
 type PosTab = 'products' | 'cart';
+type SpeechRecognitionLike = {
+  lang: string;
+  interimResults: boolean;
+  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+type SpeechWindow = Window & {
+  SpeechRecognition?: new () => SpeechRecognitionLike;
+  webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+};
+
+function editDistance(left: string, right: string): number {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= left.length; i++) {
+    let diagonal = previous[0];
+    previous[0] = i;
+    for (let j = 1; j <= right.length; j++) {
+      const above = previous[j];
+      previous[j] = Math.min(previous[j] + 1, previous[j - 1] + 1, diagonal + (left[i - 1] === right[j - 1] ? 0 : 1));
+      diagonal = above;
+    }
+  }
+  return previous[right.length];
+}
+
+function productMatchScore(product: LocalProduct, query: string): number {
+  const name = product.name.toLocaleLowerCase();
+  const barcode = product.barcode.toLocaleLowerCase();
+  const category = product.category.toLocaleLowerCase();
+  if (barcode === query) return 1000;
+  if (barcode.includes(query)) return 900;
+  if (query.length >= 3 && query.includes(barcode) && barcode.length >= 3) return 850;
+  if (name === query) return 800;
+  if (name.startsWith(query)) return 750;
+  if (name.includes(query) || name.replace(/\s+/g, '').includes(query.replace(/\s+/g, ''))) return 700;
+  if (category.includes(query)) return 500;
+
+  const queryParts = query.split(/\s+/).filter(Boolean);
+  const words = `${name} ${category}`.split(/[\s/-]+/).filter(Boolean);
+  let score = 0;
+  for (const part of queryParts) {
+    let best = 0;
+    for (const word of words) {
+      if (word.startsWith(part)) best = Math.max(best, 400);
+      else if (part.length >= 3) {
+        const distance = editDistance(part, word);
+        const maxDistance = part.length < 5 ? 1 : Math.min(3, Math.floor(part.length * 0.25));
+        if (distance <= maxDistance) best = Math.max(best, 350 - distance * 20);
+      }
+    }
+    if (best === 0) return 0;
+    score += best;
+  }
+  return score;
+}
 
 function moveBefore<T>(order: readonly T[], source: T, target: T): T[] {
   const next = [...order];
@@ -57,7 +115,7 @@ function moveBy<T>(order: readonly T[], item: T, offset: number): T[] {
   return next;
 }
 
-export default function POSPage() {
+export default function POSPage({ onNavigate }: { onNavigate?: (page: string) => void }) {
   const cart = useCartStore();
   const setSaleContext = useCartStore((s) => s.setSaleContext);
   const { currentUser, currentStore } = useAuthStore();
@@ -81,6 +139,11 @@ export default function POSPage() {
   const [btStatus, setBtStatus] = useState(getBluetoothHardwareStatus());
   const [ownerForLayout, setOwnerForLayout] = useState<typeof currentUser>(null);
   const [posLayout, setPosLayout] = useState<PosLayout>(DEFAULT_POS_LAYOUT);
+  const [salesRank, setSalesRank] = useState<Record<string, { quantity: number; lastSold: number }>>({});
+  const [voiceSearchAvailable, setVoiceSearchAvailable] = useState(false);
+  const [voiceSearchActive, setVoiceSearchActive] = useState(false);
+  const [voiceSearchError, setVoiceSearchError] = useState('');
+  const speechRecognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const [showLayoutEditor, setShowLayoutEditor] = useState(false);
   const [layoutStatus, setLayoutStatus] = useState('');
   const [draggedSection, setDraggedSection] = useState<PosSection | null>(null);
@@ -290,16 +353,92 @@ export default function POSPage() {
 
   const filteredProducts = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return products.filter((p) => {
-      if (selectedCategory !== 'All' && p.category !== selectedCategory) return false;
-      if (!q) return true;
-      return (
-        p.name.toLowerCase().includes(q) ||
-        p.barcode.toLowerCase().includes(q) ||
-        p.category.toLowerCase().includes(q)
-      );
+    return products
+      .filter((product) => selectedCategory === 'All' || product.category === selectedCategory)
+      .map((product) => ({
+        product,
+        relevance: q ? productMatchScore(product, q) : 0,
+        rank: salesRank[product.id],
+      }))
+      .filter(({ relevance }) => !q || relevance > 0)
+      .sort((a, b) =>
+        b.relevance - a.relevance ||
+        (b.rank?.quantity || 0) - (a.rank?.quantity || 0) ||
+        (b.rank?.lastSold || 0) - (a.rank?.lastSold || 0) ||
+        new Date(b.product.updated_at || 0).getTime() - new Date(a.product.updated_at || 0).getTime()
+      )
+      .map(({ product }) => product);
+  }, [products, searchQuery, selectedCategory, salesRank]);
+
+  useEffect(() => {
+    const speech = window as SpeechWindow;
+    setVoiceSearchAvailable(Boolean(speech.SpeechRecognition || speech.webkitSpeechRecognition));
+    return () => speechRecognitionRef.current?.stop();
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      const storeId = await getCurrentStoreId();
+      if (!storeId) return;
+      const since = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      const [transactions, items] = await Promise.all([
+        db.transactions.where('store_id').equals(storeId).filter((transaction) =>
+          transaction.status === 'completed' && new Date(transaction.created_at).getTime() >= since
+        ).toArray(),
+        db.transaction_items.where('store_id').equals(storeId).toArray(),
+      ]);
+      const transactionDates = new Map(transactions.map((transaction) => [transaction.id, new Date(transaction.created_at).getTime()]));
+      const next: Record<string, { quantity: number; lastSold: number }> = {};
+      for (const item of items) {
+        const soldAt = transactionDates.get(item.transaction_id);
+        if (!soldAt) continue;
+        const entry = next[item.product_id] || { quantity: 0, lastSold: 0 };
+        entry.quantity += Number(item.quantity) || 0;
+        entry.lastSold = Math.max(entry.lastSold, soldAt);
+        next[item.product_id] = entry;
+      }
+      if (active) setSalesRank(next);
+    })().catch((error: unknown) => {
+      console.error('[POS] Could not load product sales ranking:', error);
     });
-  }, [products, searchQuery, selectedCategory]);
+    return () => { active = false; };
+  }, [currentStore?.id]);
+
+  const startVoiceSearch = useCallback(() => {
+    const speech = window as SpeechWindow;
+    const Recognition = speech.SpeechRecognition || speech.webkitSpeechRecognition;
+    if (!Recognition) {
+      setVoiceSearchError('Voice search is not supported in this browser.');
+      return;
+    }
+    speechRecognitionRef.current?.stop();
+    const recognition = new Recognition();
+    recognition.lang = currentStore?.preferred_language === 'fr' ? 'fr-GH' : 'en-GH';
+    recognition.interimResults = false;
+    recognition.onresult = (event) => {
+      const transcript = event.results[0]?.[0]?.transcript?.trim();
+      if (transcript) setSearchQuery(transcript);
+    };
+    recognition.onerror = () => {
+      setVoiceSearchError('Could not hear that. Check microphone permission and try again.');
+      setVoiceSearchActive(false);
+    };
+    recognition.onend = () => {
+      setVoiceSearchActive(false);
+      speechRecognitionRef.current = null;
+    };
+    speechRecognitionRef.current = recognition;
+    setVoiceSearchError('');
+    setVoiceSearchActive(true);
+    try {
+      recognition.start();
+    } catch (error) {
+      console.error('[POS] Could not start voice search:', error);
+      setVoiceSearchActive(false);
+      setVoiceSearchError('Could not start voice search. Check microphone permission and try again.');
+    }
+  }, [currentStore?.preferred_language]);
 
   const flashFeedback = useCallback((feedback: { type: 'success' | 'error' | 'warning'; message: string }, ms = 2500) => {
     setScanFeedback(feedback);
@@ -686,8 +825,19 @@ export default function POSPage() {
                 aria-label="Search products by name, barcode, or category"
                 aria-describedby="pos-search-keyboard-hint"
                 data-allow-typing="true"
-                className="w-full pl-9 pr-12 py-3 bg-white border border-emerald-100 rounded-xl text-base outline-none focus:ring-2 focus:ring-primary"
+                className="w-full pl-9 pr-20 py-3 bg-white border border-emerald-100 rounded-xl text-base outline-none focus:ring-2 focus:ring-primary"
               />
+              {voiceSearchAvailable && (
+                <button
+                  type="button"
+                  onClick={startVoiceSearch}
+                  aria-label={voiceSearchActive ? 'Listening for product name' : 'Search products by voice'}
+                  title={voiceSearchActive ? 'Listening…' : 'Search by voice'}
+                  className={`absolute right-10 top-1/2 -translate-y-1/2 rounded-lg p-2 touch-target ${voiceSearchActive ? 'text-primary animate-pulse' : 'text-gray-500 hover:bg-gray-100'}`}
+                >
+                  <Mic className="h-4 w-4" />
+                </button>
+              )}
               {searchQuery && (
                 <button
                   type="button"
@@ -702,6 +852,7 @@ export default function POSPage() {
                 Press Enter to add the only matching in-stock product. Press Escape to clear the search.
               </span>
             </div>
+            {voiceSearchError && <p role="status" className="px-1 text-[11px] text-amber-800">{voiceSearchError}</p>}
             <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
               {categories.map((cat) => (
                 <button
@@ -750,8 +901,8 @@ export default function POSPage() {
                 <p className="text-sm font-medium">No products found</p>
                 <p className="text-xs mt-1 text-center px-6">
                   {products.length === 0
-                    ? 'Add products in Inventory (owner) to sell from POS.'
-                    : 'Try a different search or category.'}
+                    ? 'No products yet. Scan or import to start.'
+                    : 'No close matches. Try another spelling, barcode, or category.'}
                 </p>
               </div>
             ) : (
@@ -1008,6 +1159,7 @@ export default function POSPage() {
           setScannerActive(true);
         }}
         onComplete={handleCheckoutComplete}
+        onConnectPrinter={() => onNavigate?.('devices')}
       />
     </div>
   );

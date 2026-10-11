@@ -1,5 +1,5 @@
 import Dexie, { Table } from 'dexie';
-import { v4 as uuidv4 } from 'uuid';
+import { v4 as uuidv4, v5 as uuidv5 } from 'uuid';
 import { isSupabaseConfigured, supabase, testSupabaseConnection } from './supabase';
 import { toMoneyAmount } from './money';
 import { formatUnknownError, isUuid, uuidOrNull } from './ids';
@@ -268,9 +268,43 @@ export interface LocalExpense {
   category: string;
   amount: number;
   notes: string;
+  receipt_image_data_url?: string;
+  recurring_expense_id?: string | null;
+  recurrence_month?: string | null;
   created_at: string;
   updated_at: string;
   synced: number;
+}
+
+export interface LocalRecurringExpense {
+  id: string;
+  store_id: string;
+  description: string;
+  category: string;
+  amount: number;
+  notes: string;
+  day_of_month: number;
+  is_active: number;
+  last_generated_month: string | null;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export interface LocalExpenseBudget {
+  id: string;
+  store_id: string;
+  category: string;
+  monthly_limit: number;
+  updated_at: string;
+  synced: number;
+}
+
+interface LocalPinAttempt {
+  store_id: string;
+  failed_attempts: number;
+  locked_until: number;
+  updated_at: string;
 }
 
 /** Store cash book ledger (manual income / expense entries) */
@@ -318,6 +352,9 @@ class AdimatDB extends Dexie {
   transactions!: Table<LocalTransaction, string>;
   transaction_items!: Table<LocalTransactionItem, string>;
   expenses!: Table<LocalExpense, string>;
+  recurring_expenses!: Table<LocalRecurringExpense, string>;
+  expense_budgets!: Table<LocalExpenseBudget, string>;
+  pin_attempts!: Table<LocalPinAttempt, string>;
   cash_book_entries!: Table<LocalCashBookEntry, string>;
   locations!: Table<LocalLocation, string>;
   stock_batches!: Table<LocalStockBatch, string>;
@@ -433,6 +470,51 @@ class AdimatDB extends Dexie {
       sync_meta: 'id',
       app_config: 'id',
     });
+    this.version(9).stores({
+      stores: 'id, synced',
+      users: 'id, store_id, role, pin_hash, is_active, synced',
+      products: 'id, store_id, name, category, barcode, is_active, sell_online, synced, updated_at',
+      transactions: 'id, store_id, receipt_number, cashier_id, status, created_at, synced',
+      transaction_items: 'id, store_id, transaction_id, product_id, synced',
+      expenses: 'id, store_id, category, created_at, synced',
+      recurring_expenses: 'id, store_id, is_active, synced',
+      expense_budgets: 'id, store_id, category, synced',
+      cash_book_entries: 'id, store_id, entry_type, entry_date, created_at, synced',
+      locations: 'id, store_id, location_type, is_default, is_active, synced',
+      stock_batches: 'id, store_id, product_id, location_id, expiry_date, synced, updated_at',
+      stock_movements: 'id, store_id, product_id, batch_id, movement_type, created_at, synced',
+      online_orders: 'id, store_id, order_number, status, created_at, synced',
+      online_order_items: 'id, store_id, order_id, product_id, synced',
+      suppliers: 'id, store_id, name, is_active, synced',
+      purchase_orders: 'id, store_id, supplier_id, order_number, status, created_at, synced',
+      backup_snapshots: 'id, store_id, created_at',
+      deleted_records: 'id, store_id, table_name, record_id, synced, deleted_at',
+      sync_meta: 'id',
+      app_config: 'id',
+    });
+    this.version(10).stores({
+      stores: 'id, synced',
+      users: 'id, store_id, role, pin_hash, is_active, synced',
+      products: 'id, store_id, name, category, barcode, is_active, sell_online, synced, updated_at',
+      transactions: 'id, store_id, receipt_number, cashier_id, status, created_at, synced',
+      transaction_items: 'id, store_id, transaction_id, product_id, synced',
+      expenses: 'id, store_id, category, created_at, synced',
+      recurring_expenses: 'id, store_id, is_active, synced',
+      expense_budgets: 'id, store_id, category, synced',
+      pin_attempts: 'store_id, locked_until',
+      cash_book_entries: 'id, store_id, entry_type, entry_date, created_at, synced',
+      locations: 'id, store_id, location_type, is_default, is_active, synced',
+      stock_batches: 'id, store_id, product_id, location_id, expiry_date, synced, updated_at',
+      stock_movements: 'id, store_id, product_id, batch_id, movement_type, created_at, synced',
+      online_orders: 'id, store_id, order_number, status, created_at, synced',
+      online_order_items: 'id, store_id, order_id, product_id, synced',
+      suppliers: 'id, store_id, name, is_active, synced',
+      purchase_orders: 'id, store_id, supplier_id, order_number, status, created_at, synced',
+      backup_snapshots: 'id, store_id, created_at',
+      deleted_records: 'id, store_id, table_name, record_id, synced, deleted_at',
+      sync_meta: 'id',
+      app_config: 'id',
+    });
   }
 }
 
@@ -460,6 +542,93 @@ export function hashPin(pin: string): string {
     hash = hash & hash;
   }
   return Math.abs(hash).toString(36);
+}
+
+const PBKDF2_ITERATIONS = 600_000;
+const PIN_LOCK_THRESHOLD = 5;
+const PIN_LOCK_MS = 15 * 60 * 1000;
+
+function toBase64(bytes: Uint8Array): string {
+  let binary = '';
+  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+  return btoa(binary);
+}
+
+function fromBase64(value: string): Uint8Array {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+async function derivePinBits(pin: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
+  if (!globalThis.crypto?.subtle) {
+    throw new Error('Secure PIN protection is unavailable in this browser. Open the app over HTTPS and try again.');
+  }
+  const rawPin = new TextEncoder().encode(pin);
+  const pinBuffer = new ArrayBuffer(rawPin.length);
+  new Uint8Array(pinBuffer).set(rawPin);
+  const saltBuffer = new ArrayBuffer(salt.length);
+  new Uint8Array(saltBuffer).set(salt);
+  const key = await crypto.subtle.importKey('raw', pinBuffer, 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt: saltBuffer, iterations },
+    key,
+    256
+  );
+  return new Uint8Array(bits);
+}
+
+export async function hashUserPin(pin: string): Promise<string> {
+  if (!/^\d{4}$/.test(pin)) throw new Error('PIN must be 4 digits.');
+  if (!globalThis.crypto?.subtle) {
+    throw new Error('Secure PIN protection is unavailable in this browser. Open the app over HTTPS and try again.');
+  }
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const derived = await derivePinBits(pin, salt, PBKDF2_ITERATIONS);
+  return `pbkdf2-sha256$${PBKDF2_ITERATIONS}$${toBase64(salt)}$${toBase64(derived)}`;
+}
+
+export async function verifyUserPin(pin: string, storedHash: string): Promise<boolean> {
+  if (!storedHash.startsWith('pbkdf2-sha256$')) return hashPin(pin) === storedHash;
+  const [, iterationsText, saltText, expectedText] = storedHash.split('$');
+  const iterations = Number(iterationsText);
+  if (!Number.isSafeInteger(iterations) || iterations < 100_000 || iterations > 1_000_000 || !saltText || !expectedText) {
+    return false;
+  }
+  try {
+    const expected = fromBase64(expectedText);
+    const actual = await derivePinBits(pin, fromBase64(saltText), iterations);
+    if (actual.length !== expected.length) return false;
+    let difference = 0;
+    for (let index = 0; index < actual.length; index++) difference |= actual[index] ^ expected[index];
+    return difference === 0;
+  } catch (error) {
+    console.error('[Auth] Could not verify PIN hash:', error);
+    throw error;
+  }
+}
+
+async function checkPinLockout(storeId: string): Promise<void> {
+  const record = await db.pin_attempts.get(storeId);
+  if (!record || record.locked_until <= Date.now()) return;
+  const minutes = Math.max(1, Math.ceil((record.locked_until - Date.now()) / 60_000));
+  throw new Error(`Too many incorrect PIN attempts. Sign-in is locked for about ${minutes} minute${minutes === 1 ? '' : 's'}.`);
+}
+
+async function recordPinFailure(storeId: string): Promise<void> {
+  const now = Date.now();
+  const previous = await db.pin_attempts.get(storeId);
+  const failures = previous && previous.locked_until <= now ? 0 : previous?.failed_attempts || 0;
+  const nextFailures = failures + 1;
+  await db.pin_attempts.put({
+    store_id: storeId,
+    failed_attempts: nextFailures,
+    locked_until: nextFailures >= PIN_LOCK_THRESHOLD ? now + PIN_LOCK_MS : 0,
+    updated_at: new Date(now).toISOString(),
+  });
+}
+
+async function clearPinFailures(storeId: string): Promise<void> {
+  await db.pin_attempts.delete(storeId);
 }
 
 // Get current store ID from app config
@@ -593,7 +762,7 @@ export async function createStoreWithOwner(
     store_id: storeId,
     name: ownerName,
     role: 'owner',
-    pin_hash: hashPin(ownerPin),
+    pin_hash: await hashUserPin(ownerPin),
     is_active: 1,
     phone: ownerPhone,
     assigned_location_id: null,
@@ -861,15 +1030,28 @@ export async function getCurrentStoreUsersIncludingBlocked(): Promise<LocalUser[
 export async function authenticateByPin(pin: string): Promise<LocalUser | null> {
   const storeId = await getCurrentStoreId();
   if (!storeId) return null;
-  
-  const pinHash = hashPin(pin);
-  const users = await db.users
-    .where('store_id')
-    .equals(storeId)
-    .and(u => u.pin_hash === pinHash)
-    .toArray();
-  
-  return users.length > 0 ? users[0] : null;
+  await checkPinLockout(storeId);
+  const users = await db.users.where('store_id').equals(storeId).toArray();
+  const matches = await Promise.all(users.map(async (user) => ({
+    user,
+    matched: await verifyUserPin(pin, user.pin_hash),
+  })));
+  const match = matches.find((candidate) => candidate.matched)?.user;
+  if (match) {
+    if (!match.pin_hash.startsWith('pbkdf2-sha256$')) {
+      match.pin_hash = await hashUserPin(pin);
+      match.synced = 0;
+      await db.users.put(match);
+    }
+    await clearPinFailures(storeId);
+    return match;
+  }
+  await recordPinFailure(storeId);
+  const failedAttempts = (await db.pin_attempts.get(storeId))?.failed_attempts || 0;
+  if (failedAttempts >= PIN_LOCK_THRESHOLD) {
+    throw new Error('Too many incorrect PIN attempts. Sign-in is locked for 15 minutes.');
+  }
+  return null;
 }
 
 // Verify owner PIN for current store
@@ -877,14 +1059,25 @@ export async function verifyOwnerPin(pin: string): Promise<boolean> {
   const storeId = await getCurrentStoreId();
   if (!storeId) return false;
   
-  const pinHash = hashPin(pin);
-  const owners = await db.users
-    .where('store_id')
-    .equals(storeId)
-    .and(u => u.role === 'owner' && u.pin_hash === pinHash && u.is_active === 1)
-    .toArray();
-  
-  return owners.length > 0;
+  await checkPinLockout(storeId);
+  const owners = await db.users.where('store_id').equals(storeId)
+    .and((user) => user.role === 'owner' && user.is_active === 1).toArray();
+  const matches = await Promise.all(owners.map(async (owner) => ({
+    owner,
+    matched: await verifyUserPin(pin, owner.pin_hash),
+  })));
+  const match = matches.find((candidate) => candidate.matched)?.owner;
+  if (match) {
+    if (!match.pin_hash.startsWith('pbkdf2-sha256$')) {
+      match.pin_hash = await hashUserPin(pin);
+      match.synced = 0;
+      await db.users.put(match);
+    }
+    await clearPinFailures(storeId);
+    return true;
+  }
+  await recordPinFailure(storeId);
+  return false;
 }
 
 // Add a user to current store
@@ -902,7 +1095,7 @@ export async function addUserToStore(
     store_id: storeId,
     name,
     role,
-    pin_hash: hashPin(pin),
+    pin_hash: await hashUserPin(pin),
     is_active: 1,
     phone: phone.trim(),
     assigned_location_id: null,
@@ -918,14 +1111,19 @@ export async function addUserToStore(
   return user;
 }
 
-export async function updateUserPin(userId: string, newPin: string): Promise<void> {
+export async function updateUserPin(userId: string, newPin: string): Promise<string> {
+  const pinHash = await hashUserPin(newPin);
   await db.users.update(userId, {
-    pin_hash: hashPin(newPin),
+    pin_hash: pinHash,
     synced: 0,
   });
   if (isSupabaseConfigured()) {
-    await supabase.from('users').update({ pin_hash: hashPin(newPin) }).eq('id', userId);
+    const { error } = await supabase.from('users').update({ pin_hash: pinHash }).eq('id', userId);
+    if (error) {
+      console.error('[Auth] PIN changed locally but could not be synced:', error);
+    }
   }
+  return pinHash;
 }
 
 /** Attach / update a user's Ghana phone (self-serve or owner edit). */
@@ -1165,6 +1363,121 @@ export async function addExpense(
 
   await db.expenses.add(newExpense);
   return newExpense;
+}
+
+const RECURRING_EXPENSE_NAMESPACE = '03b00b87-2799-4f9d-8f12-c22709a8b991';
+
+export async function getCurrentStoreRecurringExpenses(): Promise<LocalRecurringExpense[]> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) return [];
+  return db.recurring_expenses.where('store_id').equals(storeId).toArray();
+}
+
+export async function addRecurringExpense(
+  recurring: Omit<LocalRecurringExpense, 'id' | 'store_id' | 'created_at' | 'updated_at' | 'last_generated_month' | 'synced'>
+): Promise<LocalRecurringExpense> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) throw new Error('No store selected.');
+  const description = recurring.description.trim();
+  const amount = toMoneyAmount(recurring.amount);
+  if (!description || amount <= 0) throw new Error('Enter an expense description and a valid amount.');
+  if (!Number.isSafeInteger(recurring.day_of_month) || recurring.day_of_month < 1 || recurring.day_of_month > 31) {
+    throw new Error('Choose a recurring day between 1 and 31.');
+  }
+  const now = new Date().toISOString();
+  const item: LocalRecurringExpense = {
+    ...recurring,
+    id: generateId(),
+    store_id: storeId,
+    description,
+    amount,
+    notes: recurring.notes.trim(),
+    is_active: 1,
+    last_generated_month: null,
+    created_at: now,
+    updated_at: now,
+    synced: 0,
+  };
+  await db.recurring_expenses.add(item);
+  return item;
+}
+
+export async function setRecurringExpenseActive(id: string, isActive: boolean): Promise<void> {
+  const storeId = await getCurrentStoreId();
+  const recurring = await db.recurring_expenses.get(id);
+  if (!storeId || !recurring || recurring.store_id !== storeId) throw new Error('Recurring expense not found.');
+  await db.recurring_expenses.update(id, {
+    is_active: isActive ? 1 : 0,
+    updated_at: new Date().toISOString(),
+    synced: 0,
+  });
+}
+
+export async function createDueRecurringExpenses(now = new Date()): Promise<number> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) return 0;
+  const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const templates = await db.recurring_expenses
+    .where('store_id').equals(storeId)
+    .and((item) => item.is_active === 1 && (item.last_generated_month || '') < month)
+    .toArray();
+  const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  let created = 0;
+  await db.transaction('rw', [db.recurring_expenses, db.expenses], async () => {
+    for (const template of templates) {
+      if (Math.min(template.day_of_month, lastDayOfMonth) > now.getDate()) continue;
+      const expenseId = uuidv5(`${template.id}:${month}`, RECURRING_EXPENSE_NAMESPACE);
+      const existing = await db.expenses.get(expenseId);
+      if (!existing) {
+        const createdAt = now.toISOString();
+        await db.expenses.add({
+          id: expenseId,
+          store_id: storeId,
+          description: template.description,
+          category: template.category,
+          amount: template.amount,
+          notes: template.notes,
+          recurring_expense_id: template.id,
+          recurrence_month: month,
+          created_at: createdAt,
+          updated_at: createdAt,
+          synced: 0,
+        });
+        created += 1;
+      }
+      await db.recurring_expenses.update(template.id, {
+        last_generated_month: month,
+        updated_at: now.toISOString(),
+        synced: 0,
+      });
+    }
+  });
+  return created;
+}
+
+export async function getCurrentStoreExpenseBudgets(): Promise<LocalExpenseBudget[]> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) return [];
+  return db.expense_budgets.where('store_id').equals(storeId).toArray();
+}
+
+export async function saveExpenseBudget(category: string, monthlyLimit: number): Promise<void> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) throw new Error('No store selected.');
+  const cleanCategory = category.trim();
+  const amount = toMoneyAmount(monthlyLimit);
+  if (!cleanCategory || amount <= 0) throw new Error('Enter a category and a monthly budget greater than zero.');
+  const existing = await db.expense_budgets.where('store_id').equals(storeId)
+    .and((budget) => budget.category === cleanCategory).first();
+  const budget = {
+    id: existing?.id || uuidv5(`${storeId}:${cleanCategory}`, RECURRING_EXPENSE_NAMESPACE),
+    store_id: storeId,
+    category: cleanCategory,
+    monthly_limit: amount,
+    updated_at: new Date().toISOString(),
+    synced: 0,
+  };
+  await db.expense_budgets.put(budget);
 }
 
 export async function updateExpense(
@@ -1499,6 +1812,8 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
     | 'transactions'
     | 'transaction_items'
     | 'expenses'
+    | 'recurring_expenses'
+    | 'expense_budgets'
     | 'cash_book_entries'
     | 'locations'
     | 'stock_batches'
@@ -1896,10 +2211,49 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         category: e.category,
         amount: e.amount,
         notes: e.notes,
+        receipt_image_data_url: e.receipt_image_data_url || '',
+        recurring_expense_id: uuidOrNull(e.recurring_expense_id),
+        recurrence_month: e.recurrence_month || null,
         created_at: e.created_at,
         updated_at: e.updated_at,
       })),
       async () => { await Promise.all(unsyncedExpenses.map(e => db.expenses.update(e.id, { synced: 1 }))); },
+      errors
+    );
+
+    const recurringToPush = await db.recurring_expenses.where('store_id').equals(storeId).and((item) => item.synced === 0).toArray();
+    syncedCount += await upsertToSupabase(
+      'Recurring expenses',
+      'recurring_expenses',
+      recurringToPush.map((item) => ({
+        id: item.id,
+        store_id: item.store_id,
+        description: item.description,
+        category: item.category,
+        amount: item.amount,
+        notes: item.notes,
+        day_of_month: item.day_of_month,
+        is_active: item.is_active === 1,
+        last_generated_month: item.last_generated_month,
+        created_at: item.created_at,
+        updated_at: item.updated_at,
+      })),
+      async () => { await Promise.all(recurringToPush.map((item) => db.recurring_expenses.update(item.id, { synced: 1 }))); },
+      errors
+    );
+
+    const budgetsToPush = await db.expense_budgets.where('store_id').equals(storeId).and((item) => item.synced === 0).toArray();
+    syncedCount += await upsertToSupabase(
+      'Expense budgets',
+      'expense_budgets',
+      budgetsToPush.map((item) => ({
+        id: item.id,
+        store_id: item.store_id,
+        category: item.category,
+        monthly_limit: item.monthly_limit,
+        updated_at: item.updated_at,
+      })),
+      async () => { await Promise.all(budgetsToPush.map((item) => db.expense_budgets.update(item.id, { synced: 1 }))); },
       errors
     );
 
@@ -2302,6 +2656,9 @@ export async function syncFromSupabase(opts?: {
           category: (row.category as string) || 'Other',
           amount: Number(row.amount) || 0,
           notes: (row.notes as string) || '',
+          receipt_image_data_url: (row.receipt_image_data_url as string) || undefined,
+          recurring_expense_id: (row.recurring_expense_id as string) || null,
+          recurrence_month: (row.recurrence_month as string) || null,
           created_at: row.created_at as string,
           updated_at: (row.updated_at as string) || (row.created_at as string),
           synced: 1,
@@ -2315,6 +2672,50 @@ export async function syncFromSupabase(opts?: {
             return remoteTime >= localTime ? { ...remote, synced: 1 } : local;
           }
           return remote;
+        },
+      },
+      {
+        label: 'Recurring expenses',
+        table: 'recurring_expenses',
+        map: (row: Record<string, unknown>) => ({
+          id: String(row.id),
+          store_id: String(row.store_id),
+          description: String(row.description || ''),
+          category: String(row.category || 'Other'),
+          amount: Number(row.amount) || 0,
+          notes: String(row.notes || ''),
+          day_of_month: Math.min(31, Math.max(1, Math.floor(Number(row.day_of_month) || 1))),
+          is_active: row.is_active === false ? 0 : 1,
+          last_generated_month: typeof row.last_generated_month === 'string' ? row.last_generated_month.slice(0, 7) : null,
+          created_at: String(row.created_at || ''),
+          updated_at: String(row.updated_at || row.created_at || ''),
+          synced: 1,
+        }),
+        dbTable: db.recurring_expenses,
+        merge: async (remote: LocalRecurringExpense, local: LocalRecurringExpense | undefined) => {
+          if (!local || local.synced !== 0) return remote;
+          return new Date(remote.updated_at).getTime() >= new Date(local.updated_at).getTime()
+            ? remote
+            : local;
+        },
+      },
+      {
+        label: 'Expense budgets',
+        table: 'expense_budgets',
+        map: (row: Record<string, unknown>) => ({
+          id: String(row.id),
+          store_id: String(row.store_id),
+          category: String(row.category || 'Other'),
+          monthly_limit: Number(row.monthly_limit) || 0,
+          updated_at: String(row.updated_at || ''),
+          synced: 1,
+        }),
+        dbTable: db.expense_budgets,
+        merge: async (remote: LocalExpenseBudget, local: LocalExpenseBudget | undefined) => {
+          if (!local || local.synced !== 0) return remote;
+          return new Date(remote.updated_at).getTime() >= new Date(local.updated_at).getTime()
+            ? remote
+            : local;
         },
       },
       {
@@ -2683,8 +3084,13 @@ export async function restoreStoreFromCloud(
     return { success: false, message: 'No owner account found for this store.' };
   }
 
-  const pinHash = hashPin(ownerPin);
-  const ownerMatch = owners.find(o => o.pin_hash === pinHash);
+  let ownerMatch = false;
+  for (const owner of owners) {
+    if (await verifyUserPin(ownerPin, String(owner.pin_hash || ''))) {
+      ownerMatch = true;
+      break;
+    }
+  }
   if (!ownerMatch) {
     return { success: false, message: 'Invalid owner PIN for this store.' };
   }
@@ -2698,6 +3104,8 @@ export async function restoreStoreFromCloud(
       db.transactions,
       db.transaction_items,
       db.expenses,
+      db.recurring_expenses,
+      db.expense_budgets,
       db.cash_book_entries,
       db.locations,
       db.stock_batches,
@@ -2716,6 +3124,8 @@ export async function restoreStoreFromCloud(
       await db.transactions.clear();
       await db.transaction_items.clear();
       await db.expenses.clear();
+      await db.recurring_expenses.clear();
+      await db.expense_budgets.clear();
       await db.cash_book_entries.clear();
       await db.locations.clear();
       await db.stock_batches.clear();
@@ -2784,8 +3194,13 @@ export async function addStoreFromCloud(
     return { success: false, message: 'No owner account found for this store.' };
   }
 
-  const pinHash = hashPin(ownerPin);
-  const ownerMatch = owners.find((o) => o.pin_hash === pinHash);
+  let ownerMatch = false;
+  for (const owner of owners) {
+    if (await verifyUserPin(ownerPin, String(owner.pin_hash || ''))) {
+      ownerMatch = true;
+      break;
+    }
+  }
   if (!ownerMatch) {
     return { success: false, message: 'Invalid owner PIN for this store.' };
   }

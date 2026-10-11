@@ -28,10 +28,18 @@ import InventoryInsights from '@/components/InventoryInsights';
 
 type SortMode = 'recent' | 'alpha' | 'stock-low' | 'stock-high';
 
-export default function InventoryPage() {
+export default function InventoryPage({
+  openAddOnLoad = false,
+  onQuickActionHandled,
+}: {
+  openAddOnLoad?: boolean;
+  onQuickActionHandled?: () => void;
+}) {
   const { currentStore } = useAuthStore();
   const money = useFormatMoney();
   const [products, setProducts] = useState<LocalProduct[]>([]);
+  const [productsLoaded, setProductsLoaded] = useState(false);
+  const [inventoryLoadError, setInventoryLoadError] = useState('');
   const [filteredProducts, setFilteredProducts] = useState<LocalProduct[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -51,6 +59,14 @@ export default function InventoryPage() {
   const [showInsights, setShowInsights] = useState(false);
   const lastSyncAtRef = useRef(0);
 
+  useEffect(() => {
+    if (!openAddOnLoad) return;
+    setEditProduct(null);
+    setScannedBarcodeForAdd(null);
+    setShowAddProduct(true);
+    onQuickActionHandled?.();
+  }, [openAddOnLoad, onQuickActionHandled]);
+
   const loadProducts = useCallback(async (opts?: { sync?: boolean }) => {
     const shouldSync = Boolean(opts?.sync);
 
@@ -58,6 +74,8 @@ export default function InventoryPage() {
       const allProducts = await getCurrentStoreProducts();
       const aligned = await alignProductsWithBatchStock(allProducts);
       setProducts(aligned);
+      setProductsLoaded(true);
+      setInventoryLoadError('');
       const cats = [...new Set(aligned.map((p) => p.category || 'Other'))].sort();
       setCategories(['All', ...cats]);
     };
@@ -77,14 +95,18 @@ export default function InventoryPage() {
             setSyncStatus(result.message || 'Cloud update delayed — tap Refresh');
           }
           await paintLocal();
-        } catch {
-          setSyncStatus('Cloud update delayed — tap Refresh');
+        } catch (error) {
+          console.error('[Inventory] Cloud refresh failed:', error);
+          setSyncStatus('No internet or cloud connection. Showing saved inventory; refresh when reconnected.');
         }
       }
-    } catch {
+    } catch (error) {
+      console.error('[Inventory] Could not load inventory:', error);
       try {
         const allProducts = await getCurrentStoreProducts();
         setProducts(allProducts);
+        setProductsLoaded(true);
+        setInventoryLoadError('');
         const cats = [...new Set(allProducts.map((p) => p.category || 'Other'))].sort();
         setCategories(['All', ...cats]);
         setSyncStatus('Showing this browser’s inventory');
@@ -92,6 +114,8 @@ export default function InventoryPage() {
       } catch {
         setProducts([]);
         setCategories(['All']);
+        setProductsLoaded(true);
+        setInventoryLoadError('Could not load inventory from this device. Check storage and refresh.');
       }
     }
   }, [currentStore?.id]);
@@ -450,15 +474,33 @@ export default function InventoryPage() {
               onEditProduct={(product) => { setEditProduct(product); setShowAddProduct(true); }}
             />
           ) : null
+        ) : !productsLoaded ? (
+          <div className="space-y-2" aria-label="Loading inventory" aria-busy="true">
+            {Array.from({ length: 5 }, (_, index) => (
+              <div key={index} className="animate-pulse rounded-xl border border-gray-100 bg-white p-4">
+                <div className="flex items-center gap-3">
+                  <div className="h-12 w-12 rounded-lg bg-gray-100" />
+                  <div className="flex-1 space-y-2"><div className="h-3 w-2/3 rounded bg-gray-100" /><div className="h-2 w-1/3 rounded bg-gray-100" /></div>
+                  <div className="h-4 w-16 rounded bg-gray-100" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : inventoryLoadError ? (
+          <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            <p>{inventoryLoadError}</p>
+            <button type="button" onClick={() => void loadProducts({ sync: true })} className="mt-2 rounded-lg bg-white px-3 py-2 text-xs font-semibold">Refresh inventory</button>
+          </div>
         ) : filteredProducts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-gray-400">
             <Package className="w-12 h-12 mb-3" />
-            <p className="text-sm font-medium">No products found</p>
+            <p className="text-sm font-medium">{products.length === 0 ? 'No products yet' : 'No products found'}</p>
+            <p className="mt-1 text-center text-xs">{products.length === 0 ? 'Scan or import to start adding items to your store.' : 'Try another search or category.'}</p>
             <button
               onClick={() => { setEditProduct(null); setShowAddProduct(true); }}
               className="mt-4 px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium"
             >
-              Add First Product
+              {products.length === 0 ? 'Add First Product' : 'Add Product'}
             </button>
           </div>
         ) : (

@@ -1,6 +1,6 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
-import { initAutoSync, startLiveStockSync, stopAutoSync } from '@/lib/sync';
+import { initAutoSync, startLiveStockSync, stopAutoSync, triggerPushSync } from '@/lib/sync';
 import { autoReconnectPeripherals } from '@/lib/bluetoothPeripherals';
 import { clearAdminSession, restoreAdminSession } from '@/lib/adminAuth';
 import { isValidGhanaPhone } from '@/lib/platformSettings';
@@ -27,6 +27,7 @@ import SubscriptionPage from '@/pages/SubscriptionPage';
 import WarehousePage from '@/pages/WarehousePage';
 import EcommercePage from '@/pages/EcommercePage';
 import PurchasingPage from '@/pages/PurchasingPage';
+import OwnerHomePage from '@/pages/OwnerHomePage';
 import PublicShopPage from '@/pages/PublicShopPage';
 import TermsPage from '@/pages/TermsPage';
 import NotFoundPage from '@/pages/NotFoundPage';
@@ -36,6 +37,7 @@ import { isStoreAccessBlocked } from '@/lib/subscription';
 import { checkAndSendSubscriptionExpirySms } from '@/lib/subscriptionReminders';
 import { canAccessCashbook } from '@/lib/staffAccess';
 import { createAutomaticStoreBackup, recordBackupIssue } from '@/lib/storeBackup';
+import { createDueRecurringExpenses } from '@/lib/dexie';
 
 type AppMode = 'store' | 'admin-login' | 'admin';
 
@@ -63,7 +65,8 @@ function userNeedsPhone(user: { phone?: string | null } | null | undefined): boo
 export default function App() {
   const { isAuthenticated, currentUser, currentStore, isStoreSetup, isLoading, initialize, switchUser } =
     useAuthStore();
-  const [currentPage, setCurrentPage] = useState('pos');
+  const [currentPage, setCurrentPage] = useState('home');
+  const [quickAction, setQuickAction] = useState<'add-product' | 'add-expense' | null>(null);
   const [appMode, setAppMode] = useState<AppMode>('store');
   const [adminSessionResolved, setAdminSessionResolved] = useState(false);
   const [publicShopSlug, setPublicShopSlug] = useState<string | null>(() => readPublicShopSlug());
@@ -111,6 +114,34 @@ export default function App() {
 
   useEffect(() => {
     if (!isAuthenticated || !currentStore?.id) return;
+    const runRecurringExpenses = () => {
+      void createDueRecurringExpenses()
+        .then((created) => {
+          if (created > 0) void triggerPushSync('recurring-expenses');
+        })
+        .catch((error: unknown) => {
+          console.error('[Expenses] Could not create scheduled recurring expenses:', error);
+        });
+    };
+    runRecurringExpenses();
+    const interval = window.setInterval(runRecurringExpenses, 60 * 60 * 1000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') runRecurringExpenses();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [isAuthenticated, currentStore?.id]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser) return;
+    setCurrentPage(currentUser.role === 'owner' ? 'home' : 'pos');
+  }, [isAuthenticated, currentUser?.id, currentUser?.role]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentStore?.id) return;
     const runBackup = () => {
       void createAutomaticStoreBackup(currentStore.id)
         .then(() => recordBackupIssue(''))
@@ -135,7 +166,7 @@ export default function App() {
   useEffect(() => {
     // Cashiers cannot stay on owner-only pages after switch/login
     if (currentUser?.role !== 'cashier') return;
-    const ownerOnly = ['inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription'];
+    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription'];
     const ecommerceOk = (currentUser.can_manage_ecommerce ?? 0) === 1;
     const cashbookOk = canAccessCashbook(currentUser);
     if (
@@ -276,8 +307,13 @@ export default function App() {
   const renderPage = () => {
     const role = currentUser?.role;
     switch (currentPage) {
+      case 'home':
+        return role === 'owner' ? <OwnerHomePage onNavigate={(page, quickAdd) => {
+          setQuickAction(quickAdd && page === 'inventory' ? 'add-product' : quickAdd && page === 'expenses' ? 'add-expense' : null);
+          setCurrentPage(page);
+        }} /> : <POSPage />;
       case 'pos':
-        return <POSPage />;
+        return <POSPage onNavigate={setCurrentPage} />;
       case 'transactions':
         return <TransactionsPage />;
       case 'devices':
@@ -285,7 +321,7 @@ export default function App() {
       case 'subscription':
         return role === 'owner' ? <SubscriptionPage /> : <POSPage />;
       case 'inventory':
-        return role === 'owner' ? <InventoryPage /> : <POSPage />;
+        return role === 'owner' ? <InventoryPage openAddOnLoad={quickAction === 'add-product'} onQuickActionHandled={() => setQuickAction(null)} /> : <POSPage />;
       case 'purchasing':
         return role === 'owner' ? <PurchasingPage /> : <POSPage />;
       case 'warehouse':
@@ -301,7 +337,7 @@ export default function App() {
       case 'reports':
         return role === 'owner' ? <ReportsPage /> : <POSPage />;
       case 'expenses':
-        return <ExpensesPage />;
+        return <ExpensesPage openAddOnLoad={quickAction === 'add-expense'} onQuickActionHandled={() => setQuickAction(null)} />;
       case 'cashbook':
         return canAccessCashbook(currentUser) ? <CashBookPage /> : <POSPage />;
       case 'settings':

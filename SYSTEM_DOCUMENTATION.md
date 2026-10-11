@@ -127,8 +127,8 @@ Entry: `index.html` → `src/main.tsx` → `<App />`.
    - `StoreSetupPage` if no local store
    - `LoginPage` if store exists but user not authenticated
    - Main shell otherwise
-4. Main navigation is **in-memory page state** (`pos` | `inventory` | `reports` | `settings`), not URL routing
-5. Cashiers are forced to `pos`; owner-only items appear in `BottomNav`
+4. Main navigation is **in-memory page state**, not URL routing. Owners land on Home; cashiers are forced to POS.
+5. Owners can open Home, POS, inventory, purchasing, reports, and settings.
 
 > Note: Manifest shortcut `/?page=pos` is not currently read by `App.tsx`.
 
@@ -162,6 +162,7 @@ One browser profile typically holds one active store at a time.
 |--------|-----------|--------|
 | Store setup / restore | `StoreSetupPage` | No local store |
 | Login | `LoginPage` | Store present, unauthenticated |
+| Home dashboard | `OwnerHomePage` | Owner |
 | POS | `POSPage` | Owner + cashier |
 | Inventory | `InventoryPage` | Owner (nav) |
 | Purchasing | `PurchasingPage` | Owner (nav) |
@@ -182,7 +183,8 @@ Default store settings on create:
 
 ### 6.3 Authentication
 
-- 4-digit PIN → `hashPin()` → match active user in current store
+- Account 4-digit PINs use PBKDF2-SHA-256 (600,000 iterations, per-PIN random salt); successful login upgrades legacy `hashPin()` values.
+- After five incorrect local PIN attempts, account PIN login and owner-PIN checks are locked for 15 minutes. This IndexedDB/device lockout is not server-enforced and can be cleared with browser data.
 - Optional WebAuthn biometric: credential id + `userId` in `localStorage` key `adimat_biometric_credential`
 - Signed-in user is persisted in IndexedDB (`app_config.current_user_id`) so a refresh stays on the till unless idle timeout has elapsed
 - Roles:
@@ -191,7 +193,7 @@ Default store settings on create:
 
 ### 6.4 POS / checkout
 
-1. Scan barcode (ZXing, prefers rear camera, debounce ~2s) or search/manual entry  
+1. Scan barcode (ZXing, prefers rear camera, debounce ~2s) or search/manual entry. Search supports typo-tolerant product names, partial barcode matches, recent/frequently sold ranking, and browser-supported speech input.
 2. Cart quantity with stock validation + scan beeps (`scanBeep.ts`)  
 3. Checkout overlay steps: payment method → discount → optional owner PIN → split/Paystack → processing → success  
 4. Payment methods: `cash` | `paystack` | `split`  
@@ -200,6 +202,7 @@ Default store settings on create:
 ### 6.5 Inventory (owner)
 
 - Product CRUD with categories: Food, Beverages, Dairy, Household, Electronics, Clothing, Health, Other
+- Loading skeleton and guided empty/error states
 - Activate/deactivate products
 - Stock adjust: set / add / subtract (UI collects reason; reason is **not persisted**)
 - CSV import
@@ -210,13 +213,19 @@ Default store settings on create:
 ### 6.6 Reports (owner)
 
 - Periods: today / week / month
+- Loading, retryable error, and no-data states
 - Tabs: overview / products / expenses
 - Revenue cash vs Paystack, 7-day chart, top/slow movers, category & cashier stats
 - Net profit ≈ revenue − COGS − expenses
 - Expense categories: Rent, Utilities, Supplier, Salaries, Transport, Other
+- Expenses support receipt photos, recurring monthly templates, and monthly category budgets with over-budget warnings. Due recurring expenses are generated idempotently when the app is active or the Expenses screen is opened.
 - Export CSV / PDF
 
-### 6.7 Settings (owner)
+### 6.7 Owner home
+
+The owner landing screen summarizes today's completed sales, cash and Paystack/MoMo amounts, and low-stock count. Quick actions open New Sale, Add Product, and Add Expense. Cashiers continue to land directly on POS.
+
+### 6.8 Settings (owner)
 
 - Store profile (name, address, support number)
 - Discount cap + PIN-on-discount toggle
@@ -234,7 +243,7 @@ Default store settings on create:
 ### 7.1 Local database (Dexie)
 
 **Database name:** `AdimatPOS`  
-**Schema versions:** v2 base tables; v8 adds cash book, warehouse, supplier/purchasing, and backup snapshot tables
+**Schema versions:** v2 base tables; v8 adds cash book, warehouse, supplier/purchasing, and backup snapshot tables; v9 adds expense workflows; v10 adds local PIN lockout storage
 **Module:** `src/lib/dexie.ts`
 
 | Table | Primary key | Notable indexes / fields |
@@ -244,7 +253,10 @@ Default store settings on create:
 | `products` | `id` | store_id, name, category, sku_type, barcode, cost_price, selling_price, stock_level, is_active, created_at, updated_at, synced |
 | `transactions` | `id` | store_id, receipt_number, cashier_id/name, totals, payment_method, cash/paystack amounts, paystack_reference, status, created_at, synced |
 | `transaction_items` | `id` | store_id, transaction_id, product_id, product_name, quantity, unit_price, subtotal, synced |
-| `expenses` | `id` | store_id, description, category, amount, notes, created_at, updated_at, synced |
+| `expenses` | `id` | store_id, description, category, amount, notes, receipt image, recurring template/month, created_at, updated_at, synced |
+| `recurring_expenses` | `id` | store_id, category, amount, due_day, is_active, synced |
+| `expense_budgets` | `id` | store_id, category, monthly_limit, synced |
+| `pin_attempts` | `store_id` | failed_attempts, locked_until, updated_at; local-only account PIN lockout state |
 | `suppliers` | `id` | store_id, contact details, is_active, created_at, synced |
 | `purchase_orders` | `id` | store_id, supplier_id, order_number, status, `items_json` (ordered/received quantities and unit costs), totals, timestamps, synced |
 | `backup_snapshots` | `id` | store_id, created_at, `data_json` (daily local store backup; up to seven retained) |
@@ -257,7 +269,8 @@ Booleans are stored as integers `0|1` locally and mapped to real booleans when s
 
 - `generateId()` — UUID v4  
 - `generateReceiptNumber()` — `#ADM-YYYYMMDD-XXXX` (random 4-digit seq)  
-- `hashPin(pin)` — salted string hash → base36 (client-side; not bcrypt/argon2)
+- `hashUserPin(pin)` — PBKDF2-SHA-256 account PIN hash; successful auth upgrades older hashes
+- `hashPin(pin)` — legacy helper still used for warehouse access PINs
 
 ### 7.2 Cloud database (Supabase / PostgreSQL)
 
@@ -357,14 +370,15 @@ Snapshots are on-device only and cannot protect against device loss, browser-dat
 
 Documented as implemented today:
 
-1. PIN hashing is a lightweight client hash — suitable for local UX friction, not high-assurance secret storage  
-2. Supabase RLS is enabled, but policies are open (`USING (true)` / `WITH CHECK (true)`), so the anon key can read/write all tables  
-3. Anon key and Paystack public key ship in the client bundle (expected for public keys; RLS must enforce tenancy for real multi-tenant security)  
-4. Role restrictions are enforced in the UI, not by a server authority  
-5. Session is restored from IndexedDB `app_config.current_user_id` on refresh; idle timeout (see 9.4) refuses that restore when the till has been inactive too long  
-6. Biometric unlock does not re-verify PIN against a remote identity provider  
+1. Account PINs are hashed locally with PBKDF2-SHA-256; the lockout is device-local and can be bypassed by clearing browser data. Warehouse access PINs still use the legacy `hashPin()` helper.
+2. Supabase RLS is enabled, but policies are open (`USING (true)` / `WITH CHECK (true)`), so the anon key can read/write all tables.
+3. Anon key and Paystack public key ship in the client bundle (expected for public keys; RLS must enforce tenancy for real multi-tenant security).
+4. Role restrictions are enforced in the UI, not by a server authority.
+5. Cloud restore still relies on Store ID plus owner PIN; it does not yet have independent server-side authorization.
+6. Session is restored from IndexedDB `app_config.current_user_id` on refresh; idle timeout (see 9.4) refuses that restore when the till has been inactive too long.
+7. Biometric unlock does not re-verify PIN against a remote identity provider.
 
-Operators deploying multi-tenant cloud sync should harden RLS before production exposure.
+Server-side RLS and stronger cloud-restore authorization are deferred. Operators deploying multi-tenant cloud sync should harden both before production exposure.
 
 ### 9.4 Automatic session timeout
 
@@ -489,7 +503,7 @@ npm run preview
 3. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`  
 4. Optionally harden RLS before multi-tenant production use  
 
-For an existing cloud project, run `supabase-migrate-purchasing-reorder.sql` before syncing reorder levels, suppliers, or purchase orders.
+For an existing cloud project, run `supabase-migrate-purchasing-reorder.sql` before syncing reorder levels, suppliers, or purchase orders. Run `supabase-migrate-expense-workflows.sql` before syncing receipt photos, recurring expenses, or category budgets.
 
 ### 13.5 Hosting
 
@@ -515,6 +529,7 @@ No lint/test/CI scripts are present in-repo.
 |------|---------|
 | `src/pages/StoreSetupPage.tsx` | Create store or restore from cloud |
 | `src/pages/LoginPage.tsx` | PIN / biometric login |
+| `src/pages/OwnerHomePage.tsx` | Owner sales/stock dashboard and quick actions |
 | `src/pages/POSPage.tsx` | Selling surface |
 | `src/pages/InventoryPage.tsx` | Catalog & stock ops |
 | `src/pages/PurchasingPage.tsx` | Supplier records and purchase-order receiving |

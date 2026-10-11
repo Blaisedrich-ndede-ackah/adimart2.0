@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt,
+  ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, House,
   CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare,
   ShoppingCart,
 } from 'lucide-react';
@@ -38,6 +38,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const navItems = useMemo<NavItem[]>(
     () =>
       [
+        { id: 'home', label: 'Home', icon: House, show: isOwner },
         { id: 'pos', label: t('nav.pos'), icon: ScanBarcode, show: true },
         { id: 'transactions', label: isOwner ? t('nav.sales') : t('nav.mySales'), icon: Receipt, show: true },
         { id: 'expenses', label: t('nav.expenses'), icon: PiggyBank, show: true },
@@ -66,9 +67,11 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   );
 
   // Keep bottom bar to a few primary destinations; rest live under More
-  const primaryIds: readonly string[] = cashbookOk
-    ? ['pos', 'transactions', 'cashbook']
-    : ['pos', 'transactions', 'expenses'];
+  const primaryIds: readonly string[] = isOwner
+    ? ['home', 'pos', 'transactions']
+    : cashbookOk
+      ? ['pos', 'transactions', 'cashbook']
+      : ['pos', 'transactions', 'expenses'];
 
   const primaryItems = navItems.filter((item) => primaryIds.includes(item.id));
   const moreItems = navItems.filter((item) => !primaryIds.includes(item.id));
