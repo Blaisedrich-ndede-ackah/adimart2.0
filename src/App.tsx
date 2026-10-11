@@ -26,6 +26,7 @@ import TransactionsPage from '@/pages/TransactionsPage';
 import SubscriptionPage from '@/pages/SubscriptionPage';
 import WarehousePage from '@/pages/WarehousePage';
 import EcommercePage from '@/pages/EcommercePage';
+import PurchasingPage from '@/pages/PurchasingPage';
 import PublicShopPage from '@/pages/PublicShopPage';
 import TermsPage from '@/pages/TermsPage';
 import NotFoundPage from '@/pages/NotFoundPage';
@@ -34,6 +35,7 @@ import AdminDashboardPage from '@/pages/AdminDashboardPage';
 import { isStoreAccessBlocked } from '@/lib/subscription';
 import { checkAndSendSubscriptionExpirySms } from '@/lib/subscriptionReminders';
 import { canAccessCashbook } from '@/lib/staffAccess';
+import { createAutomaticStoreBackup, recordBackupIssue } from '@/lib/storeBackup';
 
 type AppMode = 'store' | 'admin-login' | 'admin';
 
@@ -108,9 +110,32 @@ export default function App() {
   }, [isAuthenticated, currentStore?.id]);
 
   useEffect(() => {
+    if (!isAuthenticated || !currentStore?.id) return;
+    const runBackup = () => {
+      void createAutomaticStoreBackup(currentStore.id)
+        .then(() => recordBackupIssue(''))
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error('[Backup] Automatic store snapshot failed:', error);
+          recordBackupIssue(message);
+        });
+    };
+    runBackup();
+    const interval = window.setInterval(runBackup, 60 * 60 * 1000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') runBackup();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [isAuthenticated, currentStore?.id]);
+
+  useEffect(() => {
     // Cashiers cannot stay on owner-only pages after switch/login
     if (currentUser?.role !== 'cashier') return;
-    const ownerOnly = ['inventory', 'reports', 'settings', 'warehouse', 'subscription'];
+    const ownerOnly = ['inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription'];
     const ecommerceOk = (currentUser.can_manage_ecommerce ?? 0) === 1;
     const cashbookOk = canAccessCashbook(currentUser);
     if (
@@ -261,6 +286,8 @@ export default function App() {
         return role === 'owner' ? <SubscriptionPage /> : <POSPage />;
       case 'inventory':
         return role === 'owner' ? <InventoryPage /> : <POSPage />;
+      case 'purchasing':
+        return role === 'owner' ? <PurchasingPage /> : <POSPage />;
       case 'warehouse':
         return role === 'owner' ? (
           <WarehousePage onBackToSettings={leaveWarehouse} />

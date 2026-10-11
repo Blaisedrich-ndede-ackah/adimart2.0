@@ -8,7 +8,7 @@ import {
   syncToSupabase,
 } from '@/lib/dexie';
 import { isSupabaseConfigured } from '@/lib/supabase';
-import { isAutoSyncEnabled, setAutoSyncEnabled, startAutoSync, stopAutoSync } from '@/lib/sync';
+import { isAutoSyncEnabled, recordSyncOutcome, setAutoSyncEnabled, startAutoSync, stopAutoSync } from '@/lib/sync';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useT } from '@/lib/i18n';
 
@@ -66,6 +66,7 @@ export default function CloudSyncPanel({
           : mode === 'full'
             ? await syncBidirectional()
             : await syncToSupabase();
+      recordSyncOutcome(result);
       setSyncStatus(result.message);
 
       if (result.success) {
@@ -75,6 +76,7 @@ export default function CloudSyncPanel({
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
+      recordSyncOutcome({ success: false, message: msg });
       setSyncStatus(`${t('sync.errorPrefix')} ${msg}`);
     }
 
@@ -96,7 +98,7 @@ export default function CloudSyncPanel({
   };
 
   const statusIsError =
-    /error|failed|not configured/i.test(syncStatus);
+    /issue|partial|error|failed|not configured/i.test(syncStatus);
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">

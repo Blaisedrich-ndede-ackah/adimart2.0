@@ -109,6 +109,7 @@ CREATE TABLE IF NOT EXISTS products (
   wholesale_unit_price DECIMAL(12,2) DEFAULT 0,
   wholesale_tiers_json TEXT DEFAULT '[]',
   sell_online BOOLEAN DEFAULT FALSE,
+  reorder_level INTEGER NOT NULL DEFAULT 0 CHECK (reorder_level >= 0),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -124,6 +125,52 @@ CREATE INDEX IF NOT EXISTS idx_products_store ON products(store_id);
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(store_id, barcode);
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(store_id, category);
 CREATE INDEX IF NOT EXISTS idx_products_is_active ON products(store_id, is_active);
+
+-- ============================================================
+-- SUPPLIERS AND PURCHASE ORDERS
+-- ============================================================
+CREATE TABLE IF NOT EXISTS suppliers (
+  id UUID PRIMARY KEY,
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  name VARCHAR(255) NOT NULL,
+  contact_name VARCHAR(255) DEFAULT '',
+  phone VARCHAR(50) DEFAULT '',
+  email VARCHAR(255) DEFAULT '',
+  address TEXT DEFAULT '',
+  notes TEXT DEFAULT '',
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS purchase_orders (
+  id UUID PRIMARY KEY,
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  supplier_id UUID NOT NULL REFERENCES suppliers(id),
+  order_number VARCHAR(60) NOT NULL,
+  status VARCHAR(20) NOT NULL CHECK (status IN ('ordered', 'partially_received', 'received', 'cancelled')),
+  items_json TEXT NOT NULL DEFAULT '[]',
+  total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  notes TEXT DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  received_at TIMESTAMPTZ
+);
+
+ALTER TABLE suppliers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE purchase_orders ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "suppliers_select" ON suppliers FOR SELECT USING (true);
+CREATE POLICY "suppliers_insert" ON suppliers FOR INSERT WITH CHECK (true);
+CREATE POLICY "suppliers_update" ON suppliers FOR UPDATE USING (true);
+CREATE POLICY "suppliers_delete" ON suppliers FOR DELETE USING (true);
+CREATE POLICY "purchase_orders_select" ON purchase_orders FOR SELECT USING (true);
+CREATE POLICY "purchase_orders_insert" ON purchase_orders FOR INSERT WITH CHECK (true);
+CREATE POLICY "purchase_orders_update" ON purchase_orders FOR UPDATE USING (true);
+CREATE POLICY "purchase_orders_delete" ON purchase_orders FOR DELETE USING (true);
+
+CREATE INDEX IF NOT EXISTS idx_suppliers_store ON suppliers(store_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_store_created ON purchase_orders(store_id, created_at);
 
 -- ============================================================
 -- TRANSACTIONS TABLE (linked to stores)
@@ -561,6 +608,8 @@ CREATE TRIGGER update_online_orders_updated_at
   BEFORE UPDATE ON online_orders
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
+
+ALTER TABLE products ADD COLUMN IF NOT EXISTS reorder_level INTEGER NOT NULL DEFAULT 0 CHECK (reorder_level >= 0);
 
 -- ============================================================
 -- STOCK DEDUCTION FUNCTION (called after transaction item insert)

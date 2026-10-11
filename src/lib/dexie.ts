@@ -103,6 +103,7 @@ export interface LocalProduct {
   wholesale_tiers_json?: string;
   /** List this product on the public e-commerce storefront */
   sell_online?: number;
+  reorder_level?: number;
   created_at: string;
   updated_at: string;
   synced: number;
@@ -220,6 +221,46 @@ export interface LocalStockMovement {
   synced: number;
 }
 
+export interface LocalSupplier {
+  id: string;
+  store_id: string;
+  name: string;
+  contact_name: string;
+  phone: string;
+  email: string;
+  address: string;
+  notes: string;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export type PurchaseOrderStatus = 'ordered' | 'partially_received' | 'received' | 'cancelled';
+
+export interface PurchaseOrderLine {
+  product_id: string;
+  product_name: string;
+  quantity: number;
+  unit_cost: number;
+  received_quantity: number;
+}
+
+export interface LocalPurchaseOrder {
+  id: string;
+  store_id: string;
+  supplier_id: string;
+  order_number: string;
+  status: PurchaseOrderStatus;
+  items_json: string;
+  total_amount: number;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+  received_at?: string;
+  synced: number;
+}
+
 export interface LocalExpense {
   id: string;
   store_id: string;
@@ -283,6 +324,9 @@ class AdimatDB extends Dexie {
   stock_movements!: Table<LocalStockMovement, string>;
   online_orders!: Table<LocalOnlineOrder, string>;
   online_order_items!: Table<LocalOnlineOrderItem, string>;
+  suppliers!: Table<LocalSupplier, string>;
+  purchase_orders!: Table<LocalPurchaseOrder, string>;
+  backup_snapshots!: Table<{ id: string; store_id: string; created_at: string; data_json: string }, string>;
   deleted_records!: Table<LocalDeletedRecord, string>;
   sync_meta!: Table<SyncMeta, string>;
   app_config!: Table<AppConfig, string>;
@@ -365,6 +409,26 @@ class AdimatDB extends Dexie {
       stock_movements: 'id, store_id, product_id, batch_id, movement_type, created_at, synced',
       online_orders: 'id, store_id, order_number, status, created_at, synced',
       online_order_items: 'id, store_id, order_id, product_id, synced',
+      deleted_records: 'id, store_id, table_name, record_id, synced, deleted_at',
+      sync_meta: 'id',
+      app_config: 'id',
+    });
+    this.version(8).stores({
+      stores: 'id, synced',
+      users: 'id, store_id, role, pin_hash, is_active, synced',
+      products: 'id, store_id, name, category, barcode, is_active, sell_online, synced, updated_at',
+      transactions: 'id, store_id, receipt_number, cashier_id, status, created_at, synced',
+      transaction_items: 'id, store_id, transaction_id, product_id, synced',
+      expenses: 'id, store_id, category, created_at, synced',
+      cash_book_entries: 'id, store_id, entry_type, entry_date, created_at, synced',
+      locations: 'id, store_id, location_type, is_default, is_active, synced',
+      stock_batches: 'id, store_id, product_id, location_id, expiry_date, synced, updated_at',
+      stock_movements: 'id, store_id, product_id, batch_id, movement_type, created_at, synced',
+      online_orders: 'id, store_id, order_number, status, created_at, synced',
+      online_order_items: 'id, store_id, order_id, product_id, synced',
+      suppliers: 'id, store_id, name, is_active, synced',
+      purchase_orders: 'id, store_id, supplier_id, order_number, status, created_at, synced',
+      backup_snapshots: 'id, store_id, created_at',
       deleted_records: 'id, store_id, table_name, record_id, synced, deleted_at',
       sync_meta: 'id',
       app_config: 'id',
@@ -1440,7 +1504,9 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
     | 'stock_batches'
     | 'stock_movements'
     | 'online_orders'
-    | 'online_order_items',
+    | 'online_order_items'
+    | 'suppliers'
+    | 'purchase_orders',
   rows: T[],
   markSynced: () => Promise<void>,
   errors: string[]
@@ -1662,6 +1728,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         wholesale_unit_price: p.wholesale_unit_price ?? 0,
         wholesale_tiers_json: p.wholesale_tiers_json || '[]',
         sell_online: (p.sell_online ?? 0) === 1,
+        reorder_level: Number(p.reorder_level) || 0,
         created_at: p.created_at,
         updated_at: p.updated_at,
       })),
@@ -1904,6 +1971,52 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
       errors
     );
 
+    const unsyncedSuppliers = await db.suppliers.where('store_id').equals(storeId).and((s) => s.synced === 0).toArray();
+    syncedCount += await upsertToSupabase(
+      'Suppliers',
+      'suppliers',
+      unsyncedSuppliers.map((s) => ({
+        id: s.id,
+        store_id: s.store_id,
+        name: s.name,
+        contact_name: s.contact_name,
+        phone: s.phone,
+        email: s.email,
+        address: s.address,
+        notes: s.notes,
+        is_active: s.is_active === 1,
+        created_at: s.created_at,
+        updated_at: s.updated_at,
+      })),
+      async () => { await Promise.all(unsyncedSuppliers.map((s) => db.suppliers.update(s.id, { synced: 1 }))); },
+      errors
+    );
+
+    const unsyncedPurchaseOrders = await db.purchase_orders
+      .where('store_id')
+      .equals(storeId)
+      .and((o) => o.synced === 0)
+      .toArray();
+    syncedCount += await upsertToSupabase(
+      'Purchase orders',
+      'purchase_orders',
+      unsyncedPurchaseOrders.map((o) => ({
+        id: o.id,
+        store_id: o.store_id,
+        supplier_id: o.supplier_id,
+        order_number: o.order_number,
+        status: o.status,
+        items_json: o.items_json,
+        total_amount: o.total_amount,
+        notes: o.notes,
+        created_at: o.created_at,
+        updated_at: o.updated_at,
+        received_at: o.received_at || null,
+      })),
+      async () => { await Promise.all(unsyncedPurchaseOrders.map((o) => db.purchase_orders.update(o.id, { synced: 1 }))); },
+      errors
+    );
+
     if (errors.length > 0) {
       return { success: false, message: `Partial sync. Errors: ${errors.join('; ')}` };
     }
@@ -2114,6 +2227,7 @@ export async function syncFromSupabase(opts?: {
             wholesale_unit_price: Number(local.wholesale_unit_price) || 0,
             wholesale_tiers_json: (local.wholesale_tiers_json as string) || '[]',
             sell_online: local.sell_online ? 1 : 0,
+            reorder_level: Math.max(0, Math.floor(Number(local.reorder_level) || 0)),
             created_at: local.created_at as string,
             updated_at: (local.updated_at as string) || (local.created_at as string),
             synced: 1,
@@ -2345,6 +2459,56 @@ export async function syncFromSupabase(opts?: {
         }),
         dbTable: db.online_order_items,
       },
+      {
+        label: 'Suppliers',
+        table: 'suppliers',
+        map: (row: Record<string, unknown>) => ({
+          id: String(row.id),
+          store_id: String(row.store_id),
+          name: String(row.name || ''),
+          contact_name: String(row.contact_name || ''),
+          phone: String(row.phone || ''),
+          email: String(row.email || ''),
+          address: String(row.address || ''),
+          notes: String(row.notes || ''),
+          is_active: row.is_active === false ? 0 : 1,
+          created_at: String(row.created_at || ''),
+          updated_at: String(row.updated_at || row.created_at || ''),
+          synced: 1,
+        }),
+        dbTable: db.suppliers,
+        merge: async (remote: LocalSupplier, local: LocalSupplier | undefined) => {
+          if (!local || local.synced !== 0) return remote;
+          return new Date(remote.updated_at).getTime() >= new Date(local.updated_at).getTime()
+            ? remote
+            : local;
+        },
+      },
+      {
+        label: 'Purchase orders',
+        table: 'purchase_orders',
+        map: (row: Record<string, unknown>) => ({
+          id: String(row.id),
+          store_id: String(row.store_id),
+          supplier_id: String(row.supplier_id),
+          order_number: String(row.order_number || ''),
+          status: row.status as PurchaseOrderStatus,
+          items_json: String(row.items_json || '[]'),
+          total_amount: Number(row.total_amount) || 0,
+          notes: String(row.notes || ''),
+          created_at: String(row.created_at || ''),
+          updated_at: String(row.updated_at || row.created_at || ''),
+          received_at: typeof row.received_at === 'string' ? row.received_at : undefined,
+          synced: 1,
+        }),
+        dbTable: db.purchase_orders,
+        merge: async (remote: LocalPurchaseOrder, local: LocalPurchaseOrder | undefined) => {
+          if (!local || local.synced !== 0) return remote;
+          return new Date(remote.updated_at).getTime() >= new Date(local.updated_at).getTime()
+            ? remote
+            : local;
+        },
+      },
     ] as const;
 
     for (const config of tables) {
@@ -2452,6 +2616,7 @@ export async function syncStockFast(): Promise<{ success: boolean; message: stri
   const push = await syncToSupabase({ skipPing: true });
   const adopted = await refreshStockFromCloud();
   if (adopted.ok) {
+    if (!push.success) return { success: false, message: `${adopted.message}. ${push.message}` };
     return { success: true, message: adopted.message };
   }
   if (push.success) {
@@ -2474,8 +2639,9 @@ export async function syncBidirectional(): Promise<{ success: boolean; message: 
   }
 
   if (!push.success) {
-    return { success: true, message: `${adopted.message}. ${push.message}` };
+    return { success: false, message: `${adopted.message}. Push issue: ${push.message}` };
   }
+  if (!pull.success) return { success: false, message: `${adopted.message}. Pull issue: ${pull.message}` };
 
   return {
     success: true,
@@ -2538,6 +2704,8 @@ export async function restoreStoreFromCloud(
       db.stock_movements,
       db.online_orders,
       db.online_order_items,
+      db.suppliers,
+      db.purchase_orders,
       db.deleted_records,
       db.app_config,
     ],
@@ -2554,6 +2722,8 @@ export async function restoreStoreFromCloud(
       await db.stock_movements.clear();
       await db.online_orders.clear();
       await db.online_order_items.clear();
+      await db.suppliers.clear();
+      await db.purchase_orders.clear();
       await db.deleted_records.clear();
     }
   );

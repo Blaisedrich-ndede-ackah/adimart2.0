@@ -24,10 +24,11 @@ There is **no first-party application server**. Production deployment is static 
 | Area | Capabilities |
 |------|----------------|
 | POS | Scan/search products, cart, stock checks, cash / Paystack / split checkout, discounts with owner PIN gate, PDF/WhatsApp receipts, Bluetooth print |
-| Inventory | Product CRUD, categories, stock adjust, CSV import, barcode labels, low/out-of-stock views |
+| Inventory | Product CRUD, categories, stock adjust, CSV import, barcode labels, reorder suggestions, stock audit/export |
+| Purchasing | Supplier directory, purchase orders, partial receipts, stock/cost updates |
 | Reports | Period filters, revenue mix, charts, product performance, expenses, net profit, CSV/PDF export |
 | Staff & security | Owner/cashier roles, 4-digit PIN auth, biometric unlock, discount authorization |
-| Ops | Store setup or cloud restore, bidirectional/auto sync, PWA install + offline shell |
+| Ops | Store setup or cloud restore, bidirectional/auto sync, daily local backups + sync health, PWA install + offline shell |
 
 ---
 
@@ -163,6 +164,7 @@ One browser profile typically holds one active store at a time.
 | Login | `LoginPage` | Store present, unauthenticated |
 | POS | `POSPage` | Owner + cashier |
 | Inventory | `InventoryPage` | Owner (nav) |
+| Purchasing | `PurchasingPage` | Owner (nav) |
 | Reports | `ReportsPage` | Owner (nav) |
 | Settings | `SettingsPage` | Owner (nav) |
 
@@ -232,7 +234,7 @@ Default store settings on create:
 ### 7.1 Local database (Dexie)
 
 **Database name:** `AdimatPOS`  
-**Schema versions:** v2 base tables; v3 adds `expenses`  
+**Schema versions:** v2 base tables; v8 adds cash book, warehouse, supplier/purchasing, and backup snapshot tables
 **Module:** `src/lib/dexie.ts`
 
 | Table | Primary key | Notable indexes / fields |
@@ -243,6 +245,9 @@ Default store settings on create:
 | `transactions` | `id` | store_id, receipt_number, cashier_id/name, totals, payment_method, cash/paystack amounts, paystack_reference, status, created_at, synced |
 | `transaction_items` | `id` | store_id, transaction_id, product_id, product_name, quantity, unit_price, subtotal, synced |
 | `expenses` | `id` | store_id, description, category, amount, notes, created_at, updated_at, synced |
+| `suppliers` | `id` | store_id, contact details, is_active, created_at, synced |
+| `purchase_orders` | `id` | store_id, supplier_id, order_number, status, `items_json` (ordered/received quantities and unit costs), totals, timestamps, synced |
+| `backup_snapshots` | `id` | store_id, created_at, `data_json` (daily local store backup; up to seven retained) |
 | `sync_meta` | `id` | `last_sync` → `last_synced_at` |
 | `app_config` | `id` (`main`) | current_store_id, current_user_id |
 
@@ -274,7 +279,10 @@ stores 1──* users
 stores 1──* products
 stores 1──* transactions 1──* transaction_items (*──? products)
 stores 1──* expenses
+stores 1──* suppliers 1──* purchase_orders
 ```
+
+Products also have `reorder_level` (0 disables configurable restock suggestions). Receiving a purchase order adds stock batches and stock-movement records, and updates product cost price to the order’s unit cost.
 
 ---
 
@@ -311,6 +319,18 @@ Requires: Supabase configured + `navigator.onLine` + auto-sync enabled + no sync
 ### 8.4 Configuration detection
 
 Supabase is considered configured when URL/key env vars are present and the anon key length is > 20 (`src/lib/supabase.ts`). Without configuration the app remains fully local.
+
+### 8.5 Purchasing and inventory history
+
+`src/lib/purchasing.ts` validates supplier/order ownership and line quantities. Receipts are processed in a Dexie transaction, support partial quantities, create stock batches and `stock_movements` entries, and update product cost. Open orders may be cancelled; received orders cannot be cancelled or received again. Owners set product reorder levels in the product editor. Inventory suggestions flag stock at/below a positive reorder level and target twice that level.
+
+The Inventory stock-audit view pulls cloud `stock_movements` when configured, displays the latest 500 local/cloud records, and exports all locally available movements to CSV. Audit notes include receiving/adjustment context; older activity is not retroactively reconstructable.
+
+### 8.6 Store backups and sync health
+
+Authenticated app sessions attempt a daily, store-scoped IndexedDB snapshot and retain up to seven snapshots in `backup_snapshots`. Settings supports full JSON download, latest-snapshot download, and local restore. Snapshot failures are logged and exposed in Settings. The sync-health panel counts unsynced business rows and shows the last successful sync and recorded sync error. Sync and backup issue text is stored in browser `localStorage`.
+
+Snapshots are on-device only and cannot protect against device loss, browser-data clearing, or storage failure. Download backups to a separate secure location. Exported backups include user rows and therefore PIN hashes; treat them as sensitive credentials. Backups over 50 MB are rejected. Restore replaces local data for the selected store on that device; rows marked unsynced in the backup may be uploaded on the next cloud sync, while synced local rows can be reconciled with the cloud copy.
 
 ---
 
@@ -415,6 +435,8 @@ Typed in `src/vite-env.d.ts`. App runs offline without them.
 | Key | Storage | Purpose |
 |-----|---------|---------|
 | `adimat_auto_sync` | localStorage | Auto-sync enable/disable |
+| `adimat_last_sync_error` | localStorage | Most recent recorded sync issue |
+| `adimat_backup_error` | localStorage | Most recent automatic backup issue |
 | `adimat_biometric_credential` | localStorage | WebAuthn credential + userId |
 | `adimat_last_activity_{storeId}` | localStorage | Last till activity (idle timeout) |
 | `adimat_idle_lock` | sessionStorage | PIN-screen notice after idle lock |
@@ -467,6 +489,8 @@ npm run preview
 3. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`  
 4. Optionally harden RLS before multi-tenant production use  
 
+For an existing cloud project, run `supabase-migrate-purchasing-reorder.sql` before syncing reorder levels, suppliers, or purchase orders.
+
 ### 13.5 Hosting
 
 Deploy `dist` to any static host (Vercel recommended in README): Netlify, Cloudflare Pages, GitHub Pages, S3 + CloudFront, etc. Configure the same `VITE_*` env vars in the host dashboard.
@@ -493,6 +517,7 @@ No lint/test/CI scripts are present in-repo.
 | `src/pages/LoginPage.tsx` | PIN / biometric login |
 | `src/pages/POSPage.tsx` | Selling surface |
 | `src/pages/InventoryPage.tsx` | Catalog & stock ops |
+| `src/pages/PurchasingPage.tsx` | Supplier records and purchase-order receiving |
 | `src/pages/ReportsPage.tsx` | Analytics & expenses |
 | `src/pages/SettingsPage.tsx` | Store, staff, printer, sync |
 
@@ -506,6 +531,8 @@ No lint/test/CI scripts are present in-repo.
 | `CheckoutOverlay.tsx` | Multi-step checkout |
 | `CsvImportModal.tsx` | Bulk product import |
 | `StockAdjustment.tsx` | Manual stock changes |
+| `InventoryInsights.tsx` | Restock suggestions and stock movement audit/export |
+| `BackupSyncTools.tsx` | Local backups, restore, and sync-health status |
 | `ChangePinModal.tsx` / `ResetUserPinModal.tsx` | PIN management |
 | `PWAInstallBanner.tsx` | Install guidance |
 
@@ -514,6 +541,8 @@ No lint/test/CI scripts are present in-repo.
 | File | Purpose |
 |------|---------|
 | `dexie.ts` | Schema, CRUD, receipt/id helpers, push/pull/restore |
+| `purchasing.ts` | Supplier and purchase-order validation/receipt workflow |
+| `storeBackup.ts` | Store-scoped export/restore, daily snapshots, sync-health counts |
 | `sync.ts` | Auto-sync scheduler & triggers |
 | `supabase.ts` | Client init & configuration checks |
 | `paystack.ts` | Inline payment wrapper |
@@ -542,14 +571,16 @@ No lint/test/CI scripts are present in-repo.
 
 1. Open app → Create store → owner PIN  
 2. Settings → complete profile, discount rules, staff  
-3. Inventory → add products (or CSV import)  
-4. Optional: connect printer, enable biometrics, configure Supabase env + sync  
+3. Inventory → add products (or CSV import), set reorder levels as needed
+4. Optional: Purchasing → add suppliers and create purchase orders
+5. Optional: connect printer, enable biometrics, configure Supabase env + sync
 
 ### 15.2 Move store to another device
 
 1. Ensure source device has synced (Settings → full sync)  
 2. On new device: Store setup → Restore → Store ID + owner PIN  
 3. Verify products/users/transactions pulled  
+4. Download a separate backup from **Settings → Backup & sync health** for device-loss protection
 
 ### 15.3 Offline selling day
 

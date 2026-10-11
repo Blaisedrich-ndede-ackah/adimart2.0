@@ -39,12 +39,14 @@ const WHOLESALE_MODES: { value: WholesaleMode; label: string }[] = [
 
 export default function AddProduct({ isOpen, onClose, onSaved, editProduct, initialBarcode }: AddProductProps) {
   const currencySymbol = getStoreCurrency(useAuthStore((s) => s.currentStore?.currency_code)).symbol;
+  const currentUserId = useAuthStore((s) => s.currentUser?.id);
   const [name, setName] = useState('');
   const [category, setCategory] = useState('Food');
   const [barcode, setBarcode] = useState('');
   const [costPrice, setCostPrice] = useState('');
   const [sellingPrice, setSellingPrice] = useState('');
   const [stockLevel, setStockLevel] = useState('');
+  const [reorderLevel, setReorderLevel] = useState('0');
   const [skuType, setSkuType] = useState('unit');
   const [packSize, setPackSize] = useState('1');
   const [trackExpiry, setTrackExpiry] = useState(false);
@@ -94,6 +96,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         setCostPrice(editProduct.cost_price.toString());
         setSellingPrice(editProduct.selling_price.toString());
         setStockLevel(editProduct.stock_level.toString());
+        setReorderLevel(String(editProduct.reorder_level ?? 0));
         setSkuType(editProduct.sku_type);
         setImageUrl(editProduct.image_url || '');
         setPackSize(String(editProduct.pack_size ?? 1));
@@ -118,6 +121,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         setCostPrice('');
         setSellingPrice('');
         setStockLevel('');
+        setReorderLevel('0');
         setSkuType('unit');
         setImageUrl('');
         setPackSize('1');
@@ -303,6 +307,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           barcode: barcode.trim(),
           cost_price: cost,
           selling_price: sell,
+          reorder_level: Math.max(0, Math.floor(Number(reorderLevel) || 0)),
           sku_type: skuType,
           image_url: imageUrl || '',
           ...wholesaleFields,
@@ -314,6 +319,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           productId: editProduct.id,
           targetQty: parseInt(stockLevel) || 0,
           note: 'Product edit stock',
+          userId: currentUserId,
         });
       } else {
         const productId = generateId();
@@ -326,6 +332,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           barcode: barcode.trim(),
           cost_price: cost,
           selling_price: sell,
+          reorder_level: Math.max(0, Math.floor(Number(reorderLevel) || 0)),
           stock_level: 0,
           is_active: 1,
           image_url: imageUrl || '',
@@ -341,6 +348,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
             productId,
             targetQty: openingQty,
             note: 'Opening stock',
+            userId: currentUserId,
           });
         }
       }
@@ -532,6 +540,20 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
               >
                 {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-gray-700 mb-1.5 block">Restock alert level</label>
+              <input
+                type="number"
+                value={reorderLevel}
+                onChange={(e) => setReorderLevel(e.target.value)}
+                placeholder="0"
+                min="0"
+                step="1"
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
+              />
+              <p className="mt-1 text-[11px] text-gray-500">Suggest restocking when available stock reaches this quantity. Set to 0 to disable.</p>
             </div>
             <div>
               <label className="text-sm font-medium text-gray-700 mb-1.5 block">Unit Type</label>

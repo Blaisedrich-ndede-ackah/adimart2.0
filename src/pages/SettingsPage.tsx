@@ -7,6 +7,7 @@ import ChangePinModal from '@/components/ChangePinModal';
 import ResetUserPinModal from '@/components/ResetUserPinModal';
 import BluetoothHardwareSettings from '@/components/BluetoothHardwareSettings';
 import CloudSyncPanel from '@/components/CloudSyncPanel';
+import BackupSyncTools from '@/components/BackupSyncTools';
 import { 
   db, 
   LocalUser,
@@ -906,6 +907,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         <BluetoothHardwareSettings />
 
         <CloudSyncPanel showStoreId />
+        <BackupSyncTools />
 
         {/* Save Button */}
         {saveError && (

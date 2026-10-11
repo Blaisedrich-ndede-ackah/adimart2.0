@@ -24,6 +24,7 @@ import { useFormatMoney } from '@/lib/currency';
 import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 import { playScanBeep } from '@/lib/scanBeep';
 import ProductImage from '@/components/ProductImage';
+import InventoryInsights from '@/components/InventoryInsights';
 
 type SortMode = 'recent' | 'alpha' | 'stock-low' | 'stock-high';
 
@@ -47,6 +48,7 @@ export default function InventoryPage() {
   const [syncStatus, setSyncStatus] = useState('');
   const [scannedBarcodeForAdd, setScannedBarcodeForAdd] = useState<string | null>(null);
   const [highlightedProductId, setHighlightedProductId] = useState<string | null>(null);
+  const [showInsights, setShowInsights] = useState(false);
   const lastSyncAtRef = useRef(0);
 
   const loadProducts = useCallback(async (opts?: { sync?: boolean }) => {
@@ -222,7 +224,8 @@ export default function InventoryPage() {
   const outOfStock = activeProducts.filter((p) => toQty(p.stock_level) === 0).length;
   const lowStock = activeProducts.filter((p) => {
     const stock = toQty(p.stock_level);
-    return stock > 0 && stock < 5;
+    const threshold = Number(p.reorder_level) > 0 ? Number(p.reorder_level) : 5;
+    return stock > 0 && stock <= threshold;
   }).length;
   const totalValue = activeProducts.reduce(
     (sum, p) => sum + toQty(p.stock_level) * toMoney(p.selling_price),
@@ -431,7 +434,23 @@ export default function InventoryPage() {
 
       {/* Product List */}
       <div className="page-body no-scrollbar">
-        {filteredProducts.length === 0 ? (
+        <div className="mb-3 flex gap-2">
+          <button type="button" onClick={() => setShowInsights(false)} className={`rounded-lg px-3 py-2 text-xs font-semibold touch-target ${!showInsights ? 'bg-primary text-white' : 'bg-white text-gray-700 border border-gray-200'}`}>
+            Products
+          </button>
+          <button type="button" onClick={() => setShowInsights(true)} className={`rounded-lg px-3 py-2 text-xs font-semibold touch-target ${showInsights ? 'bg-primary text-white' : 'bg-white text-gray-700 border border-gray-200'}`}>
+            Restock & audit
+          </button>
+        </div>
+        {showInsights ? (
+          currentStore?.id ? (
+            <InventoryInsights
+              storeId={currentStore.id}
+              products={products}
+              onEditProduct={(product) => { setEditProduct(product); setShowAddProduct(true); }}
+            />
+          ) : null
+        ) : filteredProducts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-gray-400">
             <Package className="w-12 h-12 mb-3" />
             <p className="text-sm font-medium">No products found</p>
@@ -467,7 +486,9 @@ export default function InventoryPage() {
                               OUT OF STOCK
                             </span>
                           )}
-                          {toQty(product.stock_level) > 0 && toQty(product.stock_level) < 5 && product.is_active === 1 && (
+                          {toQty(product.stock_level) > 0 &&
+                            toQty(product.stock_level) <= (Number(product.reorder_level) > 0 ? Number(product.reorder_level) : 5) &&
+                            product.is_active === 1 && (
                             <span className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 text-[9px] font-bold rounded">
                               LOW
                             </span>
@@ -498,7 +519,7 @@ export default function InventoryPage() {
                           className={`text-xs font-semibold ${
                             toQty(product.stock_level) === 0
                               ? 'text-red-500'
-                              : toQty(product.stock_level) < 5
+                              : toQty(product.stock_level) <= (Number(product.reorder_level) > 0 ? Number(product.reorder_level) : 5)
                                 ? 'text-amber-500'
                                 : 'text-gray-700'
                           }`}

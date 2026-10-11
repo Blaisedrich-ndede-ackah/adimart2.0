@@ -3,6 +3,7 @@ import { X, Plus, Minus, Package, Save } from 'lucide-react';
 import { LocalProduct, getCurrentStoreId } from '@/lib/dexie';
 import { getProductTotalStock, setProductStockLevel } from '@/lib/warehouse';
 import { triggerPushSync } from '@/lib/sync';
+import { useAuthStore } from '@/store/useAuthStore';
 
 interface StockAdjustmentProps {
   isOpen: boolean;
@@ -12,6 +13,7 @@ interface StockAdjustmentProps {
 }
 
 export default function StockAdjustment({ isOpen, product, onClose, onSaved }: StockAdjustmentProps) {
+  const currentUserId = useAuthStore((s) => s.currentUser?.id);
   const [adjustmentType, setAdjustmentType] = useState<'set' | 'add' | 'subtract'>('add');
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
@@ -50,6 +52,10 @@ export default function StockAdjustment({ isOpen, product, onClose, onSaved }: S
       setError('Enter a valid quantity');
       return;
     }
+    if (!reason.trim()) {
+      setError('Enter a reason so this adjustment is recorded in the stock audit.');
+      return;
+    }
 
     setSaving(true);
     setError('');
@@ -69,7 +75,8 @@ export default function StockAdjustment({ isOpen, product, onClose, onSaved }: S
         storeId,
         productId: product.id,
         targetQty: newStock,
-        note: reason.trim() || `Stock ${adjustmentType}`,
+        note: reason.trim(),
+        userId: currentUserId,
       });
       void triggerPushSync('stock-adjust');
       onSaved();
@@ -189,7 +196,7 @@ export default function StockAdjustment({ isOpen, product, onClose, onSaved }: S
           )}
 
           <div>
-            <label className="text-sm font-medium text-gray-700 mb-2 block">Reason (optional)</label>
+            <label className="text-sm font-medium text-gray-700 mb-2 block">Reason *</label>
             <input
               type="text"
               value={reason}

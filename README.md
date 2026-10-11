@@ -22,6 +22,8 @@ A mobile-first Point of Sale (POS) and inventory management Progressive Web App 
 - **Optional Product Photos** — Add a picture when creating/editing a product; shown in inventory and at checkout
 - **Stock Tracking** — Automatic stock deduction on sales, low stock and out-of-stock alerts
 - **Stock Adjustment** — Manually add, remove, or set stock levels with reason tracking
+- **Restock Alerts** — Configure a reorder level per product and review suggested restock quantities
+- **Stock Audit Trail** — Review and export recorded receipts, transfers, sales, and adjustments with staff and location details
 - **Barcode Assignment** — Scan barcodes directly when adding products
 - **Profit Margin Calculator** — Auto-calculates margin based on cost and selling price
 - **Dashboard Cards** — Total SKUs, out of stock count, low stock count, total inventory value
@@ -40,6 +42,7 @@ A mobile-first Point of Sale (POS) and inventory management Progressive Web App 
 - **Automatic Session Timeout** — Owners set how long the till may sit idle (off, or 1–30 minutes; default 5). Staff are returned to the PIN screen, the cart is cleared, and a refresh cannot restore a stale session.
 - **Thermal Printer** — Connect Bluetooth thermal printers for receipt printing
 - **Cloud Sync** — Manual sync to Supabase with last-synced timestamp. Owners use **Settings**; cashiers use **My Sales** or **Devices → Cloud Sync** (Full Sync / Pull / Push) so they can send sales and pick up stock updates.
+- **Backup & Sync Health** — Daily on-device snapshots, downloadable store backups, restore, pending-change count, and last sync/backup errors
 
 ### 📱 PWA & Offline Support
 - **Installable** — Add to home screen on mobile devices
@@ -146,6 +149,16 @@ Products support pack size, expiry tracking, and owner-defined wholesale pricing
 
 If your Supabase project predates this feature, run `supabase-migrate-warehouse.sql` in the SQL Editor.
 For store quotas + warehouse PINs, run `supabase-migrate-store-quotas.sql` (includes `max_stores` and the canonical `store_quotas` table).
+
+### Supplier purchasing and restocking
+
+Owners can open **Purchasing** to save supplier contact details, create purchase orders, receive orders in full or in partial quantities into a selected shop/warehouse, and cancel open orders. Receiving adds stock batches and stock-movement audit entries, and updates product cost prices. Set a product’s **Restock alert quantity** from its Inventory edit form; **Inventory → Restock & audit** shows items at or below that level and a suggested quantity.
+
+If your Supabase project predates these tables/columns, run `supabase-migrate-purchasing-reorder.sql` in the SQL Editor before syncing purchasing or reorder-level data. New projects receive the schema from `supabase-init.sql`.
+
+### Backups and sync health
+
+Owners can open **Settings → Backup & sync health** to download a JSON backup, restore a backup for the currently selected store, inspect pending local changes and recent sync/backup errors, and download the latest automatic snapshot. Authenticated sessions also create one daily snapshot in the browser, retaining up to seven. Browser snapshots are not off-device protection: download backups to a separate secure location. Backup files include sensitive store and staff data, including PIN hashes, and are limited to 50 MB. Restoring replaces that store’s local data on the current device; unsynced rows in a restored backup may be uploaded during the next cloud sync.
 
 ### E-commerce storefront
 
