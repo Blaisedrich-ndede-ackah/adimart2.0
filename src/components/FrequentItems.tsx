@@ -30,7 +30,7 @@ export default function FrequentItems({ onAddProduct }: { onAddProduct?: (produc
         const transactions = await db.transactions
           .where('store_id')
           .equals(storeId)
-          .filter((t) => t.created_at && t.created_at > thirtyDaysAgo && t.status === 'completed')
+          .filter((t) => Boolean(t.created_at && t.created_at > thirtyDaysAgo && t.status === 'completed'))
           .toArray();
 
         // Count product frequency
@@ -99,7 +99,7 @@ export default function FrequentItems({ onAddProduct }: { onAddProduct?: (produc
             >
               <div className="aspect-square bg-gray-50 rounded-t-[6px] flex items-center justify-center overflow-hidden">
                 <ProductImage
-                  productId={product.id}
+                  src={product.image_url}
                   alt={product.name}
                   className="w-full h-full object-cover"
                 />

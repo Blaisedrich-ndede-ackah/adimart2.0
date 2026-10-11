@@ -76,6 +76,8 @@ export interface LocalUser {
   can_manage_ecommerce?: number;
   /** Cashiers may open Cash Book when 1. Missing = allowed (legacy). Owners always can. */
   can_access_cashbook?: number;
+  /** Owner-configured POS section order, shared across their signed-in devices. */
+  pos_layout_json?: string;
   created_at: string;
   synced: number;
 }
@@ -1606,6 +1608,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         can_sell_from_warehouse: (u.can_sell_from_warehouse ?? 0) === 1,
         can_manage_ecommerce: (u.can_manage_ecommerce ?? (u.role === 'owner' ? 1 : 0)) === 1,
         can_access_cashbook: u.role === 'owner' ? true : (u.can_access_cashbook ?? 1) === 1,
+        pos_layout_json: u.role === 'owner' ? u.pos_layout_json || null : null,
         created_at: u.created_at,
       })),
       async () => { await Promise.all(unsyncedUsers.map(u => db.users.update(u.id, { synced: 1 }))); },
@@ -2050,6 +2053,9 @@ export async function syncFromSupabase(opts?: {
           can_sell_from_warehouse: row.can_sell_from_warehouse ? 1 : 0,
           can_manage_ecommerce: (row.can_manage_ecommerce || row.role === 'owner') ? 1 : 0,
           can_access_cashbook: cashbookAccessFromCloud(row.role, row.can_access_cashbook),
+          pos_layout_json: row.role === 'owner' && typeof row.pos_layout_json === 'string'
+            ? row.pos_layout_json
+            : undefined,
           created_at: row.created_at as string,
           synced: 1,
         }),
@@ -2073,6 +2079,7 @@ export async function syncFromSupabase(opts?: {
                 local.can_sell_from_warehouse ?? remote.can_sell_from_warehouse,
               can_manage_ecommerce: local.can_manage_ecommerce ?? remote.can_manage_ecommerce,
               can_access_cashbook: local.can_access_cashbook ?? remote.can_access_cashbook,
+              pos_layout_json: local.pos_layout_json ?? remote.pos_layout_json,
               synced: 0,
             };
           }
