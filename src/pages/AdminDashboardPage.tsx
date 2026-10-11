@@ -78,6 +78,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
   const [platformSettings, setPlatformSettings] = useState<PlatformSettings | null>(null);
   const [contactWhatsapp, setContactWhatsapp] = useState('');
   const [contactEmail, setContactEmail] = useState('');
+  const [adminPhone, setAdminPhone] = useState('');
   const [mnotifyApiKey, setMnotifyApiKey] = useState('');
   const [mnotifySenderId, setMnotifySenderId] = useState('Adimat');
   const [savingContact, setSavingContact] = useState(false);
@@ -134,6 +135,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
     setPlatformSettings(settings);
     setContactWhatsapp(settings.contact_whatsapp);
     setContactEmail(settings.contact_email);
+    setAdminPhone(settings.admin_phone);
     setMnotifyApiKey(settings.mnotify_api_key);
     setMnotifySenderId(settings.mnotify_sender_id || 'Adimat');
   }, []);
@@ -181,6 +183,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
     const result = await savePlatformSettings({
       contact_whatsapp: contactWhatsapp,
       contact_email: contactEmail,
+      admin_phone: adminPhone,
       mnotify_api_key: mnotifyApiKey,
       mnotify_sender_id: mnotifySenderId,
     });
@@ -188,7 +191,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       setStatusMsg(result.error || 'Failed to save contact settings');
     } else {
       setPlatformSettings(result.settings || null);
-      setStatusMsg('Admin contact and SMS alert settings saved. Store Plan screens will use these details.');
+      setStatusMsg('Admin contact and SMS settings saved.');
     }
     setSavingContact(false);
     setTimeout(() => setStatusMsg(''), 5000);
@@ -940,6 +943,21 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                   placeholder="admin@example.com"
                   className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
                 />
+              </div>
+              <div>
+                <label className="text-[11px] font-medium text-slate-500 mb-1 block">
+                  Admin phone for sign-in SMS
+                </label>
+                <input
+                  type="tel"
+                  value={adminPhone}
+                  onChange={(event) => setAdminPhone(event.target.value)}
+                  placeholder="024XXXXXXX or +23324XXXXXXX"
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  This phone must belong to the platform administrator's Supabase Auth account. If blank, WhatsApp is used.
+                </p>
               </div>
             </div>
 
