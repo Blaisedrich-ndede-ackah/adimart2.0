@@ -39,6 +39,7 @@ import { checkAndSendSubscriptionExpirySms } from '@/lib/subscriptionReminders';
 import { canAccessCashbook } from '@/lib/staffAccess';
 import { createAutomaticStoreBackup, recordBackupIssue } from '@/lib/storeBackup';
 import { createDueRecurringExpenses } from '@/lib/dexie';
+import { useAccessibilityStore } from '@/lib/accessibility';
 
 type AppMode = 'store' | 'admin-login' | 'admin';
 
@@ -66,6 +67,7 @@ function userNeedsPhone(user: { phone?: string | null } | null | undefined): boo
 export default function App() {
   const { isAuthenticated, currentUser, currentStore, isStoreSetup, isLoading, initialize, switchUser } =
     useAuthStore();
+  const leftHanded = useAccessibilityStore((state) => state.leftHanded);
   const [currentPage, setCurrentPage] = useState('home');
   const [quickAction, setQuickAction] = useState<'add-product' | 'add-expense' | null>(null);
   const [appMode, setAppMode] = useState<AppMode>('store');
@@ -364,7 +366,7 @@ export default function App() {
       }}
     >
       <AppNav currentPage={currentPage} onNavigate={setCurrentPage} />
-      <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+      <div className={`flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden ${leftHanded ? 'lg:order-1' : ''}`}>
         <PWAInstallBanner />
         <SubscriptionWarningBanner
           onOpenPlan={

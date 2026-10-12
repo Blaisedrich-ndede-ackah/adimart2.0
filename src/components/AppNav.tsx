@@ -6,8 +6,10 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useAccessibilityStore } from '@/lib/accessibility';
 import { COMMUNITY_CHAT_URL } from '@/lib/community';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
+import AccessibilityControls from '@/components/AccessibilityControls';
 import { useT } from '@/lib/i18n';
 import { canAccessCashbook } from '@/lib/staffAccess';
 
@@ -29,6 +31,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const { currentUser, currentStore, switchUser } = useAuthStore();
   const t = useT();
   const [moreOpen, setMoreOpen] = useState(false);
+  const leftHanded = useAccessibilityStore((state) => state.leftHanded);
   const isOwner = currentUser?.role === 'owner';
   const ecommerceEnabled = (currentStore?.ecommerce_enabled ?? 0) === 1;
   const canManageEcommerce =
@@ -95,7 +98,9 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className="hidden lg:flex w-56 xl:w-64 shrink-0 flex-col self-stretch bg-primary text-white border-r border-primary-dark">
+      <aside className={`hidden lg:flex w-56 xl:w-64 shrink-0 flex-col self-stretch bg-primary text-white border-primary-dark ${
+        leftHanded ? 'lg:order-2 border-l border-r-0' : 'border-r'
+      }`}>
         <div className="px-4 py-5 border-b border-white/10">
           <p className="text-emerald-200 text-[10px] font-semibold uppercase tracking-[0.14em]">Adimat</p>
           <p className="font-bold text-xl tracking-tight truncate mt-1">{currentStore?.name || 'Store'}</p>
@@ -145,6 +150,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
           })}
         </nav>
         <div className="p-2 border-t border-white/10 space-y-2">
+          <AccessibilityControls variant="sidebar" />
           <LanguageSwitcher variant="onPrimary" compact />
           <button
             type="button"
@@ -291,6 +297,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
             </div>
 
             <div className="px-4 pb-2 space-y-2">
+              <AccessibilityControls variant="menu" />
               <LanguageSwitcher compact />
               <button
                 type="button"

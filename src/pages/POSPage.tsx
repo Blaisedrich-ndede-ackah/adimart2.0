@@ -1,13 +1,15 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   ShoppingCart, Minus, Plus, Trash2, Search, ChevronRight, Package, AlertCircle, Bluetooth,
-  ScanBarcode, MapPin, X, Settings2, GripVertical, MoveUp, MoveDown, Mic, Pause, Play
+  ScanBarcode, MapPin, X, Settings2, GripVertical, MoveUp, MoveDown, Mic, Pause, Play,
+  CircleCheck, CircleX,
 } from 'lucide-react';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import CheckoutOverlay from '@/components/CheckoutOverlay';
 import FrequentItems from '@/components/FrequentItems';
 import { useCartStore } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useAccessibilityStore } from '@/lib/accessibility';
 import { db, LocalProduct, LocalLocation, getActiveStoreOwner, getCurrentStoreActiveProducts, getCurrentStoreId } from '@/lib/dexie';
 import { playScanBeep, primeScanBeep } from '@/lib/scanBeep';
 import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
