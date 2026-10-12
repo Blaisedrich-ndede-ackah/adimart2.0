@@ -504,7 +504,7 @@ npm run preview
 3. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`  
 4. Optionally harden RLS before multi-tenant production use  
 
-For an existing cloud project, run `supabase-migrate-purchasing-reorder.sql` before syncing reorder levels, suppliers, or purchase orders. Run `supabase-migrate-expense-workflows.sql` before syncing receipt photos, recurring expenses, or category budgets, and `supabase-migrate-manual-payments.sql` before syncing manually recorded payment methods.
+For an existing cloud project, run `supabase-migrate-purchasing-reorder.sql` before syncing reorder levels, suppliers, or purchase orders. Run `supabase-migrate-expense-workflows.sql` in the Supabase SQL Editor before syncing receipt photos, recurring expenses, or category budgets; it creates the required tables and requests a PostgREST schema-cache refresh. If sync still reports `PGRST205`, verify both tables exist in the `public` schema and rerun the migration. Run `supabase-migrate-manual-payments.sql` before syncing manually recorded payment methods.
 
 ### 13.5 Hosting
 

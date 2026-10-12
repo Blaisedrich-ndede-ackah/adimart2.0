@@ -58,3 +58,8 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS idx_recurring_expenses_store ON recurring_expenses(store_id);
 CREATE INDEX IF NOT EXISTS idx_expense_budgets_store ON expense_budgets(store_id);
+
+NOTIFY pgrst, 'reload schema';
+
+-- Read-only verification after running:
+-- SELECT to_regclass('public.recurring_expenses'), to_regclass('public.expense_budgets');
