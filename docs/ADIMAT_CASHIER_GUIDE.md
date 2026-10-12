@@ -4,17 +4,19 @@ Role-specific guide for cashiers. The in-app Learn Adimat area shows cashier les
 
 ## Sign in safely
 
-Open Adimat and sign in with your own cashier PIN. Never use another staff member's PIN or share yours. The owner manages cashier accounts and can reset a PIN. If the till has been idle, sign in again; the cart may have been cleared by the idle lock.
+Open Adimat and sign in with your own cashier PIN. Never use another staff member's PIN or share yours. The owner manages cashier accounts and can reset a PIN. Five incorrect PIN attempts lock PIN verification for 5 minutes. If the till has been idle, sign in again; the cart may have been cleared by the idle lock.
 
 ## Make a sale
 
 1. Open POS. Search for a product by name or barcode, scan it with the camera, or use a paired handheld scanner.
 2. Tap the product to add it. Check the cart items, quantities, and total before checkout.
-3. Choose Cash, Paystack, or Split and follow the payment instructions. Paystack needs internet.
+3. Choose Cash, Paystack, Split, or record an offline MTN MoMo, Telecel Cash, AirtelTigo Money, bank transfer, or card-terminal payment. Enter the payment reference for manual methods. Paystack needs internet; manual payment recording does not contact a provider.
 4. Wait for the payment result. Do not start the same checkout again while it is processing.
 5. After confirmation, provide the customer with the receipt: PDF, share, WhatsApp where supported, or a connected Bluetooth printer.
 
 Adimat checks stock during a sale. If an item is out of stock or the quantity is unavailable, do not adjust stock yourself; tell the owner. If a discount needs owner authorization, ask the owner to enter their PIN.
+
+Use **Hold sale** in the cart to park the current sale while serving another customer. Choose **Resume** under Held sales to continue; resuming while another cart is active parks that cart too. Held sales are available for the current POS session.
 
 ## Find sales and hand over your shift
 

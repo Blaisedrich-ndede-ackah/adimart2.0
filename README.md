@@ -15,7 +15,8 @@ A mobile-first Point of Sale (POS) and inventory management Progressive Web App 
 - **Manual Entry** — Search products by name or enter barcodes manually
 - **Real-time Cart** — Add, remove, and adjust quantities with instant totals
 - **Stock Validation** — Prevents selling out-of-stock items, warns on low stock
-- **Flexible Payments** — Cash, Paystack (Mobile Money/Card/QR), or split payments
+- **Flexible Payments** — Cash, Paystack, split payments, or offline-recorded MTN/Telecel/AirtelTigo MoMo, bank transfers, and standalone card-terminal payments with references
+- **Hold Sale** — Park a cart while serving another customer, then resume it in the same POS session
 - **Discount Management** — Apply discounts with optional owner PIN authorization for amounts exceeding the configured cap
 - **PDF Receipts** — Generate, download, and share receipts as PDF files
 
@@ -33,7 +34,7 @@ A mobile-first Point of Sale (POS) and inventory management Progressive Web App 
 
 ### 📊 Reports & Analytics
 - **Period Filtering** — Today, This Week, This Month views
-- **Revenue Breakdown** — Cash vs Paystack isolation
+- **Revenue Breakdown** — Cash vs non-cash collections; manual payments are kept separate from Paystack payout totals
 - **7-Day Rolling Chart** — Visual revenue trend using bar charts
 - **Transaction Register** — Chronological audit log with expandable item details
 
@@ -47,7 +48,7 @@ A mobile-first Point of Sale (POS) and inventory management Progressive Web App 
 - **Backup & Sync Health** — Daily on-device snapshots, downloadable store backups, restore, pending-change count, and last sync/backup errors
 
 ### 📈 Owner dashboard & product search
-- **Owner Home** — Today’s sales, cash and Mobile Money/Paystack totals, low-stock count, and one-tap new sale/product/expense actions; cashiers continue directly to POS
+- **Owner Home** — Today’s sales, cash and non-cash totals, low-stock count, and one-tap new sale/product/expense actions; cashiers continue directly to POS
 - **Smarter POS Search** — Typo-tolerant product-name search, partial barcode matching, recently and frequently sold products prioritized, and optional voice input where the browser supports it
 
 ### 💸 Expense controls
@@ -190,6 +191,7 @@ Store owners set their preferred MoMo account under **Settings → Mobile Money 
 If your Supabase project was created before these features, run `supabase-migrate-admin.sql`, `supabase-migrate-subscriptions.sql`, `supabase-migrate-platform-settings.sql`, `supabase-migrate-clear-store-ledger.sql`, and `supabase-migrate-cashier-cashbook.sql` in the SQL Editor (or re-apply the latest `supabase-init.sql`).
 For self-serve Paystack subscription renewals, also run `supabase-migrate-subscription-payments.sql`.
 For automatic session timeout (idle PIN lock), run `supabase-migrate-session-timeout.sql`.
+For manually recorded MoMo, bank transfer, and card-terminal sales, run `supabase-migrate-manual-payments.sql`.
 
 ### Multi-store on one device
 

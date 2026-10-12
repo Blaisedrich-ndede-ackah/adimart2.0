@@ -15,6 +15,11 @@ import {
   type OtherCharge,
   type OtherChargeCategoryId,
 } from '@/lib/otherCharges';
+import {
+  MANUAL_PAYMENT_METHODS,
+  isManualPaymentMethod,
+  type PaymentMethod,
+} from '@/lib/paymentMethods';
 import { useFormatMoney, getStoreCurrency } from '@/lib/currency';
 import { getBluetoothHardwareStatus } from '@/lib/bluetoothPeripherals';
 
@@ -25,7 +30,7 @@ interface CheckoutOverlayProps {
   onConnectPrinter?: () => void;
 }
 
-type Step = 'method' | 'discount' | 'charges' | 'pin-verify' | 'cash-input' | 'split-input' | 'paystack' | 'processing' | 'success';
+type Step = 'method' | 'discount' | 'charges' | 'pin-verify' | 'cash-input' | 'split-input' | 'manual-payment' | 'paystack' | 'processing' | 'success';
 
 interface SaleResult {
   receiptNumber: string;
@@ -35,9 +40,12 @@ interface SaleResult {
   otherCharges: OtherCharge[];
   otherChargesTotal: number;
   total: number;
-  paymentMethod?: 'cash' | 'split' | 'paystack';
+  paymentMethod?: PaymentMethod;
   cashAmount?: number;
   paystackAmount?: number;
+  manualPaymentAmount?: number;
+  paystackReference?: string;
+  paymentReference?: string;
 }
 
 export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnectPrinter }: CheckoutOverlayProps) {
@@ -51,6 +59,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [cashAmount, setCashAmount] = useState('');
+  const [manualMethod, setManualMethod] = useState<(typeof MANUAL_PAYMENT_METHODS)[number]['value']>('momo_mtn');
+  const [manualReference, setManualReference] = useState('');
   const [saleResult, setSaleResult] = useState<SaleResult | null>(null);
   const [error, setError] = useState('');
   const [isPrinting, setIsPrinting] = useState(false);
@@ -82,6 +92,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       setPinInput('');
       setPinError('');
       setCashAmount('');
+      setManualMethod('momo_mtn');
+      setManualReference('');
       setSaleResult(null);
       setError('');
       setPaystackError('');
@@ -101,7 +113,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
     }
   }, [isOpen, allowPercentage, canApplyDiscount]);
 
-  function buildReceiptData(result: SaleResult, method: 'cash' | 'split' | 'paystack', cashAmt?: number, paystackAmt?: number, paystackRef?: string): PDFReceiptData {
+  function buildReceiptData(result: SaleResult, method: PaymentMethod): PDFReceiptData {
     return {
       storeName: currentStore?.name || 'Store',
       storeAddress: currentStore?.address || '',
@@ -122,9 +134,11 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       otherCharges: result.otherCharges || [],
       total: result.total,
       paymentMethod: method,
-      cashAmount: cashAmt,
-      paystackAmount: paystackAmt,
-      paystackReference: paystackRef,
+      cashAmount: result.cashAmount,
+      paystackAmount: result.paystackAmount,
+      manualPaymentAmount: result.manualPaymentAmount,
+      paystackReference: result.paystackReference,
+      paymentReference: result.paymentReference,
     };
   }
 
@@ -201,14 +215,19 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
   }
 
   async function handlePinVerify() {
-    const isValid = await verifyOwnerPin(pinInput);
-    if (isValid) {
-      setPinError('');
-      if (pendingDiscountKind === 'percentage') cart.setDiscountPercent(pendingDiscountValue);
-      else cart.setDiscountFixed(pendingDiscountValue);
-      setStep('method');
-    } else {
-      setPinError('Invalid owner PIN');
+    try {
+      const isValid = await verifyOwnerPin(pinInput);
+      if (isValid) {
+        setPinError('');
+        if (pendingDiscountKind === 'percentage') cart.setDiscountPercent(pendingDiscountValue);
+        else cart.setDiscountFixed(pendingDiscountValue);
+        setStep('method');
+      } else {
+        setPinError('Invalid owner PIN');
+      }
+    } catch (pinVerificationError: unknown) {
+      setPinError(pinVerificationError instanceof Error ? pinVerificationError.message : 'Could not verify owner PIN.');
+    } finally {
       setPinInput('');
     }
   }
@@ -224,10 +243,11 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
   }
 
   async function processSale(
-    method: 'cash' | 'split' | 'paystack', 
+    method: PaymentMethod,
     cashAmt?: number, 
     paystackAmt?: number, 
-    paystackRef?: string
+    paystackRef?: string,
+    paymentRef?: string
   ) {
     if (!currentUser) return;
     if (!canApplyDiscount && cart.discountAmount > 0) {
@@ -243,7 +263,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         method,
         cashAmt,
         paystackAmt,
-        paystackRef
+        paystackRef,
+        paymentRef
       );
       
       const completed: SaleResult = {
@@ -256,7 +277,10 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         total: result.total,
         paymentMethod: method,
         cashAmount: cashAmt,
-        paystackAmount: paystackAmt,
+        paystackAmount: isManualPaymentMethod(method) ? 0 : paystackAmt,
+        manualPaymentAmount: isManualPaymentMethod(method) ? result.total : 0,
+        paystackReference: paystackRef,
+        paymentReference: paymentRef || paystackRef,
       };
       setSaleResult(completed);
       setStep('success');
@@ -269,9 +293,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
 
   async function tryPrintReceipt(
     result: SaleResult,
-    method: 'cash' | 'split' | 'paystack',
-    cashAmt?: number,
-    paystackAmt?: number
+    method: PaymentMethod
   ) {
     if (!currentStore) return;
     if (!getBluetoothHardwareStatus().printerConnected) {
@@ -282,7 +304,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
     setPrintError('');
 
     try {
-      const receiptData: ReceiptData = buildReceiptData(result, method, cashAmt, paystackAmt);
+      const receiptData: ReceiptData = buildReceiptData(result, method);
       const printResult = await printReceipt(receiptData);
       if (!printResult.success) {
         setPrintError(printResult.error || 'Print failed');
@@ -299,9 +321,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
     if (!saleResult) return;
     await tryPrintReceipt(
       saleResult,
-      saleResult.paymentMethod || 'cash',
-      saleResult.cashAmount,
-      saleResult.paystackAmount
+      saleResult.paymentMethod || 'cash'
     );
   }
 
@@ -312,9 +332,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
     try {
       const receiptData = buildReceiptData(
         saleResult,
-        saleResult.paymentMethod || 'cash',
-        saleResult.cashAmount,
-        saleResult.paystackAmount
+        saleResult.paymentMethod || 'cash'
       );
       await shareReceipt(receiptData);
     } catch {
@@ -328,9 +346,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
     if (!saleResult) return;
     const receiptData = buildReceiptData(
       saleResult,
-      saleResult.paymentMethod || 'cash',
-      saleResult.cashAmount,
-      saleResult.paystackAmount
+      saleResult.paymentMethod || 'cash'
     );
     shareViaWhatsApp(receiptData, currentStore?.support_number);
   }
@@ -339,9 +355,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
     if (!saleResult) return;
     const receiptData = buildReceiptData(
       saleResult,
-      saleResult.paymentMethod || 'cash',
-      saleResult.cashAmount,
-      saleResult.paystackAmount
+      saleResult.paymentMethod || 'cash'
     );
     downloadReceipt(receiptData);
   }
@@ -350,6 +364,19 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
     setCashAmount('');
     setError('');
     setStep('cash-input');
+  }
+
+  function handleManualPaymentConfirm() {
+    const reference = manualReference.trim();
+    if (!reference) {
+      setError('Enter the payment reference number.');
+      return;
+    }
+    if (reference.length > 100) {
+      setError('Payment reference must be 100 characters or fewer.');
+      return;
+    }
+    processSale(manualMethod, 0, cart.total, '', reference);
   }
 
   function handleCashConfirm() {
@@ -444,6 +471,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
             {step === 'pin-verify' && 'Owner Authorization'}
             {step === 'cash-input' && 'Cash Payment'}
             {step === 'split-input' && 'Split Payment'}
+            {step === 'manual-payment' && 'Record Manual Payment'}
             {step === 'paystack' && 'Processing Payment...'}
             {step === 'processing' && 'Processing...'}
             {step === 'success' && 'Sale Complete!'}
@@ -615,6 +643,24 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                 <div className="text-left flex-1">
                   <p className="font-semibold text-gray-900">Split Payment</p>
                   <p className="text-xs text-gray-500">Part cash, part mobile money</p>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setManualReference('');
+                  setError('');
+                  setStep('manual-payment');
+                }}
+                className="w-full flex items-center gap-3 p-4 rounded-xl border border-gray-200 hover:border-primary hover:bg-emerald-50 transition touch-target"
+              >
+                <div className="w-10 h-10 bg-violet-100 rounded-full flex items-center justify-center">
+                  <CreditCard className="w-5 h-5 text-violet-600" />
+                </div>
+                <div className="text-left flex-1">
+                  <p className="font-semibold text-gray-900">MoMo, Bank or Card Terminal</p>
+                  <p className="text-xs text-gray-500">Record an offline payment with its reference</p>
                 </div>
               </button>
 
@@ -897,6 +943,70 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                   className="flex-1 py-3 bg-primary text-white rounded-xl font-medium touch-target disabled:opacity-50"
                 >
                   Continue to Pay
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === 'manual-payment' && (
+            <div className="space-y-4">
+              <div className="rounded-xl bg-violet-50 border border-violet-100 p-4 text-center">
+                <p className="text-sm text-gray-600">Amount received</p>
+                <p className="text-2xl font-bold text-gray-900 mt-1">{money(cart.total)}</p>
+                <p className="text-xs text-gray-500 mt-1">This records the payment only; no provider is contacted.</p>
+              </div>
+              <div>
+                <label htmlFor="manual-payment-method" className="text-sm font-medium text-gray-700 mb-2 block">
+                  Payment method
+                </label>
+                <select
+                  id="manual-payment-method"
+                  value={manualMethod}
+                  onChange={(event) => {
+                    const selected = MANUAL_PAYMENT_METHODS.find((method) => method.value === event.target.value);
+                    if (selected) setManualMethod(selected.value);
+                  }}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
+                >
+                  {MANUAL_PAYMENT_METHODS.map((method) => (
+                    <option key={method.value} value={method.value}>{method.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="manual-payment-reference" className="text-sm font-medium text-gray-700 mb-2 block">
+                  Payment reference number
+                </label>
+                <input
+                  id="manual-payment-reference"
+                  value={manualReference}
+                  onChange={(event) => {
+                    setManualReference(event.target.value);
+                    setError('');
+                  }}
+                  placeholder="Enter the transaction/reference number"
+                  maxLength={100}
+                  autoComplete="off"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
+                  autoFocus
+                />
+              </div>
+              {error && <p className="text-sm text-red-600 text-center">{error}</p>}
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setError(''); setStep('method'); }}
+                  className="flex-1 py-3 border border-gray-300 rounded-xl text-gray-700 font-medium touch-target"
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={handleManualPaymentConfirm}
+                  disabled={!manualReference.trim()}
+                  className="flex-1 py-3 bg-primary text-white rounded-xl font-medium touch-target disabled:opacity-50"
+                >
+                  Complete Sale
                 </button>
               </div>
             </div>

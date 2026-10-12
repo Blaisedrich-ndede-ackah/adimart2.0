@@ -57,7 +57,10 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
 
   const totalSales = transactions.reduce((total, transaction) => total + Number(transaction.total_amount || 0), 0);
   const cashTotal = transactions.reduce((total, transaction) => total + Number(transaction.cash_amount || 0), 0);
-  const momoTotal = transactions.reduce((total, transaction) => total + Number(transaction.paystack_amount || 0), 0);
+  const nonCashTotal = transactions.reduce(
+    (total, transaction) => total + Number(transaction.paystack_amount || 0) + Number(transaction.manual_payment_amount || 0),
+    0
+  );
   const actions = [
     { label: 'New sale', detail: 'Open the till', page: 'pos', icon: ShoppingCart, className: 'bg-primary text-white' },
     { label: 'Add product', detail: 'Update your catalog', page: 'inventory', quickAdd: true, icon: Package, className: 'bg-white text-primary border border-emerald-100' },
@@ -102,9 +105,9 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
           <article className="rounded-2xl bg-white p-4 shadow-sm border border-gray-100">
             <div className="flex items-center gap-2 text-gray-500">
               <CreditCard className="h-4 w-4 text-blue-600" />
-              <span className="text-xs font-medium">MoMo / Paystack</span>
+              <span className="text-xs font-medium">Non-cash received</span>
             </div>
-            {loading ? <div className="mt-2 h-6 w-24 animate-pulse rounded bg-gray-100" /> : <p className="mt-2 text-lg font-bold">{money(momoTotal)}</p>}
+            {loading ? <div className="mt-2 h-6 w-24 animate-pulse rounded bg-gray-100" /> : <p className="mt-2 text-lg font-bold">{money(nonCashTotal)}</p>}
           </article>
           <button type="button" onClick={() => onNavigate('inventory')} className="col-span-2 flex items-center justify-between rounded-2xl border border-amber-100 bg-amber-50 p-4 text-left touch-target">
             <span>

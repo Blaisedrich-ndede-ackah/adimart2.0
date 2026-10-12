@@ -5,6 +5,7 @@ import { toMoneyAmount } from './money';
 import { formatUnknownError, isUuid, uuidOrNull } from './ids';
 import { cashbookAccessFromCloud } from './staffAccess';
 import { normalizeSessionTimeoutMinutes } from './sessionTimeout';
+import type { PaymentMethod } from './paymentMethods';
 
 // Store represents a business/shop
 export interface LocalStore {
@@ -151,10 +152,12 @@ export interface LocalTransaction {
   /** JSON array of extra checkout fees (delivery, packing, service, other) */
   other_charges_json?: string;
   other_charges_total?: number;
-  payment_method: 'cash' | 'split' | 'paystack';
+  payment_method: PaymentMethod;
   cash_amount: number;
   paystack_amount: number;
   paystack_reference: string;
+  manual_payment_amount?: number;
+  payment_reference?: string;
   status: 'completed' | 'pending';
   location_id?: string;
   sale_mode?: 'retail' | 'wholesale';
@@ -546,7 +549,7 @@ export function hashPin(pin: string): string {
 
 const PBKDF2_ITERATIONS = 600_000;
 const PIN_LOCK_THRESHOLD = 5;
-const PIN_LOCK_MS = 15 * 60 * 1000;
+const PIN_LOCK_MS = 5 * 60 * 1000;
 
 function toBase64(bytes: Uint8Array): string {
   let binary = '';
@@ -611,7 +614,7 @@ async function checkPinLockout(storeId: string): Promise<void> {
   const record = await db.pin_attempts.get(storeId);
   if (!record || record.locked_until <= Date.now()) return;
   const minutes = Math.max(1, Math.ceil((record.locked_until - Date.now()) / 60_000));
-  throw new Error(`Too many incorrect PIN attempts. Sign-in is locked for about ${minutes} minute${minutes === 1 ? '' : 's'}.`);
+  throw new Error(`Too many incorrect PIN attempts. PIN verification is locked for about ${minutes} minute${minutes === 1 ? '' : 's'}.`);
 }
 
 async function recordPinFailure(storeId: string): Promise<void> {
@@ -1049,7 +1052,7 @@ export async function authenticateByPin(pin: string): Promise<LocalUser | null> 
   await recordPinFailure(storeId);
   const failedAttempts = (await db.pin_attempts.get(storeId))?.failed_attempts || 0;
   if (failedAttempts >= PIN_LOCK_THRESHOLD) {
-    throw new Error('Too many incorrect PIN attempts. Sign-in is locked for 15 minutes.');
+    throw new Error('Too many incorrect PIN attempts. Sign-in is locked for 5 minutes.');
   }
   return null;
 }
@@ -1077,6 +1080,10 @@ export async function verifyOwnerPin(pin: string): Promise<boolean> {
     return true;
   }
   await recordPinFailure(storeId);
+  const failedAttempts = (await db.pin_attempts.get(storeId))?.failed_attempts || 0;
+  if (failedAttempts >= PIN_LOCK_THRESHOLD) {
+    throw new Error('Too many incorrect PIN attempts. PIN verification is locked for 5 minutes.');
+  }
   return false;
 }
 
@@ -2158,6 +2165,8 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         cash_amount: t.cash_amount,
         paystack_amount: t.paystack_amount,
         paystack_reference: t.paystack_reference,
+        manual_payment_amount: Number(t.manual_payment_amount) || 0,
+        payment_reference: t.payment_reference || '',
         status: t.status,
         location_id: uuidOrNull(t.location_id),
         sale_mode: t.sale_mode || 'retail',
@@ -2614,10 +2623,12 @@ export async function syncFromSupabase(opts?: {
               ? row.other_charges_json
               : JSON.stringify(row.other_charges_json ?? []),
           other_charges_total: Number(row.other_charges_total) || 0,
-          payment_method: row.payment_method as 'cash' | 'split' | 'paystack',
+          payment_method: (row.payment_method as PaymentMethod) || 'cash',
           cash_amount: Number(row.cash_amount) || 0,
           paystack_amount: Number(row.paystack_amount) || 0,
           paystack_reference: (row.paystack_reference as string) || '',
+          manual_payment_amount: Number(row.manual_payment_amount) || 0,
+          payment_reference: (row.payment_reference as string) || '',
           status: row.status as 'completed' | 'pending',
           location_id: (row.location_id as string) || undefined,
           sale_mode: ((row.sale_mode as 'retail' | 'wholesale') || 'retail'),

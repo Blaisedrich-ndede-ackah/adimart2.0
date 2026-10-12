@@ -29,6 +29,7 @@ import {
   type OtherCharge,
   type OtherChargeCategoryId,
 } from '@/lib/otherCharges';
+import { isManualPaymentMethod, type PaymentMethod } from '@/lib/paymentMethods';
 
 export interface CartItem {
   id: string;
@@ -48,8 +49,25 @@ export interface CartItem {
 
 export type CartDiscountKind = 'none' | 'percentage' | 'fixed';
 
+export interface ParkedCart {
+  id: string;
+  items: CartItem[];
+  locationId: string | null;
+  saleMode: SaleMode;
+  discountKind: CartDiscountKind;
+  discountPercent: number;
+  discountFixed: number;
+  discountAmount: number;
+  otherCharges: OtherCharge[];
+  otherChargesTotal: number;
+  subtotal: number;
+  total: number;
+  parkedAt: string;
+}
+
 interface CartState {
   items: CartItem[];
+  parkedCarts: ParkedCart[];
   locationId: string | null;
   saleMode: SaleMode;
   discountKind: CartDiscountKind;
@@ -79,14 +97,19 @@ interface CartState {
   removeOtherCharge: (categoryId: OtherChargeCategoryId) => void;
   clearOtherCharges: () => void;
   clearCart: () => void;
+  parkCart: () => void;
+  resumeParkedCart: (id: string) => { locationId: string | null; saleMode: SaleMode } | null;
+  removeParkedCart: (id: string) => void;
+  clearParkedCarts: () => void;
 
   completeSale: (
     cashierId: string,
     cashierName: string,
-    paymentMethod: 'cash' | 'split' | 'paystack',
+    paymentMethod: PaymentMethod,
     cashAmount?: number,
     paystackAmount?: number,
-    paystackReference?: string
+    paystackReference?: string,
+    paymentReference?: string
   ) => Promise<{
     receiptNumber: string;
     items: CartItem[];
@@ -201,6 +224,7 @@ async function stockAtContext(productId: string, locationId: string | null): Pro
 
 export const useCartStore = create<CartState>((set, get) => ({
   items: [],
+  parkedCarts: [],
   locationId: null,
   saleMode: 'retail',
   discountKind: 'none',
@@ -424,13 +448,82 @@ export const useCartStore = create<CartState>((set, get) => ({
     });
   },
 
+  parkCart: () => {
+    const state = get();
+    if (state.items.length === 0) return;
+    const parked: ParkedCart = {
+      id: generateId(),
+      items: state.items,
+      locationId: state.locationId,
+      saleMode: state.saleMode,
+      discountKind: state.discountKind,
+      discountPercent: state.discountPercent,
+      discountFixed: state.discountFixed,
+      discountAmount: state.discountAmount,
+      otherCharges: state.otherCharges,
+      otherChargesTotal: state.otherChargesTotal,
+      subtotal: state.subtotal,
+      total: state.total,
+      parkedAt: new Date().toISOString(),
+    };
+    set((current) => ({ parkedCarts: [...current.parkedCarts, parked] }));
+    get().clearCart();
+  },
+
+  resumeParkedCart: (id) => {
+    const state = get();
+    const parked = state.parkedCarts.find((cart) => cart.id === id);
+    if (!parked) return null;
+
+    const parkedCarts = state.parkedCarts.filter((cart) => cart.id !== id);
+    if (state.items.length > 0) {
+      parkedCarts.push({
+        id: generateId(),
+        items: state.items,
+        locationId: state.locationId,
+        saleMode: state.saleMode,
+        discountKind: state.discountKind,
+        discountPercent: state.discountPercent,
+        discountFixed: state.discountFixed,
+        discountAmount: state.discountAmount,
+        otherCharges: state.otherCharges,
+        otherChargesTotal: state.otherChargesTotal,
+        subtotal: state.subtotal,
+        total: state.total,
+        parkedAt: new Date().toISOString(),
+      });
+    }
+
+    set({
+      ...recalculate(
+        parked.items,
+        parked.discountKind,
+        parked.discountPercent,
+        parked.discountFixed,
+        parked.otherCharges
+      ),
+      items: parked.items,
+      locationId: parked.locationId,
+      saleMode: parked.saleMode,
+      parkedCarts,
+    });
+    return { locationId: parked.locationId, saleMode: parked.saleMode };
+  },
+
+  removeParkedCart: (id) => {
+    set((state) => ({ parkedCarts: state.parkedCarts.filter((cart) => cart.id !== id) }));
+  },
+
+  clearParkedCarts: () => set({ parkedCarts: [] }),
+
   completeSale: async (
     cashierId,
     cashierName,
     paymentMethod,
     cashAmount = 0,
     paystackAmount = 0,
-    paystackReference = ''
+    paystackReference = '',
+    paymentReference = ''
   ) => {
     const state = get();
     if (state.items.length === 0) throw new Error('Cart is empty');
@@ -467,12 +560,18 @@ export const useCartStore = create<CartState>((set, get) => ({
 
     let cash = toMoneyAmount(cashAmount);
     let paystack = toMoneyAmount(paystackAmount);
+    let manualPayment = 0;
+    const recordedPaymentReference = paymentReference.trim();
     if (paymentMethod === 'cash') {
       cash = priced.total;
       paystack = 0;
     } else if (paymentMethod === 'paystack') {
       cash = 0;
       paystack = priced.total;
+    } else if (isManualPaymentMethod(paymentMethod)) {
+      cash = 0;
+      paystack = 0;
+      manualPayment = priced.total;
     } else {
       // split
       if (!moneyEquals(cash + paystack, priced.total)) {
@@ -480,6 +579,10 @@ export const useCartStore = create<CartState>((set, get) => ({
           `Split payment must equal total. Cash ${formatStoreMoneyNow(cash)} + MoMo ${formatStoreMoneyNow(paystack)} ≠ ${formatStoreMoneyNow(priced.total)}.`
         );
       }
+    }
+    if (isManualPaymentMethod(paymentMethod)) {
+      if (!recordedPaymentReference) throw new Error('Payment reference is required for manual payments.');
+      if (recordedPaymentReference.length > 100) throw new Error('Payment reference must be 100 characters or fewer.');
     }
 
     let locationId = state.locationId;
@@ -539,7 +642,9 @@ export const useCartStore = create<CartState>((set, get) => ({
           payment_method: paymentMethod,
           cash_amount: cash,
           paystack_amount: paystack,
-          paystack_reference: paystackReference,
+          paystack_reference: paymentMethod === 'paystack' || paymentMethod === 'split' ? paystackReference : '',
+          manual_payment_amount: manualPayment,
+          payment_reference: isManualPaymentMethod(paymentMethod) ? recordedPaymentReference : '',
           status: 'completed',
           location_id: locationId,
           sale_mode: state.saleMode,

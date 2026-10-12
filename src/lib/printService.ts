@@ -10,6 +10,7 @@ import {
 } from './bluetoothPeripherals';
 import { buildEscPosLogoRaster } from './escPosImage';
 import { formatOfficialMoney } from './currency';
+import { getPaymentMethodLabel } from './paymentMethods';
 
 const ESC = 0x1b;
 const GS = 0x1d;
@@ -39,6 +40,8 @@ export interface EscPosReceiptData {
   paymentMethod: string;
   cashAmount?: number;
   paystackAmount?: number;
+  manualPaymentAmount?: number;
+  paymentReference?: string;
   currencyCode?: string;
 }
 
@@ -163,10 +166,7 @@ export async function buildEscPosReceipt(data: EscPosReceiptData): Promise<Uint8
   bytes.push(...textToBytes(line('=')));
   bytes.push(LF);
 
-  const methodLabel =
-    data.paymentMethod === 'cash' ? 'Cash' :
-    data.paymentMethod === 'paystack' ? 'Paystack' :
-    'Split Payment';
+  const methodLabel = data.paymentMethod === 'paystack' ? 'Paystack' : getPaymentMethodLabel(data.paymentMethod);
   bytes.push(...textToBytes(rightAlign('Payment:', methodLabel)));
   bytes.push(LF);
 
@@ -176,9 +176,18 @@ export async function buildEscPosReceipt(data: EscPosReceiptData): Promise<Uint8
       bytes.push(LF);
     }
     if (data.paystackAmount) {
-      bytes.push(...textToBytes(rightAlign('  Paystack:', amt(data, data.paystackAmount))));
+      bytes.push(...textToBytes(rightAlign('  Mobile money/card:', amt(data, data.paystackAmount))));
       bytes.push(LF);
     }
+  }
+
+  if (data.manualPaymentAmount) {
+    bytes.push(...textToBytes(rightAlign('  Amount received:', amt(data, data.manualPaymentAmount))));
+    bytes.push(LF);
+  }
+  if (data.paymentReference) {
+    bytes.push(...textToBytes(rightAlign('  Reference:', data.paymentReference)));
+    bytes.push(LF);
   }
 
   bytes.push(LF);

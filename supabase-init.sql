@@ -185,10 +185,15 @@ CREATE TABLE IF NOT EXISTS transactions (
   discount_applied DECIMAL(12,2) DEFAULT 0,
   other_charges_json TEXT DEFAULT '[]',
   other_charges_total DECIMAL(12,2) DEFAULT 0,
-  payment_method VARCHAR(20) NOT NULL CHECK (payment_method IN ('cash', 'split', 'paystack')),
+  payment_method VARCHAR(20) NOT NULL CHECK (payment_method IN (
+    'cash', 'split', 'paystack', 'momo_mtn', 'momo_telecel',
+    'momo_airteltigo', 'bank_transfer', 'card_terminal'
+  )),
   cash_amount DECIMAL(12,2) DEFAULT 0,
   paystack_amount DECIMAL(12,2) DEFAULT 0,
   paystack_reference VARCHAR(100) DEFAULT '',
+  manual_payment_amount DECIMAL(12,2) DEFAULT 0,
+  payment_reference VARCHAR(100) DEFAULT '',
   status VARCHAR(20) NOT NULL DEFAULT 'completed' CHECK (status IN ('completed', 'pending')),
   location_id UUID,
   sale_mode VARCHAR(20) DEFAULT 'retail',

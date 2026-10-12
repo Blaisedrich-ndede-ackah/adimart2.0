@@ -184,7 +184,7 @@ Default store settings on create:
 ### 6.3 Authentication
 
 - Account 4-digit PINs use PBKDF2-SHA-256 (600,000 iterations, per-PIN random salt); successful login upgrades legacy `hashPin()` values.
-- After five incorrect local PIN attempts, account PIN login and owner-PIN checks are locked for 15 minutes. This IndexedDB/device lockout is not server-enforced and can be cleared with browser data.
+- After five incorrect local PIN attempts, account PIN login and owner-PIN checks are locked for 5 minutes. This IndexedDB/device lockout is not server-enforced and can be cleared with browser data.
 - Optional WebAuthn biometric: credential id + `userId` in `localStorage` key `adimat_biometric_credential`
 - Signed-in user is persisted in IndexedDB (`app_config.current_user_id`) so a refresh stays on the till unless idle timeout has elapsed
 - Roles:
@@ -195,9 +195,10 @@ Default store settings on create:
 
 1. Scan barcode (ZXing, prefers rear camera, debounce ~2s) or search/manual entry. Search supports typo-tolerant product names, partial barcode matches, recent/frequently sold ranking, and browser-supported speech input.
 2. Cart quantity with stock validation + scan beeps (`scanBeep.ts`)  
-3. Checkout overlay steps: payment method → discount → optional owner PIN → split/Paystack → processing → success  
-4. Payment methods: `cash` | `paystack` | `split`  
-5. On success: stock deducted locally, receipt `#ADM-YYYYMMDD-XXXX`, optional Bluetooth print, PDF/share/WhatsApp, auto-sync trigger
+3. Checkout overlay steps: payment method → discount → optional owner PIN → payment details → processing → success
+4. Payment methods: `cash` | `paystack` | `split` | manual MTN/Telecel/AirtelTigo MoMo | bank transfer | card terminal. Manual methods record a required reference offline; they do not initiate a provider payment. Manual collections are kept separate from Paystack payout totals.
+5. Cashiers can hold a cart and resume it later in the same POS session. Resuming another held sale holds the active cart automatically.
+6. On success: stock deducted locally, receipt `#ADM-YYYYMMDD-XXXX`, optional Bluetooth print, PDF/share/WhatsApp, auto-sync trigger
 
 ### 6.5 Inventory (owner)
 
@@ -215,7 +216,7 @@ Default store settings on create:
 - Periods: today / week / month
 - Loading, retryable error, and no-data states
 - Tabs: overview / products / expenses
-- Revenue cash vs Paystack, 7-day chart, top/slow movers, category & cashier stats
+- Revenue cash vs non-cash (online and manual), 7-day chart, top/slow movers, category & cashier stats
 - Net profit ≈ revenue − COGS − expenses
 - Expense categories: Rent, Utilities, Supplier, Salaries, Transport, Other
 - Expenses support receipt photos, recurring monthly templates, and monthly category budgets with over-budget warnings. Due recurring expenses are generated idempotently when the app is active or the Expenses screen is opened.
@@ -223,7 +224,7 @@ Default store settings on create:
 
 ### 6.7 Owner home
 
-The owner landing screen summarizes today's completed sales, cash and Paystack/MoMo amounts, and low-stock count. Quick actions open New Sale, Add Product, and Add Expense. Cashiers continue to land directly on POS.
+The owner landing screen summarizes today's completed sales, cash and non-cash payment amounts, and low-stock count. Quick actions open New Sale, Add Product, and Add Expense. Cashiers continue to land directly on POS.
 
 ### 6.8 Settings (owner)
 
@@ -503,7 +504,7 @@ npm run preview
 3. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`  
 4. Optionally harden RLS before multi-tenant production use  
 
-For an existing cloud project, run `supabase-migrate-purchasing-reorder.sql` before syncing reorder levels, suppliers, or purchase orders. Run `supabase-migrate-expense-workflows.sql` before syncing receipt photos, recurring expenses, or category budgets.
+For an existing cloud project, run `supabase-migrate-purchasing-reorder.sql` before syncing reorder levels, suppliers, or purchase orders. Run `supabase-migrate-expense-workflows.sql` before syncing receipt photos, recurring expenses, or category budgets, and `supabase-migrate-manual-payments.sql` before syncing manually recorded payment methods.
 
 ### 13.5 Hosting
 

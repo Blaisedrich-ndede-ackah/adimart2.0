@@ -233,7 +233,10 @@ function buildPosition(params: {
     params.toDateTxns.reduce((sum, t) => sum + (Number(t.cash_amount) || 0), 0)
   );
   const digitalCollections = roundMoney(
-    params.toDateTxns.reduce((sum, t) => sum + (Number(t.paystack_amount) || 0), 0)
+    params.toDateTxns.reduce(
+      (sum, t) => sum + (Number(t.paystack_amount) || 0) + (Number(t.manual_payment_amount) || 0),
+      0
+    )
   );
 
   let cashBookIncomeExSales = 0;
@@ -293,7 +296,7 @@ function buildPosition(params: {
   const lines: StatementLine[] = [
     { label: 'Inventory (current, at cost)', amount: inventory },
     { label: 'Cash (POS cash + cash book)', amount: cash },
-    { label: 'Digital collections (Paystack)', amount: digitalCollections },
+    { label: 'Non-cash collections', amount: digitalCollections },
     { label: 'Total assets', amount: totalAssets, emphasis: 'total' },
     { label: 'Loans', amount: loans },
     { label: 'Total liabilities', amount: totalLiabilities, emphasis: 'subtotal' },

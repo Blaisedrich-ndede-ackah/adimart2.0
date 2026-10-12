@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf';
 import { FormalPdf, formatGhsOfficial, formatOfficialDate, orgFromStore } from './formalPdf';
 import { formatOfficialMoney } from './currency';
+import { getPaymentMethodLabel } from './paymentMethods';
 
 export interface ReceiptData {
   storeName: string;
@@ -24,7 +25,9 @@ export interface ReceiptData {
   paymentMethod: string;
   cashAmount?: number;
   paystackAmount?: number;
+  manualPaymentAmount?: number;
   paystackReference?: string;
+  paymentReference?: string;
   currencyCode?: string;
 }
 
@@ -198,10 +201,7 @@ function generateReceiptPDF(data: ReceiptData): jsPDF {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   
-  const methodLabel = 
-    data.paymentMethod === 'cash' ? 'Cash' :
-    data.paymentMethod === 'paystack' ? 'Mobile Money/Card' :
-    'Split Payment';
+  const methodLabel = data.paymentMethod === 'paystack' ? 'Mobile Money/Card' : getPaymentMethodLabel(data.paymentMethod);
   
   leftRightText('Payment:', methodLabel, y, 9);
   y += 4;
@@ -217,9 +217,15 @@ function generateReceiptPDF(data: ReceiptData): jsPDF {
     }
   }
 
-  if (data.paystackReference) {
+  if (data.manualPaymentAmount && data.manualPaymentAmount > 0) {
+    leftRightText('  Paid:', amt(data, data.manualPaymentAmount), y, 8);
+    y += 4;
+  }
+
+  const reference = data.paymentReference || data.paystackReference;
+  if (reference) {
     doc.setFontSize(7);
-    leftRightText('Ref:', data.paystackReference, y, 7);
+    leftRightText('Ref:', reference, y, 7);
     y += 4;
   }
 
@@ -291,12 +297,9 @@ function generateOfficialReceiptPdf(data: ReceiptData): FormalPdf {
   pdf.section('Totals');
   pdf.kvTable(totalRows);
 
-  const methodLabel =
-    data.paymentMethod === 'cash'
-      ? 'Cash'
-      : data.paymentMethod === 'paystack'
-        ? 'Mobile money / card'
-        : 'Split payment';
+  const methodLabel = data.paymentMethod === 'paystack'
+    ? 'Mobile money / card'
+    : getPaymentMethodLabel(data.paymentMethod);
   const paymentRows = [
     { label: 'Method', value: methodLabel },
     ...(data.paymentMethod === 'split' && data.cashAmount
@@ -305,8 +308,11 @@ function generateOfficialReceiptPdf(data: ReceiptData): FormalPdf {
     ...(data.paymentMethod === 'split' && data.paystackAmount
       ? [{ label: 'Mobile money / card portion', value: formatGhsOfficial(data.paystackAmount, data.currencyCode) }]
       : []),
-    ...(data.paystackReference
-      ? [{ label: 'Payment reference', value: data.paystackReference, emphasis: 'muted' as const }]
+    ...(data.manualPaymentAmount
+      ? [{ label: 'Amount received', value: formatGhsOfficial(data.manualPaymentAmount, data.currencyCode) }]
+      : []),
+    ...((data.paymentReference || data.paystackReference)
+      ? [{ label: 'Payment reference', value: data.paymentReference || data.paystackReference || '', emphasis: 'muted' as const }]
       : []),
   ];
   pdf.section('Payment');
@@ -453,16 +459,16 @@ function generateReceiptText(data: ReceiptData): string {
   lines.push(leftRight('TOTAL:', amt(data, data.total)));
   lines.push(line('='));
   
-  const methodLabel = 
-    data.paymentMethod === 'cash' ? 'Cash' :
-    data.paymentMethod === 'paystack' ? 'Mobile Money/Card' :
-    'Split Payment';
+  const methodLabel = data.paymentMethod === 'paystack' ? 'Mobile Money/Card' : getPaymentMethodLabel(data.paymentMethod);
   lines.push(leftRight('Payment:', methodLabel));
   
   if (data.paymentMethod === 'split') {
     if (data.cashAmount) lines.push(leftRight('  Cash:', amt(data, data.cashAmount)));
     if (data.paystackAmount) lines.push(leftRight('  MoMo:', amt(data, data.paystackAmount)));
   }
+  if (data.manualPaymentAmount) lines.push(leftRight('  Amount received:', amt(data, data.manualPaymentAmount)));
+  const reference = data.paymentReference || data.paystackReference;
+  if (reference) lines.push(leftRight('  Reference:', reference));
   
   lines.push('');
   lines.push(center('Thank you for your purchase!'));

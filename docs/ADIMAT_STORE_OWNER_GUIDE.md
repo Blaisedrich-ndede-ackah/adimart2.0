@@ -6,11 +6,11 @@ Role-specific guide for owners. The in-app Learn Adimat area shows this guidance
 
 Open Adimat on a supported phone, tablet, or computer. Use the Store ID and owner PIN supplied by your administrator, then sign in with your PIN. Install the app from the browser menu if you want it on your home screen. Open it once online before relying on the offline shell.
 
-Complete the store profile in Settings. Add each staff member with a separate PIN. Choose staff permissions, discount limits, and the automatic idle timeout. Do not share the owner PIN.
+Complete the store profile in Settings. Add each staff member with a separate PIN. Choose staff permissions, discount limits, and the automatic idle timeout. Do not share the owner PIN. Five incorrect PIN attempts lock PIN verification for 5 minutes.
 
 ## Use your owner dashboard
 
-Home summarizes today's completed sales, cash and MoMo/Paystack totals, and products needing stock attention. The quick actions open a new sale, add a product, or record an expense. Figures show data currently available on this device; sync when you use more than one device.
+Home summarizes today's completed sales, cash and non-cash payment totals, and products needing stock attention. Manual payment records are not included in Paystack payout totals. The quick actions open a new sale, add a product, or record an expense. Figures show data currently available on this device; sync when you use more than one device.
 
 ## Manage products and stock
 
@@ -34,7 +34,7 @@ Use Plan to view subscription status and administrator contact information. Set 
 
 ## Sync, backup, and security
 
-Cash sales can be recorded offline after the app has loaded; Paystack payments and cloud sync need internet. Settings → Cloud Sync provides Full Sync, Pull, and Push. Check last sync, pending changes, and errors.
+Cash and manual MTN/Telecel/AirtelTigo MoMo, bank transfer, or card-terminal sales can be recorded offline after the app has loaded, with a payment reference for manual methods. Paystack payments and cloud sync need internet. Settings → Cloud Sync provides Full Sync, Pull, and Push. Check last sync, pending changes, and errors.
 
 Use Settings → Backup & sync health to download a store backup or restore one on the current device. Daily automatic snapshots stay on the device and are not protection against device loss. Store downloaded backups somewhere separate and secure; they contain sensitive staff data. Restore replaces local data for the selected store.
 

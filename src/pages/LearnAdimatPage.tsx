@@ -164,8 +164,9 @@ export default function LearnAdimatPage({ onNavigate }: LearnAdimatPageProps) {
             <LessonCard
               title="2. Take payment and give the receipt"
               steps={[
-                'At checkout choose Cash, Paystack, or Split, then follow the confirmation shown on screen.',
+                'At checkout choose Cash, Paystack, Split, or record an offline MTN/Telecel/AirtelTigo MoMo, bank transfer, or card-terminal payment with its reference number.',
                 'Paystack needs internet. Do not repeat a payment while it is still processing; check My Sales if you are unsure.',
+                'Use Hold sale to suspend a cart while serving another customer. Choose Resume in Held sales to continue later in this POS session.',
                 'After success, show or share the PDF receipt, send it via WhatsApp where available, or print it if a printer is connected.',
                 'Ask the owner to approve a discount if the till requests the owner PIN.',
               ]}

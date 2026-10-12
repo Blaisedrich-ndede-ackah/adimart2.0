@@ -87,6 +87,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         await setCurrentUserId(null);
         markIdleLock();
         useCartStore.getState().clearCart();
+        useCartStore.getState().clearParkedCarts();
         set({
           currentStore: store,
           currentUser: null,
@@ -189,6 +190,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   switchStore: async (storeId: string) => {
     clearAllWarehouseSessions();
+    useCartStore.getState().clearParkedCarts();
     const store = await switchToStore(storeId);
     // switchToStore clears persisted user via setCurrentStoreId
     const refreshed = (await pullAdminStoreLimits(storeId)) || store;

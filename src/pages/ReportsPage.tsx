@@ -277,7 +277,10 @@ export default function ReportsPage() {
 
   const totalRevenue = summary?.revenue ?? 0;
   const cashRevenue = roundMoney(transactions.reduce((s, t) => s + (Number(t.cash_amount) || 0), 0));
-  const paystackRevenue = roundMoney(transactions.reduce((s, t) => s + (Number(t.paystack_amount) || 0), 0));
+  const nonCashRevenue = roundMoney(transactions.reduce(
+    (s, t) => s + (Number(t.paystack_amount) || 0) + (Number(t.manual_payment_amount) || 0),
+    0
+  ));
 
   return (
     <div className="page-shell">
@@ -440,9 +443,9 @@ export default function ReportsPage() {
               <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100">
                 <div className="flex items-center gap-2 mb-1">
                   <CreditCard className="w-4 h-4 text-blue-600" />
-                  <span className="text-xs text-gray-500">Paystack</span>
+                  <span className="text-xs text-gray-500">Non-cash received</span>
                 </div>
-                <p className="text-lg font-bold">{money(paystackRevenue)}</p>
+                <p className="text-lg font-bold">{money(nonCashRevenue)}</p>
               </div>
 
               <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 col-span-2">

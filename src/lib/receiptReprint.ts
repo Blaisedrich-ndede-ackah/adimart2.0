@@ -41,6 +41,8 @@ export async function buildReceiptDataFromTransaction(
     paymentMethod: txn.payment_method,
     cashAmount: txn.cash_amount,
     paystackAmount: txn.paystack_amount,
+    manualPaymentAmount: txn.manual_payment_amount,
+    paymentReference: txn.payment_reference || txn.paystack_reference,
   };
 }
 

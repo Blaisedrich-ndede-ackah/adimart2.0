@@ -13,6 +13,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { reprintTransactionReceipt } from '@/lib/receiptReprint';
 import { isPrinterConnected } from '@/lib/bluetoothPeripherals';
 import { parseOtherCharges } from '@/lib/otherCharges';
+import { getPaymentMethodLabel } from '@/lib/paymentMethods';
 import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
 import CloudSyncPanel from '@/components/CloudSyncPanel';
@@ -151,7 +152,7 @@ export default function TransactionsPage() {
                       {new Date(txn.created_at).toLocaleString('en-GH')}
                       {isOwner ? ` · ${txn.cashier_name || 'Cashier'}` : ''}
                       {' · '}
-                      {txn.payment_method}
+                      {getPaymentMethodLabel(txn.payment_method)}
                     </p>
                   </div>
                   <div className="text-right flex-shrink-0">
@@ -186,6 +187,11 @@ export default function TransactionsPage() {
                         {charge.label}: {money(charge.amount)}
                       </p>
                     ))}
+                    {(txn.payment_reference || txn.paystack_reference) && (
+                      <p className="text-xs text-gray-600">
+                        Payment reference: <span className="font-mono">{txn.payment_reference || txn.paystack_reference}</span>
+                      </p>
+                    )}
                     <button
                       onClick={() => void handleReprint(txn)}
                       disabled={printingId === txn.id}
