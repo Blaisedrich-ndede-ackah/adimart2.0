@@ -3,6 +3,7 @@ import {
   Building2, Users, Package, Wallet, RefreshCcw, LogOut, ChevronLeft, ChevronRight,
   Smartphone, CheckCircle2, AlertCircle, Loader2, Store, CreditCard, CalendarClock, Mail,
   FileBarChart, Download, FileText, Ban, LayoutDashboard, MoreHorizontal, X, Search, Megaphone,
+  BookOpen,
 } from 'lucide-react';
 import {
   AdminDashboardData,
@@ -40,7 +41,7 @@ import AdminCreateStoreForm from '@/components/AdminCreateStoreForm';
 import AdminCampaignManager from '@/components/AdminCampaignManager';
 import CopyableStoreId from '@/components/CopyableStoreId';
 
-type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact' | 'campaigns';
+type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact' | 'campaigns' | 'learn';
 
 function defaultReportFromDate(): string {
   const d = new Date();
@@ -379,6 +380,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       ['reports', 'Reports', FileBarChart],
       ['contact', 'Contact', Mail],
       ['campaigns', 'Campaigns', Megaphone],
+      ['learn', 'Learn', BookOpen],
     ] as const
   );
 
@@ -492,7 +494,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 md:px-6 lg:px-8 2xl:px-12 py-3 md:py-5 lg:py-6 2xl:py-8 pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-8"
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
-        {loading && !data && tab !== 'contact' && tab !== 'reports' && (
+        {loading && !data && tab !== 'contact' && tab !== 'reports' && tab !== 'learn' && (
           <div className="flex flex-col items-center justify-center py-20 text-slate-500">
             <Loader2 className="w-8 h-8 animate-spin mb-3" />
             <p className="text-sm">Loading cloud data…</p>
@@ -516,6 +518,78 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         {statusMsg && (
           <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl px-3 py-2 text-xs mb-3">
             {statusMsg}
+          </div>
+        )}
+
+        {tab === 'learn' && (
+          <div className="mx-auto max-w-5xl space-y-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">Platform administrator and technical staff</p>
+              <h2 className="mt-1 text-2xl font-bold text-slate-900">Learn Adimat administration</h2>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+                This reference is shown inside the authenticated administrator portal. Store owners and cashiers use
+                their separate Learn Adimat guides in the store app.
+              </p>
+            </div>
+
+            <figure className="overflow-hidden rounded-2xl border border-emerald-100 bg-white p-3">
+              <img
+                src="/learn/admin-dashboard.svg"
+                alt="Illustration of the Adimat administrator portal overview and Learn tab"
+                className="block h-auto w-full rounded-xl"
+              />
+              <figcaption className="mt-2 text-center text-xs text-slate-500">
+                Administrator portal illustration; example figures only.
+              </figcaption>
+            </figure>
+
+            <a
+              href="/guides/adimat-admin-technical-guide.pdf"
+              download
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white touch-target"
+            >
+              <Download className="h-4 w-4" />
+              Download administrator and technical guide (PDF)
+            </a>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-4">
+              <h3 className="font-bold text-slate-900">Provision and support stores</h3>
+              <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm leading-6 text-slate-600">
+                <li>Create a store in Stores, issue its Store ID and owner PIN securely, and tell the owner to open it on their device.</li>
+                <li>Use Subscriptions to grant access and configure optional warehouse or online-shop features. Confirm the store and limits before saving.</li>
+                <li>Use Contact to maintain administrator contact details and configured notification settings.</li>
+                <li>Before clearing trial sales, confirm the selected store and explain that ledger history is deleted; ask its staff to run a full sync afterward.</li>
+              </ol>
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-4">
+              <h3 className="font-bold text-slate-900">Configure and deploy the app</h3>
+              <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm leading-6 text-slate-600">
+                <li>Use Node.js 18+ and npm. Install dependencies with <code>npm install</code>.</li>
+                <li>Set the Vite build variables for Supabase URL/anon key and, if online payments are enabled, the Paystack public key.</li>
+                <li>Build with <code>npm run build</code> and deploy the resulting <code>dist/</code> as a static site over HTTPS.</li>
+                <li>All <code>VITE_</code> values are shipped to browsers. Never put a Supabase service-role key, Paystack secret key, or private credential in the client build.</li>
+              </ol>
+            </section>
+
+            <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+              <h3 className="font-bold text-amber-950">Database and security precautions</h3>
+              <ul className="mt-2 list-disc space-y-2 pl-5 text-sm leading-6 text-amber-950">
+                <li>New Supabase projects start from <code>supabase-init.sql</code>. Existing projects need only the feature migrations required by their schema and enabled features.</li>
+                <li>Back up production data and review migration SQL before applying it. Verify store sync and enabled workflows after a migration.</li>
+                <li>The current client relies on local PIN checks and permissive cloud RLS policies. Do not treat hidden UI or store IDs as server-side tenant isolation; harden and test server-side RLS/authorization before untrusted multi-tenant production use.</li>
+                <li>Downloaded backups include sensitive staff data. Store them securely, restrict access, and validate the target store before restore.</li>
+              </ul>
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-4">
+              <h3 className="font-bold text-slate-900">Sync and release checklist</h3>
+              <ul className="mt-2 list-disc space-y-2 pl-5 text-sm leading-6 text-slate-600">
+                <li>Full sync pulls cloud changes and pushes local changes. Check pending changes, last sync time, and error status before moving devices.</li>
+                <li>Test owner and cashier sign-in separately, cash checkout, online payment configuration if used, inventory, sync in both directions, backup/restore, and any enabled warehouse or storefront features.</li>
+                <li>For implementation and schema detail, consult the project’s <code>SYSTEM_DOCUMENTATION.md</code> and review the corresponding migration file.</li>
+              </ul>
+            </section>
           </div>
         )}
 

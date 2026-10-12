@@ -44,6 +44,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         { id: 'expenses', label: t('nav.expenses'), icon: PiggyBank, show: true },
         { id: 'cashbook', label: t('nav.cashbook'), icon: BookOpen, show: cashbookOk },
         { id: 'devices', label: t('nav.devices'), icon: Bluetooth, show: true },
+        { id: 'learn', label: 'Learn Adimat', icon: BookOpen, show: true },
         { id: 'subscription', label: t('nav.plan'), icon: CalendarClock, show: isOwner },
         { id: 'inventory', label: t('nav.inventory'), icon: Package, show: isOwner },
         { id: 'purchasing', label: 'Purchasing', icon: ShoppingCart, show: isOwner },

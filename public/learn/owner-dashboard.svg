@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="440" height="650" viewBox="0 0 440 650" role="img" aria-labelledby="title desc">
+  <title id="title">Adimat owner dashboard screen illustration</title>
+  <desc id="desc">A sample Adimat screen with owner dashboard, sales summaries, a low stock alert, quick actions, and sales history.</desc>
+  <rect width="440" height="650" rx="28" fill="#f1f5f4"/>
+  <rect x="16" y="16" width="408" height="618" rx="24" fill="#fff" stroke="#dbe4e1" stroke-width="2"/>
+  <path d="M40 16h360a24 24 0 0 1 24 24v184H16V40a24 24 0 0 1 24-24Z" fill="#065f46"/>
+  <text x="40" y="53" fill="#a7f3d0" font-family="Arial,sans-serif" font-size="13" font-weight="700" letter-spacing="1.4">OWNER DASHBOARD</text>
+  <text x="40" y="88" fill="#fff" font-family="Arial,sans-serif" font-size="27" font-weight="700">Adimat Store</text>
+  <text x="40" y="116" fill="#d1fae5" font-family="Arial,sans-serif" font-size="15">Today at a glance</text>
+  <rect x="36" y="142" width="368" height="92" rx="17" fill="#fff"/>
+  <circle cx="57" cy="168" r="9" fill="#ecfdf5"/>
+  <path d="m53 170 3-4 3 2 4-6" fill="none" stroke="#065f46" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="76" y="173" fill="#64748b" font-family="Arial,sans-serif" font-size="13">Today's sales</text>
+  <text x="52" y="211" fill="#0f172a" font-family="Arial,sans-serif" font-size="28" font-weight="700">GH₵ 1,250.00</text>
+  <text x="40" y="273" fill="#64748b" font-family="Arial,sans-serif" font-size="12">6 completed sales</text>
+  <rect x="36" y="287" width="177" height="77" rx="15" fill="#fff" stroke="#e2e8f0"/>
+  <text x="52" y="313" fill="#64748b" font-family="Arial,sans-serif" font-size="12">Cash received</text>
+  <text x="52" y="345" fill="#0f172a" font-family="Arial,sans-serif" font-size="19" font-weight="700">GH₵ 800.00</text>
+  <rect x="227" y="287" width="177" height="77" rx="15" fill="#fff" stroke="#e2e8f0"/>
+  <text x="243" y="313" fill="#64748b" font-family="Arial,sans-serif" font-size="12">MoMo / Paystack</text>
+  <text x="243" y="345" fill="#0f172a" font-family="Arial,sans-serif" font-size="19" font-weight="700">GH₵ 450.00</text>
+  <rect x="36" y="378" width="368" height="67" rx="15" fill="#fffbeb" stroke="#fde68a"/>
+  <text x="54" y="403" fill="#92400e" font-family="Arial,sans-serif" font-size="12">Low-stock products</text>
+  <text x="54" y="430" fill="#451a03" font-family="Arial,sans-serif" font-size="21" font-weight="700">3 items need attention</text>
+  <text x="40" y="478" fill="#0f172a" font-family="Arial,sans-serif" font-size="15" font-weight="700">Quick actions</text>
+  <rect x="36" y="490" width="115" height="57" rx="13" fill="#065f46"/>
+  <text x="53" y="515" fill="#fff" font-family="Arial,sans-serif" font-size="12" font-weight="700">New sale</text>
+  <text x="53" y="533" fill="#d1fae5" font-family="Arial,sans-serif" font-size="10">Open the till</text>
+  <rect x="160" y="490" width="116" height="57" rx="13" fill="#fff" stroke="#d1fae5"/>
+  <text x="174" y="515" fill="#065f46" font-family="Arial,sans-serif" font-size="12" font-weight="700">Add product</text>
+  <text x="174" y="533" fill="#64748b" font-family="Arial,sans-serif" font-size="10">Update catalog</text>
+  <rect x="285" y="490" width="119" height="57" rx="13" fill="#fff" stroke="#d1fae5"/>
+  <text x="298" y="515" fill="#065f46" font-family="Arial,sans-serif" font-size="12" font-weight="700">Add expense</text>
+  <text x="298" y="533" fill="#64748b" font-family="Arial,sans-serif" font-size="10">Record a cost</text>
+  <rect x="36" y="562" width="368" height="48" rx="13" fill="#f8fafc"/>
+  <circle cx="61" cy="586" r="11" fill="#ecfdf5"/>
+  <text x="81" y="583" fill="#0f172a" font-family="Arial,sans-serif" font-size="12" font-weight="700">Sales history</text>
+  <text x="81" y="599" fill="#64748b" font-family="Arial,sans-serif" font-size="10">Review receipts and transactions</text>
+</svg>

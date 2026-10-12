@@ -4,6 +4,8 @@ A mobile-first Point of Sale (POS) and inventory management Progressive Web App 
 
 **Full system documentation:** see [`SYSTEM_DOCUMENTATION.md`](./SYSTEM_DOCUMENTATION.md) for architecture, data models, sync, security, integrations, and operations.
 
+**Learn Adimat:** The signed-in app shows owner or cashier lessons for that user's role, with screen illustrations and a matching downloadable PDF. Platform administrators have a separate **Learn** area inside the authenticated administrator portal, including its own technical guide. The [store owner guide PDF](./public/guides/adimat-store-owner-guide.pdf), [cashier guide PDF](./public/guides/adimat-cashier-guide.pdf), [administrator and technical guide PDF](./public/guides/adimat-admin-technical-guide.pdf), and [technical system documentation](./SYSTEM_DOCUMENTATION.md) are also available in the repository.
+
 ![Adimat POS](public/logo.png)
 
 ## Features

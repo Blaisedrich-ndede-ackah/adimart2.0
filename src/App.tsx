@@ -28,6 +28,7 @@ import WarehousePage from '@/pages/WarehousePage';
 import EcommercePage from '@/pages/EcommercePage';
 import PurchasingPage from '@/pages/PurchasingPage';
 import OwnerHomePage from '@/pages/OwnerHomePage';
+import LearnAdimatPage from '@/pages/LearnAdimatPage';
 import PublicShopPage from '@/pages/PublicShopPage';
 import TermsPage from '@/pages/TermsPage';
 import NotFoundPage from '@/pages/NotFoundPage';
@@ -318,6 +319,8 @@ export default function App() {
         return <TransactionsPage />;
       case 'devices':
         return <DevicesPage />;
+      case 'learn':
+        return currentUser ? <LearnAdimatPage onNavigate={setCurrentPage} /> : <POSPage />;
       case 'subscription':
         return role === 'owner' ? <SubscriptionPage /> : <POSPage />;
       case 'inventory':
