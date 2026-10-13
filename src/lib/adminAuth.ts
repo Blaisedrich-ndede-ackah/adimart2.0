@@ -1,7 +1,4 @@
-import { supabase } from './supabase';
-
 const ADMIN_SESSION_KEY = 'adimat_admin_session';
-const ADMIN_FUNCTION = 'manage-promotional-campaigns';
 
 interface AdminFunctionResponse {
   session?: string;
@@ -12,25 +9,29 @@ interface AdminFunctionResponse {
 async function invokeAdminFunction(
   body: Record<string, unknown>
 ): Promise<AdminFunctionResponse> {
-  const { data, error } = await supabase.functions.invoke<AdminFunctionResponse>(
-    ADMIN_FUNCTION,
-    { body }
-  );
-  if (error) {
-    if (error.context instanceof Response) {
-      let responseBody: AdminFunctionResponse | null = null;
-      try {
-        responseBody = await error.context.clone().json() as AdminFunctionResponse;
-      } catch {
-        responseBody = null;
-      }
-      const responseMessage = responseBody?.error || responseBody?.message;
-      if (responseMessage) throw new Error(responseMessage);
-    }
-    throw new Error(error.message);
+  let response: Response;
+  try {
+    response = await fetch('/api/manage-promotional-campaigns', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new Error('Could not reach the Vercel admin API. Confirm this app is deployed on Vercel with the /api/manage-promotional-campaigns route and check the internet connection.');
   }
-  if (!data) throw new Error('The administrator service returned no response.');
-  if (data.error) throw new Error(data.error);
+  let data: AdminFunctionResponse | null = null;
+  try {
+    data = await response.json() as AdminFunctionResponse;
+  } catch {
+    data = null;
+  }
+  if (!response.ok) {
+    const routeHint = response.status === 404
+      ? ' The /api/manage-promotional-campaigns route is missing; redeploy the latest version on Vercel.'
+      : '';
+    throw new Error(data?.error || data?.message || `Admin API request failed (${response.status}).${routeHint}`);
+  }
+  if (!data) throw new Error('The Vercel admin API returned an invalid response.');
   return data;
 }
 
@@ -38,6 +39,14 @@ export async function verifyAdminPin(pin: string): Promise<string> {
   const response = await invokeAdminFunction({ action: 'login', pin: pin.trim() });
   if (!response.session) throw new Error('Administrator sign-in returned no session.');
   return response.session;
+}
+
+export function adminFunctionErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) return 'The administrator service could not be reached.';
+  if (/failed to fetch|networkerror/i.test(error.message)) {
+    return 'Could not reach the Vercel admin API. Confirm the app is deployed on Vercel with the /api/manage-promotional-campaigns route and check the internet connection.';
+  }
+  return error.message;
 }
 
 export function startAdminSession(session: string): void {
@@ -53,7 +62,11 @@ export function getAdminSessionToken(): string {
 }
 
 export async function clearAdminSession(): Promise<void> {
+  const session = getAdminSessionToken();
   sessionStorage.removeItem(ADMIN_SESSION_KEY);
+  if (session) {
+    await invokeAdminFunction({ action: 'logout', session });
+  }
 }
 
 export async function restoreAdminSession(): Promise<boolean> {

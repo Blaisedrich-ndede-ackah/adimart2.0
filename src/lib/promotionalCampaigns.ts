@@ -1,5 +1,9 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
-import { getAdminSessionToken, isAdminSessionActive } from '@/lib/adminAuth';
+import {
+  adminFunctionErrorMessage,
+  getAdminSessionToken,
+  isAdminSessionActive,
+} from '@/lib/adminAuth';
 import { db, type CachedCampaigns } from '@/lib/dexie';
 
 export const CAMPAIGN_BUCKET = 'promotional-campaigns';
@@ -81,7 +85,7 @@ function presentCampaign(row: CampaignRow): PromotionCampaign {
 }
 
 function throwQueryError(error: unknown): never {
-  throw new Error(campaignErrorMessage(error));
+  throw new Error(adminFunctionErrorMessage(error));
 }
 
 export async function fetchActiveCampaigns(): Promise<PromotionCampaign[]> {
@@ -134,22 +138,27 @@ async function invokeCampaignAdmin<T>(
 ): Promise<T> {
   const session = getAdminSessionToken();
   if (!session) throw new Error('Admin session expired. Sign in to the administrator portal again.');
-  const { data, error } = await supabase.functions.invoke<T & { error?: string }>(
-    'manage-promotional-campaigns',
-    { body: { action, session, ...values } }
-  );
-  if (error) {
-    if (error.context instanceof Response) {
-      let responseBody: { error?: string; message?: string } | null = null;
-      try {
-        responseBody = await error.context.clone().json() as { error?: string; message?: string };
-      } catch {
-        responseBody = null;
-      }
-      const responseMessage = responseBody?.error || responseBody?.message;
-      if (responseMessage) throw new Error(responseMessage);
-    }
-    throw new Error(campaignErrorMessage(error));
+  let response: Response;
+  try {
+    response = await fetch('/api/manage-promotional-campaigns', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, session, ...values }),
+    });
+  } catch {
+    throw new Error('Could not reach the Vercel admin API. Confirm this app is deployed on Vercel and check the internet connection.');
+  }
+  let data: (T & { error?: string }) | null = null;
+  try {
+    data = await response.json() as T & { error?: string };
+  } catch {
+    data = null;
+  }
+  if (!response.ok) {
+    const routeHint = response.status === 404
+      ? ' The /api/manage-promotional-campaigns route is missing; redeploy the latest version on Vercel.'
+      : '';
+    throw new Error(data?.error || `Campaign API request failed (${response.status}).${routeHint}`);
   }
   if (!data) throw new Error('The campaign service returned no response.');
   if (typeof data === 'object' && data !== null && 'error' in data && data.error) {
@@ -285,8 +294,8 @@ export function campaignErrorMessage(error: unknown): string {
   if (message.includes('Load failed') || message.includes('Failed to fetch')) {
     return 'Could not reach Supabase. Check the connection and try again.';
   }
-  if (/edge function/i.test(message) && /not found|does not exist|could not be reached|failed to send/i.test(message)) {
-    return 'Campaign tools need the manage-promotional-campaigns Edge Function. Deploy it and configure ADMIN_PIN and ADMIN_SESSION_SECRET in Supabase.';
+  if (/api\/manage-promotional-campaigns/i.test(message) && /not found|404/i.test(message)) {
+    return 'Campaign tools need the Vercel API route at /api/manage-promotional-campaigns. Redeploy the latest app from Vercel.';
   }
   return message || 'The campaign request could not be completed.';
 }

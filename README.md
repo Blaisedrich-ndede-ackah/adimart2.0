@@ -118,16 +118,15 @@ VITE_PAYSTACK_PUBLIC_KEY=pk_live_your-public-key
 
 ### Administrator Portal
 
-Platform admins sign in with the administrator PIN only; admin login does not send SMS or use Supabase Auth. Configure the PIN as a **server-side Supabase Edge Function secret**, never as a `VITE_` client variable. The portal still needs Supabase credentials to load cloud dashboard data.
+Platform admins sign in with the administrator PIN only; admin login does not send SMS or use Supabase Auth. The app reads the existing `VITE_ADMIN_PIN` from the Vercel server function at `/api/manage-promotional-campaigns`; the PIN is not checked in browser code.
 
-Campaign management uses the same PIN-only admin session through the `manage-promotional-campaigns` Edge Function. Apply `supabase-migrate-promotional-campaigns.sql`, then configure and deploy the function:
+Campaign management uses that PIN-only session through the Vercel API route. Apply `supabase-migrate-promotional-campaigns.sql`, then make sure the Vercel project has these environment variables:
 
-```bash
-supabase secrets set ADMIN_PIN=your-admin-pin ADMIN_SESSION_SECRET=your-long-random-secret
-supabase functions deploy manage-promotional-campaigns --no-verify-jwt
-```
+- `VITE_ADMIN_PIN` — the admin PIN already configured in Vercel.
+- `VITE_SUPABASE_URL` — the existing Supabase project URL.
+- `SUPABASE_SERVICE_ROLE_KEY` — the Supabase service-role key as a private Vercel environment variable (not prefixed with `VITE_`).
 
-`ADMIN_PIN` must be the same PIN entered on the administrator login screen. Set `ADMIN_SESSION_SECRET` to a private random value of at least 32 characters. The function uses its server-side Supabase service credentials to write campaigns; neither that credential nor the PIN is included in the browser bundle. Do not open campaign database or storage write policies to `anon`.
+The API function uses Supabase service credentials server-side to write campaigns. Do not expose the service-role key to browser code or open campaign write policies to `anon`. Vercel automatically deploys the API route with the app.
 
 Published campaigns appear on the store login screen for all store users. Campaign details and media are cached on each device after that device loads them while online, so they can be shown offline later. A device must load the campaigns at least once while online; campaign changes made elsewhere appear after it reconnects.
 

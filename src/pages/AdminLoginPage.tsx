@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Shield, ArrowLeft, Loader2 } from 'lucide-react';
 import {
+  adminFunctionErrorMessage,
   verifyAdminPin,
   startAdminSession,
 } from '@/lib/adminAuth';
@@ -32,7 +33,7 @@ export default function AdminLoginPage({ onSuccess, onBack }: AdminLoginPageProp
       startAdminSession(session);
       finishLogin();
     } catch (loginError) {
-      const message = loginError instanceof Error ? loginError.message : 'Administrator sign-in failed.';
+      const message = adminFunctionErrorMessage(loginError);
       setError(/invalid.*pin|unauthorized/i.test(message) ? 'Invalid administrator PIN.' : message);
       setPin('');
       setLoading(false);

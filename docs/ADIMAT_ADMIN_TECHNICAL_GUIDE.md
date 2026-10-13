@@ -4,7 +4,7 @@ For platform administrators and technical staff responsible for provisioning, de
 
 ## Administrator portal overview
 
-Sign in through the administrator portal with the configured administrator PIN. Admin login does not send SMS or use Supabase Auth. Campaign CRUD uses a Supabase Edge Function with server-side `ADMIN_PIN` and `ADMIN_SESSION_SECRET` secrets; deploy it with `supabase functions deploy manage-promotional-campaigns --no-verify-jwt`. Do not place the administrator PIN or service-role key in browser build variables. Published campaign media is cached on each device after its first successful online load for later offline viewing. Use the Learn tab for this operational guide; store owners and cashiers have different guides inside their store app.
+Sign in through the administrator portal with the PIN configured as `VITE_ADMIN_PIN` in Vercel. The Vercel `/api/manage-promotional-campaigns` server function verifies it without exposing the PIN in browser code. Campaign CRUD requires `VITE_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in the Vercel server environment; keep the service-role key private and do not prefix it with `VITE_`. Vercel deploys the API route with the app. Published campaign media is cached on each device after its first successful online load for later offline viewing. Use the Learn tab for this operational guide; store owners and cashiers have different guides inside their store app.
 
 ## Provision and manage stores
 

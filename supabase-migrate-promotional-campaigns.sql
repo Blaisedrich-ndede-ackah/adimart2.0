@@ -6,8 +6,8 @@
 --
 -- Direct table/storage writes require a trusted Supabase Auth JWT whose
 -- app_metadata contains { "is_platform_admin": true }. The PIN-only admin
--- portal uses the manage-promotional-campaigns Edge Function for writes;
--- it never exposes service credentials or opens anonymous write policies.
+-- portal uses the Vercel /api/manage-promotional-campaigns route for admin
+-- writes; it never exposes service credentials or opens anonymous writes.
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION public.is_adimat_campaign_admin()
@@ -58,6 +58,16 @@ CREATE TABLE IF NOT EXISTS public.promotional_campaign_login_attempts (
 ALTER TABLE public.promotional_campaign_login_attempts ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.promotional_campaign_login_attempts FROM PUBLIC, anon, authenticated;
 GRANT ALL ON TABLE public.promotional_campaign_login_attempts TO service_role;
+
+CREATE TABLE IF NOT EXISTS public.promotional_campaign_admin_sessions (
+  session_hash TEXT PRIMARY KEY,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.promotional_campaign_admin_sessions ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.promotional_campaign_admin_sessions FROM PUBLIC, anon, authenticated;
+GRANT ALL ON TABLE public.promotional_campaign_admin_sessions TO service_role;
 
 CREATE INDEX IF NOT EXISTS idx_promotional_campaigns_published_order
   ON public.promotional_campaigns (sort_order ASC, created_at DESC)
@@ -241,5 +251,5 @@ NOTIFY storage, 'reload config';
 -- SELECT id, name, public, file_size_limit, allowed_mime_types
 -- FROM storage.buckets WHERE id = 'promotional-campaigns';
 
--- The PIN-only portal performs campaign CRUD through its server function.
+-- The PIN-only portal performs campaign CRUD through the Vercel API route.
 -- Keep direct anonymous writes prohibited; authenticated writes remain protected by RLS.
