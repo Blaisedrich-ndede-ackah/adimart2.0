@@ -109,7 +109,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 # Paystack Configuration
 VITE_PAYSTACK_PUBLIC_KEY=pk_live_your-public-key
 
-# Administrator portal PIN (required before SMS verification)
+# Administrator portal PIN
 VITE_ADMIN_PIN=9999
 
 # Optional mNotify defaults for non-admin SMS alerts
@@ -121,25 +121,25 @@ VITE_ADMIN_PIN=9999
 
 ### Administrator Portal
 
-Platform admins sign in with `VITE_ADMIN_PIN`, then confirm with a Supabase Auth SMS code sent to the **Admin phone** in Admin → Contact (falls back to the WhatsApp number). The administrator's Supabase Auth user must have that phone number and trusted `app_metadata` containing `"is_platform_admin": true`; this claim is enforced by the campaign database/storage policies.
+Platform admins sign in with `VITE_ADMIN_PIN` only; admin login does not send SMS or use Supabase OTP. Supabase credentials are still needed to load cloud dashboard data. Campaign create/edit/delete operations are separately protected by the campaign database/storage policies and require a trusted Supabase Auth session with `app_metadata` containing `"is_platform_admin": true`.
 
-To set it up, apply `supabase-migrate-promotional-campaigns.sql`, enable **Phone Auth** and configure an SMS provider in the Supabase Dashboard under **Authentication → Providers**, and set the admin phone in Admin → Contact. In **Authentication → Users**, make sure an Auth user exists for that phone. Then, in the SQL Editor, mark the administrator account using its exact phone number:
+To enable campaign management, apply `supabase-migrate-promotional-campaigns.sql` and mark the intended Supabase Auth user as a platform administrator in the SQL Editor:
 
 ```sql
 UPDATE auth.users
 SET raw_app_meta_data = COALESCE(raw_app_meta_data, '{}'::jsonb)
       || '{"is_platform_admin": true}'::jsonb
-WHERE phone = '+233XXXXXXXXX';
+WHERE id = '<supabase-auth-user-uuid>';
 ```
 
-Use the same phone number in Admin → Contact. Set `VITE_ADMIN_PIN` in the app build environment and rebuild the app after changing it. The PIN is only the first step; the SMS OTP and platform-admin role are also required. No campaign Edge Function or service-role key is needed.
+Set `VITE_ADMIN_PIN` in the app build environment and rebuild the app after changing it. The client-side PIN unlocks the portal UI; it does not grant the separate Supabase Auth role needed for campaign writes. Never put a service-role key in the client build.
 
 The portal loads cloud data and shows:
 
 - All stores, users, and products
 - Subscription grants and usage
 - **Create a store** — Admin → Stores creates the shop, owner PIN, and **downloads a subscription invoice PDF immediately** (Aktum / Adimat bill matching the official invoice). Share the Store ID so the owner can open it on their phone.
-- **Contact** settings: WhatsApp number + email shown on every store’s **Plan** tab, admin SMS login phone, and mNotify SMS API key/sender ID for store alerts
+- **Contact** settings: WhatsApp number + email shown on every store’s **Plan** tab, and mNotify SMS API key/sender ID for store alerts
 - All-time revenue and Paystack (online) totals per store
 - Weekly Paystack collections with each store’s MoMo account name/number for remittance
 - **Mark sent** to record that a weekly payout was transferred

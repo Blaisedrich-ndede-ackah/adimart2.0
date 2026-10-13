@@ -529,7 +529,6 @@ CREATE TABLE IF NOT EXISTS platform_settings (
   contact_email VARCHAR(255) DEFAULT '',
   mnotify_api_key TEXT DEFAULT '',
   mnotify_sender_id VARCHAR(11) DEFAULT 'Adimat',
-  admin_phone VARCHAR(50) DEFAULT '',
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 

@@ -4,7 +4,7 @@ For platform administrators and technical staff responsible for provisioning, de
 
 ## Administrator portal overview
 
-Sign in through the administrator portal. The portal requires the configured administrator PIN, Supabase Auth SMS verification, and the trusted platform-administrator role. Use the Learn tab for this operational guide; store owners and cashiers have different guides inside their store app.
+Sign in through the administrator portal with the configured administrator PIN. Admin login does not send SMS or use Supabase OTP. Campaign management has separate database/storage policies and requires a trusted Supabase Auth session with the platform-administrator role. Use the Learn tab for this operational guide; store owners and cashiers have different guides inside their store app.
 
 ## Provision and manage stores
 
