@@ -1,4 +1,5 @@
-const CACHE_NAME = 'adimat-v11';
+const CACHE_NAME = 'adimat-v12';
+const CAMPAIGN_MEDIA_CACHE = 'adimat-campaign-media-v1';
 const OFFLINE_URL = '/';
 
 const PRECACHE_ASSETS = [
@@ -24,7 +25,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames
-          .filter((name) => name !== CACHE_NAME)
+          .filter((name) => name !== CACHE_NAME && name !== CAMPAIGN_MEDIA_CACHE)
           .map((name) => caches.delete(name))
       );
     })

@@ -1,5 +1,6 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
-import { isAdminSessionActive } from '@/lib/adminAuth';
+import { getAdminSessionToken, isAdminSessionActive } from '@/lib/adminAuth';
+import { db, type CachedCampaigns } from '@/lib/dexie';
 
 export const CAMPAIGN_BUCKET = 'promotional-campaigns';
 export const PUBLIC_CAMPAIGNS_KEY = 'promotional-campaigns:public-active';
@@ -19,6 +20,9 @@ const ALLOWED_MEDIA_TYPES = new Set([
   'video/webm',
   'video/quicktime',
 ]);
+const PUBLIC_CAMPAIGN_CACHE_ID = 'public-active';
+const PUBLIC_CAMPAIGN_MEDIA_CACHE = 'adimat-campaign-media-v1';
+const OFFLINE_MEDIA_URLS = new Map<string, string>();
 
 export type CampaignMediaType = 'image' | 'video';
 
@@ -62,10 +66,9 @@ export type CampaignAdminAccess = 'unconfigured' | 'signed-out' | 'not-authorize
 
 export async function getCampaignAdminAccess(): Promise<CampaignAdminAccess> {
   if (!isSupabaseConfigured()) return 'unconfigured';
-  const { data, error } = await supabase.auth.getSession();
-  if (error) throw error;
-  if (!isAdminSessionActive() || !data.session) return 'signed-out';
-  return data.session.user.app_metadata?.is_platform_admin === true ? 'authorized' : 'not-authorized';
+  if (!isAdminSessionActive()) return 'signed-out';
+  await invokeCampaignAdmin('verify-session');
+  return 'authorized';
 }
 
 function presentCampaign(row: CampaignRow): PromotionCampaign {
@@ -82,41 +85,154 @@ function throwQueryError(error: unknown): never {
 }
 
 export async function fetchActiveCampaigns(): Promise<PromotionCampaign[]> {
-  if (!isSupabaseConfigured()) return [];
+  if (!isSupabaseConfigured()) return readOfflineCampaigns();
+  try {
+    const { data, error } = await supabase
+      .from('promotional_campaigns')
+      .select(CAMPAIGN_COLUMNS)
+      .eq('is_published', true)
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: false })
+      .limit(100);
 
-  const { data, error } = await supabase
-    .from('promotional_campaigns')
-    .select(CAMPAIGN_COLUMNS)
-    .eq('is_published', true)
-    .order('sort_order', { ascending: true })
-    .order('created_at', { ascending: false })
-    .limit(100);
+    if (error) throwQueryError(error);
 
-  if (error) throwQueryError(error);
+    const now = Date.now();
+    const campaigns = ((data || []) as unknown as CampaignRow[])
+      .filter((campaign) => {
+        const startsAt = campaign.starts_at ? Date.parse(campaign.starts_at) : null;
+        const endsAt = campaign.ends_at ? Date.parse(campaign.ends_at) : null;
+        return (
+          (startsAt === null || (Number.isFinite(startsAt) && startsAt <= now)) &&
+          (endsAt === null || (Number.isFinite(endsAt) && endsAt > now))
+        );
+      })
+      .map(presentCampaign);
 
-  const now = Date.now();
-  return ((data || []) as unknown as CampaignRow[])
-    .filter((campaign) => {
-      const startsAt = campaign.starts_at ? Date.parse(campaign.starts_at) : null;
-      const endsAt = campaign.ends_at ? Date.parse(campaign.ends_at) : null;
-      return (
-        (startsAt === null || (Number.isFinite(startsAt) && startsAt <= now)) &&
-        (endsAt === null || (Number.isFinite(endsAt) && endsAt > now))
-      );
-    })
-    .map(presentCampaign);
+    try {
+      await cachePublicCampaigns(campaigns);
+    } catch (cacheError) {
+      console.warn('Could not save campaigns for offline viewing:', cacheError);
+    }
+    void cacheCampaignMedia(campaigns);
+    return campaigns;
+  } catch (error) {
+    const cachedCampaigns = await readOfflineCampaigns();
+    if (cachedCampaigns.length) return cachedCampaigns;
+    throw error;
+  }
 }
 
 export async function fetchAdminCampaigns(): Promise<PromotionCampaign[]> {
-  await requireCampaignAdmin();
-  const { data, error } = await supabase
-    .from('promotional_campaigns')
-    .select(CAMPAIGN_COLUMNS)
-    .order('sort_order', { ascending: true })
-    .order('created_at', { ascending: false })
-    .limit(200);
-  if (error) throwQueryError(error);
-  return ((data || []) as unknown as CampaignRow[]).map(presentCampaign);
+  const response = await invokeCampaignAdmin<{ campaigns: CampaignRow[] }>('list');
+  return (response.campaigns || []).map(presentCampaign);
+}
+
+async function invokeCampaignAdmin<T>(
+  action: string,
+  values: Record<string, unknown> = {}
+): Promise<T> {
+  const session = getAdminSessionToken();
+  if (!session) throw new Error('Admin session expired. Sign in to the administrator portal again.');
+  const { data, error } = await supabase.functions.invoke<T & { error?: string }>(
+    'manage-promotional-campaigns',
+    { body: { action, session, ...values } }
+  );
+  if (error) {
+    if (error.context instanceof Response) {
+      let responseBody: { error?: string; message?: string } | null = null;
+      try {
+        responseBody = await error.context.clone().json() as { error?: string; message?: string };
+      } catch {
+        responseBody = null;
+      }
+      const responseMessage = responseBody?.error || responseBody?.message;
+      if (responseMessage) throw new Error(responseMessage);
+    }
+    throw new Error(campaignErrorMessage(error));
+  }
+  if (!data) throw new Error('The campaign service returned no response.');
+  if (typeof data === 'object' && data !== null && 'error' in data && data.error) {
+    throw new Error(data.error);
+  }
+  return data;
+}
+
+async function cachePublicCampaigns(campaigns: PromotionCampaign[]): Promise<void> {
+  await db.campaign_cache.put({
+    id: PUBLIC_CAMPAIGN_CACHE_ID,
+    campaigns: campaigns as unknown as Array<Record<string, unknown>>,
+    updated_at: new Date().toISOString(),
+  });
+}
+
+async function readOfflineCampaigns(): Promise<PromotionCampaign[]> {
+  const cached = await db.campaign_cache.get(PUBLIC_CAMPAIGN_CACHE_ID) as CachedCampaigns | undefined;
+  if (!cached) return [];
+  const now = Date.now();
+  const campaigns = (cached.campaigns as unknown as PromotionCampaign[]).filter((campaign) => {
+    const startsAt = campaign.starts_at ? Date.parse(campaign.starts_at) : null;
+    const endsAt = campaign.ends_at ? Date.parse(campaign.ends_at) : null;
+    return (
+      (startsAt === null || (Number.isFinite(startsAt) && startsAt <= now)) &&
+      (endsAt === null || (Number.isFinite(endsAt) && endsAt > now))
+    );
+  });
+  const mediaCache = typeof caches === 'undefined'
+    ? null
+    : await caches.open(PUBLIC_CAMPAIGN_MEDIA_CACHE).catch(() => null);
+  return Promise.all(campaigns.map(async (campaign) => {
+    if (!mediaCache) return campaign;
+    const offlineUrl = async (url: string | null): Promise<string | null> => {
+      if (!url) return null;
+      const existingUrl = OFFLINE_MEDIA_URLS.get(url);
+      if (existingUrl) return existingUrl;
+      const response = await mediaCache.match(url);
+      if (!response) return url;
+      const localUrl = URL.createObjectURL(await response.blob());
+      OFFLINE_MEDIA_URLS.set(url, localUrl);
+      return localUrl;
+    };
+    const [mediaUrl, posterUrl] = await Promise.all([
+      offlineUrl(campaign.media_url),
+      offlineUrl(campaign.poster_url),
+    ]);
+    return {
+      ...campaign,
+      media_url: mediaUrl || campaign.media_url,
+      poster_url: posterUrl,
+    };
+  }));
+}
+
+async function cacheCampaignMedia(campaigns: PromotionCampaign[]): Promise<void> {
+  if (typeof caches === 'undefined' || typeof fetch === 'undefined') return;
+  try {
+    const cache = await caches.open(PUBLIC_CAMPAIGN_MEDIA_CACHE);
+    const urls = campaigns.flatMap((campaign) =>
+      [campaign.media_url, campaign.poster_url].filter((value): value is string => Boolean(value))
+    );
+    let cursor = 0;
+    const cacheNextMedia = async () => {
+      while (cursor < urls.length) {
+        const url = urls[cursor++];
+        try {
+          if (await cache.match(url)) continue;
+          const response = await fetch(url, { mode: 'cors', credentials: 'omit' });
+          if (response.ok && response.type !== 'opaque') await cache.put(url, response);
+        } catch (error) {
+          console.warn('Could not cache campaign media for offline viewing:', error);
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(2, urls.length) }, cacheNextMedia));
+    const keepUrls = new Set(urls);
+    await Promise.all((await cache.keys())
+      .filter((request) => !keepUrls.has(request.url))
+      .map((request) => cache.delete(request)));
+  } catch (error) {
+    console.warn('Could not open campaign media cache for offline viewing:', error);
+  }
 }
 
 export function validateCampaignMedia(file: File): string | null {
@@ -169,6 +285,9 @@ export function campaignErrorMessage(error: unknown): string {
   if (message.includes('Load failed') || message.includes('Failed to fetch')) {
     return 'Could not reach Supabase. Check the connection and try again.';
   }
+  if (/edge function/i.test(message) && /not found|does not exist|could not be reached|failed to send/i.test(message)) {
+    return 'Campaign tools need the manage-promotional-campaigns Edge Function. Deploy it and configure ADMIN_PIN and ADMIN_SESSION_SECRET in Supabase.';
+  }
   return message || 'The campaign request could not be completed.';
 }
 
@@ -189,42 +308,39 @@ function describeError(error: unknown): { code: string; message: string } {
 
 async function requireCampaignAdmin(): Promise<void> {
   if (!isAdminSessionActive()) throw new Error('Admin session expired. Sign in to the admin portal again.');
-  const { data, error } = await supabase.auth.getSession();
-  if (error) throw new Error(campaignErrorMessage(error));
-  if (!data.session) throw new Error('Your Supabase session expired. Sign in to the admin portal again.');
-  if (data.session.user.app_metadata?.is_platform_admin !== true) {
-    throw new Error('This Supabase account is not authorized to manage campaigns.');
-  }
+  await invokeCampaignAdmin('verify-session');
 }
 
 async function uploadCampaignMedia(file: File): Promise<string> {
   await requireCampaignAdmin();
   const validationError = validateCampaignMedia(file);
   if (validationError) throw new Error(validationError);
-  const extension = {
-    'image/jpeg': 'jpg',
-    'image/png': 'png',
-    'image/webp': 'webp',
-    'image/gif': 'gif',
-    'video/mp4': 'mp4',
-    'video/webm': 'webm',
-    'video/quicktime': 'mov',
-  }[file.type];
-  const path = `${crypto.randomUUID()}.${extension}`;
-  const { error } = await supabase.storage.from(CAMPAIGN_BUCKET).upload(
+  const { path, token } = await invokeCampaignAdmin<{ path: string; token: string }>(
+    'create-upload-url',
+    { contentType: file.type }
+  );
+  const { error } = await supabase.storage.from(CAMPAIGN_BUCKET).uploadToSignedUrl(
     path,
+    token,
     file,
     { cacheControl: '3600', contentType: file.type, upsert: false },
   );
-  if (error) throw new Error(campaignErrorMessage(error));
+  if (error) {
+    const cleanupWarning = await removeMedia([path]);
+    throw new Error([campaignErrorMessage(error), cleanupWarning].filter(Boolean).join(' '));
+  }
   return path;
 }
 
 async function removeMedia(paths: string[]): Promise<string> {
   const uniquePaths = [...new Set(paths.filter(Boolean))];
   if (uniquePaths.length === 0) return '';
-  const { error } = await supabase.storage.from(CAMPAIGN_BUCKET).remove(uniquePaths);
-  return error ? `Campaign media cleanup failed: ${campaignErrorMessage(error)}` : '';
+  try {
+    await invokeCampaignAdmin('remove-media', { paths: uniquePaths });
+    return '';
+  } catch (error) {
+    return `Campaign media cleanup failed: ${campaignErrorMessage(error)}`;
+  }
 }
 
 export async function createPromotionCampaign(
@@ -233,17 +349,17 @@ export async function createPromotionCampaign(
 ): Promise<PromotionCampaign> {
   await requireCampaignAdmin();
   const mediaPath = await uploadCampaignMedia(file);
-  const { data, error } = await supabase.from('promotional_campaigns').insert({
-    ...fields,
-    media_type: mediaFileType(file),
-    media_path: mediaPath,
-  }).select(CAMPAIGN_COLUMNS).single();
-  if (error || !data) {
+  try {
+    const { campaign } = await invokeCampaignAdmin<{ campaign: CampaignRow }>('create', {
+      fields,
+      mediaPath,
+      mediaType: file.type,
+    });
+    return presentCampaign(campaign);
+  } catch (error) {
     const cleanupWarning = await removeMedia([mediaPath]);
-    const message = error ? campaignErrorMessage(error) : 'Campaign was not created.';
-    throw new Error([message, cleanupWarning].filter(Boolean).join(' '));
+    throw new Error([campaignErrorMessage(error), cleanupWarning].filter(Boolean).join(' '));
   }
-  return presentCampaign(data as unknown as CampaignRow);
 }
 
 export async function updatePromotionCampaign(
@@ -253,45 +369,33 @@ export async function updatePromotionCampaign(
 ): Promise<{ campaign: PromotionCampaign; cleanupWarning: string }> {
   await requireCampaignAdmin();
   const replacementPath = replacementFile ? await uploadCampaignMedia(replacementFile) : '';
-  const updates = {
-    ...fields,
-    ...(replacementPath && replacementFile
-      ? {
-          media_path: replacementPath,
-          media_type: mediaFileType(replacementFile),
-          poster_path: null,
-        }
-      : {}),
-  };
-  const { data, error } = await supabase.from('promotional_campaigns')
-    .update(updates)
-    .eq('id', campaign.id)
-    .select(CAMPAIGN_COLUMNS)
-    .maybeSingle();
-  if (error || !data) {
+  let savedCampaign: CampaignRow;
+  try {
+    const result = await invokeCampaignAdmin<{ campaign: CampaignRow }>('update', {
+      id: campaign.id,
+      fields,
+      ...(replacementPath && replacementFile
+        ? { mediaPath: replacementPath, mediaType: replacementFile.type }
+        : {}),
+    });
+    savedCampaign = result.campaign;
+  } catch (error) {
     const cleanupWarning = replacementPath ? await removeMedia([replacementPath]) : '';
-    const message = error ? campaignErrorMessage(error) : 'Campaign not found or you do not have permission to update it.';
-    throw new Error([message, cleanupWarning].filter(Boolean).join(' '));
+    throw new Error([campaignErrorMessage(error), cleanupWarning].filter(Boolean).join(' '));
   }
 
   const cleanupWarning = replacementPath
     ? await removeMedia([campaign.media_path, campaign.poster_path || ''])
     : '';
-  return { campaign: presentCampaign(data as unknown as CampaignRow), cleanupWarning };
+  return { campaign: presentCampaign(savedCampaign), cleanupWarning };
 }
 
 export async function deletePromotionCampaign(
   campaign: PromotionCampaign
 ): Promise<string> {
   await requireCampaignAdmin();
-  const { data, error } = await supabase.from('promotional_campaigns')
-    .delete()
-    .eq('id', campaign.id)
-    .select('id')
-    .maybeSingle();
-  if (error) throw new Error(campaignErrorMessage(error));
-  if (!data) throw new Error('Campaign not found or you do not have permission to delete it.');
-  return removeMedia([campaign.media_path, campaign.poster_path || '']);
+  const result = await invokeCampaignAdmin<{ cleanupWarning?: string }>('delete', { id: campaign.id });
+  return result.cleanupWarning || '';
 }
 
 export async function uploadCampaignAdminMedia(file: File): Promise<string> {

@@ -5,8 +5,9 @@
 -- for flyers/videos shown in FlyerShowcase.
 --
 -- Direct table/storage writes require a trusted Supabase Auth JWT whose
--- app_metadata contains { "is_platform_admin": true }. The portal signs in
--- with Supabase Auth; row-level security protects all campaign writes.
+-- app_metadata contains { "is_platform_admin": true }. The PIN-only admin
+-- portal uses the manage-promotional-campaigns Edge Function for writes;
+-- it never exposes service credentials or opens anonymous write policies.
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION public.is_adimat_campaign_admin()
@@ -47,6 +48,17 @@ CREATE TABLE IF NOT EXISTS public.promotional_campaigns (
     CHECK (poster_path IS NULL OR char_length(btrim(poster_path)) > 0)
 );
 
+CREATE TABLE IF NOT EXISTS public.promotional_campaign_login_attempts (
+  ip_hash TEXT PRIMARY KEY,
+  failed_attempts INTEGER NOT NULL DEFAULT 0,
+  window_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  locked_until TIMESTAMPTZ
+);
+
+ALTER TABLE public.promotional_campaign_login_attempts ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.promotional_campaign_login_attempts FROM PUBLIC, anon, authenticated;
+GRANT ALL ON TABLE public.promotional_campaign_login_attempts TO service_role;
+
 CREATE INDEX IF NOT EXISTS idx_promotional_campaigns_published_order
   ON public.promotional_campaigns (sort_order ASC, created_at DESC)
   WHERE is_published = TRUE;
@@ -56,6 +68,7 @@ ALTER TABLE public.promotional_campaigns ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.promotional_campaigns FROM PUBLIC;
 GRANT SELECT ON TABLE public.promotional_campaigns TO anon, authenticated;
 GRANT INSERT, UPDATE, DELETE ON TABLE public.promotional_campaigns TO authenticated;
+GRANT ALL ON TABLE public.promotional_campaigns TO service_role;
 
 DROP POLICY IF EXISTS promotional_campaigns_public_read_active
   ON public.promotional_campaigns;
@@ -151,6 +164,8 @@ SET
   file_size_limit = EXCLUDED.file_size_limit,
   allowed_mime_types = EXCLUDED.allowed_mime_types;
 
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE storage.objects TO service_role;
+
 -- Public buckets allow public downloads; listing and every write remain
 -- limited to authenticated platform admins. SELECT is included for admin
 -- listing and Storage upserts, which require SELECT + INSERT + UPDATE.
@@ -215,10 +230,6 @@ COMMENT ON COLUMN public.promotional_campaigns.poster_path IS
 COMMENT ON COLUMN public.promotional_campaigns.is_published IS
   'Only published campaigns within their optional date window are visible to public clients.';
 
--- Assign is_platform_admin in Supabase Auth app_metadata through the
--- Supabase Dashboard or SQL Editor. Never authorize with user_metadata,
--- which users can edit themselves.
-
 NOTIFY pgrst, 'reload schema';
 NOTIFY pgrst, 'reload config';
 NOTIFY storage, 'reload config';
@@ -230,5 +241,5 @@ NOTIFY storage, 'reload config';
 -- SELECT id, name, public, file_size_limit, allowed_mime_types
 -- FROM storage.buckets WHERE id = 'promotional-campaigns';
 
--- Portal campaign CRUD uses the signed-in administrator's JWT. Keep direct
--- anonymous writes prohibited; authenticated writes remain protected by RLS.
+-- The PIN-only portal performs campaign CRUD through its server function.
+-- Keep direct anonymous writes prohibited; authenticated writes remain protected by RLS.

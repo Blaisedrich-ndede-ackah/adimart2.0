@@ -330,7 +330,7 @@ export default function AdminCampaignManager() {
               <h3 className="mt-1 text-lg font-bold text-slate-950">
                 {editingCampaign ? 'Edit campaign' : 'Create a campaign'}
               </h3>
-              <p className="mt-1 text-xs leading-5 text-slate-500">Images and videos up to 50 MB. Public campaigns appear on the store login screen.</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">Images and videos up to 50 MB. Published campaigns appear to store users on the login screen and are cached on each device for offline viewing after an online visit.</p>
             </div>
             {editingCampaign && (
               <button

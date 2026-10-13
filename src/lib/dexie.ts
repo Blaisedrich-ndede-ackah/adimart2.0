@@ -338,6 +338,12 @@ export interface AppConfig {
   current_user_id: string | null;
 }
 
+export interface CachedCampaigns {
+  id: string;
+  campaigns: Array<Record<string, unknown>>;
+  updated_at: string;
+}
+
 /** Tombstones so cloud sync cannot resurrect hard-deleted records */
 export interface LocalDeletedRecord {
   id: string;
@@ -370,6 +376,7 @@ class AdimatDB extends Dexie {
   deleted_records!: Table<LocalDeletedRecord, string>;
   sync_meta!: Table<SyncMeta, string>;
   app_config!: Table<AppConfig, string>;
+  campaign_cache!: Table<CachedCampaigns, string>;
 
   constructor() {
     super('AdimatPOS');
@@ -517,6 +524,9 @@ class AdimatDB extends Dexie {
       deleted_records: 'id, store_id, table_name, record_id, synced, deleted_at',
       sync_meta: 'id',
       app_config: 'id',
+    });
+    this.version(11).stores({
+      campaign_cache: 'id',
     });
   }
 }

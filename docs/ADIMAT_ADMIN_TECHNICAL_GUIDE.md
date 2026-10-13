@@ -4,7 +4,7 @@ For platform administrators and technical staff responsible for provisioning, de
 
 ## Administrator portal overview
 
-Sign in through the administrator portal with the configured administrator PIN. Admin login does not send SMS or use Supabase OTP. Campaign management has separate database/storage policies and requires a trusted Supabase Auth session with the platform-administrator role. Use the Learn tab for this operational guide; store owners and cashiers have different guides inside their store app.
+Sign in through the administrator portal with the configured administrator PIN. Admin login does not send SMS or use Supabase Auth. Campaign CRUD uses a Supabase Edge Function with server-side `ADMIN_PIN` and `ADMIN_SESSION_SECRET` secrets; deploy it with `supabase functions deploy manage-promotional-campaigns --no-verify-jwt`. Do not place the administrator PIN or service-role key in browser build variables. Published campaign media is cached on each device after its first successful online load for later offline viewing. Use the Learn tab for this operational guide; store owners and cashiers have different guides inside their store app.
 
 ## Provision and manage stores
 
@@ -18,7 +18,7 @@ Sign in through the administrator portal with the configured administrator PIN. 
 
 Use Node.js 18+ and npm. From the project root, run `npm install`, configure environment variables for the build, run `npm run build`, and deploy `dist/` to static hosting over HTTPS. `npm run preview` allows a local check of the production output.
 
-Client build variables include `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, and optionally `VITE_PAYSTACK_PUBLIC_KEY`, administrator PIN configuration, and SMS defaults. Values prefixed with `VITE_` are embedded in browser-delivered code. Never put a Supabase service-role key, payment secret key, or private credential in the client build or source control.
+Client build variables include `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, optionally `VITE_PAYSTACK_PUBLIC_KEY`, and SMS defaults. Values prefixed with `VITE_` are embedded in browser-delivered code. Never put the administrator PIN, Supabase service-role key, payment secret key, or private credential in the client build or source control.
 
 ## Supabase schema and migrations
 

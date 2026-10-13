@@ -109,9 +109,6 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 # Paystack Configuration
 VITE_PAYSTACK_PUBLIC_KEY=pk_live_your-public-key
 
-# Administrator portal PIN
-VITE_ADMIN_PIN=9999
-
 # Optional mNotify defaults for non-admin SMS alerts
 # VITE_MNOTIFY_API_KEY=
 # VITE_MNOTIFY_SENDER_ID=Adimat
@@ -121,18 +118,18 @@ VITE_ADMIN_PIN=9999
 
 ### Administrator Portal
 
-Platform admins sign in with `VITE_ADMIN_PIN` only; admin login does not send SMS or use Supabase OTP. Supabase credentials are still needed to load cloud dashboard data. Campaign create/edit/delete operations are separately protected by the campaign database/storage policies and require a trusted Supabase Auth session with `app_metadata` containing `"is_platform_admin": true`.
+Platform admins sign in with the administrator PIN only; admin login does not send SMS or use Supabase Auth. Configure the PIN as a **server-side Supabase Edge Function secret**, never as a `VITE_` client variable. The portal still needs Supabase credentials to load cloud dashboard data.
 
-To enable campaign management, apply `supabase-migrate-promotional-campaigns.sql` and mark the intended Supabase Auth user as a platform administrator in the SQL Editor:
+Campaign management uses the same PIN-only admin session through the `manage-promotional-campaigns` Edge Function. Apply `supabase-migrate-promotional-campaigns.sql`, then configure and deploy the function:
 
-```sql
-UPDATE auth.users
-SET raw_app_meta_data = COALESCE(raw_app_meta_data, '{}'::jsonb)
-      || '{"is_platform_admin": true}'::jsonb
-WHERE id = '<supabase-auth-user-uuid>';
+```bash
+supabase secrets set ADMIN_PIN=your-admin-pin ADMIN_SESSION_SECRET=your-long-random-secret
+supabase functions deploy manage-promotional-campaigns --no-verify-jwt
 ```
 
-Set `VITE_ADMIN_PIN` in the app build environment and rebuild the app after changing it. The client-side PIN unlocks the portal UI; it does not grant the separate Supabase Auth role needed for campaign writes. Never put a service-role key in the client build.
+`ADMIN_PIN` must be the same PIN entered on the administrator login screen. Set `ADMIN_SESSION_SECRET` to a private random value of at least 32 characters. The function uses its server-side Supabase service credentials to write campaigns; neither that credential nor the PIN is included in the browser bundle. Do not open campaign database or storage write policies to `anon`.
+
+Published campaigns appear on the store login screen for all store users. Campaign details and media are cached on each device after that device loads them while online, so they can be shown offline later. A device must load the campaigns at least once while online; campaign changes made elsewhere appear after it reconnects.
 
 The portal loads cloud data and shows:
 

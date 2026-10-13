@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Shield, ArrowLeft, Loader2 } from 'lucide-react';
 import {
   verifyAdminPin,
-  getConfiguredAdminPin,
   startAdminSession,
 } from '@/lib/adminAuth';
 import AuthShowcase from '@/components/AuthShowcase';
@@ -16,30 +15,26 @@ export default function AdminLoginPage({ onSuccess, onBack }: AdminLoginPageProp
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const pinLength = Math.min(8, Math.max(4, getConfiguredAdminPin().length));
+  const pinLength = 8;
 
   const finishLogin = () => {
     setLoading(false);
     onSuccess();
   };
 
-  const submitPin = (value: string) => {
+  const submitPin = async (value: string) => {
     if (loading) return;
     setLoading(true);
     setError('');
 
-    if (!verifyAdminPin(value)) {
-      setError('Invalid administrator PIN.');
-      setPin('');
-      setLoading(false);
-      return;
-    }
-
     try {
-      startAdminSession();
+      const session = await verifyAdminPin(value);
+      startAdminSession(session);
       finishLogin();
-    } catch {
-      setError('Your browser blocked session storage. Allow site storage, then try again.');
+    } catch (loginError) {
+      const message = loginError instanceof Error ? loginError.message : 'Administrator sign-in failed.';
+      setError(/invalid.*pin|unauthorized/i.test(message) ? 'Invalid administrator PIN.' : message);
+      setPin('');
       setLoading(false);
     }
   };
@@ -53,7 +48,7 @@ export default function AdminLoginPage({ onSuccess, onBack }: AdminLoginPageProp
     }
     const next = (pin + key).slice(0, pinLength);
     setPin(next);
-    if (next.length === pinLength) submitPin(next);
+    if (next.length === pinLength) void submitPin(next);
   };
 
   return (
@@ -82,7 +77,7 @@ export default function AdminLoginPage({ onSuccess, onBack }: AdminLoginPageProp
             Administrator
           </h1>
           <p className="text-emerald-100/80 text-sm text-center mt-2 max-w-xs">
-            Enter your admin PIN to continue.
+            Enter your admin PIN, then tap the arrow if your PIN has fewer than eight digits.
           </p>
 
           <div className="relative mt-4 mb-4 tracking-[0.5em] text-2xl font-mono text-white min-h-[2rem]">
@@ -107,7 +102,7 @@ export default function AdminLoginPage({ onSuccess, onBack }: AdminLoginPageProp
               onChange={(event) => {
                 const value = event.target.value.replace(/\D/g, '').slice(0, pinLength);
                 setPin(value);
-                if (value.length === pinLength) submitPin(value);
+                if (value.length === pinLength) void submitPin(value);
               }}
               className="absolute inset-0 h-full w-full cursor-text opacity-0"
             />
@@ -125,7 +120,7 @@ export default function AdminLoginPage({ onSuccess, onBack }: AdminLoginPageProp
                 disabled={loading}
                 onClick={() => {
                   if (key === 'go') {
-                    if (pin.length >= 4) submitPin(pin);
+                    if (pin.length >= 4) void submitPin(pin);
                     return;
                   }
                   onKey(key);
@@ -138,7 +133,7 @@ export default function AdminLoginPage({ onSuccess, onBack }: AdminLoginPageProp
           </div>
 
           <p className="text-emerald-200/70 text-[11px] text-center mt-6 max-w-sm px-2">
-            Set <code className="text-emerald-100">VITE_ADMIN_PIN</code> in your app environment.
+            Enter the administrator PIN to sign in.
           </p>
         </div>
       </div>

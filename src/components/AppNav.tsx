@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, House,
   CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare,
-  ShoppingCart,
+  ShoppingCart, Megaphone,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -48,6 +48,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         { id: 'cashbook', label: t('nav.cashbook'), icon: BookOpen, show: cashbookOk },
         { id: 'devices', label: t('nav.devices'), icon: Bluetooth, show: true },
         { id: 'learn', label: 'Learn Adimat', icon: BookOpen, show: true },
+        { id: 'promotions', label: 'Promotions', icon: Megaphone, show: true },
         { id: 'subscription', label: t('nav.plan'), icon: CalendarClock, show: isOwner },
         { id: 'inventory', label: t('nav.inventory'), icon: Package, show: isOwner },
         { id: 'purchasing', label: 'Purchasing', icon: ShoppingCart, show: isOwner },
