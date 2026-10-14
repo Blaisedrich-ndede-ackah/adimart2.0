@@ -15,6 +15,8 @@ import { getPaymentMethodLabel } from './paymentMethods';
 const ESC = 0x1b;
 const GS = 0x1d;
 const LF = 0x0a;
+const COMPANY_LOGO_URL = '/logo.png';
+const COMPANY_SERVICES_CONTACT = 'Need our services? Contact: +233-555-857-224';
 
 export interface EscPosReceiptItem {
   name: string;
@@ -50,6 +52,12 @@ export type ReceiptData = EscPosReceiptData;
 
 function amt(data: EscPosReceiptData, n: number): string {
   return formatOfficialMoney(n, data.currencyCode);
+}
+
+function companyLogoUrl(): string {
+  return typeof window === 'undefined'
+    ? COMPANY_LOGO_URL
+    : new URL(COMPANY_LOGO_URL, window.location.href).href;
 }
 
 function escapeHtml(value: string): string {
@@ -110,6 +118,10 @@ function printOnComputer(
       ? `<div class="row"><span>Reference:</span><span>${escapeHtml(data.paymentReference)}</span></div>`
       : '',
   ].join('');
+  const logoUrl = companyLogoUrl();
+  const storeLogo = data.storeLogoUrl
+    ? `<img class="store-logo" src="${escapeHtml(data.storeLogoUrl)}" alt="">`
+    : '';
 
   target.document.open();
   target.document.write(`<!doctype html>
@@ -123,6 +135,8 @@ function printOnComputer(
           body { margin: 0; padding: 4mm; color: #111; font: 12px/1.35 Arial, sans-serif; }
           .receipt { width: 72mm; max-width: 100%; margin: 0 auto; }
           .center { text-align: center; }
+          .company-logo { display: block; width: 72mm; height: 24mm; object-fit: cover; object-position: center; margin: 0 auto 2mm; }
+          .store-logo { display: block; max-width: 42mm; max-height: 18mm; object-fit: contain; margin: 0 auto 2mm; }
           .store { font-size: 17px; font-weight: 700; }
           .rule { border: 0; border-top: 1px dashed #333; margin: 8px 0; }
           .row, .item-detail { display: flex; justify-content: space-between; gap: 8px; }
@@ -136,6 +150,8 @@ function printOnComputer(
       <body>
         <main class="receipt">
           <header class="center">
+            <img id="company-logo" class="company-logo" src="${escapeHtml(logoUrl)}" alt="Adimat">
+            ${storeLogo}
             <div class="store">${escapeHtml(data.storeName || 'Store')}</div>
             ${data.storeAddress ? `<div>${escapeHtml(data.storeAddress)}</div>` : ''}
             ${data.supportNumber ? `<div>Tel: ${escapeHtml(data.supportNumber)}</div>` : ''}
@@ -157,18 +173,26 @@ function printOnComputer(
           <div class="row"><span>Payment:</span><span>${escapeHtml(paymentMethod)}</span></div>
           ${paymentDetails}
           <p class="center">Thank you for shopping with us!<br>Powered by Adimat POS</p>
+          <p class="center">${escapeHtml(COMPANY_SERVICES_CONTACT)}</p>
         </main>
       </body>
     </html>`);
   target.document.close();
 
   target.addEventListener('afterprint', () => target.close(), { once: true });
-  target.setTimeout(() => {
+  const startPrint = () => target.setTimeout(() => {
     if (!target.closed) {
       target.focus();
       target.print();
     }
   }, 250);
+  const companyLogo = target.document.getElementById('company-logo') as HTMLImageElement | null;
+  if (companyLogo && !companyLogo.complete) {
+    companyLogo.addEventListener('load', startPrint, { once: true });
+    companyLogo.addEventListener('error', startPrint, { once: true });
+  } else {
+    startPrint();
+  }
   return { success: true };
 }
 
@@ -202,7 +226,11 @@ export async function buildEscPosReceipt(data: EscPosReceiptData): Promise<Uint8
   // Initialize printer
   bytes.push(...cmd(ESC, 0x40));
 
-  // Optional store logo (centered raster)
+  // Put the Adimat brand mark first, then the store logo when configured.
+  const companyLogoBytes = await buildEscPosLogoRaster(companyLogoUrl());
+  if (companyLogoBytes?.length) {
+    bytes.push(...companyLogoBytes);
+  }
   if (data.storeLogoUrl) {
     const logoBytes = await buildEscPosLogoRaster(data.storeLogoUrl);
     if (logoBytes?.length) {
@@ -316,6 +344,10 @@ export async function buildEscPosReceipt(data: EscPosReceiptData): Promise<Uint8
   bytes.push(LF);
   bytes.push(...textToBytes('Powered by Adimat POS'));
   bytes.push(LF);
+  bytes.push(...cmd(ESC, 0x61, 1));
+  bytes.push(...textToBytes(COMPANY_SERVICES_CONTACT));
+  bytes.push(LF);
+  bytes.push(...cmd(ESC, 0x61, 0));
   bytes.push(LF);
   bytes.push(LF);
   bytes.push(LF);

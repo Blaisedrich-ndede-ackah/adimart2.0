@@ -1,6 +1,6 @@
 /**
- * Convert a store logo (JPEG/PNG data URL) into ESC/POS raster bytes (GS v 0).
- * Soft-fails to null if the image cannot be processed on this device.
+ * Convert an image URL or data URL into ESC/POS raster bytes (GS v 0).
+ * Soft-fails to null if the image cannot be processed on this device or origin.
  */
 
 const ESC = 0x1b;
@@ -11,15 +11,43 @@ const LF = 0x0a;
 const MAX_LOGO_WIDTH_DOTS = 200;
 
 export async function buildEscPosLogoRaster(dataUrl: string): Promise<number[] | null> {
-  if (!dataUrl?.startsWith('data:image/')) return null;
+  if (!dataUrl) return null;
 
   try {
     const img = await loadImage(dataUrl);
-    const scale = Math.min(1, MAX_LOGO_WIDTH_DOTS / Math.max(1, img.width));
-    const width = Math.max(8, Math.round(img.width * scale));
+    const sourceCanvas = document.createElement('canvas');
+    sourceCanvas.width = img.width;
+    sourceCanvas.height = img.height;
+    const sourceContext = sourceCanvas.getContext('2d');
+    if (!sourceContext) return null;
+    sourceContext.drawImage(img, 0, 0);
+
+    const source = sourceContext.getImageData(0, 0, img.width, img.height);
+    let left = img.width;
+    let top = img.height;
+    let right = -1;
+    let bottom = -1;
+    for (let y = 0; y < img.height; y++) {
+      for (let x = 0; x < img.width; x++) {
+        const pixel = (y * img.width + x) * 4;
+        const visible = source.data[pixel + 3] > 20
+          && (source.data[pixel] < 245 || source.data[pixel + 1] < 245 || source.data[pixel + 2] < 245);
+        if (!visible) continue;
+        left = Math.min(left, x);
+        top = Math.min(top, y);
+        right = Math.max(right, x);
+        bottom = Math.max(bottom, y);
+      }
+    }
+    if (right < left || bottom < top) return null;
+
+    const cropWidth = right - left + 1;
+    const cropHeight = bottom - top + 1;
+    const scale = Math.min(1, MAX_LOGO_WIDTH_DOTS / Math.max(1, cropWidth));
+    const width = Math.max(8, Math.round(cropWidth * scale));
     // Width must be multiple of 8 for clean byte packing
     const widthAligned = Math.ceil(width / 8) * 8;
-    const height = Math.max(8, Math.round(img.height * scale));
+    const height = Math.max(8, Math.round(cropHeight * scale));
 
     const canvas = document.createElement('canvas');
     canvas.width = widthAligned;
@@ -30,7 +58,7 @@ export async function buildEscPosLogoRaster(dataUrl: string): Promise<number[] |
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, widthAligned, height);
     const offsetX = Math.floor((widthAligned - width) / 2);
-    ctx.drawImage(img, offsetX, 0, width, height);
+    ctx.drawImage(img, left, top, cropWidth, cropHeight, offsetX, 0, width, height);
 
     const { data } = ctx.getImageData(0, 0, widthAligned, height);
     const widthBytes = widthAligned / 8;

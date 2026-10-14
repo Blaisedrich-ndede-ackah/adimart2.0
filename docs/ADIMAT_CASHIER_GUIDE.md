@@ -14,6 +14,8 @@ Open Adimat and sign in with your own cashier PIN. Never use another staff membe
 4. Wait for the payment result. Do not start the same checkout again while it is processing.
 5. After confirmation, provide the customer with the receipt: PDF, share, WhatsApp where supported, a connected Bluetooth printer, or choose a computer printer from the print dialog when Bluetooth is not connected.
 
+Printed receipts include the Adimat company logo and services contact. On a configured Windows kiosk, receipts may print without a chooser; on Android Chrome, use the system print UI to select a destination.
+
 Adimat checks stock during a sale. If an item is out of stock or the quantity is unavailable, do not adjust stock yourself; tell the owner. If a discount needs owner authorization, ask the owner to enter their PIN.
 
 Use **Hold sale** in the cart to park the current sale while serving another customer. Choose **Resume** under Held sales to continue; resuming while another cart is active parks that cart too. Held sales are available for the current POS session.

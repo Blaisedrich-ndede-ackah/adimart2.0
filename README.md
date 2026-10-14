@@ -299,7 +299,11 @@ The app also uses `@zxing/library` for on-device camera scanning. Supported form
 
 ### Thermal Printer (ESC/POS)
 
-`src/lib/printService.ts` formats receipts with ESC/POS commands for connected Bluetooth printers. When no Bluetooth printer is connected, checkout and receipt reprints open the computer's native print dialog so the user can select an available printer. Tested with:
+`src/lib/printService.ts` formats receipts with the Adimat logo and services contact for connected Bluetooth printers. When no Bluetooth printer is connected, checkout and receipt reprints open the computer's native print dialog to select a printer.
+
+For unattended printing on a dedicated Windows computer, first set the desired printer as the Windows default, then launch Chrome with `--kiosk-printing --app="https://YOUR-ADIMAT-URL"`. Chrome sends print jobs to the default printer without showing the chooser. Ordinary browser tabs continue to show the print dialog; browsers may remember the last printer and settings, but the web app cannot force or persist them. Android Chrome requires its system print UI for web pages; silent printing there requires a managed kiosk/native printing solution.
+
+The standard app does not configure kiosk mode automatically. Test the printer's paper size and other defaults from Windows printer settings before using unattended printing. Tested with:
 - Generic 58mm Bluetooth thermal printers
 - Most printers using the `000018f0-0000-1000-8000-00805f9b34fb` service UUID
 

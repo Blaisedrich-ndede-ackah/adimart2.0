@@ -411,7 +411,9 @@ Store owners set **Settings → Security → Automatic session timeout** (`store
 - Payload chunking (~100 bytes)
 - ESC/POS receipts; barcode labels via `barcodeLabels.ts` (Code128)
 - Connection is in-memory for the session (reconnect from Settings as needed)
+- Receipts include the Adimat company logo and services contact.
 - When no Bluetooth printer is connected, checkout and receipt reprints open the computer's native print dialog so a system printer can be selected.
+- Unattended Windows printing can use Chrome's `--kiosk-printing` launch flag and the Windows default printer. This is computer/browser configuration, not an app setting. Android Chrome retains the system print UI unless deployed in a managed kiosk/native printing environment.
 
 ### 10.3 Barcode scanning
 
@@ -428,7 +430,7 @@ Store owners set **Settings → Security → Automatic session timeout** (`store
 ### 10.5 Receipts & sharing
 
 - Module: `src/lib/receiptGenerator.ts`
-- PDF generation (jsPDF), text share, WhatsApp deep link, ESC/POS printing over Bluetooth, or computer-printer selection from the browser print dialog when Bluetooth is disconnected
+- PDF generation (jsPDF), text share, WhatsApp deep link, ESC/POS printing over Bluetooth, or computer-printer selection from the browser print dialog when Bluetooth is disconnected. Standard web pages cannot save a printer destination or suppress the dialog; unattended printing requires supported kiosk/browser configuration.
 
 ---
 
