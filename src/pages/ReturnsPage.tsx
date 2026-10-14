@@ -190,7 +190,7 @@ export default function ReturnsPage() {
         <h1 className="text-white font-bold text-lg">Returns management</h1>
         <p className="text-emerald-200 text-xs">Process a sold item return and automatically restock inventory.</p>
       </div>
-      <div className="page-content space-y-4">
+      <div className="page-body no-scrollbar space-y-4">
         {error && (
           <div role="alert" className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> {error}
