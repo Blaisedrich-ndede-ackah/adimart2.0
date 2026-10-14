@@ -1,4 +1,19 @@
--- Add mixed-tender customer account receipts and restock-only sales returns.
+-- Add mixed-tender account receipts, return refunds, and customer wallet support.
+
+ALTER TABLE customers
+  ADD COLUMN IF NOT EXISTS wallet_balance DECIMAL(12,2) NOT NULL DEFAULT 0
+  CHECK (wallet_balance >= 0);
+
+ALTER TABLE transactions
+  ADD COLUMN IF NOT EXISTS wallet_amount DECIMAL(12,2) NOT NULL DEFAULT 0
+  CHECK (wallet_amount >= 0);
+ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_payment_method_check;
+ALTER TABLE transactions
+  ADD CONSTRAINT transactions_payment_method_check
+  CHECK (payment_method IN (
+    'cash', 'split', 'paystack', 'momo_mtn', 'momo_telecel',
+    'momo_airteltigo', 'bank_transfer', 'card_terminal', 'credit', 'wallet'
+  ));
 
 CREATE TABLE IF NOT EXISTS customer_account_receipts (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -94,5 +109,45 @@ CREATE POLICY "sales_returns_update" ON sales_returns FOR UPDATE USING (true);
 CREATE POLICY "sales_returns_delete" ON sales_returns FOR DELETE USING (true);
 CREATE INDEX IF NOT EXISTS idx_sales_returns_store ON sales_returns(store_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_sales_returns_item ON sales_returns(transaction_item_id);
+
+ALTER TABLE sales_returns
+  ADD COLUMN IF NOT EXISTS customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS refund_method VARCHAR(20) NOT NULL DEFAULT 'none',
+  ADD COLUMN IF NOT EXISTS refund_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS debt_applied DECIMAL(12,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS wallet_credit DECIMAL(12,2) NOT NULL DEFAULT 0;
+ALTER TABLE sales_returns DROP CONSTRAINT IF EXISTS sales_returns_refund_method_check;
+ALTER TABLE sales_returns
+  ADD CONSTRAINT sales_returns_refund_method_check
+  CHECK (refund_method IN ('none', 'cash', 'wallet', 'account'));
+ALTER TABLE sales_returns DROP CONSTRAINT IF EXISTS sales_returns_refund_amount_check;
+ALTER TABLE sales_returns
+  ADD CONSTRAINT sales_returns_refund_amount_check
+  CHECK (refund_amount >= 0 AND debt_applied >= 0 AND wallet_credit >= 0);
+
+CREATE TABLE IF NOT EXISTS customer_wallet_transactions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  type VARCHAR(20) NOT NULL CHECK (type IN ('return_credit', 'sale_debit')),
+  amount DECIMAL(12,2) NOT NULL CHECK (amount > 0),
+  balance_after DECIMAL(12,2) NOT NULL CHECK (balance_after >= 0),
+  return_id UUID,
+  transaction_id UUID,
+  description TEXT NOT NULL DEFAULT '',
+  created_by VARCHAR(255) NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE customer_wallet_transactions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "customer_wallet_transactions_select" ON customer_wallet_transactions;
+DROP POLICY IF EXISTS "customer_wallet_transactions_insert" ON customer_wallet_transactions;
+DROP POLICY IF EXISTS "customer_wallet_transactions_update" ON customer_wallet_transactions;
+DROP POLICY IF EXISTS "customer_wallet_transactions_delete" ON customer_wallet_transactions;
+CREATE POLICY "customer_wallet_transactions_select" ON customer_wallet_transactions FOR SELECT USING (true);
+CREATE POLICY "customer_wallet_transactions_insert" ON customer_wallet_transactions FOR INSERT WITH CHECK (true);
+CREATE POLICY "customer_wallet_transactions_update" ON customer_wallet_transactions FOR UPDATE USING (true);
+CREATE POLICY "customer_wallet_transactions_delete" ON customer_wallet_transactions FOR DELETE USING (true);
+CREATE INDEX IF NOT EXISTS idx_customer_wallet_transactions_customer ON customer_wallet_transactions(customer_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_customer_wallet_transactions_store ON customer_wallet_transactions(store_id, created_at);
 
 NOTIFY pgrst, 'reload schema';

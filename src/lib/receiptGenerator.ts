@@ -27,6 +27,7 @@ export interface ReceiptData {
   paystackAmount?: number;
   momoAmount?: number;
   chequeAmount?: number;
+  walletAmount?: number;
   manualPaymentAmount?: number;
   paystackReference?: string;
   paymentReference?: string;
@@ -332,6 +333,9 @@ function generateOfficialReceiptPdf(data: ReceiptData): FormalPdf {
   const paymentRows = [
     { label: 'Method', value: methodLabel },
     ...(data.customerName ? [{ label: 'Customer', value: data.customerName }] : []),
+    ...(data.walletAmount
+      ? [{ label: 'Store credit used', value: formatGhsOfficial(data.walletAmount, data.currencyCode) }]
+      : []),
     ...(data.receiptPurpose === 'credit-payment'
       ? [
           { label: 'Amount paid', value: formatGhsOfficial(data.amountPaid || 0, data.currencyCode), emphasis: 'subtotal' as const },
@@ -513,6 +517,7 @@ function generateReceiptText(data: ReceiptData): string {
   const methodLabel = data.paymentMethod === 'paystack' ? 'Mobile Money/Card' : getPaymentMethodLabel(data.paymentMethod);
   lines.push(leftRight('Payment:', methodLabel));
   if (data.customerName) lines.push(leftRight('  Customer:', data.customerName));
+  if (data.walletAmount) lines.push(leftRight('Store credit used:', amt(data, data.walletAmount)));
   if (data.receiptPurpose === 'credit-payment') {
     lines.push(leftRight('Amount paid:', amt(data, data.amountPaid || 0)));
     lines.push(leftRight('Balance remaining:', amt(data, data.balanceAfterPayment || 0)));

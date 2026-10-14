@@ -9,8 +9,11 @@ import {
   getCurrentStoreTransactions,
   LocalCustomer,
   LocalCustomerOpeningPayment,
+  LocalCustomerWalletTransaction,
+  LocalSaleReturn,
   LocalCreditPayment,
   LocalTransaction,
+  getCurrentStoreId,
   getCreditPaymentsForTransaction,
   recordCustomerAccountPayment,
   setCustomerActive,
@@ -36,6 +39,10 @@ export default function CustomersPage() {
   const [accountReceiptsByCustomer, setAccountReceiptsByCustomer] = useState<
     Record<string, LocalCustomerAccountReceipt[]>
   >({});
+  const [walletTransactionsByCustomer, setWalletTransactionsByCustomer] = useState<
+    Record<string, LocalCustomerWalletTransaction[]>
+  >({});
+  const [returnsByCustomer, setReturnsByCustomer] = useState<Record<string, LocalSaleReturn[]>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -78,6 +85,23 @@ export default function CustomersPage() {
         ] as const)
       );
       setAccountReceiptsByCustomer(Object.fromEntries(accountReceiptEntries));
+      const walletEntries = await Promise.all(
+        allCustomers.map(async (customer) => [
+          customer.id,
+          await db.customer_wallet_transactions.where('customer_id').equals(customer.id).sortBy('created_at'),
+        ] as const)
+      );
+      setWalletTransactionsByCustomer(Object.fromEntries(walletEntries));
+      const storeId = await getCurrentStoreId();
+      const allReturns = storeId
+        ? await db.sales_returns.where('store_id').equals(storeId).toArray()
+        : [];
+      setReturnsByCustomer(Object.fromEntries(allCustomers.map((customer) => [
+        customer.id,
+        allReturns.filter((saleReturn) => saleReturn.customer_id === customer.id).sort(
+          (a, b) => a.created_at.localeCompare(b.created_at)
+        ),
+      ])));
       const creditPaymentEntries = await Promise.all(
         creditTransactions.map(async (transaction) => [
           transaction.id,
@@ -236,6 +260,7 @@ export default function CustomersPage() {
     );
     return total + salesBalance + (Number(customer.opening_balance_remaining) || 0);
   }, 0);
+  const totalWalletCredit = customers.reduce((total, customer) => total + (Number(customer.wallet_balance) || 0), 0);
 
   return (
     <div className="page-shell">
@@ -256,7 +281,7 @@ export default function CustomersPage() {
       </div>
 
       <div className="page-content space-y-4">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
           <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
             <p className="text-xs text-gray-500">Registered customers</p>
             <p className="mt-1 text-xl font-bold text-gray-900">
@@ -266,6 +291,10 @@ export default function CustomersPage() {
           <div className="rounded-xl border border-amber-100 bg-amber-50 p-4 shadow-sm">
             <p className="text-xs text-amber-800">Total outstanding</p>
             <p className="mt-1 text-xl font-bold text-amber-900">{money(totalReceivable)}</p>
+          </div>
+          <div className="rounded-xl border border-teal-100 bg-teal-50 p-4 shadow-sm">
+            <p className="text-xs text-teal-800">Customer store credit</p>
+            <p className="mt-1 text-xl font-bold text-teal-900">{money(totalWalletCredit)}</p>
           </div>
         </div>
 
@@ -363,6 +392,9 @@ export default function CustomersPage() {
                         <span className="flex items-center gap-2 font-semibold text-gray-900">
                           <span className="truncate">{customer.name}</span>
                           {customer.is_active !== 1 && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-500">Archived</span>}
+                        </span>
+                        <span className="mt-1 block text-xs text-teal-800">
+                          Wallet credit: {money(customer.wallet_balance || 0)}
                         </span>
                         <span className="mt-1 block text-xs text-gray-500">{customer.phone || 'No phone number'}</span>
                       </button>
@@ -531,6 +563,20 @@ export default function CustomersPage() {
                           </div>
                         </div>
                       ))}
+                      {(walletTransactionsByCustomer[customer.id] || []).map((entry) => (
+                        <div key={entry.id} className="flex justify-between gap-3 text-xs text-teal-800">
+                          <span>{entry.description} · {new Date(entry.created_at).toLocaleDateString()}</span>
+                          <span>{entry.type === 'return_credit' ? '+' : '−'}{money(entry.amount)} · wallet {money(entry.balance_after)}</span>
+                        </div>
+                      ))}
+                      {(returnsByCustomer[customer.id] || [])
+                        .filter((saleReturn) => saleReturn.refund_method === 'account')
+                        .map((saleReturn) => (
+                          <div key={saleReturn.id} className="flex justify-between gap-3 text-xs text-amber-800">
+                            <span>Return adjustment · {saleReturn.receipt_number} · {new Date(saleReturn.created_at).toLocaleDateString()}</span>
+                            <span>Debt −{money(saleReturn.debt_applied)}{saleReturn.wallet_credit > 0 ? ` · wallet +${money(saleReturn.wallet_credit)}` : ''}</span>
+                          </div>
+                        ))}
                       {customerSales.length === 0 && customer.opening_balance <= 0 && (
                         <p className="text-sm text-gray-500">No credit balance or credit sales recorded.</p>
                       )}

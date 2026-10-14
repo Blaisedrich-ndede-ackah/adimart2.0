@@ -44,6 +44,7 @@ export interface EscPosReceiptData {
   paystackAmount?: number;
   momoAmount?: number;
   chequeAmount?: number;
+  walletAmount?: number;
   manualPaymentAmount?: number;
   paymentReference?: string;
   customerName?: string;
@@ -123,6 +124,9 @@ function printOnComputer(
       : '',
     data.chequeAmount
       ? `<div class="row"><span>Cheque:</span><span>${escapeHtml(amt(data, data.chequeAmount))}</span></div>`
+      : '',
+    data.walletAmount
+      ? `<div class="row"><span>Store credit used:</span><span>${escapeHtml(amt(data, data.walletAmount))}</span></div>`
       : '',
     data.manualPaymentAmount
       ? `<div class="row"><span>Amount received:</span><span>${escapeHtml(amt(data, data.manualPaymentAmount))}</span></div>`
@@ -341,6 +345,10 @@ export async function buildEscPosReceipt(data: EscPosReceiptData): Promise<Uint8
   bytes.push(LF);
   if (data.customerName) {
     bytes.push(...textToBytes(rightAlign('  Customer:', data.customerName)));
+    bytes.push(LF);
+  }
+  if (data.walletAmount) {
+    bytes.push(...textToBytes(rightAlign('Store credit used:', amt(data, data.walletAmount))));
     bytes.push(LF);
   }
   if (data.receiptPurpose === 'credit-payment' || data.paymentMethod === 'credit') {

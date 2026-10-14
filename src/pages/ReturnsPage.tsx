@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Camera, Loader2, RotateCcw } from 'lucide-react';
 import {
   db,
+  type LocalCustomer,
   getCurrentStoreId,
   getCurrentStoreTransactions,
   type LocalSaleReturn,
@@ -20,11 +21,16 @@ export default function ReturnsPage() {
   const [transactions, setTransactions] = useState<LocalTransaction[]>([]);
   const [transactionItems, setTransactionItems] = useState<LocalTransactionItem[]>([]);
   const [returns, setReturns] = useState<LocalSaleReturn[]>([]);
+  const [customers, setCustomers] = useState<LocalCustomer[]>([]);
   const [selectedTransactionId, setSelectedTransactionId] = useState('');
   const [selectedItemId, setSelectedItemId] = useState('');
   const [quantity, setQuantity] = useState('1');
   const [reason, setReason] = useState('');
   const [photo, setPhoto] = useState('');
+  const [refundMethod, setRefundMethod] = useState<'cash' | 'wallet' | 'account'>('cash');
+  const [refundCustomerId, setRefundCustomerId] = useState('');
+  const [refundCustomerName, setRefundCustomerName] = useState('');
+  const [refundCustomerPhone, setRefundCustomerPhone] = useState('');
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -39,9 +45,10 @@ export default function ReturnsPage() {
         getCurrentStoreId(),
       ]);
       if (!storeId) throw new Error('No store selected.');
-      const [allReturns, allItems] = await Promise.all([
+      const [allReturns, allItems, allCustomers] = await Promise.all([
         db.sales_returns.where('store_id').equals(storeId).toArray(),
         db.transaction_items.where('store_id').equals(storeId).toArray(),
+        db.customers.where('store_id').equals(storeId).toArray(),
       ]);
       const completedTransactions = allTransactions
         .filter((transaction) => transaction.status === 'completed')
@@ -50,6 +57,7 @@ export default function ReturnsPage() {
       setTransactions(completedTransactions);
       setReturns(allReturns.sort((a, b) => b.created_at.localeCompare(a.created_at)));
       setTransactionItems(allItems);
+      setCustomers(allCustomers);
       if (selectedTransactionId && !transactionIds.has(selectedTransactionId)) {
         setSelectedTransactionId('');
         setSelectedItemId('');
@@ -68,6 +76,21 @@ export default function ReturnsPage() {
   const selectedTransaction = transactions.find((transaction) => transaction.id === selectedTransactionId);
   const itemsForSale = transactionItems.filter((item) => item.transaction_id === selectedTransactionId);
   const selectedItem = itemsForSale.find((item) => item.id === selectedItemId);
+  const selectedCustomer = customers.find((customer) => customer.id === refundCustomerId);
+  const returnQuantity = Number(quantity) || 0;
+  const saleItemSubtotal = transactionItems
+    .filter((item) => item.transaction_id === selectedTransactionId)
+    .reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
+  const grossReturnAmount = selectedItem ? selectedItem.unit_price * returnQuantity : 0;
+  const discountShare = selectedItem && selectedTransaction && saleItemSubtotal > 0
+    ? Math.min(
+        grossReturnAmount,
+        selectedTransaction.discount_applied *
+          (selectedItem.subtotal / saleItemSubtotal) *
+          (returnQuantity / selectedItem.quantity)
+      )
+    : 0;
+  const estimatedRefund = Math.max(0, grossReturnAmount - discountShare);
 
   const returnedByItem = useMemo(() => {
     const totals = new Map<string, number>();
@@ -107,7 +130,17 @@ export default function ReturnsPage() {
       setError(`Enter a quantity up to ${selectedItem.quantity - alreadyReturned}.`);
       return;
     }
-    if (!confirm('This will record the return and restock the item. Any refund must be handled separately. Continue?')) {
+    if (refundMethod !== 'cash' && !refundCustomerId && !refundCustomerName.trim() &&
+      !(selectedTransaction.customer_name || '').trim()) {
+      setError('Enter the customer name to create their store-credit account.');
+      return;
+    }
+    const outcomeText = refundMethod === 'cash'
+      ? `refund ${money(estimatedRefund)} in cash`
+      : refundMethod === 'wallet'
+        ? `add ${money(estimatedRefund)} to the customer wallet`
+        : `apply ${money(estimatedRefund)} to the customer account; any amount above their debt becomes wallet credit`;
+    if (!confirm(`This will restock the item and ${outcomeText}. Continue?`)) {
       return;
     }
 
@@ -121,12 +154,24 @@ export default function ReturnsPage() {
         quantity: returnQty,
         reason,
         photoDataUrl: photo,
+        refundMethod,
+        customerId: refundCustomerId || undefined,
+        customerName: refundCustomerName || selectedTransaction.customer_name || '',
+        customerPhone: refundCustomerPhone || selectedTransaction.customer_phone || '',
       });
-      setMessage(`${record.product_name} return recorded and ${record.stock_quantity} stock unit(s) restocked.`);
+      const refundSummary = record.refund_method === 'cash'
+        ? `Cash refund ${money(record.refund_amount)}`
+        : record.refund_method === 'wallet'
+          ? `Wallet credit ${money(record.wallet_credit)}`
+          : `Debt reduced ${money(record.debt_applied)}${record.wallet_credit > 0 ? ` · wallet credit ${money(record.wallet_credit)}` : ''}`;
+      setMessage(`${record.product_name} return recorded; ${record.stock_quantity} inventory unit(s) restocked. ${refundSummary}.`);
       setSelectedItemId('');
       setQuantity('1');
       setReason('');
       setPhoto('');
+      setRefundCustomerId('');
+      setRefundCustomerName('');
+      setRefundCustomerPhone('');
       await load();
       void triggerPushSync('sale-return');
     } catch (returnError) {
@@ -156,7 +201,7 @@ export default function ReturnsPage() {
         <form onSubmit={(event) => void handleSubmit(event)} className="space-y-4 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
           <div>
             <h2 className="font-semibold text-gray-900">Record a returned item</h2>
-            <p className="mt-1 text-xs text-gray-500">Only items on the selected sale can be returned. The return does not issue a refund or change the customer balance.</p>
+            <p className="mt-1 text-xs text-gray-500">Only items on the selected sale can be returned. Returned quantities are automatically restocked.</p>
           </div>
           <label className="block text-sm text-gray-700">
             Original sale / receipt *
@@ -164,8 +209,19 @@ export default function ReturnsPage() {
               required
               value={selectedTransactionId}
               onChange={(event) => {
-                setSelectedTransactionId(event.target.value);
+                const id = event.target.value;
+                const transaction = transactions.find((item) => item.id === id);
+                const match = customers.find((customer) =>
+                  transaction?.customer_id
+                    ? customer.id === transaction.customer_id
+                    : customer.name.trim().toLowerCase() === (transaction?.customer_name || '').trim().toLowerCase() &&
+                      customer.phone.trim() === (transaction?.customer_phone || '').trim()
+                );
+                setSelectedTransactionId(id);
                 setSelectedItemId('');
+                setRefundCustomerId(match?.id || '');
+                setRefundCustomerName(transaction?.customer_name || '');
+                setRefundCustomerPhone(transaction?.customer_phone || '');
               }}
               className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2.5"
             >
@@ -177,6 +233,84 @@ export default function ReturnsPage() {
               ))}
             </select>
           </label>
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium text-gray-700">Refund or account adjustment *</legend>
+            {([
+              ['cash', 'Refund in cash'],
+              ['wallet', 'Add store credit to customer wallet'],
+              ['account', 'Deduct from customer balance'],
+            ] as const).map(([value, label]) => (
+              <label key={value} className="flex items-start gap-2 rounded-xl border border-gray-200 p-3 text-sm">
+                <input
+                  type="radio"
+                  name="refund-method"
+                  value={value}
+                  checked={refundMethod === value}
+                  onChange={() => setRefundMethod(value)}
+                  className="mt-0.5 accent-primary"
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+          </fieldset>
+          {refundMethod !== 'cash' && (
+            <div className="space-y-3 rounded-xl border border-teal-100 bg-teal-50 p-3">
+              <p className="text-xs text-teal-900">
+                {refundMethod === 'account'
+                  ? 'Return value reduces the customer’s oldest debt first. Any remainder is added to their wallet.'
+                  : 'If the sale has no registered customer, one will be created from the original sale details below.'}
+              </p>
+              <label className="block text-sm text-gray-700">
+                Registered customer (optional if creating from sale)
+                <select
+                  value={refundCustomerId}
+                  onChange={(event) => {
+                    const customer = customers.find((item) => item.id === event.target.value);
+                    setRefundCustomerId(event.target.value);
+                    if (customer) {
+                      setRefundCustomerName(customer.name);
+                      setRefundCustomerPhone(customer.phone);
+                    }
+                  }}
+                  className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5"
+                >
+                  <option value="">Create/link from original sale details</option>
+                  {customers.filter((customer) => customer.is_active === 1).map((customer) => (
+                    <option key={customer.id} value={customer.id}>{customer.name}{customer.phone ? ` · ${customer.phone}` : ''}</option>
+                  ))}
+                </select>
+              </label>
+              {!refundCustomerId && (
+                <>
+                  <label className="block text-sm text-gray-700">
+                    Customer name *
+                    <input
+                      required
+                      maxLength={255}
+                      value={refundCustomerName}
+                      onChange={(event) => setRefundCustomerName(event.target.value)}
+                      className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5"
+                    />
+                  </label>
+                  <label className="block text-sm text-gray-700">
+                    Customer phone
+                    <input
+                      type="tel"
+                      maxLength={30}
+                      value={refundCustomerPhone}
+                      onChange={(event) => setRefundCustomerPhone(event.target.value)}
+                      className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5"
+                    />
+                  </label>
+                </>
+              )}
+              {selectedCustomer && (
+                <p className="text-xs text-gray-600">
+                  Current wallet balance: {money(selectedCustomer.wallet_balance || 0)}
+                </p>
+              )}
+            </div>
+          )}
           <label className="block text-sm text-gray-700">
             Item returned *
             <select
@@ -211,6 +345,17 @@ export default function ReturnsPage() {
                 className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2.5"
               />
             </label>
+          )}
+          {selectedItem && (
+            <div className="rounded-xl bg-gray-50 p-3 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-600">Estimated return value</span>
+                <strong>{money(estimatedRefund)}</strong>
+              </div>
+              {Number(selectedTransaction?.discount_applied) > 0 && (
+                <p className="mt-1 text-xs text-gray-500">Original sale discount is deducted proportionally.</p>
+              )}
+            </div>
           )}
           <label className="block text-sm text-gray-700">
             Return reason *
@@ -269,6 +414,15 @@ export default function ReturnsPage() {
                 <p className="text-xs text-gray-500">{record.receipt_number} · {new Date(record.created_at).toLocaleString()}</p>
                 <p className="mt-1 text-xs text-gray-700">{record.reason}</p>
                 <p className="mt-1 text-xs font-medium text-emerald-800">Restocked {record.stock_quantity} inventory unit(s)</p>
+                <p className="mt-1 text-xs text-gray-600">
+                  {record.refund_method === 'cash'
+                    ? `Cash refund: ${money(record.refund_amount)}`
+                    : record.refund_method === 'wallet'
+                      ? `Wallet credit: ${money(record.wallet_credit)}`
+                      : record.refund_method === 'account'
+                        ? `Debt deducted: ${money(record.debt_applied)}${record.wallet_credit > 0 ? ` · wallet credit: ${money(record.wallet_credit)}` : ''}`
+                        : 'Restock only (legacy record)'}
+                </p>
               </div>
             </article>
           ))}

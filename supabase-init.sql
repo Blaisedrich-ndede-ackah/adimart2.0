@@ -201,6 +201,7 @@ CREATE TABLE IF NOT EXISTS customers (
   phone VARCHAR(30) NOT NULL DEFAULT '',
   opening_balance DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (opening_balance >= 0),
   opening_balance_remaining DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (opening_balance_remaining >= 0),
+  wallet_balance DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (wallet_balance >= 0),
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -272,12 +273,13 @@ CREATE TABLE IF NOT EXISTS transactions (
   other_charges_total DECIMAL(12,2) DEFAULT 0,
   payment_method VARCHAR(20) NOT NULL CHECK (payment_method IN (
     'cash', 'split', 'paystack', 'momo_mtn', 'momo_telecel',
-    'momo_airteltigo', 'bank_transfer', 'card_terminal', 'credit'
+    'momo_airteltigo', 'bank_transfer', 'card_terminal', 'credit', 'wallet'
   )),
   cash_amount DECIMAL(12,2) DEFAULT 0,
   paystack_amount DECIMAL(12,2) DEFAULT 0,
   paystack_reference VARCHAR(100) DEFAULT '',
   manual_payment_amount DECIMAL(12,2) DEFAULT 0,
+  wallet_amount DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (wallet_amount >= 0),
   payment_reference VARCHAR(100) DEFAULT '',
   customer_name VARCHAR(255) DEFAULT '',
   customer_phone VARCHAR(30) DEFAULT '',
@@ -294,6 +296,7 @@ ALTER TABLE transactions
   ADD COLUMN IF NOT EXISTS customer_name VARCHAR(255) DEFAULT '',
   ADD COLUMN IF NOT EXISTS customer_phone VARCHAR(30) DEFAULT '',
   ADD COLUMN IF NOT EXISTS customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS wallet_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS credit_paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS credit_balance DECIMAL(12,2) NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
@@ -302,7 +305,7 @@ ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_payment_method_c
 ALTER TABLE transactions ADD CONSTRAINT transactions_payment_method_check
   CHECK (payment_method IN (
     'cash', 'split', 'paystack', 'momo_mtn', 'momo_telecel',
-    'momo_airteltigo', 'bank_transfer', 'card_terminal', 'credit'
+    'momo_airteltigo', 'bank_transfer', 'card_terminal', 'credit', 'wallet'
   ));
 
 ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
@@ -581,6 +584,11 @@ CREATE TABLE IF NOT EXISTS sales_returns (
   photo_data_url TEXT NOT NULL DEFAULT '',
   receipt_number VARCHAR(50) NOT NULL DEFAULT '',
   location_id UUID REFERENCES locations(id) ON DELETE SET NULL,
+  customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
+  refund_method VARCHAR(20) NOT NULL DEFAULT 'none' CHECK (refund_method IN ('none', 'cash', 'wallet', 'account')),
+  refund_amount DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (refund_amount >= 0),
+  debt_applied DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (debt_applied >= 0),
+  wallet_credit DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (wallet_credit >= 0),
   created_by UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -591,6 +599,27 @@ CREATE POLICY "sales_returns_update" ON sales_returns FOR UPDATE USING (true);
 CREATE POLICY "sales_returns_delete" ON sales_returns FOR DELETE USING (true);
 CREATE INDEX IF NOT EXISTS idx_sales_returns_store ON sales_returns(store_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_sales_returns_item ON sales_returns(transaction_item_id);
+
+CREATE TABLE IF NOT EXISTS customer_wallet_transactions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  type VARCHAR(20) NOT NULL CHECK (type IN ('return_credit', 'sale_debit')),
+  amount DECIMAL(12,2) NOT NULL CHECK (amount > 0),
+  balance_after DECIMAL(12,2) NOT NULL CHECK (balance_after >= 0),
+  return_id UUID,
+  transaction_id UUID,
+  description TEXT NOT NULL DEFAULT '',
+  created_by VARCHAR(255) NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE customer_wallet_transactions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "customer_wallet_transactions_select" ON customer_wallet_transactions FOR SELECT USING (true);
+CREATE POLICY "customer_wallet_transactions_insert" ON customer_wallet_transactions FOR INSERT WITH CHECK (true);
+CREATE POLICY "customer_wallet_transactions_update" ON customer_wallet_transactions FOR UPDATE USING (true);
+CREATE POLICY "customer_wallet_transactions_delete" ON customer_wallet_transactions FOR DELETE USING (true);
+CREATE INDEX IF NOT EXISTS idx_customer_wallet_transactions_customer ON customer_wallet_transactions(customer_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_customer_wallet_transactions_store ON customer_wallet_transactions(store_id, created_at);
 
 -- ============================================================
 -- WEEKLY PAYOUTS (admin marks Paystack remittances to stores)

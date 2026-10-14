@@ -7,6 +7,7 @@ import {
   type LocalStockBatch,
   type LocalStockMovement,
   type LocalSaleReturn,
+  type LocalCustomer,
   type LocalStore,
   type LocalUser,
 } from '@/lib/dexie';
@@ -1693,6 +1694,10 @@ export async function processSaleReturn(params: {
   quantity: number;
   reason: string;
   photoDataUrl: string;
+  refundMethod: 'cash' | 'wallet' | 'account' | 'none';
+  customerId?: string;
+  customerName?: string;
+  customerPhone?: string;
 }): Promise<LocalSaleReturn> {
   const quantity = Number(params.quantity);
   const reason = params.reason.trim();
@@ -1716,6 +1721,9 @@ export async function processSaleReturn(params: {
       db.stock_batches,
       db.stock_movements,
       db.products,
+      db.customers,
+      db.customer_wallet_transactions,
+      db.cash_book_entries,
     ],
     async () => {
       const [transaction, item] = await Promise.all([
@@ -1740,6 +1748,19 @@ export async function processSaleReturn(params: {
       if (returnedAlready + quantity > item.quantity + 0.0001) {
         throw new Error(`Only ${Math.max(0, item.quantity - returnedAlready)} more item(s) can be returned.`);
       }
+      const saleItems = await db.transaction_items
+        .where('transaction_id')
+        .equals(transaction.id)
+        .toArray();
+      const saleItemsSubtotal = saleItems.reduce((sum, saleItem) => sum + toMoney(saleItem.subtotal), 0);
+      const grossReturnAmount = toMoney(item.unit_price * quantity);
+      const discountShare = saleItemsSubtotal > 0
+        ? toMoney(Math.min(
+            grossReturnAmount,
+            toMoney(transaction.discount_applied * (toMoney(item.subtotal) / saleItemsSubtotal) * (quantity / item.quantity))
+          ))
+        : 0;
+      const refundAmount = toMoney(Math.max(0, grossReturnAmount - discountShare));
       const product = await db.products.get(item.product_id);
       if (!product || product.store_id !== params.storeId) {
         throw new Error('The sold product is no longer available in this store.');
@@ -1750,6 +1771,105 @@ export async function processSaleReturn(params: {
         locations.find((location) => location.is_default === 1 && location.is_active === 1)?.id ||
         locations.find((location) => location.location_type === 'shop' && location.is_active === 1)?.id;
       if (!locationId) throw new Error('No active shop location is available to restock the return.');
+
+      let customer: LocalCustomer | undefined;
+      let debtApplied = 0;
+      let walletCredit = 0;
+      if (params.refundMethod === 'wallet' || params.refundMethod === 'account') {
+        const customerId = params.customerId || transaction.customer_id;
+        customer = customerId
+          ? await db.customers.get(customerId)
+          : undefined;
+        if (!customer && !params.customerId) {
+          const name = (params.customerName || transaction.customer_name || '').trim().toLowerCase();
+          const phone = (params.customerPhone || transaction.customer_phone || '').trim();
+          customer = (await db.customers.where('store_id').equals(params.storeId).toArray()).find((entry) =>
+            entry.is_active === 1 &&
+            entry.name.trim().toLowerCase() === name &&
+            entry.phone.trim() === phone
+          );
+        }
+        if (customer && customer.store_id !== params.storeId) {
+          throw new Error('Selected customer is not part of this store.');
+        }
+        if (customer && customer.is_active !== 1) {
+          throw new Error('Select an active customer for store credit or account adjustments.');
+        }
+        if (!customer) {
+          const name = (params.customerName || transaction.customer_name || '').trim();
+          const phone = (params.customerPhone || transaction.customer_phone || '').trim();
+          if (!name) throw new Error('Enter the customer name to create their store-credit account.');
+          if (name.length > 255 || phone.length > 30) throw new Error('Customer name or phone is too long.');
+          const nowCustomer = nowIso();
+          customer = {
+            id: generateId(),
+            store_id: params.storeId,
+            name,
+            phone,
+            opening_balance: 0,
+            opening_balance_remaining: 0,
+            wallet_balance: 0,
+            is_active: 1,
+            created_at: nowCustomer,
+            updated_at: nowCustomer,
+            synced: 0,
+          };
+          await db.customers.add(customer);
+        }
+        if (!params.customerId && !transaction.customer_id && transaction.payment_method === 'credit') {
+          await db.transactions.update(transaction.id, {
+            customer_id: customer.id,
+            customer_name: customer.name,
+            customer_phone: customer.phone,
+            updated_at: now,
+            synced: 0,
+          });
+          transaction.customer_id = customer.id;
+        }
+        if (params.refundMethod === 'wallet') {
+          walletCredit = refundAmount;
+        } else {
+          const customerTransactions = (await db.transactions
+            .where('customer_id')
+            .equals(customer.id)
+            .toArray())
+            .filter((customerTransaction) =>
+              customerTransaction.store_id === params.storeId &&
+              customerTransaction.payment_method === 'credit' &&
+              customerTransaction.status === 'completed' &&
+              toMoney(customerTransaction.credit_balance ?? customerTransaction.total_amount) > 0
+            )
+            .sort((a, b) => a.created_at.localeCompare(b.created_at));
+          const openingBalance = toMoney(customer.opening_balance_remaining);
+          const totalDebt = toMoney(openingBalance + customerTransactions.reduce(
+            (sum, customerTransaction) => sum + toMoney(customerTransaction.credit_balance ?? customerTransaction.total_amount),
+            0
+          ));
+          debtApplied = toMoney(Math.min(totalDebt, refundAmount));
+          walletCredit = toMoney(refundAmount - debtApplied);
+          let remainingToApply = debtApplied;
+          const openingApplied = toMoney(Math.min(openingBalance, remainingToApply));
+          if (openingApplied > 0) {
+            await db.customers.update(customer.id, {
+              opening_balance_remaining: toMoney(openingBalance - openingApplied),
+              updated_at: now,
+              synced: 0,
+            });
+            remainingToApply = toMoney(remainingToApply - openingApplied);
+          }
+          for (const customerTransaction of customerTransactions) {
+            if (remainingToApply <= 0) break;
+            const balance = toMoney(customerTransaction.credit_balance ?? customerTransaction.total_amount);
+            const applied = toMoney(Math.min(balance, remainingToApply));
+            await db.transactions.update(customerTransaction.id, {
+              credit_balance: toMoney(balance - applied),
+              updated_at: now,
+              synced: 0,
+            });
+            remainingToApply = toMoney(remainingToApply - applied);
+          }
+        }
+      }
 
       const packSize = Math.max(1, Number(item.pack_size) || 1);
       const unitsPerSoldUnit = item.unit_type === 'pack' ? packSize : 1;
@@ -1794,6 +1914,11 @@ export async function processSaleReturn(params: {
         photo_data_url: params.photoDataUrl,
         receipt_number: transaction.receipt_number,
         location_id: locationId,
+        customer_id: customer?.id || null,
+        refund_method: params.refundMethod,
+        refund_amount: refundAmount,
+        debt_applied: debtApplied,
+        wallet_credit: walletCredit,
         created_by: params.userId,
         created_at: now,
         synced: 0,
@@ -1801,6 +1926,54 @@ export async function processSaleReturn(params: {
       await db.stock_batches.add(batch);
       await db.stock_movements.add(movement);
       await db.sales_returns.add(record);
+      if (customer && transaction.customer_id !== customer.id) {
+        await db.transactions.update(transaction.id, {
+          customer_id: customer.id,
+          customer_name: customer.name,
+          customer_phone: customer.phone,
+          updated_at: now,
+          synced: 0,
+        });
+      }
+      if (customer && walletCredit > 0) {
+        const walletBalance = toMoney(customer.wallet_balance || 0);
+        const nextWalletBalance = toMoney(walletBalance + walletCredit);
+        await db.customers.update(customer.id, {
+          wallet_balance: nextWalletBalance,
+          updated_at: now,
+          synced: 0,
+        });
+        await db.customer_wallet_transactions.add({
+          id: generateId(),
+          store_id: params.storeId,
+          customer_id: customer.id,
+          type: 'return_credit',
+          amount: walletCredit,
+          balance_after: nextWalletBalance,
+          return_id: record.id,
+          description: `Store credit for return ${transaction.receipt_number}`,
+          created_by: params.userId,
+          created_at: now,
+          synced: 0,
+        });
+      }
+      if (params.refundMethod === 'cash' && refundAmount > 0) {
+        await db.cash_book_entries.add({
+          id: generateId(),
+          store_id: params.storeId,
+          entry_type: 'expense',
+          description: `Cash refund for return ${transaction.receipt_number}`,
+          category: 'Sales refund',
+          amount: refundAmount,
+          notes: `${item.product_name} × ${quantity}`,
+          entry_date: now.slice(0, 10),
+          created_by: params.userId,
+          created_at: now,
+          updated_at: now,
+          synced: 0,
+          account_type: 'cash',
+        });
+      }
       const allBatches = await db.stock_batches.where('product_id').equals(product.id).toArray();
       const totalStock = allBatches.reduce((sum, stockBatch) =>
         stockBatch.store_id === params.storeId ? sum + toQty(stockBatch.quantity) : sum, 0

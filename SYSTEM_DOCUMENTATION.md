@@ -24,8 +24,8 @@ There is **no first-party application server**. Production deployment is static 
 | Area | Capabilities |
 |------|----------------|
 | POS | Scan/search products, cart, stock checks, cash / Paystack / split / registered-customer credit checkout, discounts with owner PIN gate, PDF/WhatsApp receipts, Bluetooth print |
-| Customers | Owner-managed customer book, consolidated opening and credit-sale balances, cash/MoMo/cheque/split repayments with receipts, and active/archive status |
-| Returns | Owner-only return processing with receipt/item validation, optional photo evidence, and automatic inventory restocking |
+| Customers | Owner-managed customer book, consolidated opening and credit-sale balances, cash/MoMo/cheque/split repayments with receipts, wallet/store credit, and active/archive status |
+| Returns | Owner-only return processing with receipt/item validation, cash refunds, wallet credit, debt offsets, optional photo evidence, and automatic inventory restocking |
 | Inventory | Product CRUD, owner-managed product categories, stock adjust, CSV import, barcode labels, reorder suggestions, stock audit/export |
 | Purchasing | Supplier directory, purchase orders, partial receipts, stock/cost updates |
 | Reports | Period filters, revenue mix, charts, product performance, expenses, net profit, CSV/PDF export |
@@ -198,7 +198,7 @@ Default store settings on create:
 1. Scan barcode (ZXing, prefers rear camera, debounce ~2s) or search/manual entry. Search supports typo-tolerant product names, partial barcode matches, recent/frequently sold ranking, and browser-supported speech input.
 2. Cart quantity with stock validation + scan beeps (`scanBeep.ts`)  
 3. Checkout overlay steps: payment method → discount → optional owner PIN → payment details → processing → success
-4. Payment methods: `cash` | `paystack` | `split` | manual MTN/Telecel/AirtelTigo MoMo | bank transfer | card terminal | `credit`. Manual methods record a required reference offline; they do not initiate a provider payment. Credit sales require a registered customer and store the outstanding balance. Owners record cash, MoMo, cheque, or split account repayments in Customers; payments apply to the oldest outstanding debt, and a receipt records the paid amount and resulting balance. Manual collections are kept separate from Paystack payout totals.
+4. Payment methods: `cash` | `paystack` | `split` | manual MTN/Telecel/AirtelTigo MoMo | bank transfer | card terminal | `credit` | `wallet`. Manual methods record a required reference offline; they do not initiate a provider payment. Credit sales require a registered customer and store the outstanding balance. Owners record cash, MoMo, cheque, or split account repayments in Customers; payments apply to the oldest outstanding debt, and a receipt records the paid amount and resulting balance. Customer wallet credit can pay a full sale or combine with cash. Manual collections are kept separate from Paystack payout totals.
 5. Cashiers can hold a cart and resume it later in the same POS session. Resuming another held sale holds the active cart automatically.
 6. On success: stock deducted locally, receipt `#ADM-YYYYMMDD-XXXX`, optional Bluetooth print, PDF/share/WhatsApp, auto-sync trigger
 
@@ -257,11 +257,12 @@ The owner landing screen summarizes today's completed sales, cash and non-cash p
 | `product_categories` | `id` | store_id, name, is_active, created_at, updated_at, synced |
 | `transactions` | `id` | store_id, receipt_number, cashier_id/name, totals, payment_method, cash/paystack amounts, customer details, credit paid/balance, status, created_at, synced |
 | `transaction_items` | `id` | store_id, transaction_id, product_id, product_name, quantity, unit_price, subtotal, synced |
-| `customers` | `id` | store_id, name, phone, opening balance and remaining balance, is_active, timestamps |
+| `customers` | `id` | store_id, name, phone, opening balance and remaining balance, wallet balance, is_active, timestamps |
 | `customer_opening_payments` | `id` | store_id, customer_id, entry_type, amount, tender breakdown, optional account receipt, created_at, synced |
 | `customer_account_receipts` | `id` | store_id, customer_id, receipt_number, amount, cash/MoMo/cheque amounts, balance before/after, created_at, synced |
+| `customer_wallet_transactions` | `id` | store_id, customer_id, return credit or sale debit, amount, balance after, source reference, created_at, synced |
 | `credit_payments` | `id` | store_id, customer_id, transaction_id, account receipt, amount, tender breakdown, created_at, synced |
-| `sales_returns` | `id` | store_id, transaction/item/product, returned and restocked quantities, reason, optional photo data URL, location, created_at, synced |
+| `sales_returns` | `id` | store_id, transaction/item/product, returned and restocked quantities, reason, refund method and amount, debt/wallet allocation, optional photo data URL, location, created_at, synced |
 | `expenses` | `id` | store_id, description, category, amount, notes, receipt image, recurring template/month, created_at, updated_at, synced |
 | `cash_book_entries` | `id` | store_id, entry_type, category, Cash/Bank account, amount, entry_date, created_at, synced |
 | `recurring_expenses` | `id` | store_id, category, amount, due_day, is_active, synced |

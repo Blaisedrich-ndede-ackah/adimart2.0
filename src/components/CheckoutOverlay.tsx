@@ -31,7 +31,7 @@ interface CheckoutOverlayProps {
   onConnectPrinter?: () => void;
 }
 
-type Step = 'method' | 'discount' | 'charges' | 'pin-verify' | 'cash-input' | 'split-input' | 'manual-payment' | 'credit-input' | 'paystack' | 'processing' | 'success';
+type Step = 'method' | 'discount' | 'charges' | 'pin-verify' | 'cash-input' | 'split-input' | 'manual-payment' | 'credit-input' | 'wallet-input' | 'paystack' | 'processing' | 'success';
 
 interface SaleResult {
   receiptNumber: string;
@@ -45,6 +45,7 @@ interface SaleResult {
   cashAmount?: number;
   paystackAmount?: number;
   manualPaymentAmount?: number;
+  walletAmount?: number;
   paystackReference?: string;
   paymentReference?: string;
   customerName?: string;
@@ -67,6 +68,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
   const [manualMethod, setManualMethod] = useState<(typeof MANUAL_PAYMENT_METHODS)[number]['value']>('momo_mtn');
   const [manualReference, setManualReference] = useState('');
   const [creditCustomerId, setCreditCustomerId] = useState('');
+  const [walletCustomerId, setWalletCustomerId] = useState('');
+  const [walletUseAmount, setWalletUseAmount] = useState('');
   const [creditCustomers, setCreditCustomers] = useState<LocalCustomer[]>([]);
   const [saleResult, setSaleResult] = useState<SaleResult | null>(null);
   const [error, setError] = useState('');
@@ -102,6 +105,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       setManualMethod('momo_mtn');
       setManualReference('');
       setCreditCustomerId('');
+      setWalletCustomerId('');
+      setWalletUseAmount('');
       setCreditCustomers([]);
       setSaleResult(null);
       setError('');
@@ -155,6 +160,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       cashAmount: result.cashAmount,
       paystackAmount: result.paystackAmount,
       manualPaymentAmount: result.manualPaymentAmount,
+      walletAmount: result.walletAmount,
       paystackReference: result.paystackReference,
       paymentReference: result.paymentReference,
       customerName: result.customerName,
@@ -272,7 +278,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
     paymentRef?: string,
     customerName?: string,
     customerPhone?: string,
-    customerId?: string
+    customerId?: string,
+    walletAmt?: number
   ) {
     if (!currentUser) return;
     if (!canApplyDiscount && cart.discountAmount > 0) {
@@ -290,7 +297,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         paystackAmt,
         paystackRef,
         paymentRef,
-        customerId
+        customerId,
+        walletAmt
       );
       
       const completed: SaleResult = {
@@ -305,6 +313,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         cashAmount: cashAmt,
         paystackAmount: isManualPaymentMethod(method) ? 0 : paystackAmt,
         manualPaymentAmount: isManualPaymentMethod(method) ? result.total : 0,
+        walletAmount: walletAmt,
         paystackReference: paystackRef,
         paymentReference: paymentRef || paystackRef,
         customerName,
@@ -412,6 +421,32 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       return;
     }
     processSale('credit', 0, 0, '', '', customer.name, customer.phone, customer.id);
+  }
+
+  function handleWalletSaleConfirm() {
+    const customer = creditCustomers.find((item) => item.id === walletCustomerId && item.is_active === 1);
+    const wallet = Math.round((Number(walletUseAmount) || 0) * 100) / 100;
+    const available = Math.round((Number(customer?.wallet_balance) || 0) * 100) / 100;
+    if (!customer) {
+      setError('Select a registered customer to use store credit.');
+      return;
+    }
+    if (wallet <= 0 || wallet > available || wallet > cart.total) {
+      setError('Enter a valid store-credit amount up to the customer balance and sale total.');
+      return;
+    }
+    const cashDue = Math.round((cart.total - wallet) * 100) / 100;
+    processSale(
+      cashDue > 0 ? 'split' : 'wallet',
+      cashDue,
+      0,
+      '',
+      '',
+      customer.name,
+      customer.phone,
+      customer.id,
+      wallet
+    );
   }
 
   function handleCashConfirm() {
@@ -716,6 +751,27 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                   <p className="text-xs text-gray-500">Record the customer and collect payment later</p>
                 </div>
               </button>
+
+              {creditCustomers.some((customer) => customer.is_active === 1 && Number(customer.wallet_balance) > 0) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWalletCustomerId('');
+                    setWalletUseAmount('');
+                    setError('');
+                    setStep('wallet-input');
+                  }}
+                  className="w-full flex items-center gap-3 p-4 rounded-xl border border-teal-200 hover:border-teal-500 hover:bg-teal-50 transition touch-target"
+                >
+                  <div className="w-10 h-10 bg-teal-100 rounded-full flex items-center justify-center">
+                    <CreditCard className="w-5 h-5 text-teal-700" />
+                  </div>
+                  <div className="text-left flex-1">
+                    <p className="font-semibold text-gray-900">Customer Store Credit</p>
+                    <p className="text-xs text-gray-500">Use a customer wallet, with cash for any remaining amount</p>
+                  </div>
+                </button>
+              )}
 
               <div className="rounded-xl border border-gray-200 p-4 space-y-2">
                 <label className="text-sm font-medium text-gray-700 block">
@@ -1109,6 +1165,87 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                   className="flex-1 py-3 bg-primary text-white rounded-xl font-medium touch-target disabled:opacity-50"
                 >
                   Record Credit Sale
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === 'wallet-input' && (
+            <div className="space-y-4">
+              <div className="rounded-xl bg-teal-50 border border-teal-100 p-4 text-center">
+                <p className="text-sm text-gray-600">Sale total</p>
+                <p className="text-2xl font-bold text-gray-900 mt-1">{money(cart.total)}</p>
+              </div>
+              <label className="block text-sm font-medium text-gray-700">
+                Customer wallet *
+                <select
+                  value={walletCustomerId}
+                  onChange={(event) => {
+                    const id = event.target.value;
+                    const customer = creditCustomers.find((item) => item.id === id);
+                    setWalletCustomerId(id);
+                    setWalletUseAmount(
+                      customer
+                        ? Math.min(Number(customer.wallet_balance) || 0, cart.total).toFixed(2)
+                        : ''
+                    );
+                    setError('');
+                  }}
+                  className="mt-1 w-full rounded-xl border border-gray-300 px-4 py-3 text-sm"
+                >
+                  <option value="">Select customer</option>
+                  {creditCustomers
+                    .filter((customer) => customer.is_active === 1 && Number(customer.wallet_balance) > 0)
+                    .map((customer) => (
+                      <option key={customer.id} value={customer.id}>
+                        {customer.name} · wallet {money(customer.wallet_balance || 0)}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label className="block text-sm font-medium text-gray-700">
+                Store credit to use ({currencySymbol})
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0.01"
+                  max={Math.min(
+                    Number(creditCustomers.find((item) => item.id === walletCustomerId)?.wallet_balance) || 0,
+                    cart.total
+                  )}
+                  step="0.01"
+                  value={walletUseAmount}
+                  onChange={(event) => setWalletUseAmount(event.target.value)}
+                  className="mt-1 w-full rounded-xl border border-gray-300 px-4 py-3"
+                  disabled={!walletCustomerId}
+                />
+              </label>
+              <div className="rounded-xl bg-gray-50 p-4 text-sm">
+                <div className="flex justify-between">
+                  <span>Wallet credit used</span>
+                  <strong>{money(Number(walletUseAmount) || 0)}</strong>
+                </div>
+                <div className="mt-2 flex justify-between">
+                  <span>Cash due</span>
+                  <strong>{money(Math.max(0, cart.total - (Number(walletUseAmount) || 0)))}</strong>
+                </div>
+              </div>
+              {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setError(''); setStep('method'); }}
+                  className="flex-1 rounded-xl border border-gray-300 py-3 font-medium text-gray-700"
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={handleWalletSaleConfirm}
+                  disabled={!walletCustomerId || !walletUseAmount}
+                  className="flex-1 rounded-xl bg-primary py-3 font-medium text-white disabled:opacity-50"
+                >
+                  Complete Sale
                 </button>
               </div>
             </div>

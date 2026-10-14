@@ -30,7 +30,7 @@ Reports can be filtered to today, this week, or this month. Review sales by paym
 
 Register customers in Customers before making a credit sale. Add only starting debt that is not already recorded as a credit sale. Customer credit sales and starting debt appear together as one outstanding account balance. Record repayments from the customer account using cash, MoMo, cheque, or a split across these methods. Payments reduce the oldest debt first, and each payment has a printable/shareable receipt showing the amount paid and remaining balance.
 
-Open Returns to select the original receipt and sold item, enter the returned quantity and reason, and optionally capture or attach a product or receipt photo. Processing a return restocks the item at the sale's shop location and records it in return history. Returns are restock-only; handle any customer refund separately.
+Open Returns to select the original receipt and sold item, enter the returned quantity and reason, and optionally capture or attach a product or receipt photo. Choose a cash refund, store credit in the customer wallet, or apply the value to the customer's outstanding balance. Account adjustments reduce the oldest debt first; any remainder goes to the wallet. Wallet credit can be used for a later purchase, including as part of a wallet-plus-cash payment. The return value accounts for the original sale discount, and cash refunds are recorded as cash-book expenses.
 
 ## Online shop and subscription
 

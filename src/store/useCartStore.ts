@@ -111,7 +111,8 @@ interface CartState {
     paystackAmount?: number,
     paystackReference?: string,
     paymentReference?: string,
-    customerId?: string
+    customerId?: string,
+    walletAmount?: number
   ) => Promise<{
     receiptNumber: string;
     items: CartItem[];
@@ -527,7 +528,8 @@ export const useCartStore = create<CartState>((set, get) => ({
     paystackAmount = 0,
     paystackReference = '',
     paymentReference = '',
-    customerId = ''
+    customerId = '',
+    walletAmount = 0
   ) => {
     const state = get();
     if (state.items.length === 0) throw new Error('Cart is empty');
@@ -564,6 +566,7 @@ export const useCartStore = create<CartState>((set, get) => ({
 
     let cash = toMoneyAmount(cashAmount);
     let paystack = toMoneyAmount(paystackAmount);
+    const wallet = toMoneyAmount(walletAmount || 0);
     let manualPayment = 0;
     const recordedPaymentReference = paymentReference.trim();
     if (paymentMethod === 'cash') {
@@ -581,11 +584,19 @@ export const useCartStore = create<CartState>((set, get) => ({
       paystack = 0;
       manualPayment = 0;
       if (!customerId) throw new Error('Select a registered customer for a credit sale.');
+    } else if (paymentMethod === 'wallet') {
+      cash = 0;
+      paystack = 0;
+      if (!customerId) throw new Error('Select a registered customer to use store credit.');
+      if (!moneyEquals(wallet, priced.total)) {
+        throw new Error('Store credit must cover the full sale. Use wallet plus cash for a partial balance.');
+      }
     } else {
       // split
-      if (!moneyEquals(cash + paystack, priced.total)) {
+      if (wallet > 0 && !customerId) throw new Error('Select a registered customer to use store credit.');
+      if (!moneyEquals(cash + paystack + wallet, priced.total)) {
         throw new Error(
-          `Split payment must equal total. Cash ${formatStoreMoneyNow(cash)} + MoMo ${formatStoreMoneyNow(paystack)} ≠ ${formatStoreMoneyNow(priced.total)}.`
+          `Split payment must equal total. Cash ${formatStoreMoneyNow(cash)} + MoMo ${formatStoreMoneyNow(paystack)} + store credit ${formatStoreMoneyNow(wallet)} ≠ ${formatStoreMoneyNow(priced.total)}.`
         );
       }
     }
@@ -638,12 +649,40 @@ export const useCartStore = create<CartState>((set, get) => ({
       db.transactions,
       db.transaction_items,
       db.customers,
+      db.customer_wallet_transactions,
       async () => {
         let creditCustomer: LocalCustomer | undefined;
-        if (paymentMethod === 'credit') {
+        let payingCustomer: LocalCustomer | undefined;
+        if (paymentMethod === 'credit' || wallet > 0) {
           creditCustomer = await db.customers.get(customerId || '');
           if (!creditCustomer || creditCustomer.store_id !== storeId || creditCustomer.is_active !== 1) {
-            throw new Error('Credit sales are only available to active registered customers.');
+            throw new Error('Select an active registered customer for this payment.');
+          }
+          payingCustomer = creditCustomer;
+          if (wallet > 0) {
+            const availableWallet = toMoneyAmount(creditCustomer.wallet_balance || 0);
+            if (wallet > availableWallet) {
+              throw new Error(`Customer store credit is ${formatStoreMoneyNow(availableWallet)}.`);
+            }
+            const balanceAfter = toMoneyAmount(availableWallet - wallet);
+            await db.customers.update(creditCustomer.id, {
+              wallet_balance: balanceAfter,
+              updated_at: now,
+              synced: 0,
+            });
+            await db.customer_wallet_transactions.add({
+              id: generateId(),
+              store_id: storeId,
+              customer_id: creditCustomer.id,
+              type: 'sale_debit',
+              amount: wallet,
+              balance_after: balanceAfter,
+              transaction_id: txnId,
+              description: `Store credit used for sale ${receiptNumber}`,
+              created_by: cashierName,
+              created_at: now,
+              synced: 0,
+            });
           }
         }
         await db.transactions.add({
@@ -661,10 +700,11 @@ export const useCartStore = create<CartState>((set, get) => ({
           paystack_amount: paystack,
           paystack_reference: paymentMethod === 'paystack' || paymentMethod === 'split' ? paystackReference : '',
           manual_payment_amount: manualPayment,
+          wallet_amount: wallet,
           payment_reference: isManualPaymentMethod(paymentMethod) ? recordedPaymentReference : '',
-          customer_id: paymentMethod === 'credit' ? creditCustomer!.id : null,
-          customer_name: paymentMethod === 'credit' ? creditCustomer!.name : '',
-          customer_phone: paymentMethod === 'credit' ? creditCustomer!.phone : '',
+          customer_id: payingCustomer?.id || null,
+          customer_name: payingCustomer?.name || '',
+          customer_phone: payingCustomer?.phone || '',
           credit_paid_amount: 0,
           credit_balance: paymentMethod === 'credit' ? priced.total : 0,
           status: 'completed',
@@ -724,8 +764,30 @@ export const useCartStore = create<CartState>((set, get) => ({
     } catch (err) {
       // Roll back the sale so we never sync revenue without a stock movement
       const items = await db.transaction_items.where('transaction_id').equals(txnId).toArray();
-      await Promise.all(items.map((i) => db.transaction_items.delete(i.id)));
-      await db.transactions.delete(txnId);
+      await db.transaction(
+        'rw',
+        [db.transaction_items, db.transactions, db.customer_wallet_transactions, db.customers],
+        async () => {
+          await Promise.all(items.map((item) => db.transaction_items.delete(item.id)));
+          await db.transactions.delete(txnId);
+          if (wallet > 0 && customerId) {
+            const walletEntries = await db.customer_wallet_transactions
+              .where('transaction_id')
+              .equals(txnId)
+              .toArray();
+            const restoredAmount = walletEntries.reduce((sum, entry) => sum + entry.amount, 0);
+            const customer = await db.customers.get(customerId);
+            if (customer) {
+              await db.customers.update(customer.id, {
+                wallet_balance: toMoneyAmount((customer.wallet_balance || 0) + restoredAmount),
+                updated_at: new Date().toISOString(),
+                synced: 0,
+              });
+            }
+            await Promise.all(walletEntries.map((entry) => db.customer_wallet_transactions.delete(entry.id)));
+          }
+        }
+      );
       throw err;
     }
 

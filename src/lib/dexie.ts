@@ -78,6 +78,7 @@ export interface LocalCustomer {
   phone: string;
   opening_balance: number;
   opening_balance_remaining: number;
+  wallet_balance?: number;
   is_active: number;
   created_at: string;
   updated_at: string;
@@ -212,6 +213,7 @@ export interface LocalTransaction {
   paystack_amount: number;
   paystack_reference: string;
   manual_payment_amount?: number;
+  wallet_amount?: number;
   payment_reference?: string;
   customer_name?: string;
   customer_phone?: string;
@@ -278,6 +280,26 @@ export interface LocalSaleReturn {
   photo_data_url: string;
   receipt_number: string;
   location_id: string;
+  customer_id?: string | null;
+  refund_method: 'cash' | 'wallet' | 'account' | 'none';
+  refund_amount: number;
+  debt_applied: number;
+  wallet_credit: number;
+  created_by: string;
+  created_at: string;
+  synced: number;
+}
+
+export interface LocalCustomerWalletTransaction {
+  id: string;
+  store_id: string;
+  customer_id: string;
+  type: 'return_credit' | 'sale_debit';
+  amount: number;
+  balance_after: number;
+  return_id?: string | null;
+  transaction_id?: string | null;
+  description: string;
   created_by: string;
   created_at: string;
   synced: number;
@@ -469,6 +491,7 @@ class AdimatDB extends Dexie {
   credit_payments!: Table<LocalCreditPayment, string>;
   customer_account_receipts!: Table<LocalCustomerAccountReceipt, string>;
   sales_returns!: Table<LocalSaleReturn, string>;
+  customer_wallet_transactions!: Table<LocalCustomerWalletTransaction, string>;
   expenses!: Table<LocalExpense, string>;
   recurring_expenses!: Table<LocalRecurringExpense, string>;
   expense_budgets!: Table<LocalExpenseBudget, string>;
@@ -655,6 +678,9 @@ class AdimatDB extends Dexie {
       sales_returns: 'id, store_id, transaction_id, transaction_item_id, product_id, created_at, synced',
       credit_payments: 'id, store_id, customer_id, account_receipt_id, transaction_id, created_at, synced',
       customer_opening_payments: 'id, store_id, customer_id, account_receipt_id, created_at, synced',
+    });
+    this.version(17).stores({
+      customer_wallet_transactions: 'id, store_id, customer_id, type, created_at, synced',
     });
   }
 }
@@ -1446,9 +1472,10 @@ export async function setCustomerActive(customerId: string, isActive: boolean): 
       .toArray();
     if (
       toMoneyAmount(customer.opening_balance_remaining) > 0 ||
+      toMoneyAmount(customer.wallet_balance || 0) > 0 ||
       transactions.some((transaction) => toMoneyAmount(transaction.credit_balance || 0) > 0)
     ) {
-      throw new Error('A customer with an outstanding balance cannot be archived.');
+      throw new Error('A customer with debt or unused store credit cannot be archived.');
     }
   }
   await db.customers.update(customerId, {
@@ -2396,6 +2423,7 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
     | 'credit_payments'
     | 'customer_account_receipts'
     | 'sales_returns'
+    | 'customer_wallet_transactions'
     | 'expenses'
     | 'recurring_expenses'
     | 'expense_budgets'
@@ -2417,7 +2445,10 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
     // Append-only ledgers have INSERT policies but historically no UPDATE.
     // PostgREST upsert is ON CONFLICT DO UPDATE and needs UPDATE RLS (42501).
     const appendOnly =
-      table === 'stock_movements' || table === 'transaction_items' || table === 'credit_payments';
+      table === 'stock_movements' ||
+      table === 'transaction_items' ||
+      table === 'credit_payments' ||
+      table === 'customer_wallet_transactions';
     const { error } = await supabase.from(table).upsert(rows as Record<string, unknown>[], {
       onConflict: 'id',
       ignoreDuplicates: appendOnly,
@@ -2556,6 +2587,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         async () => { await db.stores.update(storeId, { synced: 1 }); },
         errors
       );
+
     }
 
     const unsyncedUsers = await db.users.where('store_id').equals(storeId).and(u => u.synced === 0).toArray();
@@ -2787,6 +2819,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         phone: customer.phone,
         opening_balance: customer.opening_balance,
         opening_balance_remaining: customer.opening_balance_remaining,
+        wallet_balance: Number(customer.wallet_balance) || 0,
         is_active: customer.is_active === 1,
         created_at: customer.created_at,
         updated_at: customer.updated_at,
@@ -2822,6 +2855,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         paystack_amount: t.paystack_amount,
         paystack_reference: t.paystack_reference,
         manual_payment_amount: Number(t.manual_payment_amount) || 0,
+        wallet_amount: Number(t.wallet_amount) || 0,
         payment_reference: t.payment_reference || '',
         customer_name: t.customer_name || '',
         customer_phone: t.customer_phone || '',
@@ -2978,12 +3012,46 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         photo_data_url: record.photo_data_url,
         receipt_number: record.receipt_number,
         location_id: record.location_id,
+        customer_id: record.customer_id || null,
+        refund_method: record.refund_method,
+        refund_amount: record.refund_amount,
+        debt_applied: record.debt_applied,
+        wallet_credit: record.wallet_credit,
         created_by: record.created_by,
         created_at: record.created_at,
       })),
       async () => {
         await Promise.all(unsyncedReturns.map((record) =>
           db.sales_returns.update(record.id, { synced: 1 })
+        ));
+      },
+      errors
+    );
+
+    const unsyncedWalletTransactions = await db.customer_wallet_transactions
+      .where('store_id')
+      .equals(storeId)
+      .and((record) => record.synced === 0)
+      .toArray();
+    syncedCount += await upsertToSupabase(
+      'Customer wallet transactions',
+      'customer_wallet_transactions',
+      unsyncedWalletTransactions.map((record) => ({
+        id: record.id,
+        store_id: record.store_id,
+        customer_id: record.customer_id,
+        type: record.type,
+        amount: record.amount,
+        balance_after: record.balance_after,
+        return_id: record.return_id || null,
+        transaction_id: record.transaction_id || null,
+        description: record.description,
+        created_by: record.created_by,
+        created_at: record.created_at,
+      })),
+      async () => {
+        await Promise.all(unsyncedWalletTransactions.map((record) =>
+          db.customer_wallet_transactions.update(record.id, { synced: 1 })
         ));
       },
       errors
@@ -3379,6 +3447,7 @@ export async function syncFromSupabase(opts?: {
           phone: String(row.phone || ''),
           opening_balance: Number(row.opening_balance) || 0,
           opening_balance_remaining: Number(row.opening_balance_remaining) || 0,
+          wallet_balance: Number(row.wallet_balance) || 0,
           is_active: row.is_active === false ? 0 : 1,
           created_at: String(row.created_at || ''),
           updated_at: String(row.updated_at || row.created_at || ''),
@@ -3452,6 +3521,7 @@ export async function syncFromSupabase(opts?: {
           paystack_amount: Number(row.paystack_amount) || 0,
           paystack_reference: (row.paystack_reference as string) || '',
           manual_payment_amount: Number(row.manual_payment_amount) || 0,
+          wallet_amount: Number(row.wallet_amount) || 0,
           payment_reference: (row.payment_reference as string) || '',
           customer_name: String(row.customer_name || ''),
           customer_phone: String(row.customer_phone || ''),
@@ -3594,12 +3664,45 @@ export async function syncFromSupabase(opts?: {
           photo_data_url: String(row.photo_data_url || ''),
           receipt_number: String(row.receipt_number || ''),
           location_id: String(row.location_id || ''),
+          customer_id: String(row.customer_id || '') || null,
+          refund_method: row.refund_method === 'cash' || row.refund_method === 'wallet' || row.refund_method === 'account'
+            ? row.refund_method
+            : 'none',
+          refund_amount: Number(row.refund_amount) || 0,
+          debt_applied: Number(row.debt_applied) || 0,
+          wallet_credit: Number(row.wallet_credit) || 0,
           created_by: String(row.created_by || ''),
           created_at: String(row.created_at || ''),
           synced: 1,
         }),
         dbTable: db.sales_returns,
         merge: async (remote: LocalSaleReturn, local: LocalSaleReturn | undefined) => {
+          if (!local || local.synced !== 0) return remote;
+          return local;
+        },
+      },
+      {
+        label: 'Customer wallet transactions',
+        table: 'customer_wallet_transactions',
+        map: (row: Record<string, unknown>) => ({
+          id: String(row.id),
+          store_id: String(row.store_id),
+          customer_id: String(row.customer_id),
+          type: row.type === 'sale_debit' ? 'sale_debit' : 'return_credit',
+          amount: Number(row.amount) || 0,
+          balance_after: Number(row.balance_after) || 0,
+          return_id: String(row.return_id || '') || null,
+          transaction_id: String(row.transaction_id || '') || null,
+          description: String(row.description || ''),
+          created_by: String(row.created_by || ''),
+          created_at: String(row.created_at || ''),
+          synced: 1,
+        }),
+        dbTable: db.customer_wallet_transactions,
+        merge: async (
+          remote: LocalCustomerWalletTransaction,
+          local: LocalCustomerWalletTransaction | undefined
+        ) => {
           if (!local || local.synced !== 0) return remote;
           return local;
         },

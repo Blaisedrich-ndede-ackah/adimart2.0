@@ -29,7 +29,7 @@ For a new Supabase project, apply `supabase-init.sql`. Existing projects require
 - `supabase-migrate-warehouse.sql`, `supabase-migrate-store-quotas.sql`, and `supabase-migrate-purchasing-reorder.sql` for locations, limits, supplier orders, movement history, and reorder levels.
 - `supabase-migrate-expense-workflows.sql` and `supabase-migrate-ecommerce.sql` for expense automation and online orders.
 - `supabase-migrate-session-timeout.sql`, `supabase-migrate-cashier-cashbook.sql`, and `supabase-migrate-clear-store-ledger.sql` for their corresponding features.
-- Apply `supabase-migrate-customer-repayments-returns.sql` after `supabase-migrate-customers-book.sql` to add mixed-tender customer account receipts and restock-only sales returns.
+- Apply `supabase-migrate-customer-repayments-returns.sql` after `supabase-migrate-customers-book.sql` to add mixed-tender repayments, customer wallet/store-credit balances and ledger entries, wallet checkout, and refunded sales returns.
 
 Review the SQL and dependencies against the actual deployed schema; do not blindly apply every migration. Back up production data first. After applying a migration, verify the columns/tables and run a test store through the affected workflow and cloud sync.
 

@@ -5,7 +5,7 @@ export type ManualPaymentMethod =
   | 'bank_transfer'
   | 'card_terminal';
 
-export type PaymentMethod = 'cash' | 'split' | 'paystack' | 'credit' | ManualPaymentMethod;
+export type PaymentMethod = 'cash' | 'split' | 'paystack' | 'credit' | 'wallet' | ManualPaymentMethod;
 
 export const MANUAL_PAYMENT_METHODS: Array<{ value: ManualPaymentMethod; label: string }> = [
   { value: 'momo_mtn', label: 'MTN MoMo' },
@@ -20,6 +20,7 @@ const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   split: 'Split payment',
   paystack: 'Paystack',
   credit: 'Credit',
+  wallet: 'Customer store credit',
   momo_mtn: 'MTN MoMo',
   momo_telecel: 'Telecel Cash',
   momo_airteltigo: 'AirtelTigo Money',

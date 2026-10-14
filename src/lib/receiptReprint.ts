@@ -42,6 +42,7 @@ export async function buildReceiptDataFromTransaction(
     cashAmount: txn.cash_amount,
     paystackAmount: txn.paystack_amount,
     manualPaymentAmount: txn.manual_payment_amount,
+    walletAmount: txn.wallet_amount,
     paymentReference: txn.payment_reference || txn.paystack_reference,
     customerName: txn.customer_name,
     outstandingBalance: txn.credit_balance,
