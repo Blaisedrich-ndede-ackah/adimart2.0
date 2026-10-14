@@ -35,7 +35,6 @@ import TermsPage from '@/pages/TermsPage';
 import NotFoundPage from '@/pages/NotFoundPage';
 import AdminLoginPage from '@/pages/AdminLoginPage';
 import AdminDashboardPage from '@/pages/AdminDashboardPage';
-import CampaignsPage from '@/pages/CampaignsPage';
 import { isStoreAccessBlocked } from '@/lib/subscription';
 import { checkAndSendSubscriptionExpirySms } from '@/lib/subscriptionReminders';
 import { canAccessCashbook } from '@/lib/staffAccess';
@@ -327,8 +326,6 @@ export default function App() {
         return <DevicesPage />;
       case 'learn':
         return currentUser ? <LearnAdimatPage onNavigate={setCurrentPage} /> : <POSPage />;
-      case 'promotions':
-        return <CampaignsPage />;
       case 'subscription':
         return role === 'owner' ? <SubscriptionPage /> : <POSPage />;
       case 'inventory':
