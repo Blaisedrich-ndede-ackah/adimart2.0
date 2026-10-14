@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Package, AlertTriangle, TrendingDown, DollarSign, Coins,
   Plus, Search, ArrowUpDown, Edit, Trash2, ToggleLeft, ToggleRight, Tags,
-  PackagePlus, RefreshCw, Upload, Barcode, Bluetooth
+  PackagePlus, RefreshCw, Upload, Barcode, Bluetooth, Download
 } from 'lucide-react';
 import {
   db,
@@ -27,6 +27,7 @@ import { playScanBeep } from '@/lib/scanBeep';
 import ProductImage from '@/components/ProductImage';
 import InventoryInsights from '@/components/InventoryInsights';
 import ManageProductCategoriesModal from '@/components/ManageProductCategoriesModal';
+import { downloadInventoryCsv, downloadInventoryPdf } from '@/lib/inventoryExport';
 
 type SortMode = 'recent' | 'alpha' | 'stock-low' | 'stock-high';
 
@@ -60,6 +61,8 @@ export default function InventoryPage({
   const [highlightedProductId, setHighlightedProductId] = useState<string | null>(null);
   const [showInsights, setShowInsights] = useState(false);
   const [showManageCategories, setShowManageCategories] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [exportStatus, setExportStatus] = useState('');
   const lastSyncAtRef = useRef(0);
 
   useEffect(() => {
@@ -267,6 +270,24 @@ export default function InventoryPage({
 
   const formatStockQty = (value: unknown) => String(toQty(value));
 
+  const handleInventoryExport = (format: 'csv' | 'pdf') => {
+    setShowExportMenu(false);
+    setExportStatus('');
+    try {
+      const currencyCode = currentStore?.currency_code || 'GHS';
+      const storeName = currentStore?.name || 'Store';
+      if (format === 'csv') {
+        downloadInventoryCsv(filteredProducts, currencyCode, storeName);
+      } else {
+        downloadInventoryPdf(filteredProducts, currencyCode, storeName);
+      }
+      setExportStatus(`Exported ${filteredProducts.length} inventory products as ${format.toUpperCase()}.`);
+    } catch (error) {
+      console.error('[Inventory] Could not export inventory:', error);
+      setExportStatus(error instanceof Error ? `Could not export inventory: ${error.message}` : 'Could not export inventory.');
+    }
+  };
+
   const handleDelete = async (id: string) => {
     if (
       confirm(
@@ -312,6 +333,37 @@ export default function InventoryPage({
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowExportMenu((visible) => !visible)}
+                disabled={!productsLoaded || filteredProducts.length === 0}
+                className="bg-white/20 p-2 rounded-xl touch-target disabled:opacity-50"
+                title="Export inventory"
+                aria-label="Export inventory"
+                aria-expanded={showExportMenu}
+              >
+                <Download className="w-4 h-4 text-white" />
+              </button>
+              {showExportMenu && (
+                <div className="absolute right-0 top-full mt-1 z-30 min-w-36 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg">
+                  <button
+                    type="button"
+                    onClick={() => handleInventoryExport('csv')}
+                    className="w-full px-3 py-2.5 text-left text-xs font-medium text-gray-700 hover:bg-gray-50 touch-target"
+                  >
+                    Export CSV
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleInventoryExport('pdf')}
+                    className="w-full border-t border-gray-100 px-3 py-2.5 text-left text-xs font-medium text-gray-700 hover:bg-gray-50 touch-target"
+                  >
+                    Export PDF
+                  </button>
+                </div>
+              )}
+            </div>
             {currentUser?.role === 'owner' && (
               <button
                 type="button"
@@ -351,6 +403,11 @@ export default function InventoryPage({
         )}
         {syncStatus && (
           <p className="text-emerald-100/90 text-[11px] text-center mb-2">{syncStatus}</p>
+        )}
+        {exportStatus && (
+          <p role={exportStatus.startsWith('Could not') ? 'alert' : 'status'} className="text-emerald-100/90 text-[11px] text-center mb-2">
+            {exportStatus}
+          </p>
         )}
 
         {/* Dashboard Cards — identical layout and figures on phone and desktop */}
