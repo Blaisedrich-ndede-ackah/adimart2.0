@@ -28,6 +28,8 @@ export interface ReceiptData {
   manualPaymentAmount?: number;
   paystackReference?: string;
   paymentReference?: string;
+  customerName?: string;
+  outstandingBalance?: number;
   currencyCode?: string;
 }
 
@@ -205,6 +207,14 @@ function generateReceiptPDF(data: ReceiptData): jsPDF {
   
   leftRightText('Payment:', methodLabel, y, 9);
   y += 4;
+  if (data.customerName) {
+    leftRightText('Customer:', data.customerName, y, 8);
+    y += 4;
+  }
+  if (data.outstandingBalance !== undefined && data.outstandingBalance > 0) {
+    leftRightText('Credit due:', amt(data, data.outstandingBalance), y, 8);
+    y += 4;
+  }
 
   if (data.paymentMethod === 'split') {
     if (data.cashAmount && data.cashAmount > 0) {
@@ -302,6 +312,10 @@ function generateOfficialReceiptPdf(data: ReceiptData): FormalPdf {
     : getPaymentMethodLabel(data.paymentMethod);
   const paymentRows = [
     { label: 'Method', value: methodLabel },
+    ...(data.customerName ? [{ label: 'Customer', value: data.customerName }] : []),
+    ...(data.outstandingBalance !== undefined && data.outstandingBalance > 0
+      ? [{ label: 'Credit due', value: formatGhsOfficial(data.outstandingBalance, data.currencyCode) }]
+      : []),
     ...(data.paymentMethod === 'split' && data.cashAmount
       ? [{ label: 'Cash portion', value: formatGhsOfficial(data.cashAmount, data.currencyCode) }]
       : []),
@@ -461,6 +475,10 @@ function generateReceiptText(data: ReceiptData): string {
   
   const methodLabel = data.paymentMethod === 'paystack' ? 'Mobile Money/Card' : getPaymentMethodLabel(data.paymentMethod);
   lines.push(leftRight('Payment:', methodLabel));
+  if (data.customerName) lines.push(leftRight('  Customer:', data.customerName));
+  if (data.outstandingBalance !== undefined && data.outstandingBalance > 0) {
+    lines.push(leftRight('  Credit due:', amt(data, data.outstandingBalance)));
+  }
   
   if (data.paymentMethod === 'split') {
     if (data.cashAmount) lines.push(leftRight('  Cash:', amt(data, data.cashAmount)));

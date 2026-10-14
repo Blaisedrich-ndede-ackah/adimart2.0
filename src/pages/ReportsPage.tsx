@@ -8,7 +8,7 @@ import {
   Warehouse, Store, MapPin, Camera
 } from 'lucide-react';
 import {
-  db, LocalTransaction, LocalTransactionItem, LocalExpense, LocalStockBatch, LocalLocation,
+  db, LocalTransaction, LocalTransactionItem, LocalExpense, LocalCreditPayment, LocalCustomerOpeningPayment, LocalStockBatch, LocalLocation,
   getCurrentStoreTransactions, getCurrentStoreExpenses, getCurrentStoreId,
   addExpense, deleteExpense
 } from '@/lib/dexie';
@@ -67,6 +67,9 @@ export default function ReportsPage() {
   const [rangeError, setRangeError] = useState('');
   const [tab, setTab] = useState<ReportTab>('overview');
   const [transactions, setTransactions] = useState<LocalTransaction[]>([]);
+  const [creditPayments, setCreditPayments] = useState<LocalCreditPayment[]>([]);
+  const [customerOpeningPayments, setCustomerOpeningPayments] = useState<LocalCustomerOpeningPayment[]>([]);
+  const [outstandingCredit, setOutstandingCredit] = useState(0);
   const [expenses, setExpenses] = useState<LocalExpense[]>([]);
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [chartData, setChartData] = useState<DayData[]>([]);
@@ -107,6 +110,17 @@ export default function ReportsPage() {
     try {
       const { start, end } = range;
       const allTxns = (await getCurrentStoreTransactions()).filter(t => t.status === 'completed');
+      const allCreditPayments = await db.credit_payments.where('store_id').equals(storeId).toArray();
+      const allCustomerOpeningPayments = await db.customer_opening_payments.where('store_id').equals(storeId).toArray();
+      setCustomerOpeningPayments(allCustomerOpeningPayments.filter((payment) => {
+        const day = payment.created_at.slice(0, 10);
+        return day >= start.toISOString().slice(0, 10) && day <= end.toISOString().slice(0, 10);
+      }));
+      const customers = await db.customers.where('store_id').equals(storeId).toArray();
+      setOutstandingCredit(roundMoney(
+        allTxns.reduce((sum, transaction) => sum + (Number(transaction.credit_balance) || 0), 0) +
+        customers.reduce((sum, customer) => sum + (Number(customer.opening_balance_remaining) || 0), 0)
+      ));
       const allExpenses = await getCurrentStoreExpenses();
       const expiring = await getExpiringBatches(storeId, 30);
       setExpiringBatches(expiring.slice(0, 8));
@@ -127,6 +141,10 @@ export default function ReportsPage() {
       }).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
       setTransactions(periodTxns);
+      setCreditPayments(allCreditPayments.filter((payment) => {
+        const paidAt = new Date(payment.created_at);
+        return paidAt >= start && paidAt <= end;
+      }));
       setExpenses(periodExpenses);
       setSummary(await buildReportSummary(storeId, range));
 
@@ -276,9 +294,18 @@ export default function ReportsPage() {
   };
 
   const totalRevenue = summary?.revenue ?? 0;
-  const cashRevenue = roundMoney(transactions.reduce((s, t) => s + (Number(t.cash_amount) || 0), 0));
+  const cashRevenue = roundMoney(
+    transactions.reduce((sum, transaction) =>
+      sum + (transaction.payment_method === 'credit' ? 0 : Number(transaction.cash_amount) || 0), 0
+    ) + creditPayments.reduce((sum, payment) => sum + payment.amount, 0) +
+      customerOpeningPayments.reduce((sum, payment) => sum + payment.amount, 0)
+  );
   const nonCashRevenue = roundMoney(transactions.reduce(
     (s, t) => s + (Number(t.paystack_amount) || 0) + (Number(t.manual_payment_amount) || 0),
+    0
+  ));
+  const creditRevenue = roundMoney(transactions.reduce(
+    (sum, transaction) => sum + (transaction.payment_method === 'credit' ? Number(transaction.total_amount) || 0 : 0),
     0
   ));
 
@@ -446,6 +473,15 @@ export default function ReportsPage() {
                   <span className="text-xs text-gray-500">Non-cash received</span>
                 </div>
                 <p className="text-lg font-bold">{money(nonCashRevenue)}</p>
+              </div>
+
+              <div className="bg-white rounded-xl p-3 shadow-sm border border-amber-100">
+                <p className="text-xs text-gray-500">Credit sales</p>
+                <p className="text-lg font-bold text-amber-800">{money(creditRevenue)}</p>
+              </div>
+              <div className="bg-white rounded-xl p-3 shadow-sm border border-amber-100">
+                <p className="text-xs text-gray-500">Outstanding credit</p>
+                <p className="text-lg font-bold text-amber-800">{money(outstandingCredit)}</p>
               </div>
 
               <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 col-span-2">

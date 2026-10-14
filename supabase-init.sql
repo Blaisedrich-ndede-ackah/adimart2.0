@@ -126,6 +126,25 @@ CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(store_id, barcode);
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(store_id, category);
 CREATE INDEX IF NOT EXISTS idx_products_is_active ON products(store_id, is_active);
 
+CREATE TABLE IF NOT EXISTS product_categories (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  name VARCHAR(100) NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (store_id, name)
+);
+
+ALTER TABLE product_categories ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "product_categories_select" ON product_categories FOR SELECT USING (true);
+CREATE POLICY "product_categories_insert" ON product_categories FOR INSERT WITH CHECK (true);
+CREATE POLICY "product_categories_update" ON product_categories FOR UPDATE USING (true);
+CREATE POLICY "product_categories_delete" ON product_categories FOR DELETE USING (true);
+
+CREATE INDEX IF NOT EXISTS idx_product_categories_store ON product_categories(store_id, is_active);
+
 -- ============================================================
 -- SUPPLIERS AND PURCHASE ORDERS
 -- ============================================================
@@ -173,6 +192,44 @@ CREATE INDEX IF NOT EXISTS idx_suppliers_store ON suppliers(store_id);
 CREATE INDEX IF NOT EXISTS idx_purchase_orders_store_created ON purchase_orders(store_id, created_at);
 
 -- ============================================================
+-- CUSTOMERS TABLE
+-- ============================================================
+CREATE TABLE IF NOT EXISTS customers (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  name VARCHAR(255) NOT NULL,
+  phone VARCHAR(30) NOT NULL DEFAULT '',
+  opening_balance DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (opening_balance >= 0),
+  opening_balance_remaining DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (opening_balance_remaining >= 0),
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "customers_select" ON customers FOR SELECT USING (true);
+CREATE POLICY "customers_insert" ON customers FOR INSERT WITH CHECK (true);
+CREATE POLICY "customers_update" ON customers FOR UPDATE USING (true);
+CREATE POLICY "customers_delete" ON customers FOR DELETE USING (true);
+CREATE INDEX IF NOT EXISTS idx_customers_store ON customers(store_id, is_active, name);
+
+CREATE TABLE IF NOT EXISTS customer_opening_payments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  entry_type VARCHAR(20) NOT NULL DEFAULT 'payment' CHECK (entry_type IN ('opening_balance', 'payment')),
+  amount DECIMAL(12,2) NOT NULL CHECK (amount > 0),
+  created_by VARCHAR(255) DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE customer_opening_payments ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "customer_opening_payments_select" ON customer_opening_payments FOR SELECT USING (true);
+CREATE POLICY "customer_opening_payments_insert" ON customer_opening_payments FOR INSERT WITH CHECK (true);
+CREATE POLICY "customer_opening_payments_update" ON customer_opening_payments FOR UPDATE USING (true);
+CREATE POLICY "customer_opening_payments_delete" ON customer_opening_payments FOR DELETE USING (true);
+CREATE INDEX IF NOT EXISTS idx_customer_opening_payments_store ON customer_opening_payments(store_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_customer_opening_payments_customer ON customer_opening_payments(customer_id, created_at);
+
+-- ============================================================
 -- TRANSACTIONS TABLE (linked to stores)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS transactions (
@@ -187,18 +244,38 @@ CREATE TABLE IF NOT EXISTS transactions (
   other_charges_total DECIMAL(12,2) DEFAULT 0,
   payment_method VARCHAR(20) NOT NULL CHECK (payment_method IN (
     'cash', 'split', 'paystack', 'momo_mtn', 'momo_telecel',
-    'momo_airteltigo', 'bank_transfer', 'card_terminal'
+    'momo_airteltigo', 'bank_transfer', 'card_terminal', 'credit'
   )),
   cash_amount DECIMAL(12,2) DEFAULT 0,
   paystack_amount DECIMAL(12,2) DEFAULT 0,
   paystack_reference VARCHAR(100) DEFAULT '',
   manual_payment_amount DECIMAL(12,2) DEFAULT 0,
   payment_reference VARCHAR(100) DEFAULT '',
+  customer_name VARCHAR(255) DEFAULT '',
+  customer_phone VARCHAR(30) DEFAULT '',
+  customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
+  credit_paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (credit_paid_amount >= 0),
+  credit_balance DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (credit_balance >= 0),
   status VARCHAR(20) NOT NULL DEFAULT 'completed' CHECK (status IN ('completed', 'pending')),
   location_id UUID,
   sale_mode VARCHAR(20) DEFAULT 'retail',
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE transactions
+  ADD COLUMN IF NOT EXISTS customer_name VARCHAR(255) DEFAULT '',
+  ADD COLUMN IF NOT EXISTS customer_phone VARCHAR(30) DEFAULT '',
+  ADD COLUMN IF NOT EXISTS customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS credit_paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS credit_balance DECIMAL(12,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_payment_method_check;
+ALTER TABLE transactions ADD CONSTRAINT transactions_payment_method_check
+  CHECK (payment_method IN (
+    'cash', 'split', 'paystack', 'momo_mtn', 'momo_telecel',
+    'momo_airteltigo', 'bank_transfer', 'card_terminal', 'credit'
+  ));
 
 ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
 
@@ -243,6 +320,24 @@ CREATE POLICY "transaction_items_delete" ON transaction_items FOR DELETE USING (
 
 CREATE INDEX IF NOT EXISTS idx_transaction_items_store ON transaction_items(store_id);
 CREATE INDEX IF NOT EXISTS idx_transaction_items_txn ON transaction_items(transaction_id);
+
+CREATE TABLE IF NOT EXISTS credit_payments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  transaction_id UUID NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+  amount DECIMAL(12,2) NOT NULL CHECK (amount > 0),
+  payment_method VARCHAR(20) NOT NULL DEFAULT 'cash' CHECK (payment_method = 'cash'),
+  created_by VARCHAR(255) DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE credit_payments ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "credit_payments_select" ON credit_payments FOR SELECT USING (true);
+CREATE POLICY "credit_payments_insert" ON credit_payments FOR INSERT WITH CHECK (true);
+CREATE POLICY "credit_payments_update" ON credit_payments FOR UPDATE USING (true);
+CREATE POLICY "credit_payments_delete" ON credit_payments FOR DELETE USING (true);
+CREATE INDEX IF NOT EXISTS idx_credit_payments_store ON credit_payments(store_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_credit_payments_transaction ON credit_payments(transaction_id, created_at);
 
 -- ============================================================
 -- EXPENSES TABLE (linked to stores)
@@ -320,6 +415,7 @@ CREATE TABLE IF NOT EXISTS cash_book_entries (
   entry_type VARCHAR(20) NOT NULL CHECK (entry_type IN ('income', 'expense')),
   description VARCHAR(255) NOT NULL,
   category VARCHAR(100) DEFAULT 'Other',
+  account_type VARCHAR(10) NOT NULL DEFAULT 'cash' CHECK (account_type IN ('cash', 'bank')),
   amount DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (amount >= 0),
   notes TEXT DEFAULT '',
   entry_date DATE NOT NULL DEFAULT CURRENT_DATE,

@@ -24,11 +24,10 @@ interface AddProductProps {
   onClose: () => void;
   onSaved: () => void;
   editProduct?: LocalProduct | null;
+  categories: string[];
   /** Prefill barcode from handheld scanner (inventory logging) */
   initialBarcode?: string | null;
 }
-
-const CATEGORIES = ['Food', 'Beverages', 'Dairy', 'Household', 'Electronics', 'Clothing', 'Health', 'Accessories', 'Other'];
 
 const WHOLESALE_MODES: { value: WholesaleMode; label: string }[] = [
   { value: 'none', label: 'None (retail only)' },
@@ -37,7 +36,7 @@ const WHOLESALE_MODES: { value: WholesaleMode; label: string }[] = [
   { value: 'tiers', label: 'Quantity tiers' },
 ];
 
-export default function AddProduct({ isOpen, onClose, onSaved, editProduct, initialBarcode }: AddProductProps) {
+export default function AddProduct({ isOpen, onClose, onSaved, editProduct, initialBarcode, categories }: AddProductProps) {
   const currencySymbol = getStoreCurrency(useAuthStore((s) => s.currentStore?.currency_code)).symbol;
   const currentUserId = useAuthStore((s) => s.currentUser?.id);
   const [name, setName] = useState('');
@@ -116,7 +115,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         setTiers(existingTiers.length > 0 ? existingTiers : [{ min_qty: 10, unit_price: 0 }]);
       } else {
         setName('');
-        setCategory('Food');
+        setCategory(categories.includes('Food') ? 'Food' : categories[0] || 'Other');
         setBarcode(initialBarcode?.trim() || '');
         setCostPrice('');
         setSellingPrice('');
@@ -538,7 +537,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
                 onChange={e => setCategory(e.target.value)}
                 className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none bg-white"
               >
-                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                {[...new Set([...categories, category])].map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
 

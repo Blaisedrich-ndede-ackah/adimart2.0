@@ -3,8 +3,12 @@ import { db } from '@/lib/dexie';
 const BACKUP_TABLES = [
   'users',
   'products',
+  'product_categories',
+  'customers',
+  'customer_opening_payments',
   'transactions',
   'transaction_items',
+  'credit_payments',
   'expenses',
   'recurring_expenses',
   'expense_budgets',
@@ -130,7 +134,11 @@ export async function restoreStoreBackup(file: File, currentStoreId: string): Pr
 
   const tables = {} as BackupPayload['tables'];
   for (const name of BACKUP_TABLES) {
-    const rows = parsed.tables[name];
+    const rows = parsed.tables[name] ??
+      (name === 'product_categories' ||
+      name === 'customers' ||
+      name === 'customer_opening_payments' ||
+      name === 'credit_payments' ? [] : undefined);
     if (!Array.isArray(rows) || !rows.every((row) => isRecord(row) && row.store_id === currentStoreId)) {
       throw new Error(`The backup contains invalid ${name} records.`);
     }
@@ -155,7 +163,8 @@ export async function restoreStoreBackup(file: File, currentStoreId: string): Pr
 
 export async function getStoreSyncHealth(storeId: string) {
   const syncable = [
-    db.users, db.products, db.transactions, db.transaction_items, db.expenses,
+    db.users, db.products, db.product_categories, db.customers, db.customer_opening_payments,
+    db.transactions, db.transaction_items, db.credit_payments, db.expenses,
     db.recurring_expenses, db.expense_budgets,
     db.cash_book_entries, db.locations, db.stock_batches, db.stock_movements,
     db.online_orders, db.online_order_items, db.suppliers, db.purchase_orders,

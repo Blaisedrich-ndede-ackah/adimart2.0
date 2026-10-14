@@ -44,6 +44,8 @@ export interface EscPosReceiptData {
   paystackAmount?: number;
   manualPaymentAmount?: number;
   paymentReference?: string;
+  customerName?: string;
+  outstandingBalance?: number;
   currencyCode?: string;
 }
 
@@ -113,6 +115,12 @@ function printOnComputer(
       : '',
     data.manualPaymentAmount
       ? `<div class="row"><span>Amount received:</span><span>${escapeHtml(amt(data, data.manualPaymentAmount))}</span></div>`
+      : '',
+    data.customerName
+      ? `<div class="row"><span>Customer:</span><span>${escapeHtml(data.customerName)}</span></div>`
+      : '',
+    data.outstandingBalance !== undefined && data.outstandingBalance > 0
+      ? `<div class="row"><span>Credit due:</span><span>${escapeHtml(amt(data, data.outstandingBalance))}</span></div>`
       : '',
     data.paymentReference
       ? `<div class="row"><span>Reference:</span><span>${escapeHtml(data.paymentReference)}</span></div>`
@@ -317,6 +325,14 @@ export async function buildEscPosReceipt(data: EscPosReceiptData): Promise<Uint8
   const methodLabel = data.paymentMethod === 'paystack' ? 'Paystack' : getPaymentMethodLabel(data.paymentMethod);
   bytes.push(...textToBytes(rightAlign('Payment:', methodLabel)));
   bytes.push(LF);
+  if (data.customerName) {
+    bytes.push(...textToBytes(rightAlign('  Customer:', data.customerName)));
+    bytes.push(LF);
+  }
+  if (data.outstandingBalance !== undefined && data.outstandingBalance > 0) {
+    bytes.push(...textToBytes(rightAlign('  Credit due:', amt(data, data.outstandingBalance))));
+    bytes.push(LF);
+  }
 
   if (data.paymentMethod === 'split') {
     if (data.cashAmount) {

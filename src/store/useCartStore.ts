@@ -7,6 +7,7 @@ import {
   getProductByBarcode,
   getCurrentStoreId,
   type LocalLocation,
+  type LocalCustomer,
 } from '@/lib/dexie';
 import { triggerPushSync } from '@/lib/sync';
 import { resolveSalePrice, type SaleMode, type UnitType } from '@/lib/bulkPricing';
@@ -109,7 +110,8 @@ interface CartState {
     cashAmount?: number,
     paystackAmount?: number,
     paystackReference?: string,
-    paymentReference?: string
+    paymentReference?: string,
+    customerId?: string
   ) => Promise<{
     receiptNumber: string;
     items: CartItem[];
@@ -523,7 +525,8 @@ export const useCartStore = create<CartState>((set, get) => ({
     cashAmount = 0,
     paystackAmount = 0,
     paystackReference = '',
-    paymentReference = ''
+    paymentReference = '',
+    customerId = ''
   ) => {
     const state = get();
     if (state.items.length === 0) throw new Error('Cart is empty');
@@ -572,6 +575,11 @@ export const useCartStore = create<CartState>((set, get) => ({
       cash = 0;
       paystack = 0;
       manualPayment = priced.total;
+    } else if (paymentMethod === 'credit') {
+      cash = 0;
+      paystack = 0;
+      manualPayment = 0;
+      if (!customerId) throw new Error('Select a registered customer for a credit sale.');
     } else {
       // split
       if (!moneyEquals(cash + paystack, priced.total)) {
@@ -584,7 +592,6 @@ export const useCartStore = create<CartState>((set, get) => ({
       if (!recordedPaymentReference) throw new Error('Payment reference is required for manual payments.');
       if (recordedPaymentReference.length > 100) throw new Error('Payment reference must be 100 characters or fewer.');
     }
-
     let locationId = state.locationId;
     if (!locationId) {
       const locations = await db.locations.where('store_id').equals(storeId).toArray();
@@ -628,7 +635,15 @@ export const useCartStore = create<CartState>((set, get) => ({
       'rw',
       db.transactions,
       db.transaction_items,
+      db.customers,
       async () => {
+        let creditCustomer: LocalCustomer | undefined;
+        if (paymentMethod === 'credit') {
+          creditCustomer = await db.customers.get(customerId || '');
+          if (!creditCustomer || creditCustomer.store_id !== storeId || creditCustomer.is_active !== 1) {
+            throw new Error('Credit sales are only available to active registered customers.');
+          }
+        }
         await db.transactions.add({
           id: txnId,
           store_id: storeId,
@@ -645,10 +660,16 @@ export const useCartStore = create<CartState>((set, get) => ({
           paystack_reference: paymentMethod === 'paystack' || paymentMethod === 'split' ? paystackReference : '',
           manual_payment_amount: manualPayment,
           payment_reference: isManualPaymentMethod(paymentMethod) ? recordedPaymentReference : '',
+          customer_id: paymentMethod === 'credit' ? creditCustomer!.id : null,
+          customer_name: paymentMethod === 'credit' ? creditCustomer!.name : '',
+          customer_phone: paymentMethod === 'credit' ? creditCustomer!.phone : '',
+          credit_paid_amount: 0,
+          credit_balance: paymentMethod === 'credit' ? priced.total : 0,
           status: 'completed',
           location_id: locationId,
           sale_mode: state.saleMode,
           created_at: now,
+          updated_at: now,
           synced: 0,
         });
 

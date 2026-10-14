@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useCartStore, CartItem } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { getCurrentStoreCustomers, LocalCustomer } from '@/lib/dexie';
 import { generatePaystackReference, initializePaystack, isPaystackConfigured, isValidPaystackEmail, resolvePaystackEmail } from '@/lib/paystack';
 import { printReceipt, type ReceiptData } from '@/lib/printService';
 import { shareReceipt, downloadReceipt, shareViaWhatsApp, PDFReceiptData } from '@/lib/receiptGenerator';
@@ -30,7 +31,7 @@ interface CheckoutOverlayProps {
   onConnectPrinter?: () => void;
 }
 
-type Step = 'method' | 'discount' | 'charges' | 'pin-verify' | 'cash-input' | 'split-input' | 'manual-payment' | 'paystack' | 'processing' | 'success';
+type Step = 'method' | 'discount' | 'charges' | 'pin-verify' | 'cash-input' | 'split-input' | 'manual-payment' | 'credit-input' | 'paystack' | 'processing' | 'success';
 
 interface SaleResult {
   receiptNumber: string;
@@ -46,6 +47,9 @@ interface SaleResult {
   manualPaymentAmount?: number;
   paystackReference?: string;
   paymentReference?: string;
+  customerName?: string;
+  customerPhone?: string;
+  creditBalance?: number;
 }
 
 export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnectPrinter }: CheckoutOverlayProps) {
@@ -61,6 +65,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
   const [cashAmount, setCashAmount] = useState('');
   const [manualMethod, setManualMethod] = useState<(typeof MANUAL_PAYMENT_METHODS)[number]['value']>('momo_mtn');
   const [manualReference, setManualReference] = useState('');
+  const [creditCustomerId, setCreditCustomerId] = useState('');
+  const [creditCustomers, setCreditCustomers] = useState<LocalCustomer[]>([]);
   const [saleResult, setSaleResult] = useState<SaleResult | null>(null);
   const [error, setError] = useState('');
   const [isPrinting, setIsPrinting] = useState(false);
@@ -94,6 +100,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       setCashAmount('');
       setManualMethod('momo_mtn');
       setManualReference('');
+      setCreditCustomerId('');
+      setCreditCustomers([]);
       setSaleResult(null);
       setError('');
       setPaystackError('');
@@ -112,6 +120,15 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       }
     }
   }, [isOpen, allowPercentage, canApplyDiscount]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    getCurrentStoreCustomers()
+      .then(setCreditCustomers)
+      .catch((loadError: unknown) => {
+        setError(loadError instanceof Error ? loadError.message : 'Could not load registered customers.');
+      });
+  }, [isOpen]);
 
   function buildReceiptData(result: SaleResult, method: PaymentMethod): PDFReceiptData {
     return {
@@ -139,6 +156,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       manualPaymentAmount: result.manualPaymentAmount,
       paystackReference: result.paystackReference,
       paymentReference: result.paymentReference,
+      customerName: result.customerName,
+      outstandingBalance: result.creditBalance,
     };
   }
 
@@ -247,7 +266,10 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
     cashAmt?: number, 
     paystackAmt?: number, 
     paystackRef?: string,
-    paymentRef?: string
+    paymentRef?: string,
+    customerName?: string,
+    customerPhone?: string,
+    customerId?: string
   ) {
     if (!currentUser) return;
     if (!canApplyDiscount && cart.discountAmount > 0) {
@@ -264,7 +286,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         cashAmt,
         paystackAmt,
         paystackRef,
-        paymentRef
+        paymentRef,
+        customerId
       );
       
       const completed: SaleResult = {
@@ -281,6 +304,9 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         manualPaymentAmount: isManualPaymentMethod(method) ? result.total : 0,
         paystackReference: paystackRef,
         paymentReference: paymentRef || paystackRef,
+        customerName,
+        customerPhone,
+        creditBalance: method === 'credit' ? result.total : 0,
       };
       setSaleResult(completed);
       setStep('success');
@@ -373,6 +399,15 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       return;
     }
     processSale(manualMethod, 0, cart.total, '', reference);
+  }
+
+  function handleCreditSaleConfirm() {
+    const customer = creditCustomers.find((item) => item.id === creditCustomerId && item.is_active === 1);
+    if (!customer) {
+      setError('Select a registered customer for this credit sale.');
+      return;
+    }
+    processSale('credit', 0, 0, '', '', customer.name, customer.phone, customer.id);
   }
 
   function handleCashConfirm() {
@@ -657,6 +692,24 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                 <div className="text-left flex-1">
                   <p className="font-semibold text-gray-900">MoMo, Bank or Card Terminal</p>
                   <p className="text-xs text-gray-500">Record an offline payment with its reference</p>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCreditCustomerId('');
+                  setError('');
+                  setStep('credit-input');
+                }}
+                className="w-full flex items-center gap-3 p-4 rounded-xl border border-amber-200 hover:border-amber-500 hover:bg-amber-50 transition touch-target"
+              >
+                <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
+                  <CreditCard className="w-5 h-5 text-amber-700" />
+                </div>
+                <div className="text-left flex-1">
+                  <p className="font-semibold text-gray-900">Credit Sale</p>
+                  <p className="text-xs text-gray-500">Record the customer and collect payment later</p>
                 </div>
               </button>
 
@@ -1008,6 +1061,55 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
             </div>
           )}
 
+          {step === 'credit-input' && (
+            <div className="space-y-4">
+              <div className="rounded-xl bg-amber-50 border border-amber-100 p-4 text-center">
+                <p className="text-sm text-gray-600">Amount due from customer</p>
+                <p className="text-2xl font-bold text-gray-900 mt-1">{money(cart.total)}</p>
+              </div>
+              <div>
+                <label htmlFor="credit-customer" className="text-sm font-medium text-gray-700 mb-2 block">
+                  Registered customer *
+                </label>
+                <select
+                  id="credit-customer"
+                  value={creditCustomerId}
+                  onChange={(event) => { setCreditCustomerId(event.target.value); setError(''); }}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
+                  autoFocus
+                >
+                  <option value="">Select a customer</option>
+                  {creditCustomers.filter((customer) => customer.is_active === 1).map((customer) => (
+                    <option key={customer.id} value={customer.id}>
+                      {customer.name}{customer.phone ? ` · ${customer.phone}` : ''}
+                    </option>
+                  ))}
+                </select>
+                {creditCustomers.filter((customer) => customer.is_active === 1).length === 0 && (
+                  <p className="mt-2 text-xs text-amber-800">No active customers are registered. Ask the store owner to add the customer in the Customers book before selling on credit.</p>
+                )}
+              </div>
+              {error && <p className="text-sm text-red-600 text-center">{error}</p>}
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setError(''); setStep('method'); }}
+                  className="flex-1 py-3 border border-gray-300 rounded-xl text-gray-700 font-medium touch-target"
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCreditSaleConfirm}
+                  disabled={!creditCustomerId}
+                  className="flex-1 py-3 bg-primary text-white rounded-xl font-medium touch-target disabled:opacity-50"
+                >
+                  Record Credit Sale
+                </button>
+              </div>
+            </div>
+          )}
+
           {step === 'cash-input' && (
             <div className="space-y-4">
               <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-4 text-center">
@@ -1090,6 +1192,11 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
               <h3 className="text-xl font-bold text-gray-900 mb-1">Sale Complete!</h3>
               <p className="text-primary font-mono font-bold text-lg mb-1">{saleResult.receiptNumber}</p>
               <p className="text-2xl font-bold text-gray-900 mb-4">{money(saleResult.total)}</p>
+              {saleResult.paymentMethod === 'credit' && (
+                <p className="w-full rounded-xl bg-amber-50 px-3 py-2 mb-3 text-center text-sm text-amber-900">
+                  Credit for {saleResult.customerName}; outstanding {money(saleResult.creditBalance || 0)}
+                </p>
+              )}
 
               {isPrinting && (
                 <div className="flex items-center gap-2 text-gray-500 text-sm mb-4">

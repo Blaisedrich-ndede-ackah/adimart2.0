@@ -23,8 +23,9 @@ There is **no first-party application server**. Production deployment is static 
 
 | Area | Capabilities |
 |------|----------------|
-| POS | Scan/search products, cart, stock checks, cash / Paystack / split checkout, discounts with owner PIN gate, PDF/WhatsApp receipts, Bluetooth print |
-| Inventory | Product CRUD, categories, stock adjust, CSV import, barcode labels, reorder suggestions, stock audit/export |
+| POS | Scan/search products, cart, stock checks, cash / Paystack / split / registered-customer credit checkout, discounts with owner PIN gate, PDF/WhatsApp receipts, Bluetooth print |
+| Customers | Owner-managed customer book, opening balances, credit-sale balances, payment history, and active/archive status |
+| Inventory | Product CRUD, owner-managed product categories, stock adjust, CSV import, barcode labels, reorder suggestions, stock audit/export |
 | Purchasing | Supplier directory, purchase orders, partial receipts, stock/cost updates |
 | Reports | Period filters, revenue mix, charts, product performance, expenses, net profit, CSV/PDF export |
 | Staff & security | Owner/cashier roles, 4-digit PIN auth, biometric unlock, discount authorization |
@@ -196,13 +197,13 @@ Default store settings on create:
 1. Scan barcode (ZXing, prefers rear camera, debounce ~2s) or search/manual entry. Search supports typo-tolerant product names, partial barcode matches, recent/frequently sold ranking, and browser-supported speech input.
 2. Cart quantity with stock validation + scan beeps (`scanBeep.ts`)  
 3. Checkout overlay steps: payment method → discount → optional owner PIN → payment details → processing → success
-4. Payment methods: `cash` | `paystack` | `split` | manual MTN/Telecel/AirtelTigo MoMo | bank transfer | card terminal. Manual methods record a required reference offline; they do not initiate a provider payment. Manual collections are kept separate from Paystack payout totals.
+4. Payment methods: `cash` | `paystack` | `split` | manual MTN/Telecel/AirtelTigo MoMo | bank transfer | card terminal | `credit`. Manual methods record a required reference offline; they do not initiate a provider payment. Credit sales require a customer name, store the outstanding balance, and allow the owner to record later cash payments from Sales history. Manual collections are kept separate from Paystack payout totals.
 5. Cashiers can hold a cart and resume it later in the same POS session. Resuming another held sale holds the active cart automatically.
 6. On success: stock deducted locally, receipt `#ADM-YYYYMMDD-XXXX`, optional Bluetooth print, PDF/share/WhatsApp, auto-sync trigger
 
 ### 6.5 Inventory (owner)
 
-- Product CRUD with categories: Food, Beverages, Dairy, Household, Electronics, Clothing, Health, Other
+- Product CRUD with store-specific categories; owners can add, rename, and delete categories. Renaming updates products, and deleting moves assigned products to Other.
 - Loading skeleton and guided empty/error states
 - Activate/deactivate products
 - Stock adjust: set / add / subtract (UI collects reason; reason is **not persisted**)
@@ -244,7 +245,7 @@ The owner landing screen summarizes today's completed sales, cash and non-cash p
 ### 7.1 Local database (Dexie)
 
 **Database name:** `AdimatPOS`  
-**Schema versions:** v2 base tables; v8 adds cash book, warehouse, supplier/purchasing, and backup snapshot tables; v9 adds expense workflows; v10 adds local PIN lockout storage
+**Schema versions:** v2 base tables; v8 adds cash book, warehouse, supplier/purchasing, and backup snapshot tables; v9 adds expense workflows; v10 adds local PIN lockout storage; v12 adds product categories; v13 adds credit payment history
 **Module:** `src/lib/dexie.ts`
 
 | Table | Primary key | Notable indexes / fields |
@@ -252,9 +253,12 @@ The owner landing screen summarizes today's completed sales, cash and non-cash p
 | `stores` | `id` | name, address, support_number, discount_cap_percentage, pin_on_discount_enabled (0/1), created_at, synced |
 | `users` | `id` | store_id, name, role (`owner`\|`cashier`), pin_hash, is_active (0/1), can_access_cashbook, created_at, synced |
 | `products` | `id` | store_id, name, category, sku_type, barcode, cost_price, selling_price, stock_level, is_active, created_at, updated_at, synced |
-| `transactions` | `id` | store_id, receipt_number, cashier_id/name, totals, payment_method, cash/paystack amounts, paystack_reference, status, created_at, synced |
+| `product_categories` | `id` | store_id, name, is_active, created_at, updated_at, synced |
+| `transactions` | `id` | store_id, receipt_number, cashier_id/name, totals, payment_method, cash/paystack amounts, customer details, credit paid/balance, status, created_at, synced |
 | `transaction_items` | `id` | store_id, transaction_id, product_id, product_name, quantity, unit_price, subtotal, synced |
+| `credit_payments` | `id` | store_id, transaction_id, amount, payment_method, created_by, created_at, synced |
 | `expenses` | `id` | store_id, description, category, amount, notes, receipt image, recurring template/month, created_at, updated_at, synced |
+| `cash_book_entries` | `id` | store_id, entry_type, category, Cash/Bank account, amount, entry_date, created_at, synced |
 | `recurring_expenses` | `id` | store_id, category, amount, due_day, is_active, synced |
 | `expense_budgets` | `id` | store_id, category, monthly_limit, synced |
 | `pin_attempts` | `store_id` | failed_attempts, locked_until, updated_at; local-only account PIN lockout state |
@@ -507,7 +511,7 @@ npm run preview
 3. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`  
 4. Optionally harden RLS before multi-tenant production use  
 
-For an existing cloud project, run `supabase-migrate-purchasing-reorder.sql` before syncing reorder levels, suppliers, or purchase orders. Run `supabase-migrate-expense-workflows.sql` in the Supabase SQL Editor before syncing receipt photos, recurring expenses, or category budgets; it creates the required tables and requests a PostgREST schema-cache refresh. If sync still reports `PGRST205`, verify both tables exist in the `public` schema and rerun the migration. Run `supabase-migrate-manual-payments.sql` before syncing manually recorded payment methods.
+For an existing cloud project, run `supabase-migrate-purchasing-reorder.sql` before syncing reorder levels, suppliers, or purchase orders. Run `supabase-migrate-expense-workflows.sql` in the Supabase SQL Editor before syncing receipt photos, recurring expenses, or category budgets; it creates the required tables and requests a PostgREST schema-cache refresh. If sync still reports `PGRST205`, verify both tables exist in the `public` schema and rerun the migration. Run `supabase-migrate-manual-payments.sql` before syncing manually recorded payment methods, `supabase-migrate-credit-sales-bank-categories.sql` before syncing credit sales, product categories, or Cash/Bank cash-book entries, and then `supabase-migrate-customers-book.sql` before syncing registered customers, opening balances, or customer-linked credit sales. The customer migration links existing credit sales to registered customers where customer details were recorded.
 
 ### 13.5 Hosting
 

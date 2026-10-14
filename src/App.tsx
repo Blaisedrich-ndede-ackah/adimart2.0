@@ -23,6 +23,7 @@ import CashBookPage from '@/pages/CashBookPage';
 import SettingsPage from '@/pages/SettingsPage';
 import DevicesPage from '@/pages/DevicesPage';
 import TransactionsPage from '@/pages/TransactionsPage';
+import CustomersPage from '@/pages/CustomersPage';
 import SubscriptionPage from '@/pages/SubscriptionPage';
 import WarehousePage from '@/pages/WarehousePage';
 import EcommercePage from '@/pages/EcommercePage';
@@ -170,7 +171,7 @@ export default function App() {
   useEffect(() => {
     // Cashiers cannot stay on owner-only pages after switch/login
     if (currentUser?.role !== 'cashier') return;
-    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription'];
+    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'customers'];
     const ecommerceOk = (currentUser.can_manage_ecommerce ?? 0) === 1;
     const cashbookOk = canAccessCashbook(currentUser);
     if (
@@ -320,6 +321,8 @@ export default function App() {
         return <POSPage onNavigate={setCurrentPage} />;
       case 'transactions':
         return <TransactionsPage />;
+      case 'customers':
+        return role === 'owner' ? <CustomersPage /> : <POSPage />;
       case 'devices':
         return <DevicesPage />;
       case 'learn':

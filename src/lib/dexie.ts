@@ -61,6 +61,40 @@ export interface LocalStore {
   synced: number;
 }
 
+export interface LocalProductCategory {
+  id: string;
+  store_id: string;
+  name: string;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export interface LocalCustomer {
+  id: string;
+  store_id: string;
+  name: string;
+  phone: string;
+  opening_balance: number;
+  opening_balance_remaining: number;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export interface LocalCustomerOpeningPayment {
+  id: string;
+  store_id: string;
+  customer_id: string;
+  entry_type: 'opening_balance' | 'payment';
+  amount: number;
+  created_by: string;
+  created_at: string;
+  synced: number;
+}
+
 export interface LocalUser {
   id: string;
   store_id: string; // Links user to a store
@@ -158,10 +192,16 @@ export interface LocalTransaction {
   paystack_reference: string;
   manual_payment_amount?: number;
   payment_reference?: string;
+  customer_name?: string;
+  customer_phone?: string;
+  customer_id?: string | null;
+  credit_paid_amount?: number;
+  credit_balance?: number;
   status: 'completed' | 'pending';
   location_id?: string;
   sale_mode?: 'retail' | 'wholesale';
   created_at: string;
+  updated_at?: string;
   synced: number;
 }
 
@@ -178,6 +218,17 @@ export interface LocalTransactionItem {
   pack_size?: number;
   base_quantity?: number;
   batch_id?: string;
+  synced: number;
+}
+
+export interface LocalCreditPayment {
+  id: string;
+  store_id: string;
+  transaction_id: string;
+  amount: number;
+  payment_method: 'cash';
+  created_by: string;
+  created_at: string;
   synced: number;
 }
 
@@ -325,6 +376,7 @@ export interface LocalCashBookEntry {
   created_at: string;
   updated_at: string;
   synced: number;
+  account_type?: 'cash' | 'bank';
 }
 
 export interface SyncMeta {
@@ -358,8 +410,12 @@ class AdimatDB extends Dexie {
   stores!: Table<LocalStore, string>;
   users!: Table<LocalUser, string>;
   products!: Table<LocalProduct, string>;
+  product_categories!: Table<LocalProductCategory, string>;
+  customers!: Table<LocalCustomer, string>;
+  customer_opening_payments!: Table<LocalCustomerOpeningPayment, string>;
   transactions!: Table<LocalTransaction, string>;
   transaction_items!: Table<LocalTransactionItem, string>;
+  credit_payments!: Table<LocalCreditPayment, string>;
   expenses!: Table<LocalExpense, string>;
   recurring_expenses!: Table<LocalRecurringExpense, string>;
   expense_budgets!: Table<LocalExpenseBudget, string>;
@@ -527,6 +583,19 @@ class AdimatDB extends Dexie {
     });
     this.version(11).stores({
       campaign_cache: 'id',
+    });
+    this.version(12).stores({
+      product_categories: 'id, store_id, name, is_active, synced',
+    });
+    this.version(13).stores({
+      credit_payments: 'id, store_id, transaction_id, created_at, synced',
+    });
+    this.version(14).stores({
+      customers: 'id, store_id, name, phone, is_active, synced',
+      customer_opening_payments: 'id, store_id, customer_id, created_at, synced',
+    });
+    this.version(15).stores({
+      transactions: 'id, store_id, receipt_number, cashier_id, customer_id, status, created_at, synced',
     });
   }
 }
@@ -1208,6 +1277,156 @@ export async function getCurrentStoreTransactions(): Promise<LocalTransaction[]>
   return db.transactions.where('store_id').equals(storeId).toArray();
 }
 
+export async function getCurrentStoreCustomers(): Promise<LocalCustomer[]> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) return [];
+  return db.customers.where('store_id').equals(storeId).sortBy('name');
+}
+
+export async function createCustomer(
+  name: string,
+  phone: string,
+  openingBalance: number
+): Promise<LocalCustomer> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) throw new Error('No store selected');
+  const cleanName = name.trim();
+  const cleanPhone = phone.trim();
+  const balance = toMoneyAmount(openingBalance);
+  if (!cleanName) throw new Error('Customer name is required.');
+  if (cleanName.length > 255 || cleanPhone.length > 30) throw new Error('Customer name or phone is too long.');
+  if (!Number.isFinite(balance) || balance < 0) throw new Error('Opening balance must be zero or greater.');
+  const existing = await db.customers.where('store_id').equals(storeId).toArray();
+  if (existing.some((customer) =>
+    customer.is_active === 1 &&
+    customer.name.trim().toLowerCase() === cleanName.toLowerCase() &&
+    customer.phone.trim() === cleanPhone
+  )) {
+    throw new Error('An active customer with this name and phone is already registered.');
+  }
+  const now = new Date().toISOString();
+  const customer: LocalCustomer = {
+    id: generateId(),
+    store_id: storeId,
+    name: cleanName,
+    phone: cleanPhone,
+    opening_balance: balance,
+    opening_balance_remaining: balance,
+    is_active: 1,
+    created_at: now,
+    updated_at: now,
+    synced: 0,
+  };
+  await db.transaction('rw', db.customers, db.customer_opening_payments, async () => {
+    await db.customers.add(customer);
+    if (balance > 0) {
+      await db.customer_opening_payments.add({
+        id: generateId(),
+        store_id: storeId,
+        customer_id: customer.id,
+        entry_type: 'opening_balance',
+        amount: balance,
+        created_by: 'Opening balance',
+        created_at: now,
+        synced: 0,
+      });
+    }
+  });
+  return customer;
+}
+
+export async function updateCustomer(
+  customerId: string,
+  name: string,
+  phone: string
+): Promise<void> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) throw new Error('No store selected');
+  const customer = await db.customers.get(customerId);
+  if (!customer || customer.store_id !== storeId) throw new Error('Customer not found.');
+  const cleanName = name.trim();
+  const cleanPhone = phone.trim();
+  if (!cleanName) throw new Error('Customer name is required.');
+  if (cleanName.length > 255 || cleanPhone.length > 30) throw new Error('Customer name or phone is too long.');
+  await db.customers.update(customerId, {
+    name: cleanName,
+    phone: cleanPhone,
+    updated_at: new Date().toISOString(),
+    synced: 0,
+  });
+}
+
+export async function setCustomerActive(customerId: string, isActive: boolean): Promise<void> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) throw new Error('No store selected');
+  const customer = await db.customers.get(customerId);
+  if (!customer || customer.store_id !== storeId) throw new Error('Customer not found.');
+  if (isActive && customer.is_active === 1) return;
+  if (!isActive) {
+    const transactions = await db.transactions
+      .where('customer_id')
+      .equals(customerId)
+      .toArray();
+    if (
+      toMoneyAmount(customer.opening_balance_remaining) > 0 ||
+      transactions.some((transaction) => toMoneyAmount(transaction.credit_balance || 0) > 0)
+    ) {
+      throw new Error('A customer with an outstanding balance cannot be archived.');
+    }
+  }
+  await db.customers.update(customerId, {
+    is_active: isActive ? 1 : 0,
+    updated_at: new Date().toISOString(),
+    synced: 0,
+  });
+}
+
+export async function getCustomerOpeningPayments(customerId: string): Promise<LocalCustomerOpeningPayment[]> {
+  return db.customer_opening_payments
+    .where('customer_id')
+    .equals(customerId)
+    .sortBy('created_at');
+}
+
+export async function recordCustomerOpeningPayment(
+  customerId: string,
+  amount: number,
+  createdBy: string
+): Promise<LocalCustomerOpeningPayment> {
+  const paymentAmount = toMoneyAmount(amount);
+  if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+    throw new Error('Payment amount must be greater than zero.');
+  }
+  const storeId = await getCurrentStoreId();
+  if (!storeId) throw new Error('No store selected');
+  return db.transaction('rw', db.customers, db.customer_opening_payments, async () => {
+    const customer = await db.customers.get(customerId);
+    if (!customer || customer.store_id !== storeId || customer.is_active !== 1) {
+      throw new Error('Active customer not found.');
+    }
+    const remaining = toMoneyAmount(customer.opening_balance_remaining);
+    if (paymentAmount > remaining) throw new Error('Payment cannot exceed the opening balance remaining.');
+    const now = new Date().toISOString();
+    const payment: LocalCustomerOpeningPayment = {
+      id: generateId(),
+      store_id: customer.store_id,
+      customer_id: customer.id,
+      entry_type: 'payment',
+      amount: paymentAmount,
+      created_by: createdBy,
+      created_at: now,
+      synced: 0,
+    };
+    await db.customer_opening_payments.add(payment);
+    await db.customers.update(customer.id, {
+      opening_balance_remaining: toMoneyAmount(remaining - paymentAmount),
+      updated_at: now,
+      synced: 0,
+    });
+    return payment;
+  });
+}
+
 export async function getTransactionsForCashier(cashierId: string): Promise<LocalTransaction[]> {
   const storeId = await getCurrentStoreId();
   if (!storeId) return [];
@@ -1222,11 +1441,182 @@ export async function getTransactionItems(transactionId: string): Promise<LocalT
   return db.transaction_items.where('transaction_id').equals(transactionId).toArray();
 }
 
+export async function recordCreditPayment(
+  transactionId: string,
+  amount: number,
+  createdBy: string
+): Promise<LocalCreditPayment> {
+  const payment = toMoneyAmount(amount);
+  if (payment <= 0) throw new Error('Payment amount must be greater than zero');
+  return db.transaction('rw', db.transactions, db.credit_payments, async () => {
+    const transaction = await db.transactions.get(transactionId);
+    if (!transaction || transaction.payment_method !== 'credit') throw new Error('Credit sale not found');
+    const balance = toMoneyAmount(transaction.credit_balance ?? transaction.total_amount);
+    if (payment > balance) throw new Error('Payment cannot exceed the outstanding balance');
+
+    const now = new Date().toISOString();
+    const creditPayment: LocalCreditPayment = {
+      id: generateId(),
+      store_id: transaction.store_id,
+      transaction_id: transaction.id,
+      amount: payment,
+      payment_method: 'cash',
+      created_by: createdBy,
+      created_at: now,
+      synced: 0,
+    };
+    await db.credit_payments.add(creditPayment);
+    await db.transactions.update(transaction.id, {
+      credit_paid_amount: toMoneyAmount((transaction.credit_paid_amount || 0) + payment),
+      credit_balance: toMoneyAmount(balance - payment),
+      updated_at: now,
+      synced: 0,
+    });
+    return creditPayment;
+  });
+}
+
+export async function getCreditPaymentsForTransaction(transactionId: string): Promise<LocalCreditPayment[]> {
+  return db.credit_payments
+    .where('transaction_id')
+    .equals(transactionId)
+    .sortBy('created_at');
+}
+
 // Get products for current store
 export async function getCurrentStoreProducts(): Promise<LocalProduct[]> {
   const storeId = await getCurrentStoreId();
   if (!storeId) return [];
   return db.products.where('store_id').equals(storeId).toArray();
+}
+
+const DEFAULT_PRODUCT_CATEGORIES = [
+  'Food', 'Beverages', 'Dairy', 'Household', 'Electronics',
+  'Clothing', 'Health', 'Accessories', 'Other',
+];
+
+export async function getCurrentStoreProductCategories(): Promise<LocalProductCategory[]> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) return [];
+
+  const [existing, products] = await Promise.all([
+    db.product_categories.where('store_id').equals(storeId).toArray(),
+    getCurrentStoreProducts(),
+  ]);
+  const existingNames = new Set(existing.map((category) => category.name.toLocaleLowerCase()));
+  const legacyNames = [...new Set([
+    ...DEFAULT_PRODUCT_CATEGORIES,
+    ...products.map((product) => product.category.trim()).filter(Boolean),
+  ])];
+  const now = new Date().toISOString();
+  const missing = legacyNames
+    .filter((name) => !existingNames.has(name.toLocaleLowerCase()))
+    .map((name): LocalProductCategory => ({
+      id: generateId(),
+      store_id: storeId,
+      name,
+      is_active: 1,
+      created_at: now,
+      updated_at: now,
+      synced: 0,
+    }));
+  if (missing.length > 0) await db.product_categories.bulkAdd(missing);
+
+  return db.product_categories
+    .where('store_id')
+    .equals(storeId)
+    .and((category) => category.is_active === 1)
+    .sortBy('name');
+}
+
+export async function createProductCategory(name: string): Promise<void> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) throw new Error('No store selected');
+  const cleanName = name.trim();
+  if (!cleanName || cleanName.length > 100) throw new Error('Category name must be between 1 and 100 characters');
+
+  const matches = await db.product_categories.where('store_id').equals(storeId).toArray();
+  const duplicate = matches.find((category) => category.name.toLocaleLowerCase() === cleanName.toLocaleLowerCase());
+  if (duplicate?.is_active === 1) throw new Error('A category with this name already exists');
+
+  const now = new Date().toISOString();
+  if (duplicate) {
+    await db.product_categories.update(duplicate.id, { name: cleanName, is_active: 1, updated_at: now, synced: 0 });
+    return;
+  }
+  await db.product_categories.add({
+    id: generateId(),
+    store_id: storeId,
+    name: cleanName,
+    is_active: 1,
+    created_at: now,
+    updated_at: now,
+    synced: 0,
+  });
+}
+
+export async function renameProductCategory(categoryId: string, name: string): Promise<void> {
+  const category = await db.product_categories.get(categoryId);
+  if (!category || category.is_active !== 1) throw new Error('Category not found');
+  const cleanName = name.trim();
+  if (!cleanName || cleanName.length > 100) throw new Error('Category name must be between 1 and 100 characters');
+
+  const otherCategories = await db.product_categories.where('store_id').equals(category.store_id).toArray();
+  if (otherCategories.some((other) => other.id !== category.id && other.is_active === 1 &&
+    other.name.toLocaleLowerCase() === cleanName.toLocaleLowerCase())) {
+    throw new Error('A category with this name already exists');
+  }
+  const now = new Date().toISOString();
+  await db.transaction('rw', db.product_categories, db.products, async () => {
+    await db.product_categories.update(category.id, { name: cleanName, updated_at: now, synced: 0 });
+    const products = await db.products
+      .where('store_id')
+      .equals(category.store_id)
+      .and((product) => product.category === category.name)
+      .toArray();
+    await Promise.all(products.map((product) => db.products.update(product.id, {
+      category: cleanName,
+      updated_at: now,
+      synced: 0,
+    })));
+  });
+}
+
+export async function deleteProductCategory(categoryId: string): Promise<void> {
+  const category = await db.product_categories.get(categoryId);
+  if (!category || category.is_active !== 1) return;
+  if (category.name.toLocaleLowerCase() === 'other') throw new Error('The Other category cannot be deleted');
+
+  const categories = await db.product_categories.where('store_id').equals(category.store_id).toArray();
+  let fallback = categories.find((item) => item.is_active === 1 && item.name.toLocaleLowerCase() === 'other');
+  const now = new Date().toISOString();
+  if (!fallback) {
+    fallback = {
+      id: generateId(),
+      store_id: category.store_id,
+      name: 'Other',
+      is_active: 1,
+      created_at: now,
+      updated_at: now,
+      synced: 0,
+    };
+  }
+  await db.transaction('rw', db.product_categories, db.products, async () => {
+    if (!categories.some((item) => item.id === fallback?.id)) {
+      await db.product_categories.add(fallback!);
+    }
+    await db.product_categories.update(category.id, { is_active: 0, updated_at: now, synced: 0 });
+    const products = await db.products
+      .where('store_id')
+      .equals(category.store_id)
+      .and((product) => product.category === category.name)
+      .toArray();
+    await Promise.all(products.map((product) => db.products.update(product.id, {
+      category: fallback!.name,
+      updated_at: now,
+      synced: 0,
+    })));
+  });
 }
 
 /**
@@ -1826,8 +2216,12 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
     | 'stores'
     | 'users'
     | 'products'
+    | 'product_categories'
+    | 'customers'
+    | 'customer_opening_payments'
     | 'transactions'
     | 'transaction_items'
+    | 'credit_payments'
     | 'expenses'
     | 'recurring_expenses'
     | 'expense_budgets'
@@ -1848,7 +2242,8 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
   try {
     // Append-only ledgers have INSERT policies but historically no UPDATE.
     // PostgREST upsert is ON CONFLICT DO UPDATE and needs UPDATE RLS (42501).
-    const appendOnly = table === 'stock_movements' || table === 'transaction_items';
+    const appendOnly =
+      table === 'stock_movements' || table === 'transaction_items' || table === 'credit_payments';
     const { error } = await supabase.from(table).upsert(rows as Record<string, unknown>[], {
       onConflict: 'id',
       ignoreDuplicates: appendOnly,
@@ -2038,6 +2433,56 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
     );
 
     const unsyncedProducts = await db.products.where('store_id').equals(storeId).and(p => p.synced === 0).toArray();
+    const unsyncedCategories = await db.product_categories
+      .where('store_id')
+      .equals(storeId)
+      .and((category) => category.synced === 0)
+      .toArray();
+    if (unsyncedCategories.length > 0) {
+      const { data: remoteCategories, error: categoryReadError } = await supabase
+        .from('product_categories')
+        .select('id, name')
+        .eq('store_id', storeId);
+      if (categoryReadError) {
+        errors.push(formatSyncError('Product categories', categoryReadError));
+      } else {
+        const remoteIdsByName = new Map(
+          (remoteCategories || []).map((category) => [
+            String(category.name || '').toLowerCase(),
+            String(category.id),
+          ])
+        );
+        const categoriesToPush = unsyncedCategories.map((category) => ({
+          ...category,
+          id: remoteIdsByName.get(category.name.toLowerCase()) || category.id,
+        }));
+        syncedCount += await upsertToSupabase(
+          'Product categories',
+          'product_categories',
+          categoriesToPush.map((category) => ({
+            id: category.id,
+            store_id: category.store_id,
+            name: category.name,
+            is_active: category.is_active === 1,
+            created_at: category.created_at,
+            updated_at: category.updated_at,
+          })),
+          async () => {
+            await db.transaction('rw', db.product_categories, async () => {
+              for (let index = 0; index < categoriesToPush.length; index += 1) {
+                const category = categoriesToPush[index];
+                const original = unsyncedCategories[index];
+                if (category.id !== original.id) {
+                  await db.product_categories.delete(original.id);
+                }
+                await db.product_categories.put({ ...category, synced: 1 });
+              }
+            });
+          },
+          errors
+        );
+      }
+    }
     syncedCount += await upsertToSupabase(
       'Products',
       'products',
@@ -2153,6 +2598,58 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
       errors
     );
 
+    const unsyncedCustomers = await db.customers
+      .where('store_id')
+      .equals(storeId)
+      .and((customer) => customer.synced === 0)
+      .toArray();
+    syncedCount += await upsertToSupabase(
+      'Customers',
+      'customers',
+      unsyncedCustomers.map((customer) => ({
+        id: customer.id,
+        store_id: customer.store_id,
+        name: customer.name,
+        phone: customer.phone,
+        opening_balance: customer.opening_balance,
+        opening_balance_remaining: customer.opening_balance_remaining,
+        is_active: customer.is_active === 1,
+        created_at: customer.created_at,
+        updated_at: customer.updated_at,
+      })),
+      async () => {
+        await Promise.all(unsyncedCustomers.map((customer) =>
+          db.customers.update(customer.id, { synced: 1 })
+        ));
+      },
+      errors
+    );
+
+    const unsyncedCustomerOpeningPayments = await db.customer_opening_payments
+      .where('store_id')
+      .equals(storeId)
+      .and((payment) => payment.synced === 0)
+      .toArray();
+    syncedCount += await upsertToSupabase(
+      'Customer opening payments',
+      'customer_opening_payments',
+      unsyncedCustomerOpeningPayments.map((payment) => ({
+        id: payment.id,
+        store_id: payment.store_id,
+        customer_id: payment.customer_id,
+        entry_type: payment.entry_type,
+        amount: payment.amount,
+        created_by: payment.created_by,
+        created_at: payment.created_at,
+      })),
+      async () => {
+        await Promise.all(unsyncedCustomerOpeningPayments.map((payment) =>
+          db.customer_opening_payments.update(payment.id, { synced: 1 })
+        ));
+      },
+      errors
+    );
+
     const unsyncedTxns = await db.transactions
       .where('store_id')
       .equals(storeId)
@@ -2177,12 +2674,43 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         paystack_reference: t.paystack_reference,
         manual_payment_amount: Number(t.manual_payment_amount) || 0,
         payment_reference: t.payment_reference || '',
+        customer_name: t.customer_name || '',
+        customer_phone: t.customer_phone || '',
+        customer_id: uuidOrNull(t.customer_id),
+        credit_paid_amount: Number(t.credit_paid_amount) || 0,
+        credit_balance: Number(t.credit_balance) || 0,
         status: t.status,
         location_id: uuidOrNull(t.location_id),
         sale_mode: t.sale_mode || 'retail',
         created_at: t.created_at,
+        updated_at: t.updated_at || t.created_at,
       })),
       async () => { await Promise.all(unsyncedTxns.map(t => db.transactions.update(t.id, { synced: 1 }))); },
+      errors
+    );
+
+    const unsyncedCreditPayments = await db.credit_payments
+      .where('store_id')
+      .equals(storeId)
+      .and((payment) => payment.synced === 0 && shouldPushLedgerRow(payment.created_at, ledgerClearedAt))
+      .toArray();
+    syncedCount += await upsertToSupabase(
+      'Credit payments',
+      'credit_payments',
+      unsyncedCreditPayments.map((payment) => ({
+        id: payment.id,
+        store_id: payment.store_id,
+        transaction_id: payment.transaction_id,
+        amount: payment.amount,
+        payment_method: payment.payment_method,
+        created_by: payment.created_by,
+        created_at: payment.created_at,
+      })),
+      async () => {
+        await Promise.all(unsyncedCreditPayments.map((payment) =>
+          db.credit_payments.update(payment.id, { synced: 1 })
+        ));
+      },
       errors
     );
 
@@ -2290,6 +2818,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         entry_type: e.entry_type,
         description: e.description,
         category: e.category,
+        account_type: e.account_type || 'cash',
         amount: e.amount,
         notes: e.notes,
         entry_date: e.entry_date,
@@ -2577,6 +3106,45 @@ export async function syncFromSupabase(opts?: {
         },
       },
       {
+        label: 'Product categories',
+        table: 'product_categories',
+        map: (row: Record<string, unknown>) => ({
+          id: row.id as string,
+          store_id: row.store_id as string,
+          name: String(row.name || ''),
+          is_active: row.is_active === false ? 0 : 1,
+          created_at: String(row.created_at || ''),
+          updated_at: String(row.updated_at || row.created_at || ''),
+          synced: 1,
+        }),
+        dbTable: db.product_categories,
+        merge: async (remote: LocalProductCategory, local: LocalProductCategory | undefined) => {
+          if (!local || local.synced !== 0) return remote;
+          return local;
+        },
+      },
+      {
+        label: 'Customers',
+        table: 'customers',
+        map: (row: Record<string, unknown>) => ({
+          id: String(row.id),
+          store_id: String(row.store_id),
+          name: String(row.name || ''),
+          phone: String(row.phone || ''),
+          opening_balance: Number(row.opening_balance) || 0,
+          opening_balance_remaining: Number(row.opening_balance_remaining) || 0,
+          is_active: row.is_active === false ? 0 : 1,
+          created_at: String(row.created_at || ''),
+          updated_at: String(row.updated_at || row.created_at || ''),
+          synced: 1,
+        }),
+        dbTable: db.customers,
+        merge: async (remote: LocalCustomer, local: LocalCustomer | undefined) => {
+          if (!local || local.synced !== 0) return remote;
+          return { ...remote, ...local, synced: 0 };
+        },
+      },
+      {
         label: 'Products',
         table: 'products',
         map: (row: Record<string, unknown>) => {
@@ -2639,13 +3207,69 @@ export async function syncFromSupabase(opts?: {
           paystack_reference: (row.paystack_reference as string) || '',
           manual_payment_amount: Number(row.manual_payment_amount) || 0,
           payment_reference: (row.payment_reference as string) || '',
+          customer_name: String(row.customer_name || ''),
+          customer_phone: String(row.customer_phone || ''),
+          customer_id: (row.customer_id as string) || null,
+          credit_paid_amount: Number(row.credit_paid_amount) || 0,
+          credit_balance: Number(row.credit_balance) || 0,
           status: row.status as 'completed' | 'pending',
           location_id: (row.location_id as string) || undefined,
           sale_mode: ((row.sale_mode as 'retail' | 'wholesale') || 'retail'),
           created_at: row.created_at as string,
+          updated_at: (row.updated_at as string) || (row.created_at as string),
           synced: 1,
         }),
         dbTable: db.transactions,
+        merge: async (remote: LocalTransaction, local: LocalTransaction | undefined) => {
+          if (!local || local.synced !== 0) return remote;
+          return {
+            ...remote,
+            ...local,
+            customer_id: local.customer_id || remote.customer_id || null,
+            synced: 0,
+          };
+        },
+      },
+      {
+        label: 'Credit payments',
+        table: 'credit_payments',
+        map: (row: Record<string, unknown>) => ({
+          id: String(row.id),
+          store_id: String(row.store_id),
+          transaction_id: String(row.transaction_id),
+          amount: Number(row.amount) || 0,
+          payment_method: 'cash' as const,
+          created_by: String(row.created_by || ''),
+          created_at: String(row.created_at || ''),
+          synced: 1,
+        }),
+        dbTable: db.credit_payments,
+        merge: async (remote: LocalCreditPayment, local: LocalCreditPayment | undefined) => {
+          if (!local || local.synced !== 0) return remote;
+          return local;
+        },
+      },
+      {
+        label: 'Customer opening payments',
+        table: 'customer_opening_payments',
+        map: (row: Record<string, unknown>) => ({
+          id: String(row.id),
+          store_id: String(row.store_id),
+          customer_id: String(row.customer_id),
+          entry_type: row.entry_type === 'opening_balance' ? 'opening_balance' : 'payment',
+          amount: Number(row.amount) || 0,
+          created_by: String(row.created_by || ''),
+          created_at: String(row.created_at || ''),
+          synced: 1,
+        }),
+        dbTable: db.customer_opening_payments,
+        merge: async (
+          remote: LocalCustomerOpeningPayment,
+          local: LocalCustomerOpeningPayment | undefined
+        ) => {
+          if (!local || local.synced !== 0) return remote;
+          return local;
+        },
       },
       {
         label: 'Transaction items',
@@ -2748,6 +3372,7 @@ export async function syncFromSupabase(opts?: {
           entry_type: row.entry_type === 'income' ? 'income' : 'expense',
           description: (row.description as string) || '',
           category: (row.category as string) || 'Other',
+          account_type: row.account_type === 'bank' ? 'bank' : 'cash',
           amount: Number(row.amount) || 0,
           notes: (row.notes as string) || '',
           entry_date: String(row.entry_date || row.created_at || '').slice(0, 10),
@@ -3122,8 +3747,10 @@ export async function restoreStoreFromCloud(
       db.stores,
       db.users,
       db.products,
+      db.product_categories,
       db.transactions,
       db.transaction_items,
+      db.credit_payments,
       db.expenses,
       db.recurring_expenses,
       db.expense_budgets,
@@ -3142,8 +3769,10 @@ export async function restoreStoreFromCloud(
       await db.stores.clear();
       await db.users.clear();
       await db.products.clear();
+      await db.product_categories.clear();
       await db.transactions.clear();
       await db.transaction_items.clear();
+      await db.credit_payments.clear();
       await db.expenses.clear();
       await db.recurring_expenses.clear();
       await db.expense_budgets.clear();

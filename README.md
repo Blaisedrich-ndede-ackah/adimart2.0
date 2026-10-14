@@ -15,13 +15,13 @@ A mobile-first Point of Sale (POS) and inventory management Progressive Web App 
 - **Manual Entry** — Search products by name or enter barcodes manually
 - **Real-time Cart** — Add, remove, and adjust quantities with instant totals
 - **Stock Validation** — Prevents selling out-of-stock items, warns on low stock
-- **Flexible Payments** — Cash, Paystack, split payments, or offline-recorded MTN/Telecel/AirtelTigo MoMo, bank transfers, and standalone card-terminal payments with references
+- **Flexible Payments** — Cash, Paystack, split payments, offline-recorded MTN/Telecel/AirtelTigo MoMo, bank transfers, card-terminal payments, and customer credit with outstanding-balance tracking
 - **Hold Sale** — Park a cart while serving another customer, then resume it in the same POS session
 - **Discount Management** — Apply discounts with optional owner PIN authorization for amounts exceeding the configured cap
 - **PDF Receipts** — Generate, download, and share receipts as PDF files
 
 ### 📦 Inventory Management
-- **Product Catalog** — Full CRUD operations for products with categories
+- **Product Catalog** — Full product CRUD, plus owner-managed category create, rename, and delete
 - **Optional Product Photos** — Add a picture when creating/editing a product; shown in inventory and at checkout
 - **Stock Tracking** — Automatic stock deduction on sales, low stock and out-of-stock alerts
 - **Stock Adjustment** — Manually add, remove, or set stock levels with reason tracking
@@ -35,8 +35,18 @@ A mobile-first Point of Sale (POS) and inventory management Progressive Web App 
 ### 📊 Reports & Analytics
 - **Period Filtering** — Today, This Week, This Month views
 - **Revenue Breakdown** — Cash vs non-cash collections; manual payments are kept separate from Paystack payout totals
+- **Credit Sales** — Save customer details, track outstanding balances, and record cash repayments from Sales history
 - **7-Day Rolling Chart** — Visual revenue trend using bar charts
 - **Transaction Register** — Chronological audit log with expandable item details
+
+### 📒 Cash Book
+- **Cash and Bank Accounts** — Record each income or expense against Cash or Bank and review each account’s net volume
+
+### 👥 Customers Book
+- **Registered Customers** — Store customer names and phone numbers and review their credit sales and account balances
+- **Starting Balances** — Enter existing customer debt when registering a customer; repayments are recorded against that opening balance
+- **Credit Checkout** — Credit sales require selecting an active registered customer and add the sale to their outstanding balance
+- **Customer Records** — Edit customer details or archive/reactivate a customer; customers with outstanding debt cannot be archived
 
 ### ⚙️ Settings
 - **Store Profile** — Configure store name, address, and support number
@@ -188,6 +198,8 @@ If your Supabase project was created before these features, run `supabase-migrat
 For self-serve Paystack subscription renewals, also run `supabase-migrate-subscription-payments.sql`.
 For automatic session timeout (idle PIN lock), run `supabase-migrate-session-timeout.sql`.
 For manually recorded MoMo, bank transfer, and card-terminal sales, run `supabase-migrate-manual-payments.sql`.
+For credit sales, owner-managed product categories, and Cash/Bank cash-book entries, run `supabase-migrate-credit-sales-bank-categories.sql` before syncing.
+For the Customers book and registered-customer credit checkout, run `supabase-migrate-customers-book.sql` after the credit-sales migration and before syncing. It also links existing credit sales to registered customer records.
 
 ### Multi-store on one device
 

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Package, AlertTriangle, TrendingDown, DollarSign, Coins,
-  Plus, Search, ArrowUpDown, Edit, Trash2, ToggleLeft, ToggleRight,
+  Plus, Search, ArrowUpDown, Edit, Trash2, ToggleLeft, ToggleRight, Tags,
   PackagePlus, RefreshCw, Upload, Barcode, Bluetooth
 } from 'lucide-react';
 import {
@@ -9,6 +9,7 @@ import {
   deleteProductCompletely,
   LocalProduct,
   getCurrentStoreProducts,
+  getCurrentStoreProductCategories,
   syncBidirectional,
   syncStockFast,
 } from '@/lib/dexie';
@@ -25,6 +26,7 @@ import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 import { playScanBeep } from '@/lib/scanBeep';
 import ProductImage from '@/components/ProductImage';
 import InventoryInsights from '@/components/InventoryInsights';
+import ManageProductCategoriesModal from '@/components/ManageProductCategoriesModal';
 
 type SortMode = 'recent' | 'alpha' | 'stock-low' | 'stock-high';
 
@@ -35,7 +37,7 @@ export default function InventoryPage({
   openAddOnLoad?: boolean;
   onQuickActionHandled?: () => void;
 }) {
-  const { currentStore } = useAuthStore();
+  const { currentStore, currentUser } = useAuthStore();
   const money = useFormatMoney();
   const [products, setProducts] = useState<LocalProduct[]>([]);
   const [productsLoaded, setProductsLoaded] = useState(false);
@@ -57,6 +59,7 @@ export default function InventoryPage({
   const [scannedBarcodeForAdd, setScannedBarcodeForAdd] = useState<string | null>(null);
   const [highlightedProductId, setHighlightedProductId] = useState<string | null>(null);
   const [showInsights, setShowInsights] = useState(false);
+  const [showManageCategories, setShowManageCategories] = useState(false);
   const lastSyncAtRef = useRef(0);
 
   useEffect(() => {
@@ -73,11 +76,11 @@ export default function InventoryPage({
     const paintLocal = async () => {
       const allProducts = await getCurrentStoreProducts();
       const aligned = await alignProductsWithBatchStock(allProducts);
+      const productCategories = await getCurrentStoreProductCategories();
       setProducts(aligned);
       setProductsLoaded(true);
       setInventoryLoadError('');
-      const cats = [...new Set(aligned.map((p) => p.category || 'Other'))].sort();
-      setCategories(['All', ...cats]);
+      setCategories(['All', ...productCategories.map((category) => category.name)]);
     };
 
     try {
@@ -107,8 +110,8 @@ export default function InventoryPage({
         setProducts(allProducts);
         setProductsLoaded(true);
         setInventoryLoadError('');
-        const cats = [...new Set(allProducts.map((p) => p.category || 'Other'))].sort();
-        setCategories(['All', ...cats]);
+        const productCategories = await getCurrentStoreProductCategories();
+        setCategories(['All', ...productCategories.map((category) => category.name)]);
         setSyncStatus('Showing this browser’s inventory');
         window.setTimeout(() => setSyncStatus(''), 2500);
       } catch {
@@ -309,6 +312,17 @@ export default function InventoryPage({
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {currentUser?.role === 'owner' && (
+              <button
+                type="button"
+                onClick={() => setShowManageCategories(true)}
+                className="bg-white/20 p-2 rounded-xl touch-target"
+                title="Manage product categories"
+                aria-label="Manage product categories"
+              >
+                <Tags className="w-4 h-4 text-white" />
+              </button>
+            )}
             <button
               onClick={handleRefresh}
               className="bg-white/20 p-2 rounded-xl touch-target"
@@ -623,7 +637,17 @@ export default function InventoryPage({
         onClose={() => { setShowAddProduct(false); setEditProduct(null); setScannedBarcodeForAdd(null); }}
         onSaved={() => { setScannedBarcodeForAdd(null); void loadProducts({ sync: true }); }}
         editProduct={editProduct}
+        categories={categories.filter((category) => category !== 'All')}
         initialBarcode={scannedBarcodeForAdd}
+      />
+
+      <ManageProductCategoriesModal
+        isOpen={showManageCategories}
+        onClose={() => setShowManageCategories(false)}
+        onChanged={() => {
+          setSelectedCategory('All');
+          void loadProducts({ sync: false });
+        }}
       />
 
       <StockAdjustment

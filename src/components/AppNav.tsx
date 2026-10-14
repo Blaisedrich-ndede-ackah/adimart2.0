@@ -3,6 +3,7 @@ import {
   ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, House,
   CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare,
   ShoppingCart, Megaphone,
+  ContactRound,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -44,6 +45,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         { id: 'home', label: 'Home', icon: House, show: isOwner },
         { id: 'pos', label: t('nav.pos'), icon: ScanBarcode, show: true },
         { id: 'transactions', label: isOwner ? t('nav.sales') : t('nav.mySales'), icon: Receipt, show: true },
+        { id: 'customers', label: 'Customers', icon: ContactRound, show: isOwner },
         { id: 'expenses', label: t('nav.expenses'), icon: PiggyBank, show: true },
         { id: 'cashbook', label: t('nav.cashbook'), icon: BookOpen, show: cashbookOk },
         { id: 'devices', label: t('nav.devices'), icon: Bluetooth, show: true },

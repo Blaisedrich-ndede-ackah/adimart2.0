@@ -9,6 +9,9 @@ import {
   getCurrentStoreExpenses,
   getCurrentStoreId,
   type LocalCashBookEntry,
+  type LocalCustomer,
+  type LocalCustomerOpeningPayment,
+  type LocalCreditPayment,
   type LocalExpense,
   type LocalTransaction,
 } from './dexie';
@@ -49,7 +52,9 @@ export interface FinancialPosition {
   asOfDate: string;
   inventory: number;
   cash: number;
+  bank: number;
   digitalCollections: number;
+  accountsReceivable: number;
   totalAssets: number;
   loans: number;
   totalLiabilities: number;
@@ -101,13 +106,16 @@ export async function buildStoreFinancialStatements(
   const storeId = await getCurrentStoreId();
   if (!storeId) throw new Error('No store selected');
 
-  const [store, transactions, items, products, expenses, cashBook] = await Promise.all([
+  const [store, transactions, items, products, expenses, cashBook, creditPayments, customers, openingPayments] = await Promise.all([
     db.stores.get(storeId),
     db.transactions.where('store_id').equals(storeId).toArray(),
     db.transaction_items.where('store_id').equals(storeId).toArray(),
     db.products.where('store_id').equals(storeId).toArray(),
     getCurrentStoreExpenses(),
     getCurrentStoreCashBookEntries(),
+    db.credit_payments.where('store_id').equals(storeId).toArray(),
+    db.customers.where('store_id').equals(storeId).toArray(),
+    db.customer_opening_payments.where('store_id').equals(storeId).toArray(),
   ]);
 
   const storeName = store?.name?.trim() || 'Store';
@@ -137,6 +145,9 @@ export async function buildStoreFinancialStatements(
 
   const periodCash = cashBook.filter((e) => inRange(e.entry_date, fromDate, toDate));
   const toDateCash = cashBook.filter((e) => e.entry_date <= toDate);
+  const toDateCreditPayments = creditPayments.filter(
+    (payment) => dateOnlyFromIso(payment.created_at) <= toDate
+  );
 
   const otherIncomeRows: { category: string; amount: number }[] = [];
   let cashBookOperatingExpenses = 0;
@@ -201,6 +212,11 @@ export async function buildStoreFinancialStatements(
     toDateTxns,
     toDateExpenses,
     toDateCash,
+    toDateCreditPayments,
+    toDateCustomers: customers.filter((customer) => dateOnlyFromIso(customer.created_at) <= toDate),
+    toDateCustomerOpeningPayments: openingPayments.filter(
+      (payment) => dateOnlyFromIso(payment.created_at) <= toDate
+    ),
     items,
     productMap,
   });
@@ -219,6 +235,9 @@ function buildPosition(params: {
   toDateTxns: LocalTransaction[];
   toDateExpenses: LocalExpense[];
   toDateCash: LocalCashBookEntry[];
+  toDateCreditPayments: LocalCreditPayment[];
+  toDateCustomers: LocalCustomer[];
+  toDateCustomerOpeningPayments: LocalCustomerOpeningPayment[];
   items: { transaction_id: string; product_id: string; quantity: number; base_quantity?: number | null }[];
   productMap: Map<string, { cost_price: number }>;
 }): FinancialPosition {
@@ -230,7 +249,11 @@ function buildPosition(params: {
   );
 
   const posCash = roundMoney(
-    params.toDateTxns.reduce((sum, t) => sum + (Number(t.cash_amount) || 0), 0)
+    params.toDateTxns.reduce((sum, t) => sum + (Number(t.cash_amount) || 0), 0) +
+      params.toDateCreditPayments.reduce((sum, payment) => sum + payment.amount, 0) +
+      params.toDateCustomerOpeningPayments
+        .filter((payment) => payment.entry_type === 'payment')
+        .reduce((sum, payment) => sum + payment.amount, 0)
   );
   const digitalCollections = roundMoney(
     params.toDateTxns.reduce(
@@ -239,8 +262,10 @@ function buildPosition(params: {
     )
   );
 
-  let cashBookIncomeExSales = 0;
-  let cashBookExpenses = 0;
+  let cashBookCashIncomeExSales = 0;
+  let cashBookBankIncome = 0;
+  let cashBookCashExpenses = 0;
+  let cashBookBankExpenses = 0;
   let loans = 0;
   let capital = 0;
   let drawings = 0;
@@ -250,13 +275,18 @@ function buildPosition(params: {
   for (const entry of params.toDateCash) {
     const cat = normCat(entry.category);
     const amount = Number(entry.amount) || 0;
+    const isBank = entry.account_type === 'bank';
     if (entry.entry_type === 'income') {
-      if (!POS_SALES_INCOME.has(cat)) cashBookIncomeExSales += amount;
+      if (!POS_SALES_INCOME.has(cat)) {
+        if (isBank) cashBookBankIncome += amount;
+        else cashBookCashIncomeExSales += amount;
+      }
       if (LIABILITY_INCOME.has(cat)) loans += amount;
       else if (EQUITY_INCOME.has(cat)) capital += amount;
       else if (!POS_SALES_INCOME.has(cat)) otherIncome += amount;
     } else {
-      cashBookExpenses += amount;
+      if (isBank) cashBookBankExpenses += amount;
+      else cashBookCashExpenses += amount;
       if (DRAWINGS.has(cat)) drawings += amount;
       else cashBookOpex += amount;
     }
@@ -264,8 +294,37 @@ function buildPosition(params: {
 
   const expensePage = params.toDateExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
 
-  // POS cash sales plus cash-book movements, without double-counting "Cash sales".
-  const cash = roundMoney(posCash + cashBookIncomeExSales - cashBookExpenses);
+  // POS cash sales plus cash-book cash movements, without double-counting "Cash sales".
+  const cash = roundMoney(posCash + cashBookCashIncomeExSales - cashBookCashExpenses);
+  const bank = roundMoney(cashBookBankIncome - cashBookBankExpenses);
+  const paidByCreditSale = new Map<string, number>();
+  for (const payment of params.toDateCreditPayments) {
+    paidByCreditSale.set(
+      payment.transaction_id,
+      (paidByCreditSale.get(payment.transaction_id) || 0) + payment.amount
+    );
+  }
+  const salesReceivable = params.toDateTxns.reduce((sum, transaction) => {
+    if (transaction.payment_method !== 'credit') return sum;
+    const paid = paidByCreditSale.get(transaction.id) || 0;
+    return sum + Math.max(0, (Number(transaction.total_amount) || 0) - paid);
+  }, 0);
+  const paidOpeningBalances = new Map<string, number>();
+  for (const payment of params.toDateCustomerOpeningPayments) {
+    if (payment.entry_type !== 'payment') continue;
+    paidOpeningBalances.set(
+      payment.customer_id,
+      (paidOpeningBalances.get(payment.customer_id) || 0) + payment.amount
+    );
+  }
+  const openingReceivable = params.toDateCustomers.reduce(
+    (sum, customer) => sum + Math.max(
+      0,
+      (Number(customer.opening_balance) || 0) - (paidOpeningBalances.get(customer.id) || 0)
+    ),
+    0
+  );
+  const accountsReceivable = roundMoney(salesReceivable + openingReceivable);
 
   const txnIds = new Set(params.toDateTxns.map((t) => t.id));
   const cogsToDate = roundMoney(
@@ -287,7 +346,7 @@ function buildPosition(params: {
   capital = roundMoney(capital);
   drawings = roundMoney(drawings);
 
-  const totalAssets = roundMoney(inventory + cash + digitalCollections);
+  const totalAssets = roundMoney(inventory + cash + bank + digitalCollections + accountsReceivable);
   const totalLiabilities = loans;
   const equityBeforePlug = roundMoney(capital + retainedEarnings - drawings);
   const balancingDifference = roundMoney(totalAssets - totalLiabilities - equityBeforePlug);
@@ -296,7 +355,9 @@ function buildPosition(params: {
   const lines: StatementLine[] = [
     { label: 'Inventory (current, at cost)', amount: inventory },
     { label: 'Cash (POS cash + cash book)', amount: cash },
+    { label: 'Bank (cash book)', amount: bank },
     { label: 'Non-cash collections', amount: digitalCollections },
+    { label: 'Accounts receivable (credit sales)', amount: accountsReceivable },
     { label: 'Total assets', amount: totalAssets, emphasis: 'total' },
     { label: 'Loans', amount: loans },
     { label: 'Total liabilities', amount: totalLiabilities, emphasis: 'subtotal' },
@@ -314,7 +375,9 @@ function buildPosition(params: {
     asOfDate: params.asOfDate,
     inventory,
     cash,
+    bank,
     digitalCollections,
+    accountsReceivable,
     totalAssets,
     loans,
     totalLiabilities,

@@ -85,11 +85,12 @@ export async function applyLocalStoreLedgerClear(
   storeId: string,
   clearedAt: string
 ): Promise<StoreLedgerClearCounts> {
-  const [txns, items, expenses, cashBook] = await Promise.all([
+  const [txns, items, expenses, cashBook, creditPayments] = await Promise.all([
     db.transactions.where('store_id').equals(storeId).toArray(),
     db.transaction_items.where('store_id').equals(storeId).toArray(),
     db.expenses.where('store_id').equals(storeId).toArray(),
     db.cash_book_entries.where('store_id').equals(storeId).toArray(),
+    db.credit_payments.where('store_id').equals(storeId).toArray(),
   ]);
 
   const keepTxnIds = new Set(
@@ -99,12 +100,16 @@ export async function applyLocalStoreLedgerClear(
   const itemsToDelete = items.filter((i) => !keepTxnIds.has(i.transaction_id));
   const expensesToDelete = expenses.filter((e) => ledgerCreatedAtOrBefore(e.created_at, clearedAt));
   const cashToDelete = cashBook.filter((e) => ledgerCreatedAtOrBefore(e.created_at, clearedAt));
+  const creditPaymentsToDelete = creditPayments.filter((payment) =>
+    !keepTxnIds.has(payment.transaction_id) || ledgerCreatedAtOrBefore(payment.created_at, clearedAt)
+  );
 
   await db.transaction(
     'rw',
-    [db.transactions, db.transaction_items, db.expenses, db.cash_book_entries, db.stores],
+    [db.transactions, db.transaction_items, db.credit_payments, db.expenses, db.cash_book_entries, db.stores],
     async () => {
       await Promise.all(itemsToDelete.map((i) => db.transaction_items.delete(i.id)));
+      await Promise.all(creditPaymentsToDelete.map((payment) => db.credit_payments.delete(payment.id)));
       await Promise.all(txnsToDelete.map((t) => db.transactions.delete(t.id)));
       await Promise.all(expensesToDelete.map((e) => db.expenses.delete(e.id)));
       await Promise.all(cashToDelete.map((e) => db.cash_book_entries.delete(e.id)));
@@ -139,17 +144,19 @@ async function dropLocalLedgerNotInCloud(
   storeId: string,
   clearedAt: string | null
 ): Promise<StoreLedgerClearCounts> {
-  const [remoteTxnIds, remoteExpenseIds, remoteCashIds] = await Promise.all([
+  const [remoteTxnIds, remoteExpenseIds, remoteCashIds, remoteCreditPaymentIds] = await Promise.all([
     fetchStoreRowIds('transactions', storeId),
     fetchStoreRowIds('expenses', storeId),
     fetchStoreRowIds('cash_book_entries', storeId),
+    fetchStoreRowIds('credit_payments', storeId),
   ]);
 
-  const [txns, items, expenses, cashBook] = await Promise.all([
+  const [txns, items, expenses, cashBook, creditPayments] = await Promise.all([
     db.transactions.where('store_id').equals(storeId).toArray(),
     db.transaction_items.where('store_id').equals(storeId).toArray(),
     db.expenses.where('store_id').equals(storeId).toArray(),
     db.cash_book_entries.where('store_id').equals(storeId).toArray(),
+    db.credit_payments.where('store_id').equals(storeId).toArray(),
   ]);
 
   const keepTxnIds = new Set(
@@ -165,12 +172,17 @@ async function dropLocalLedgerNotInCloud(
   const cashToDelete = cashBook.filter(
     (e) => !shouldKeepLocalLedgerRow(e.id, e.created_at, e.synced, remoteCashIds, clearedAt)
   );
+  const creditPaymentsToDelete = creditPayments.filter((payment) =>
+    !keepTxnIds.has(payment.transaction_id) ||
+    !shouldKeepLocalLedgerRow(payment.id, payment.created_at, payment.synced, remoteCreditPaymentIds, clearedAt)
+  );
 
   await db.transaction(
     'rw',
-    [db.transactions, db.transaction_items, db.expenses, db.cash_book_entries],
+    [db.transactions, db.transaction_items, db.credit_payments, db.expenses, db.cash_book_entries],
     async () => {
       await Promise.all(itemsToDelete.map((i) => db.transaction_items.delete(i.id)));
+      await Promise.all(creditPaymentsToDelete.map((payment) => db.credit_payments.delete(payment.id)));
       await Promise.all(txnsToDelete.map((t) => db.transactions.delete(t.id)));
       await Promise.all(expensesToDelete.map((e) => db.expenses.delete(e.id)));
       await Promise.all(cashToDelete.map((e) => db.cash_book_entries.delete(e.id)));
