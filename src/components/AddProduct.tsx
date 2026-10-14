@@ -67,6 +67,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const cameraImageInputRef = useRef<HTMLInputElement>(null);
 
   const stopCameraScanner = useCallback(() => {
     if (readerRef.current) {
@@ -226,9 +227,11 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
       setImageUrl(dataUrl);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to process image');
+    } finally {
+      setImageBusy(false);
+      if (imageInputRef.current) imageInputRef.current.value = '';
+      if (cameraImageInputRef.current) cameraImageInputRef.current.value = '';
     }
-    setImageBusy(false);
-    if (imageInputRef.current) imageInputRef.current.value = '';
   };
 
   const handleSave = async () => {
@@ -408,6 +411,15 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
                     <ImagePlus className="w-3.5 h-3.5" />
                     {imageBusy ? 'Processing…' : imageUrl ? 'Choose another photo' : 'Choose from phone'}
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => cameraImageInputRef.current?.click()}
+                    disabled={imageBusy}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 border border-primary/20 text-primary rounded-lg text-xs font-medium touch-target disabled:opacity-50"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    Take photo
+                  </button>
                   {imageUrl && (
                     <button
                       type="button"
@@ -425,6 +437,14 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
               ref={imageInputRef}
               type="file"
               accept="image/*"
+              className="hidden"
+              onChange={(e) => void handleImagePick(e.target.files?.[0] || null)}
+            />
+            <input
+              ref={cameraImageInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
               className="hidden"
               onChange={(e) => void handleImagePick(e.target.files?.[0] || null)}
             />
