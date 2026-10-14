@@ -296,10 +296,6 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
     method: PaymentMethod
   ) {
     if (!currentStore) return;
-    if (!getBluetoothHardwareStatus().printerConnected) {
-      setPrintError('Printer not connected.');
-      return;
-    }
     setIsPrinting(true);
     setPrintError('');
 

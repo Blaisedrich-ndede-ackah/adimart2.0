@@ -12,6 +12,7 @@ import {
 import { useAuthStore } from '@/store/useAuthStore';
 import { reprintTransactionReceipt } from '@/lib/receiptReprint';
 import { isPrinterConnected } from '@/lib/bluetoothPeripherals';
+import { openComputerPrinterWindow } from '@/lib/printService';
 import { parseOtherCharges } from '@/lib/otherCharges';
 import { getPaymentMethodLabel } from '@/lib/paymentMethods';
 import { useFormatMoney } from '@/lib/currency';
@@ -63,16 +64,13 @@ export default function TransactionsPage() {
 
   const handleReprint = async (txn: LocalTransaction) => {
     setStatus('');
-    if (!isPrinterConnected()) {
-      setStatus('No printer connected. Pair one under Devices first.');
-      return;
-    }
+    const printWindow = isPrinterConnected() ? undefined : openComputerPrinterWindow();
     setPrintingId(txn.id);
-    const result = await reprintTransactionReceipt(txn);
+    const printResult = await reprintTransactionReceipt(txn, printWindow);
     setStatus(
-      result.success
+      printResult.success
         ? `Reprinted ${txn.receipt_number}`
-        : result.error || 'Reprint failed'
+        : printResult.error || 'Reprint failed'
     );
     setPrintingId(null);
     setTimeout(() => setStatus(''), 4000);

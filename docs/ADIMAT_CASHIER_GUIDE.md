@@ -12,7 +12,7 @@ Open Adimat and sign in with your own cashier PIN. Never use another staff membe
 2. Tap the product to add it. Check the cart items, quantities, and total before checkout.
 3. Choose Cash, Paystack, Split, or record an offline MTN MoMo, Telecel Cash, AirtelTigo Money, bank transfer, or card-terminal payment. Enter the payment reference for manual methods. Paystack needs internet; manual payment recording does not contact a provider.
 4. Wait for the payment result. Do not start the same checkout again while it is processing.
-5. After confirmation, provide the customer with the receipt: PDF, share, WhatsApp where supported, or a connected Bluetooth printer.
+5. After confirmation, provide the customer with the receipt: PDF, share, WhatsApp where supported, a connected Bluetooth printer, or choose a computer printer from the print dialog when Bluetooth is not connected.
 
 Adimat checks stock during a sale. If an item is out of stock or the quantity is unavailable, do not adjust stock yourself; tell the owner. If a discount needs owner authorization, ask the owner to enter their PIN.
 

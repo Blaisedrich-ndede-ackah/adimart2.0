@@ -47,12 +47,16 @@ export async function buildReceiptDataFromTransaction(
 }
 
 export async function reprintTransactionReceipt(
-  txn: LocalTransaction
+  txn: LocalTransaction,
+  computerPrintWindow?: Window | null
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const data = await buildReceiptDataFromTransaction(txn);
-    return await printReceipt(data);
+    return await printReceipt(data, computerPrintWindow);
   } catch (err: unknown) {
+    if (computerPrintWindow && !computerPrintWindow.closed) {
+      computerPrintWindow.close();
+    }
     const msg = err instanceof Error ? err.message : String(err);
     return { success: false, error: msg };
   }

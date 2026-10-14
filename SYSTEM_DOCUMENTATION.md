@@ -411,6 +411,7 @@ Store owners set **Settings → Security → Automatic session timeout** (`store
 - Payload chunking (~100 bytes)
 - ESC/POS receipts; barcode labels via `barcodeLabels.ts` (Code128)
 - Connection is in-memory for the session (reconnect from Settings as needed)
+- When no Bluetooth printer is connected, checkout and receipt reprints open the computer's native print dialog so a system printer can be selected.
 
 ### 10.3 Barcode scanning
 
@@ -427,7 +428,7 @@ Store owners set **Settings → Security → Automatic session timeout** (`store
 ### 10.5 Receipts & sharing
 
 - Module: `src/lib/receiptGenerator.ts`
-- PDF generation (jsPDF), text share, WhatsApp deep link, optional auto-print when Bluetooth connected
+- PDF generation (jsPDF), text share, WhatsApp deep link, ESC/POS printing over Bluetooth, or computer-printer selection from the browser print dialog when Bluetooth is disconnected
 
 ---
 

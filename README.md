@@ -43,7 +43,7 @@ A mobile-first Point of Sale (POS) and inventory management Progressive Web App 
 - **Discount Controls** — Set discount cap percentage and toggle PIN enforcement
 - **User Management** — Add/remove cashiers and owners with 4-digit PINs
 - **Automatic Session Timeout** — Owners set how long the till may sit idle (off, or 1–30 minutes; default 5). Staff are returned to the PIN screen, the cart is cleared, and a refresh cannot restore a stale session.
-- **Thermal Printer** — Connect Bluetooth thermal printers for receipt printing
+- **Receipt Printing** — Print directly to a connected Bluetooth thermal printer, or choose a computer printer from the browser print dialog
 - **Cloud Sync** — Manual sync to Supabase with last-synced timestamp. Owners use **Settings**; cashiers use **My Sales** or **Devices → Cloud Sync** (Full Sync / Pull / Push) so they can send sales and pick up stock updates.
 - **Backup & Sync Health** — Daily on-device snapshots, downloadable store backups, restore, pending-change count, and last sync/backup errors
 
@@ -299,7 +299,7 @@ The app also uses `@zxing/library` for on-device camera scanning. Supported form
 
 ### Thermal Printer (ESC/POS)
 
-`src/lib/printService.ts` formats receipts with ESC/POS commands and transmits them over the connected Bluetooth printer. Tested with:
+`src/lib/printService.ts` formats receipts with ESC/POS commands for connected Bluetooth printers. When no Bluetooth printer is connected, checkout and receipt reprints open the computer's native print dialog so the user can select an available printer. Tested with:
 - Generic 58mm Bluetooth thermal printers
 - Most printers using the `000018f0-0000-1000-8000-00805f9b34fb` service UUID
 

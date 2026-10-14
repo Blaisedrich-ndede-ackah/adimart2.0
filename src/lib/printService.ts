@@ -1,6 +1,6 @@
 /**
- * ESC/POS print service for Adimat POS thermal printers.
- * Formats receipt payloads and transmits them over the connected Bluetooth printer.
+ * Receipt printing for Adimat POS: ESC/POS over Bluetooth when connected,
+ * otherwise the computer's native print dialog.
  */
 
 import {
@@ -50,6 +50,126 @@ export type ReceiptData = EscPosReceiptData;
 
 function amt(data: EscPosReceiptData, n: number): string {
   return formatOfficialMoney(n, data.currencyCode);
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[character] || character);
+}
+
+/** Open the native print window synchronously from a user gesture (needed for reprints). */
+export function openComputerPrinterWindow(): Window | null {
+  if (typeof window === 'undefined') return null;
+  return window.open('', '_blank');
+}
+
+function printOnComputer(
+  data: EscPosReceiptData,
+  printWindow: Window | null | undefined
+): { success: boolean; error?: string } {
+  const target = printWindow === undefined ? openComputerPrinterWindow() : printWindow;
+  if (!target || target.closed) {
+    return {
+      success: false,
+      error: 'Could not open the computer print dialog. Allow pop-ups and try again.',
+    };
+  }
+
+  const itemRows = data.items.map((item) => `
+    <div class="item">
+      <div>${escapeHtml(item.name)}</div>
+      <div class="item-detail">
+        <span>${escapeHtml(`${item.quantity} x ${amt(data, item.unitPrice)}`)}</span>
+        <span>${escapeHtml(amt(data, item.subtotal))}</span>
+      </div>
+    </div>
+  `).join('');
+  const charges = (data.otherCharges || [])
+    .filter((charge) => charge?.amount)
+    .map((charge) => `<div class="row"><span>${escapeHtml(charge.label)}:</span><span>${escapeHtml(amt(data, charge.amount))}</span></div>`)
+    .join('');
+  const paymentMethod = data.paymentMethod === 'paystack'
+    ? 'Paystack'
+    : getPaymentMethodLabel(data.paymentMethod);
+  const paymentDetails = [
+    data.paymentMethod === 'split' && data.cashAmount
+      ? `<div class="row"><span>Cash:</span><span>${escapeHtml(amt(data, data.cashAmount))}</span></div>`
+      : '',
+    data.paymentMethod === 'split' && data.paystackAmount
+      ? `<div class="row"><span>Mobile money/card:</span><span>${escapeHtml(amt(data, data.paystackAmount))}</span></div>`
+      : '',
+    data.manualPaymentAmount
+      ? `<div class="row"><span>Amount received:</span><span>${escapeHtml(amt(data, data.manualPaymentAmount))}</span></div>`
+      : '',
+    data.paymentReference
+      ? `<div class="row"><span>Reference:</span><span>${escapeHtml(data.paymentReference)}</span></div>`
+      : '',
+  ].join('');
+
+  target.document.open();
+  target.document.write(`<!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Receipt ${escapeHtml(data.receiptNumber)}</title>
+        <style>
+          @page { size: 80mm auto; margin: 0; }
+          * { box-sizing: border-box; }
+          body { margin: 0; padding: 4mm; color: #111; font: 12px/1.35 Arial, sans-serif; }
+          .receipt { width: 72mm; max-width: 100%; margin: 0 auto; }
+          .center { text-align: center; }
+          .store { font-size: 17px; font-weight: 700; }
+          .rule { border: 0; border-top: 1px dashed #333; margin: 8px 0; }
+          .row, .item-detail { display: flex; justify-content: space-between; gap: 8px; }
+          .row span:last-child, .item-detail span:last-child { text-align: right; }
+          .item { margin: 6px 0; overflow-wrap: anywhere; }
+          .item-detail { margin-top: 2px; }
+          .total { font-size: 15px; font-weight: 700; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <main class="receipt">
+          <header class="center">
+            <div class="store">${escapeHtml(data.storeName || 'Store')}</div>
+            ${data.storeAddress ? `<div>${escapeHtml(data.storeAddress)}</div>` : ''}
+            ${data.supportNumber ? `<div>Tel: ${escapeHtml(data.supportNumber)}</div>` : ''}
+          </header>
+          <hr class="rule">
+          <div class="row"><span>Receipt:</span><span>${escapeHtml(data.receiptNumber)}</span></div>
+          <div class="row"><span>Cashier:</span><span>${escapeHtml(data.cashierName)}</span></div>
+          <div class="row"><span>Date:</span><span>${escapeHtml(data.dateTime)}</span></div>
+          <hr class="rule">
+          <strong>Items</strong>
+          ${itemRows}
+          <hr class="rule">
+          <div class="row"><span>Subtotal:</span><span>${escapeHtml(amt(data, data.subtotal))}</span></div>
+          ${data.discount > 0 ? `<div class="row"><span>Discount:</span><span>-${escapeHtml(amt(data, data.discount))}</span></div>` : ''}
+          ${charges}
+          <hr class="rule">
+          <div class="row total"><span>TOTAL:</span><span>${escapeHtml(amt(data, data.total))}</span></div>
+          <hr class="rule">
+          <div class="row"><span>Payment:</span><span>${escapeHtml(paymentMethod)}</span></div>
+          ${paymentDetails}
+          <p class="center">Thank you for shopping with us!<br>Powered by Adimat POS</p>
+        </main>
+      </body>
+    </html>`);
+  target.document.close();
+
+  target.addEventListener('afterprint', () => target.close(), { once: true });
+  target.setTimeout(() => {
+    if (!target.closed) {
+      target.focus();
+      target.print();
+    }
+  }, 250);
+  return { success: true };
 }
 
 function textToBytes(text: string): number[] {
@@ -240,10 +360,11 @@ export function buildEscPosTestPage(deviceName?: string): Uint8Array {
  * Format and transmit a receipt to the connected Bluetooth thermal printer.
  */
 export async function printReceipt(
-  data: EscPosReceiptData
+  data: EscPosReceiptData,
+  computerPrintWindow?: Window | null
 ): Promise<{ success: boolean; error?: string }> {
   if (!isPrinterConnected()) {
-    return { success: false, error: 'No printer connected. Pair a printer in Settings → Bluetooth Hardware.' };
+    return printOnComputer(data, computerPrintWindow);
   }
 
   try {
