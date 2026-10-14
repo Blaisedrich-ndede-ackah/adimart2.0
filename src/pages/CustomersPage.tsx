@@ -280,7 +280,7 @@ export default function CustomersPage() {
         </div>
       </div>
 
-      <div className="page-content space-y-4">
+      <div className="page-body space-y-4">
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
           <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
             <p className="text-xs text-gray-500">Registered customers</p>
