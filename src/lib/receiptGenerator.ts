@@ -25,11 +25,16 @@ export interface ReceiptData {
   paymentMethod: string;
   cashAmount?: number;
   paystackAmount?: number;
+  momoAmount?: number;
+  chequeAmount?: number;
   manualPaymentAmount?: number;
   paystackReference?: string;
   paymentReference?: string;
   customerName?: string;
   outstandingBalance?: number;
+  amountPaid?: number;
+  balanceAfterPayment?: number;
+  receiptPurpose?: 'sale' | 'credit-payment';
   currencyCode?: string;
 }
 
@@ -254,6 +259,7 @@ function generateReceiptPDF(data: ReceiptData): jsPDF {
 }
 
 function generateOfficialReceiptPdf(data: ReceiptData): FormalPdf {
+  const isCreditPayment = data.receiptPurpose === 'credit-payment';
   const pdf = new FormalPdf(
     orgFromStore({
       name: data.storeName,
@@ -263,18 +269,23 @@ function generateOfficialReceiptPdf(data: ReceiptData): FormalPdf {
       currency_code: data.currencyCode,
     }),
     {
-      title: 'Official receipt',
+      title: isCreditPayment ? 'Customer payment receipt' : 'Official receipt',
       subtitle: `Receipt ${data.receiptNumber}`,
-      period: `Date of sale: ${data.dateTime}`,
-      documentLabel: 'OFFICIAL RECEIPT',
-      notes: [
-        'This document is an official receipt for goods sold. Please retain it for your records.',
-        'Thank you for your custom.',
-      ],
+      period: `Date of ${isCreditPayment ? 'payment' : 'sale'}: ${data.dateTime}`,
+      documentLabel: isCreditPayment ? 'CUSTOMER PAYMENT RECEIPT' : 'OFFICIAL RECEIPT',
+      notes: isCreditPayment
+        ? [
+            'This receipt confirms a payment against the customer account balance.',
+            'Please retain it for your records.',
+          ]
+        : [
+            'This document is an official receipt for goods sold. Please retain it for your records.',
+            'Thank you for your custom.',
+          ],
     }
   );
 
-  pdf.section('Sale details');
+  pdf.section(isCreditPayment ? 'Payment details' : 'Sale details');
   pdf.kvTable([
     { label: 'Receipt number', value: data.receiptNumber },
     { label: 'Date and time', value: data.dateTime },
@@ -282,27 +293,35 @@ function generateOfficialReceiptPdf(data: ReceiptData): FormalPdf {
     { label: 'Document date', value: formatOfficialDate(new Date()), emphasis: 'muted' },
   ]);
 
-  pdf.section('Items');
-  pdf.dataTable(
-    ['Description', 'Qty', 'Unit price', 'Amount'],
-    data.items.map((item) => [
-      item.name,
-      String(item.quantity),
-      formatGhsOfficial(item.unitPrice, data.currencyCode),
-      formatGhsOfficial(item.subtotal, data.currencyCode),
-    ]),
-    [4, 1, 2, 2]
-  );
+  if (!isCreditPayment) {
+    pdf.section('Items');
+    pdf.dataTable(
+      ['Description', 'Qty', 'Unit price', 'Amount'],
+      data.items.map((item) => [
+        item.name,
+        String(item.quantity),
+        formatGhsOfficial(item.unitPrice, data.currencyCode),
+        formatGhsOfficial(item.subtotal, data.currencyCode),
+      ]),
+      [4, 1, 2, 2]
+    );
+  }
 
   const totalRows = [
-    { label: 'Subtotal', value: formatGhsOfficial(data.subtotal, data.currencyCode) },
+    ...(!isCreditPayment
+      ? [{ label: 'Subtotal', value: formatGhsOfficial(data.subtotal, data.currencyCode) }]
+      : []),
     ...(data.discount > 0
       ? [{ label: 'Discount', value: formatGhsOfficial(-data.discount, data.currencyCode) }]
       : []),
     ...(data.otherCharges || [])
       .filter((c) => c?.amount)
       .map((c) => ({ label: c.label, value: formatGhsOfficial(c.amount, data.currencyCode) })),
-    { label: 'Amount payable', value: formatGhsOfficial(data.total, data.currencyCode), emphasis: 'total' as const },
+    {
+      label: isCreditPayment ? 'Payment received' : 'Amount payable',
+      value: formatGhsOfficial(data.total, data.currencyCode),
+      emphasis: 'total' as const,
+    },
   ];
   pdf.section('Totals');
   pdf.kvTable(totalRows);
@@ -313,6 +332,18 @@ function generateOfficialReceiptPdf(data: ReceiptData): FormalPdf {
   const paymentRows = [
     { label: 'Method', value: methodLabel },
     ...(data.customerName ? [{ label: 'Customer', value: data.customerName }] : []),
+    ...(data.receiptPurpose === 'credit-payment'
+      ? [
+          { label: 'Amount paid', value: formatGhsOfficial(data.amountPaid || 0, data.currencyCode), emphasis: 'subtotal' as const },
+          { label: 'Outstanding balance', value: formatGhsOfficial(data.balanceAfterPayment || 0, data.currencyCode), emphasis: 'total' as const },
+        ]
+      : []),
+    ...(data.receiptPurpose !== 'credit-payment' && data.paymentMethod === 'credit'
+      ? [
+          { label: 'Amount paid', value: formatGhsOfficial(data.amountPaid || 0, data.currencyCode) },
+          { label: 'Outstanding balance', value: formatGhsOfficial(data.balanceAfterPayment ?? data.outstandingBalance ?? 0, data.currencyCode), emphasis: 'total' as const },
+        ]
+      : []),
     ...(data.outstandingBalance !== undefined && data.outstandingBalance > 0
       ? [{ label: 'Credit due', value: formatGhsOfficial(data.outstandingBalance, data.currencyCode) }]
       : []),
@@ -321,6 +352,12 @@ function generateOfficialReceiptPdf(data: ReceiptData): FormalPdf {
       : []),
     ...(data.paymentMethod === 'split' && data.paystackAmount
       ? [{ label: 'Mobile money / card portion', value: formatGhsOfficial(data.paystackAmount, data.currencyCode) }]
+      : []),
+    ...(data.momoAmount
+      ? [{ label: 'MoMo', value: formatGhsOfficial(data.momoAmount, data.currencyCode) }]
+      : []),
+    ...(data.chequeAmount
+      ? [{ label: 'Cheque', value: formatGhsOfficial(data.chequeAmount, data.currencyCode) }]
       : []),
     ...(data.manualPaymentAmount
       ? [{ label: 'Amount received', value: formatGhsOfficial(data.manualPaymentAmount, data.currencyCode) }]
@@ -476,6 +513,13 @@ function generateReceiptText(data: ReceiptData): string {
   const methodLabel = data.paymentMethod === 'paystack' ? 'Mobile Money/Card' : getPaymentMethodLabel(data.paymentMethod);
   lines.push(leftRight('Payment:', methodLabel));
   if (data.customerName) lines.push(leftRight('  Customer:', data.customerName));
+  if (data.receiptPurpose === 'credit-payment') {
+    lines.push(leftRight('Amount paid:', amt(data, data.amountPaid || 0)));
+    lines.push(leftRight('Balance remaining:', amt(data, data.balanceAfterPayment || 0)));
+  } else if (data.paymentMethod === 'credit') {
+    lines.push(leftRight('Amount paid:', amt(data, data.amountPaid || 0)));
+    lines.push(leftRight('Balance remaining:', amt(data, data.balanceAfterPayment ?? data.outstandingBalance ?? 0)));
+  }
   if (data.outstandingBalance !== undefined && data.outstandingBalance > 0) {
     lines.push(leftRight('  Credit due:', amt(data, data.outstandingBalance)));
   }
@@ -484,6 +528,8 @@ function generateReceiptText(data: ReceiptData): string {
     if (data.cashAmount) lines.push(leftRight('  Cash:', amt(data, data.cashAmount)));
     if (data.paystackAmount) lines.push(leftRight('  MoMo:', amt(data, data.paystackAmount)));
   }
+  if (data.momoAmount) lines.push(leftRight('  MoMo:', amt(data, data.momoAmount)));
+  if (data.chequeAmount) lines.push(leftRight('  Cheque:', amt(data, data.chequeAmount)));
   if (data.manualPaymentAmount) lines.push(leftRight('  Amount received:', amt(data, data.manualPaymentAmount)));
   const reference = data.paymentReference || data.paystackReference;
   if (reference) lines.push(leftRight('  Reference:', reference));

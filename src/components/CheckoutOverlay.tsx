@@ -50,6 +50,7 @@ interface SaleResult {
   customerName?: string;
   customerPhone?: string;
   creditBalance?: number;
+  customerBalance?: number;
 }
 
 export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnectPrinter }: CheckoutOverlayProps) {
@@ -157,7 +158,9 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       paystackReference: result.paystackReference,
       paymentReference: result.paymentReference,
       customerName: result.customerName,
-      outstandingBalance: result.creditBalance,
+      outstandingBalance: method === 'credit' ? undefined : result.creditBalance,
+      amountPaid: method === 'credit' ? 0 : result.total,
+      balanceAfterPayment: result.customerBalance ?? result.creditBalance,
     };
   }
 
@@ -307,6 +310,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         customerName,
         customerPhone,
         creditBalance: method === 'credit' ? result.total : 0,
+        customerBalance: method === 'credit' ? result.customerBalance : undefined,
       };
       setSaleResult(completed);
       setStep('success');
@@ -1194,7 +1198,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
               <p className="text-2xl font-bold text-gray-900 mb-4">{money(saleResult.total)}</p>
               {saleResult.paymentMethod === 'credit' && (
                 <p className="w-full rounded-xl bg-amber-50 px-3 py-2 mb-3 text-center text-sm text-amber-900">
-                  Credit for {saleResult.customerName}; outstanding {money(saleResult.creditBalance || 0)}
+                  Credit for {saleResult.customerName}; account balance {money(saleResult.customerBalance ?? saleResult.creditBalance ?? 0)}
                 </p>
               )}
 

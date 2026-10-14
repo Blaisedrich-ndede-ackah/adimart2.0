@@ -6,6 +6,7 @@ import {
   type LocalProduct,
   type LocalStockBatch,
   type LocalStockMovement,
+  type LocalSaleReturn,
   type LocalStore,
   type LocalUser,
 } from '@/lib/dexie';
@@ -903,7 +904,7 @@ export async function syncProductStockLevel(productId: string): Promise<number> 
   if (product?.store_id) {
     emitStockChanged({
       storeId: product.store_id,
-      reason: 'adjust',
+      reason: 'return',
       changes: [{ productId, totalQty: total }],
     });
   }
@@ -1682,6 +1683,145 @@ export async function adjustLocationStock(params: {
   }
 
   await syncProductStockLevel(params.productId);
+}
+
+export async function processSaleReturn(params: {
+  storeId: string;
+  userId: string;
+  transactionId: string;
+  transactionItemId: string;
+  quantity: number;
+  reason: string;
+  photoDataUrl: string;
+}): Promise<LocalSaleReturn> {
+  const quantity = Number(params.quantity);
+  const reason = params.reason.trim();
+  if (!Number.isInteger(quantity) || quantity <= 0) {
+    throw new Error('Return quantity must be a whole number greater than zero.');
+  }
+  if (!reason || reason.length > 500) throw new Error('Enter a return reason (up to 500 characters).');
+  if (params.photoDataUrl && !params.photoDataUrl.startsWith('data:image/')) {
+    throw new Error('Return attachment must be an image.');
+  }
+
+  await ensureStoreLocations(params.storeId);
+  const now = nowIso();
+  const returnRecord = await db.transaction(
+    'rw',
+    [
+      db.transactions,
+      db.transaction_items,
+      db.sales_returns,
+      db.locations,
+      db.stock_batches,
+      db.stock_movements,
+      db.products,
+    ],
+    async () => {
+      const [transaction, item] = await Promise.all([
+        db.transactions.get(params.transactionId),
+        db.transaction_items.get(params.transactionItemId),
+      ]);
+      if (
+        !transaction ||
+        transaction.store_id !== params.storeId ||
+        transaction.status !== 'completed' ||
+        !item ||
+        item.store_id !== params.storeId ||
+        item.transaction_id !== transaction.id
+      ) {
+        throw new Error('Original sale item was not found.');
+      }
+      const priorReturns = await db.sales_returns
+        .where('transaction_item_id')
+        .equals(item.id)
+        .toArray();
+      const returnedAlready = priorReturns.reduce((sum, record) => sum + Number(record.quantity || 0), 0);
+      if (returnedAlready + quantity > item.quantity + 0.0001) {
+        throw new Error(`Only ${Math.max(0, item.quantity - returnedAlready)} more item(s) can be returned.`);
+      }
+      const product = await db.products.get(item.product_id);
+      if (!product || product.store_id !== params.storeId) {
+        throw new Error('The sold product is no longer available in this store.');
+      }
+      const locations = await db.locations.where('store_id').equals(params.storeId).toArray();
+      const locationId =
+        locations.find((location) => location.id === transaction.location_id && location.is_active === 1)?.id ||
+        locations.find((location) => location.is_default === 1 && location.is_active === 1)?.id ||
+        locations.find((location) => location.location_type === 'shop' && location.is_active === 1)?.id;
+      if (!locationId) throw new Error('No active shop location is available to restock the return.');
+
+      const packSize = Math.max(1, Number(item.pack_size) || 1);
+      const unitsPerSoldUnit = item.unit_type === 'pack' ? packSize : 1;
+      const stockQuantity = Math.round(quantity * unitsPerSoldUnit);
+      const batch: LocalStockBatch = {
+        id: generateId(),
+        store_id: params.storeId,
+        product_id: product.id,
+        location_id: locationId,
+        batch_code: 'RETURN',
+        expiry_date: null,
+        quantity: stockQuantity,
+        cost_price: product.cost_price || 0,
+        created_at: now,
+        updated_at: now,
+        synced: 0,
+      };
+      const movement: LocalStockMovement = {
+        id: generateId(),
+        store_id: params.storeId,
+        product_id: product.id,
+        batch_id: batch.id,
+        from_location_id: null,
+        to_location_id: locationId,
+        movement_type: 'return',
+        quantity: stockQuantity,
+        note: `Return for ${transaction.receipt_number}: ${reason}`,
+        user_id: params.userId,
+        created_at: now,
+        synced: 0,
+      };
+      const record: LocalSaleReturn = {
+        id: generateId(),
+        store_id: params.storeId,
+        transaction_id: transaction.id,
+        transaction_item_id: item.id,
+        product_id: product.id,
+        product_name: item.product_name,
+        quantity,
+        stock_quantity: stockQuantity,
+        reason,
+        photo_data_url: params.photoDataUrl,
+        receipt_number: transaction.receipt_number,
+        location_id: locationId,
+        created_by: params.userId,
+        created_at: now,
+        synced: 0,
+      };
+      await db.stock_batches.add(batch);
+      await db.stock_movements.add(movement);
+      await db.sales_returns.add(record);
+      const allBatches = await db.stock_batches.where('product_id').equals(product.id).toArray();
+      const totalStock = allBatches.reduce((sum, stockBatch) =>
+        stockBatch.store_id === params.storeId ? sum + toQty(stockBatch.quantity) : sum, 0
+      );
+      await db.products.update(product.id, {
+        stock_level: totalStock,
+        updated_at: now,
+        synced: 0,
+      });
+      return record;
+    }
+  );
+
+  const totalQty = await getProductTotalStock(returnRecord.product_id);
+  emitStockChanged({
+    storeId: params.storeId,
+    locationId: returnRecord.location_id,
+    reason: 'return',
+    changes: [{ productId: returnRecord.product_id, totalQty }],
+  });
+  return returnRecord;
 }
 
 export function canUserSellWholesale(user: LocalUser | null | undefined): boolean {

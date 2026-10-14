@@ -26,6 +26,12 @@ Record expenses in Expenses; attach a receipt photo when available. Set monthly 
 
 Reports can be filtered to today, this week, or this month. Review sales by payment method, products, expenses, cashier activity, and estimated net profit. Export supported reports to CSV or PDF. Use Cash Book to monitor cash movements and manage cashier access in Settings → Staff → Perms.
 
+## Customers, credit repayments, and returns
+
+Register customers in Customers before making a credit sale. Add only starting debt that is not already recorded as a credit sale. Customer credit sales and starting debt appear together as one outstanding account balance. Record repayments from the customer account using cash, MoMo, cheque, or a split across these methods. Payments reduce the oldest debt first, and each payment has a printable/shareable receipt showing the amount paid and remaining balance.
+
+Open Returns to select the original receipt and sold item, enter the returned quantity and reason, and optionally capture or attach a product or receipt photo. Processing a return restocks the item at the sale's shop location and records it in return history. Returns are restock-only; handle any customer refund separately.
+
 ## Online shop and subscription
 
 If the administrator enables the public storefront, sync the store and open Online to copy the share link, list products, and review pay-on-delivery orders. Give cashiers order-management permission only when needed.

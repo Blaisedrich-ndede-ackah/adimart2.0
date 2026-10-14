@@ -6,9 +6,11 @@ const BACKUP_TABLES = [
   'product_categories',
   'customers',
   'customer_opening_payments',
+  'customer_account_receipts',
   'transactions',
   'transaction_items',
   'credit_payments',
+  'sales_returns',
   'expenses',
   'recurring_expenses',
   'expense_budgets',
@@ -138,7 +140,9 @@ export async function restoreStoreBackup(file: File, currentStoreId: string): Pr
       (name === 'product_categories' ||
       name === 'customers' ||
       name === 'customer_opening_payments' ||
-      name === 'credit_payments' ? [] : undefined);
+      name === 'customer_account_receipts' ||
+      name === 'credit_payments' ||
+      name === 'sales_returns' ? [] : undefined);
     if (!Array.isArray(rows) || !rows.every((row) => isRecord(row) && row.store_id === currentStoreId)) {
       throw new Error(`The backup contains invalid ${name} records.`);
     }
@@ -164,7 +168,8 @@ export async function restoreStoreBackup(file: File, currentStoreId: string): Pr
 export async function getStoreSyncHealth(storeId: string) {
   const syncable = [
     db.users, db.products, db.product_categories, db.customers, db.customer_opening_payments,
-    db.transactions, db.transaction_items, db.credit_payments, db.expenses,
+    db.transactions, db.transaction_items, db.credit_payments, db.customer_account_receipts,
+    db.sales_returns, db.expenses,
     db.recurring_expenses, db.expense_budgets,
     db.cash_book_entries, db.locations, db.stock_batches, db.stock_movements,
     db.online_orders, db.online_order_items, db.suppliers, db.purchase_orders,

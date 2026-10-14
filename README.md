@@ -402,7 +402,7 @@ To install on iPhone or iPad:
 
 MIT License — see LICENSE file for details.
 
-## Support
+  ## Support
 
 For issues and feature requests, please open a GitHub issue.
 

@@ -120,6 +120,7 @@ interface CartState {
     otherCharges: OtherCharge[];
     otherChargesTotal: number;
     total: number;
+    customerBalance: number;
     stockChanges: StockChange[];
     locationId: string;
   }>;
@@ -630,6 +631,7 @@ export const useCartStore = create<CartState>((set, get) => ({
     const txnId = generateId();
     const receiptNumber = generateReceiptNumber();
     const now = new Date().toISOString();
+    let customerBalance = priced.total;
 
     await db.transaction(
       'rw',
@@ -689,6 +691,19 @@ export const useCartStore = create<CartState>((set, get) => ({
             synced: 0,
           }))
         );
+        if (paymentMethod === 'credit' && creditCustomer) {
+          const existingCreditSales = await db.transactions
+            .where('customer_id')
+            .equals(creditCustomer.id)
+            .toArray();
+          customerBalance = toMoneyAmount(
+            creditCustomer.opening_balance_remaining +
+            existingCreditSales.reduce(
+              (sum, transaction) => sum + toMoneyAmount(transaction.credit_balance || 0),
+              0
+            )
+          );
+        }
       }
     );
 
@@ -722,6 +737,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       otherCharges: [...priced.otherCharges],
       otherChargesTotal: priced.otherChargesTotal,
       total: priced.total,
+      customerBalance,
       stockChanges,
       locationId,
     };

@@ -3,6 +3,7 @@ import { AlertCircle, Loader2, Pencil, Plus, Users, X } from 'lucide-react';
 import {
   createCustomer,
   db,
+  LocalCustomerAccountReceipt,
   getCurrentStoreCustomers,
   getCustomerOpeningPayments,
   getCurrentStoreTransactions,
@@ -11,17 +12,18 @@ import {
   LocalCreditPayment,
   LocalTransaction,
   getCreditPaymentsForTransaction,
-  recordCustomerOpeningPayment,
-  recordCreditPayment,
+  recordCustomerAccountPayment,
   setCustomerActive,
   updateCustomer,
 } from '@/lib/dexie';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useFormatMoney } from '@/lib/currency';
 import { triggerPushSync } from '@/lib/sync';
+import { shareReceipt, downloadReceipt, type PDFReceiptData } from '@/lib/receiptGenerator';
+import { printReceipt } from '@/lib/printService';
 
 export default function CustomersPage() {
-  const { currentUser } = useAuthStore();
+  const { currentUser, currentStore } = useAuthStore();
   const money = useFormatMoney();
   const [customers, setCustomers] = useState<LocalCustomer[]>([]);
   const [transactions, setTransactions] = useState<LocalTransaction[]>([]);
@@ -30,6 +32,9 @@ export default function CustomersPage() {
   >({});
   const [creditPaymentsByTransaction, setCreditPaymentsByTransaction] = useState<
     Record<string, LocalCreditPayment[]>
+  >({});
+  const [accountReceiptsByCustomer, setAccountReceiptsByCustomer] = useState<
+    Record<string, LocalCustomerAccountReceipt[]>
   >({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -41,6 +46,7 @@ export default function CustomersPage() {
   const [phone, setPhone] = useState('');
   const [openingBalance, setOpeningBalance] = useState('');
   const [paymentAmounts, setPaymentAmounts] = useState<Record<string, string>>({});
+  const [repaymentMethods, setRepaymentMethods] = useState<Record<string, 'cash' | 'momo' | 'cheque' | 'split'>>({});
   const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -65,6 +71,13 @@ export default function CustomersPage() {
         ] as const)
       );
       setPaymentsByCustomer(Object.fromEntries(paymentEntries));
+      const accountReceiptEntries = await Promise.all(
+        allCustomers.map(async (customer) => [
+          customer.id,
+          await db.customer_account_receipts.where('customer_id').equals(customer.id).sortBy('created_at'),
+        ] as const)
+      );
+      setAccountReceiptsByCustomer(Object.fromEntries(accountReceiptEntries));
       const creditPaymentEntries = await Promise.all(
         creditTransactions.map(async (transaction) => [
           transaction.id,
@@ -126,47 +139,77 @@ export default function CustomersPage() {
     }
   };
 
-  const handleOpeningPayment = async (customer: LocalCustomer) => {
+  const handleAccountPayment = async (customer: LocalCustomer) => {
     setError('');
     setSaving(true);
     try {
-      const amount = Number(paymentAmounts[customer.id]);
-      const payment = await recordCustomerOpeningPayment(
+      const method = repaymentMethods[customer.id] || 'cash';
+      const amounts = method === 'split'
+        ? {
+            cash: Number(paymentAmounts[`${customer.id}:cash`] || 0),
+            momo: Number(paymentAmounts[`${customer.id}:momo`] || 0),
+            cheque: Number(paymentAmounts[`${customer.id}:cheque`] || 0),
+          }
+        : {
+            cash: method === 'cash' ? Number(paymentAmounts[customer.id]) : 0,
+            momo: method === 'momo' ? Number(paymentAmounts[customer.id]) : 0,
+            cheque: method === 'cheque' ? Number(paymentAmounts[customer.id]) : 0,
+          };
+      const receipt = await recordCustomerAccountPayment(
         customer.id,
-        amount,
+        { method, ...amounts },
         currentUser?.name || ''
       );
-      setPaymentAmounts((current) => ({ ...current, [customer.id]: '' }));
-      setPaymentsByCustomer((current) => ({
+      setPaymentAmounts((current) => ({
         ...current,
-        [customer.id]: [...(current[customer.id] || []), payment],
+        [customer.id]: '',
+        [`${customer.id}:cash`]: '',
+        [`${customer.id}:momo`]: '',
+        [`${customer.id}:cheque`]: '',
       }));
-      setStatus(`Opening balance payment of ${money(payment.amount)} recorded.`);
+      setStatus(`Payment of ${money(receipt.amount)} recorded. Balance remaining: ${money(receipt.balance_after)}.`);
       await load();
-      void triggerPushSync('customer-opening-payment');
-    } catch (paymentError) {
+      void triggerPushSync('customer-account-payment');
+    } catch (paymentError: unknown) {
       setError(paymentError instanceof Error ? paymentError.message : 'Could not record payment.');
     } finally {
       setSaving(false);
     }
   };
 
-  const handleCreditSalePayment = async (transaction: LocalTransaction) => {
-    setError('');
-    setSaving(true);
-    try {
-      const amount = Number(paymentAmounts[transaction.id]);
-      await recordCreditPayment(transaction.id, amount, currentUser?.name || '');
-      setPaymentAmounts((current) => ({ ...current, [transaction.id]: '' }));
-      setStatus(`Credit sale payment of ${money(amount)} recorded.`);
-      await load();
-      void triggerPushSync('customer-credit-payment');
-    } catch (paymentError) {
-      setError(paymentError instanceof Error ? paymentError.message : 'Could not record payment.');
-    } finally {
-      setSaving(false);
-    }
-  };
+  const buildAccountReceiptData = (
+    receipt: LocalCustomerAccountReceipt,
+    customerName: string
+  ): PDFReceiptData => ({
+    storeName: currentStore?.name || 'Store',
+    storeAddress: currentStore?.address || '',
+    supportNumber: currentStore?.support_number || '',
+    storeLogoUrl: currentStore?.logo_url || '',
+    currencyCode: currentStore?.currency_code || 'GHS',
+    receiptNumber: receipt.receipt_number,
+    cashierName: receipt.created_by,
+    dateTime: new Date(receipt.created_at).toLocaleString('en-GH'),
+    items: [],
+    subtotal: 0,
+    discount: 0,
+    total: receipt.amount,
+    paymentMethod: Number(receipt.cash_amount > 0) +
+      Number(receipt.momo_amount > 0) +
+      Number(receipt.cheque_amount > 0) > 1
+      ? 'split'
+      : receipt.cash_amount > 0
+        ? 'cash'
+        : receipt.momo_amount > 0
+          ? 'Mobile Money (MoMo)'
+          : 'Cheque',
+    cashAmount: receipt.cash_amount,
+    momoAmount: receipt.momo_amount,
+    chequeAmount: receipt.cheque_amount,
+    customerName,
+    amountPaid: receipt.amount,
+    balanceAfterPayment: receipt.balance_after,
+    receiptPurpose: 'credit-payment',
+  });
 
   const handleArchive = async (customer: LocalCustomer) => {
     setError('');
@@ -275,7 +318,7 @@ export default function CustomersPage() {
               </label>
             )}
             {!editing && (
-              <p className="text-xs text-gray-500">Enter any credit the customer already owes. It will be added to their account balance.</p>
+              <p className="text-xs text-gray-500">Enter credit not already recorded as a credit sale. It will be added to their account balance.</p>
             )}
             <button
               type="submit"
@@ -348,6 +391,79 @@ export default function CustomersPage() {
 
                   {expanded && (
                     <div className="space-y-3 border-t border-gray-100 bg-gray-50 p-4">
+                      {customer.is_active === 1 && balance > 0 && (
+                        <div className="space-y-3 rounded-xl border border-amber-200 bg-white p-3">
+                          <p className="text-sm font-semibold text-gray-900">Record account payment</p>
+                          <label className="block text-xs font-medium text-gray-600">
+                            Payment method
+                            <select
+                              value={repaymentMethods[customer.id] || 'cash'}
+                              onChange={(event) => setRepaymentMethods((current) => ({
+                                ...current,
+                                [customer.id]: event.target.value as 'cash' | 'momo' | 'cheque' | 'split',
+                              }))}
+                              className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm"
+                            >
+                              <option value="cash">Cash</option>
+                              <option value="momo">Mobile Money (MoMo)</option>
+                              <option value="cheque">Cheque</option>
+                              <option value="split">Split payment</option>
+                            </select>
+                          </label>
+                          {(repaymentMethods[customer.id] || 'cash') === 'split' ? (
+                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                              {(['cash', 'momo', 'cheque'] as const).map((kind) => (
+                                <label key={kind} className="text-xs font-medium capitalize text-gray-600">
+                                  {kind === 'momo' ? 'MoMo' : kind}
+                                  <input
+                                    type="number"
+                                    inputMode="decimal"
+                                    min="0"
+                                    max={balance}
+                                    step="0.01"
+                                    value={paymentAmounts[`${customer.id}:${kind}`] || ''}
+                                    onChange={(event) => setPaymentAmounts((current) => ({
+                                      ...current,
+                                      [`${customer.id}:${kind}`]: event.target.value,
+                                    }))}
+                                    className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm"
+                                  />
+                                </label>
+                              ))}
+                            </div>
+                          ) : (
+                            <label className="block text-xs font-medium text-gray-600">
+                              Amount
+                              <input
+                                type="number"
+                                inputMode="decimal"
+                                min="0.01"
+                                max={balance}
+                                step="0.01"
+                                value={paymentAmounts[customer.id] || ''}
+                                onChange={(event) => setPaymentAmounts((current) => ({
+                                  ...current,
+                                  [customer.id]: event.target.value,
+                                }))}
+                                className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm"
+                              />
+                            </label>
+                          )}
+                          <p className="text-xs text-gray-500">Payment is automatically applied to the oldest outstanding balance first.</p>
+                          <button
+                            type="button"
+                            onClick={() => void handleAccountPayment(customer)}
+                            disabled={saving || !(
+                              (repaymentMethods[customer.id] || 'cash') === 'split'
+                                ? paymentAmounts[`${customer.id}:cash`] || paymentAmounts[`${customer.id}:momo`] || paymentAmounts[`${customer.id}:cheque`]
+                                : paymentAmounts[customer.id]
+                            )}
+                            className="w-full rounded-lg bg-amber-700 px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+                          >
+                            {saving ? 'Saving payment…' : `Record payment · balance ${money(balance)}`}
+                          </button>
+                        </div>
+                      )}
                       {customer.opening_balance > 0 && (
                         <div className="rounded-xl border border-amber-100 bg-amber-50 p-3">
                           <div className="flex justify-between text-sm">
@@ -355,30 +471,6 @@ export default function CustomersPage() {
                             <span className="font-bold text-amber-900">{money(customer.opening_balance_remaining)}</span>
                           </div>
                           <p className="mt-1 text-xs text-amber-800">Originally recorded: {money(customer.opening_balance)}</p>
-                          {customer.is_active === 1 && customer.opening_balance_remaining > 0 && (
-                            <div className="mt-3 flex gap-2">
-                              <input
-                                type="number"
-                                inputMode="decimal"
-                                min="0.01"
-                                max={customer.opening_balance_remaining}
-                                step="0.01"
-                                value={paymentAmounts[customer.id] || ''}
-                                onChange={(event) => setPaymentAmounts((current) => ({ ...current, [customer.id]: event.target.value }))}
-                                placeholder="Payment amount"
-                                aria-label={`Opening balance payment for ${customer.name}`}
-                                className="min-w-0 flex-1 rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => void handleOpeningPayment(customer)}
-                                disabled={saving || !paymentAmounts[customer.id]}
-                                className="rounded-lg bg-amber-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
-                              >
-                                Record cash payment
-                              </button>
-                            </div>
-                          )}
                         </div>
                       )}
                       {customerSales.map((transaction) => (
@@ -389,42 +481,54 @@ export default function CustomersPage() {
                               <p className="mt-1 text-xs text-gray-500">{new Date(transaction.created_at).toLocaleDateString()}</p>
                               {(creditPaymentsByTransaction[transaction.id] || []).map((payment) => (
                                 <p key={payment.id} className="mt-1 text-[11px] text-gray-500">
-                                  Cash payment {money(payment.amount)} · {new Date(payment.created_at).toLocaleDateString()}
+                                      Payment {money(payment.amount)} ({payment.payment_method || 'cash'}) · {new Date(payment.created_at).toLocaleDateString()}
                                 </p>
                               ))}
                             </div>
                             <span className="font-semibold text-amber-800">{money(transaction.credit_balance || 0)}</span>
                           </div>
-                          {customer.is_active === 1 && (transaction.credit_balance || 0) > 0 && (
-                            <div className="flex gap-2">
-                              <input
-                                type="number"
-                                inputMode="decimal"
-                                min="0.01"
-                                max={transaction.credit_balance || 0}
-                                step="0.01"
-                                value={paymentAmounts[transaction.id] || ''}
-                                onChange={(event) => setPaymentAmounts((current) => ({ ...current, [transaction.id]: event.target.value }))}
-                                placeholder="Payment amount"
-                                aria-label={`Credit sale payment for ${customer.name} receipt ${transaction.receipt_number}`}
-                                className="min-w-0 flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => void handleCreditSalePayment(transaction)}
-                                disabled={saving || !paymentAmounts[transaction.id]}
-                                className="rounded-lg bg-amber-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
-                              >
-                                Record cash payment
-                              </button>
-                            </div>
-                          )}
                         </div>
                       ))}
                       {(paymentsByCustomer[customer.id] || []).map((payment) => (
                         <div key={payment.id} className="flex justify-between gap-3 text-xs text-gray-600">
-                          <span>{payment.entry_type === 'opening_balance' ? 'Opening balance added' : 'Opening balance payment'} · {new Date(payment.created_at).toLocaleDateString()}</span>
+                          <span>{payment.entry_type === 'opening_balance' ? 'Opening balance added' : `Account payment (${payment.payment_method || 'cash'})`} · {new Date(payment.created_at).toLocaleDateString()}</span>
                           <span>{money(payment.amount)}</span>
+                        </div>
+                      ))}
+                      {(accountReceiptsByCustomer[customer.id] || []).map((receipt) => (
+                        <div key={receipt.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-100 bg-white p-3">
+                          <div className="text-xs">
+                            <p className="font-semibold text-gray-800">Receipt {receipt.receipt_number}</p>
+                            <p className="mt-1 text-gray-500">
+                              Paid {money(receipt.amount)} · Balance {money(receipt.balance_after)}
+                              {receipt.cash_amount ? ` · Cash ${money(receipt.cash_amount)}` : ''}
+                              {receipt.momo_amount ? ` · MoMo ${money(receipt.momo_amount)}` : ''}
+                              {receipt.cheque_amount ? ` · Cheque ${money(receipt.cheque_amount)}` : ''}
+                            </p>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => { void printReceipt(buildAccountReceiptData(receipt, customer.name)); }}
+                              className="rounded-lg border border-gray-200 px-2.5 py-2 text-xs font-semibold text-gray-700"
+                            >
+                              Print
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => downloadReceipt(buildAccountReceiptData(receipt, customer.name))}
+                              className="rounded-lg border border-gray-200 px-2.5 py-2 text-xs font-semibold text-gray-700"
+                            >
+                              PDF
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { void shareReceipt(buildAccountReceiptData(receipt, customer.name)); }}
+                              className="rounded-lg border border-gray-200 px-2.5 py-2 text-xs font-semibold text-gray-700"
+                            >
+                              Share
+                            </button>
+                          </div>
                         </div>
                       ))}
                       {customerSales.length === 0 && customer.opening_balance <= 0 && (

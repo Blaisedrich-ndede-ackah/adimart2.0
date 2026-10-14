@@ -90,6 +90,27 @@ export interface LocalCustomerOpeningPayment {
   customer_id: string;
   entry_type: 'opening_balance' | 'payment';
   amount: number;
+  payment_method?: 'cash' | 'momo' | 'cheque' | 'split';
+  cash_amount?: number;
+  momo_amount?: number;
+  cheque_amount?: number;
+  account_receipt_id?: string | null;
+  created_by: string;
+  created_at: string;
+  synced: number;
+}
+
+export interface LocalCustomerAccountReceipt {
+  id: string;
+  store_id: string;
+  customer_id: string;
+  receipt_number: string;
+  amount: number;
+  cash_amount: number;
+  momo_amount: number;
+  cheque_amount: number;
+  balance_before: number;
+  balance_after: number;
   created_by: string;
   created_at: string;
   synced: number;
@@ -224,9 +245,39 @@ export interface LocalTransactionItem {
 export interface LocalCreditPayment {
   id: string;
   store_id: string;
+  customer_id?: string;
+  account_receipt_id?: string | null;
   transaction_id: string;
   amount: number;
-  payment_method: 'cash';
+  payment_method: 'cash' | 'momo' | 'cheque' | 'split';
+  cash_amount?: number;
+  momo_amount?: number;
+  cheque_amount?: number;
+  created_by: string;
+  created_at: string;
+  synced: number;
+}
+
+export interface CustomerAccountPaymentAmounts {
+  method: 'cash' | 'momo' | 'cheque' | 'split';
+  cash: number;
+  momo: number;
+  cheque: number;
+}
+
+export interface LocalSaleReturn {
+  id: string;
+  store_id: string;
+  transaction_id: string;
+  transaction_item_id: string;
+  product_id: string;
+  product_name: string;
+  quantity: number;
+  stock_quantity: number;
+  reason: string;
+  photo_data_url: string;
+  receipt_number: string;
+  location_id: string;
   created_by: string;
   created_at: string;
   synced: number;
@@ -267,7 +318,7 @@ export interface LocalStockMovement {
   batch_id: string | null;
   from_location_id: string | null;
   to_location_id: string | null;
-  movement_type: 'receive' | 'transfer' | 'sale' | 'adjust';
+  movement_type: 'receive' | 'transfer' | 'sale' | 'adjust' | 'return';
   quantity: number;
   note: string;
   user_id: string | null;
@@ -416,6 +467,8 @@ class AdimatDB extends Dexie {
   transactions!: Table<LocalTransaction, string>;
   transaction_items!: Table<LocalTransactionItem, string>;
   credit_payments!: Table<LocalCreditPayment, string>;
+  customer_account_receipts!: Table<LocalCustomerAccountReceipt, string>;
+  sales_returns!: Table<LocalSaleReturn, string>;
   expenses!: Table<LocalExpense, string>;
   recurring_expenses!: Table<LocalRecurringExpense, string>;
   expense_budgets!: Table<LocalExpenseBudget, string>;
@@ -596,6 +649,12 @@ class AdimatDB extends Dexie {
     });
     this.version(15).stores({
       transactions: 'id, store_id, receipt_number, cashier_id, customer_id, status, created_at, synced',
+    });
+    this.version(16).stores({
+      customer_account_receipts: 'id, store_id, customer_id, receipt_number, created_at, synced',
+      sales_returns: 'id, store_id, transaction_id, transaction_item_id, product_id, created_at, synced',
+      credit_payments: 'id, store_id, customer_id, account_receipt_id, transaction_id, created_at, synced',
+      customer_opening_payments: 'id, store_id, customer_id, account_receipt_id, created_at, synced',
     });
   }
 }
@@ -1317,8 +1376,26 @@ export async function createCustomer(
     updated_at: now,
     synced: 0,
   };
-  await db.transaction('rw', db.customers, db.customer_opening_payments, async () => {
+  await db.transaction('rw', [db.customers, db.customer_opening_payments, db.transactions], async () => {
     await db.customers.add(customer);
+    const legacyCreditSales = await db.transactions
+      .where('store_id')
+      .equals(storeId)
+      .filter((transaction) =>
+        transaction.payment_method === 'credit' &&
+        transaction.status === 'completed' &&
+        !transaction.customer_id &&
+        (transaction.customer_name || '').trim().toLowerCase() === cleanName.toLowerCase() &&
+        (transaction.customer_phone || '').trim() === cleanPhone
+      )
+      .toArray();
+    await Promise.all(legacyCreditSales.map((transaction) =>
+      db.transactions.update(transaction.id, {
+        customer_id: customer.id,
+        updated_at: now,
+        synced: 0,
+      })
+    ));
     if (balance > 0) {
       await db.customer_opening_payments.add({
         id: generateId(),
@@ -1388,43 +1465,173 @@ export async function getCustomerOpeningPayments(customerId: string): Promise<Lo
     .sortBy('created_at');
 }
 
-export async function recordCustomerOpeningPayment(
+export async function recordCustomerAccountPayment(
   customerId: string,
-  amount: number,
+  tender: { method: 'cash' | 'momo' | 'cheque' | 'split'; cash: number; momo: number; cheque: number },
   createdBy: string
-): Promise<LocalCustomerOpeningPayment> {
-  const paymentAmount = toMoneyAmount(amount);
-  if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
-    throw new Error('Payment amount must be greater than zero.');
+): Promise<LocalCustomerAccountReceipt> {
+  const normalizeTender = (value: number) => {
+    if (!Number.isFinite(value) || value < 0) throw new Error('Payment amounts must be zero or greater.');
+    return toMoneyAmount(value);
+  };
+  const cash = normalizeTender(tender.cash);
+  const momo = normalizeTender(tender.momo);
+  const cheque = normalizeTender(tender.cheque);
+  const amount = toMoneyAmount(cash + momo + cheque);
+  if (amount <= 0) throw new Error('Enter a payment amount greater than zero.');
+  if (tender.method === 'cash' && (momo > 0 || cheque > 0)) {
+    throw new Error('Cash payments can only contain a cash amount.');
   }
+  if (tender.method === 'momo' && (cash > 0 || cheque > 0)) {
+    throw new Error('MoMo payments can only contain a MoMo amount.');
+  }
+  if (tender.method === 'cheque' && (cash > 0 || momo > 0)) {
+    throw new Error('Cheque payments can only contain a cheque amount.');
+  }
+
   const storeId = await getCurrentStoreId();
   if (!storeId) throw new Error('No store selected');
-  return db.transaction('rw', db.customers, db.customer_opening_payments, async () => {
-    const customer = await db.customers.get(customerId);
-    if (!customer || customer.store_id !== storeId || customer.is_active !== 1) {
-      throw new Error('Active customer not found.');
+  return db.transaction(
+    'rw',
+    [
+      db.customers,
+      db.transactions,
+      db.credit_payments,
+      db.customer_opening_payments,
+      db.customer_account_receipts,
+    ],
+    async () => {
+      const customer = await db.customers.get(customerId);
+      if (!customer || customer.store_id !== storeId || customer.is_active !== 1) {
+        throw new Error('Active customer not found.');
+      }
+      const transactions = (await db.transactions
+        .where('customer_id')
+        .equals(customerId)
+        .toArray())
+        .filter((transaction) =>
+          transaction.store_id === storeId &&
+          transaction.payment_method === 'credit' &&
+          transaction.status === 'completed' &&
+          toMoneyAmount(transaction.credit_balance ?? transaction.total_amount) > 0
+        )
+        .sort((a, b) => a.created_at.localeCompare(b.created_at));
+
+      const openingRemaining = toMoneyAmount(customer.opening_balance_remaining);
+      const accountBalance = toMoneyAmount(
+        openingRemaining + transactions.reduce(
+          (sum, transaction) => sum + toMoneyAmount(transaction.credit_balance ?? transaction.total_amount),
+          0
+        )
+      );
+      if (amount > accountBalance) throw new Error('Payment cannot exceed the customer account balance.');
+
+      const receiptId = generateId();
+      const receiptNumber = generateReceiptNumber().replace('#ADM-', '#CR-');
+      const now = new Date().toISOString();
+      const receipt: LocalCustomerAccountReceipt = {
+        id: receiptId,
+        store_id: storeId,
+        customer_id: customer.id,
+        receipt_number: receiptNumber,
+        amount,
+        cash_amount: cash,
+        momo_amount: momo,
+        cheque_amount: cheque,
+        balance_before: accountBalance,
+        balance_after: toMoneyAmount(accountBalance - amount),
+        created_by: createdBy,
+        created_at: now,
+        synced: 0,
+      };
+
+      const tenderBuckets = [
+        { kind: 'cash' as const, remaining: cash },
+        { kind: 'momo' as const, remaining: momo },
+        { kind: 'cheque' as const, remaining: cheque },
+      ].filter((bucket) => bucket.remaining > 0);
+      const debts: Array<{
+        type: 'opening' | 'transaction';
+        transaction?: LocalTransaction;
+        remaining: number;
+      }> = [];
+      if (openingRemaining > 0) debts.push({ type: 'opening', remaining: openingRemaining });
+      for (const transaction of transactions) {
+        debts.push({
+          type: 'transaction',
+          transaction,
+          remaining: toMoneyAmount(transaction.credit_balance ?? transaction.total_amount),
+        });
+      }
+
+      let tenderIndex = 0;
+      for (const debt of debts) {
+        while (debt.remaining > 0 && tenderIndex < tenderBuckets.length) {
+          const bucket = tenderBuckets[tenderIndex];
+          const allocated = toMoneyAmount(Math.min(debt.remaining, bucket.remaining));
+          const parts = {
+            cash_amount: bucket.kind === 'cash' ? allocated : 0,
+            momo_amount: bucket.kind === 'momo' ? allocated : 0,
+            cheque_amount: bucket.kind === 'cheque' ? allocated : 0,
+          };
+          const paymentMethod = tender.method === 'split' ? 'split' : bucket.kind;
+
+          if (debt.type === 'opening') {
+            await db.customer_opening_payments.add({
+              id: generateId(),
+              store_id: storeId,
+              customer_id: customer.id,
+              entry_type: 'payment',
+              amount: allocated,
+              payment_method: paymentMethod,
+              ...parts,
+              account_receipt_id: receiptId,
+              created_by: createdBy,
+              created_at: now,
+              synced: 0,
+            });
+            await db.customers.update(customer.id, {
+              opening_balance_remaining: toMoneyAmount(
+                (await db.customers.get(customer.id))!.opening_balance_remaining - allocated
+              ),
+              updated_at: now,
+              synced: 0,
+            });
+          } else {
+            const transaction = debt.transaction!;
+            const balance = toMoneyAmount(transaction.credit_balance ?? transaction.total_amount);
+            await db.credit_payments.add({
+              id: generateId(),
+              store_id: storeId,
+              customer_id: customer.id,
+              account_receipt_id: receiptId,
+              transaction_id: transaction.id,
+              amount: allocated,
+              payment_method: paymentMethod,
+              ...parts,
+              created_by: createdBy,
+              created_at: now,
+              synced: 0,
+            });
+            await db.transactions.update(transaction.id, {
+              credit_paid_amount: toMoneyAmount((transaction.credit_paid_amount || 0) + allocated),
+              credit_balance: toMoneyAmount(balance - allocated),
+              updated_at: now,
+              synced: 0,
+            });
+            transaction.credit_balance = toMoneyAmount(balance - allocated);
+            transaction.credit_paid_amount = toMoneyAmount((transaction.credit_paid_amount || 0) + allocated);
+          }
+          debt.remaining = toMoneyAmount(debt.remaining - allocated);
+          bucket.remaining = toMoneyAmount(bucket.remaining - allocated);
+          if (bucket.remaining <= 0) tenderIndex += 1;
+        }
+      }
+      await db.customer_account_receipts.add(receipt);
+      await db.customers.update(customer.id, { updated_at: now, synced: 0 });
+      return receipt;
     }
-    const remaining = toMoneyAmount(customer.opening_balance_remaining);
-    if (paymentAmount > remaining) throw new Error('Payment cannot exceed the opening balance remaining.');
-    const now = new Date().toISOString();
-    const payment: LocalCustomerOpeningPayment = {
-      id: generateId(),
-      store_id: customer.store_id,
-      customer_id: customer.id,
-      entry_type: 'payment',
-      amount: paymentAmount,
-      created_by: createdBy,
-      created_at: now,
-      synced: 0,
-    };
-    await db.customer_opening_payments.add(payment);
-    await db.customers.update(customer.id, {
-      opening_balance_remaining: toMoneyAmount(remaining - paymentAmount),
-      updated_at: now,
-      synced: 0,
-    });
-    return payment;
-  });
+  );
 }
 
 export async function getTransactionsForCashier(cashierId: string): Promise<LocalTransaction[]> {
@@ -1439,41 +1646,6 @@ export async function getTransactionsForCashier(cashierId: string): Promise<Loca
 
 export async function getTransactionItems(transactionId: string): Promise<LocalTransactionItem[]> {
   return db.transaction_items.where('transaction_id').equals(transactionId).toArray();
-}
-
-export async function recordCreditPayment(
-  transactionId: string,
-  amount: number,
-  createdBy: string
-): Promise<LocalCreditPayment> {
-  const payment = toMoneyAmount(amount);
-  if (payment <= 0) throw new Error('Payment amount must be greater than zero');
-  return db.transaction('rw', db.transactions, db.credit_payments, async () => {
-    const transaction = await db.transactions.get(transactionId);
-    if (!transaction || transaction.payment_method !== 'credit') throw new Error('Credit sale not found');
-    const balance = toMoneyAmount(transaction.credit_balance ?? transaction.total_amount);
-    if (payment > balance) throw new Error('Payment cannot exceed the outstanding balance');
-
-    const now = new Date().toISOString();
-    const creditPayment: LocalCreditPayment = {
-      id: generateId(),
-      store_id: transaction.store_id,
-      transaction_id: transaction.id,
-      amount: payment,
-      payment_method: 'cash',
-      created_by: createdBy,
-      created_at: now,
-      synced: 0,
-    };
-    await db.credit_payments.add(creditPayment);
-    await db.transactions.update(transaction.id, {
-      credit_paid_amount: toMoneyAmount((transaction.credit_paid_amount || 0) + payment),
-      credit_balance: toMoneyAmount(balance - payment),
-      updated_at: now,
-      synced: 0,
-    });
-    return creditPayment;
-  });
 }
 
 export async function getCreditPaymentsForTransaction(transactionId: string): Promise<LocalCreditPayment[]> {
@@ -2222,6 +2394,8 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
     | 'transactions'
     | 'transaction_items'
     | 'credit_payments'
+    | 'customer_account_receipts'
+    | 'sales_returns'
     | 'expenses'
     | 'recurring_expenses'
     | 'expense_budgets'
@@ -2625,31 +2799,6 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
       errors
     );
 
-    const unsyncedCustomerOpeningPayments = await db.customer_opening_payments
-      .where('store_id')
-      .equals(storeId)
-      .and((payment) => payment.synced === 0)
-      .toArray();
-    syncedCount += await upsertToSupabase(
-      'Customer opening payments',
-      'customer_opening_payments',
-      unsyncedCustomerOpeningPayments.map((payment) => ({
-        id: payment.id,
-        store_id: payment.store_id,
-        customer_id: payment.customer_id,
-        entry_type: payment.entry_type,
-        amount: payment.amount,
-        created_by: payment.created_by,
-        created_at: payment.created_at,
-      })),
-      async () => {
-        await Promise.all(unsyncedCustomerOpeningPayments.map((payment) =>
-          db.customer_opening_payments.update(payment.id, { synced: 1 })
-        ));
-      },
-      errors
-    );
-
     const unsyncedTxns = await db.transactions
       .where('store_id')
       .equals(storeId)
@@ -2689,6 +2838,66 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
       errors
     );
 
+    const unsyncedAccountReceipts = await db.customer_account_receipts
+      .where('store_id')
+      .equals(storeId)
+      .and((receipt) => receipt.synced === 0)
+      .toArray();
+    syncedCount += await upsertToSupabase(
+      'Customer account receipts',
+      'customer_account_receipts',
+      unsyncedAccountReceipts.map((receipt) => ({
+        id: receipt.id,
+        store_id: receipt.store_id,
+        customer_id: receipt.customer_id,
+        receipt_number: receipt.receipt_number,
+        amount: receipt.amount,
+        cash_amount: receipt.cash_amount,
+        momo_amount: receipt.momo_amount,
+        cheque_amount: receipt.cheque_amount,
+        balance_before: receipt.balance_before,
+        balance_after: receipt.balance_after,
+        created_by: receipt.created_by,
+        created_at: receipt.created_at,
+      })),
+      async () => {
+        await Promise.all(unsyncedAccountReceipts.map((receipt) =>
+          db.customer_account_receipts.update(receipt.id, { synced: 1 })
+        ));
+      },
+      errors
+    );
+
+    const unsyncedCustomerOpeningPayments = await db.customer_opening_payments
+      .where('store_id')
+      .equals(storeId)
+      .and((payment) => payment.synced === 0)
+      .toArray();
+    syncedCount += await upsertToSupabase(
+      'Customer opening payments',
+      'customer_opening_payments',
+      unsyncedCustomerOpeningPayments.map((payment) => ({
+        id: payment.id,
+        store_id: payment.store_id,
+        customer_id: payment.customer_id,
+        entry_type: payment.entry_type,
+        amount: payment.amount,
+        payment_method: payment.payment_method || 'cash',
+        cash_amount: Number(payment.cash_amount) || (payment.payment_method === 'cash' || !payment.payment_method ? payment.amount : 0),
+        momo_amount: Number(payment.momo_amount) || 0,
+        cheque_amount: Number(payment.cheque_amount) || 0,
+        account_receipt_id: payment.account_receipt_id || null,
+        created_by: payment.created_by,
+        created_at: payment.created_at,
+      })),
+      async () => {
+        await Promise.all(unsyncedCustomerOpeningPayments.map((payment) =>
+          db.customer_opening_payments.update(payment.id, { synced: 1 })
+        ));
+      },
+      errors
+    );
+
     const unsyncedCreditPayments = await db.credit_payments
       .where('store_id')
       .equals(storeId)
@@ -2701,8 +2910,13 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         id: payment.id,
         store_id: payment.store_id,
         transaction_id: payment.transaction_id,
+        customer_id: payment.customer_id || null,
+        account_receipt_id: payment.account_receipt_id || null,
         amount: payment.amount,
         payment_method: payment.payment_method,
+        cash_amount: Number(payment.cash_amount) || 0,
+        momo_amount: Number(payment.momo_amount) || 0,
+        cheque_amount: Number(payment.cheque_amount) || 0,
         created_by: payment.created_by,
         created_at: payment.created_at,
       })),
@@ -2740,6 +2954,38 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         batch_id: uuidOrNull(i.batch_id),
       })),
       async () => { await Promise.all(unsyncedItems.map(i => db.transaction_items.update(i.id, { synced: 1 }))); },
+      errors
+    );
+
+    const unsyncedReturns = await db.sales_returns
+      .where('store_id')
+      .equals(storeId)
+      .and((record) => record.synced === 0)
+      .toArray();
+    syncedCount += await upsertToSupabase(
+      'Sales returns',
+      'sales_returns',
+      unsyncedReturns.map((record) => ({
+        id: record.id,
+        store_id: record.store_id,
+        transaction_id: record.transaction_id,
+        transaction_item_id: record.transaction_item_id,
+        product_id: record.product_id,
+        product_name: record.product_name,
+        quantity: record.quantity,
+        stock_quantity: record.stock_quantity,
+        reason: record.reason,
+        photo_data_url: record.photo_data_url,
+        receipt_number: record.receipt_number,
+        location_id: record.location_id,
+        created_by: record.created_by,
+        created_at: record.created_at,
+      })),
+      async () => {
+        await Promise.all(unsyncedReturns.map((record) =>
+          db.sales_returns.update(record.id, { synced: 1 })
+        ));
+      },
       errors
     );
 
@@ -3231,14 +3477,48 @@ export async function syncFromSupabase(opts?: {
         },
       },
       {
+        label: 'Customer account receipts',
+        table: 'customer_account_receipts',
+        map: (row: Record<string, unknown>) => ({
+          id: String(row.id),
+          store_id: String(row.store_id),
+          customer_id: String(row.customer_id),
+          receipt_number: String(row.receipt_number || ''),
+          amount: Number(row.amount) || 0,
+          cash_amount: Number(row.cash_amount) || 0,
+          momo_amount: Number(row.momo_amount) || 0,
+          cheque_amount: Number(row.cheque_amount) || 0,
+          balance_before: Number(row.balance_before) || 0,
+          balance_after: Number(row.balance_after) || 0,
+          created_by: String(row.created_by || ''),
+          created_at: String(row.created_at || ''),
+          synced: 1,
+        }),
+        dbTable: db.customer_account_receipts,
+        merge: async (
+          remote: LocalCustomerAccountReceipt,
+          local: LocalCustomerAccountReceipt | undefined
+        ) => {
+          if (!local || local.synced !== 0) return remote;
+          return local;
+        },
+      },
+      {
         label: 'Credit payments',
         table: 'credit_payments',
         map: (row: Record<string, unknown>) => ({
           id: String(row.id),
           store_id: String(row.store_id),
           transaction_id: String(row.transaction_id),
+          customer_id: String(row.customer_id || ''),
+          account_receipt_id: String(row.account_receipt_id || '') || null,
           amount: Number(row.amount) || 0,
-          payment_method: 'cash' as const,
+          payment_method: (row.payment_method === 'momo' || row.payment_method === 'cheque' || row.payment_method === 'split'
+            ? row.payment_method
+            : 'cash') as LocalCreditPayment['payment_method'],
+          cash_amount: Number(row.cash_amount) || (row.payment_method === 'cash' ? Number(row.amount) || 0 : 0),
+          momo_amount: Number(row.momo_amount) || 0,
+          cheque_amount: Number(row.cheque_amount) || 0,
           created_by: String(row.created_by || ''),
           created_at: String(row.created_at || ''),
           synced: 1,
@@ -3258,6 +3538,13 @@ export async function syncFromSupabase(opts?: {
           customer_id: String(row.customer_id),
           entry_type: row.entry_type === 'opening_balance' ? 'opening_balance' : 'payment',
           amount: Number(row.amount) || 0,
+          payment_method: (row.payment_method === 'momo' || row.payment_method === 'cheque' || row.payment_method === 'split'
+            ? row.payment_method
+            : 'cash') as LocalCustomerOpeningPayment['payment_method'],
+          cash_amount: Number(row.cash_amount) || (row.payment_method === 'cash' ? Number(row.amount) || 0 : 0),
+          momo_amount: Number(row.momo_amount) || 0,
+          cheque_amount: Number(row.cheque_amount) || 0,
+          account_receipt_id: String(row.account_receipt_id || '') || null,
           created_by: String(row.created_by || ''),
           created_at: String(row.created_at || ''),
           synced: 1,
@@ -3290,6 +3577,32 @@ export async function syncFromSupabase(opts?: {
           synced: 1,
         }),
         dbTable: db.transaction_items,
+      },
+      {
+        label: 'Sales returns',
+        table: 'sales_returns',
+        map: (row: Record<string, unknown>) => ({
+          id: String(row.id),
+          store_id: String(row.store_id),
+          transaction_id: String(row.transaction_id),
+          transaction_item_id: String(row.transaction_item_id),
+          product_id: String(row.product_id),
+          product_name: String(row.product_name || ''),
+          quantity: Number(row.quantity) || 0,
+          stock_quantity: Number(row.stock_quantity) || 0,
+          reason: String(row.reason || ''),
+          photo_data_url: String(row.photo_data_url || ''),
+          receipt_number: String(row.receipt_number || ''),
+          location_id: String(row.location_id || ''),
+          created_by: String(row.created_by || ''),
+          created_at: String(row.created_at || ''),
+          synced: 1,
+        }),
+        dbTable: db.sales_returns,
+        merge: async (remote: LocalSaleReturn, local: LocalSaleReturn | undefined) => {
+          if (!local || local.synced !== 0) return remote;
+          return local;
+        },
       },
       {
         label: 'Expenses',

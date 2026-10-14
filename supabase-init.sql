@@ -212,12 +212,40 @@ CREATE POLICY "customers_update" ON customers FOR UPDATE USING (true);
 CREATE POLICY "customers_delete" ON customers FOR DELETE USING (true);
 CREATE INDEX IF NOT EXISTS idx_customers_store ON customers(store_id, is_active, name);
 
+CREATE TABLE IF NOT EXISTS customer_account_receipts (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  receipt_number VARCHAR(50) NOT NULL,
+  amount DECIMAL(12,2) NOT NULL CHECK (amount > 0),
+  cash_amount DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (cash_amount >= 0),
+  momo_amount DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (momo_amount >= 0),
+  cheque_amount DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (cheque_amount >= 0),
+  balance_before DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (balance_before >= 0),
+  balance_after DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (balance_after >= 0),
+  created_by VARCHAR(255) DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(store_id, receipt_number)
+);
+ALTER TABLE customer_account_receipts ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "customer_account_receipts_select" ON customer_account_receipts FOR SELECT USING (true);
+CREATE POLICY "customer_account_receipts_insert" ON customer_account_receipts FOR INSERT WITH CHECK (true);
+CREATE POLICY "customer_account_receipts_update" ON customer_account_receipts FOR UPDATE USING (true);
+CREATE POLICY "customer_account_receipts_delete" ON customer_account_receipts FOR DELETE USING (true);
+CREATE INDEX IF NOT EXISTS idx_customer_account_receipts_store ON customer_account_receipts(store_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_customer_account_receipts_customer ON customer_account_receipts(customer_id, created_at);
+
 CREATE TABLE IF NOT EXISTS customer_opening_payments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
   customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
   entry_type VARCHAR(20) NOT NULL DEFAULT 'payment' CHECK (entry_type IN ('opening_balance', 'payment')),
   amount DECIMAL(12,2) NOT NULL CHECK (amount > 0),
+  payment_method VARCHAR(20) NOT NULL DEFAULT 'cash' CHECK (payment_method IN ('cash', 'momo', 'cheque', 'split')),
+  cash_amount DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (cash_amount >= 0),
+  momo_amount DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (momo_amount >= 0),
+  cheque_amount DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (cheque_amount >= 0),
+  account_receipt_id UUID REFERENCES customer_account_receipts(id) ON DELETE SET NULL,
   created_by VARCHAR(255) DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -325,8 +353,13 @@ CREATE TABLE IF NOT EXISTS credit_payments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
   transaction_id UUID NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+  customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
+  account_receipt_id UUID REFERENCES customer_account_receipts(id) ON DELETE SET NULL,
   amount DECIMAL(12,2) NOT NULL CHECK (amount > 0),
-  payment_method VARCHAR(20) NOT NULL DEFAULT 'cash' CHECK (payment_method = 'cash'),
+  payment_method VARCHAR(20) NOT NULL DEFAULT 'cash' CHECK (payment_method IN ('cash', 'momo', 'cheque', 'split')),
+  cash_amount DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (cash_amount >= 0),
+  momo_amount DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (momo_amount >= 0),
+  cheque_amount DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (cheque_amount >= 0),
   created_by VARCHAR(255) DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -338,6 +371,7 @@ CREATE POLICY "credit_payments_update" ON credit_payments FOR UPDATE USING (true
 CREATE POLICY "credit_payments_delete" ON credit_payments FOR DELETE USING (true);
 CREATE INDEX IF NOT EXISTS idx_credit_payments_store ON credit_payments(store_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_credit_payments_transaction ON credit_payments(transaction_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_credit_payments_customer_receipt ON credit_payments(customer_id, account_receipt_id);
 
 -- ============================================================
 -- EXPENSES TABLE (linked to stores)
@@ -517,7 +551,7 @@ CREATE TABLE IF NOT EXISTS stock_movements (
   batch_id UUID REFERENCES stock_batches(id) ON DELETE SET NULL,
   from_location_id UUID REFERENCES locations(id) ON DELETE SET NULL,
   to_location_id UUID REFERENCES locations(id) ON DELETE SET NULL,
-  movement_type VARCHAR(20) NOT NULL CHECK (movement_type IN ('receive', 'transfer', 'sale', 'adjust')),
+  movement_type VARCHAR(20) NOT NULL CHECK (movement_type IN ('receive', 'transfer', 'sale', 'adjust', 'return')),
   quantity INTEGER NOT NULL,
   note TEXT DEFAULT '',
   user_id UUID,
@@ -533,6 +567,30 @@ CREATE POLICY "stock_movements_delete" ON stock_movements FOR DELETE USING (true
 
 CREATE INDEX IF NOT EXISTS idx_stock_movements_store ON stock_movements(store_id);
 CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id);
+
+CREATE TABLE IF NOT EXISTS sales_returns (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  transaction_id UUID NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+  transaction_item_id UUID NOT NULL REFERENCES transaction_items(id) ON DELETE CASCADE,
+  product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  product_name VARCHAR(255) NOT NULL DEFAULT '',
+  quantity DECIMAL(12,3) NOT NULL CHECK (quantity > 0),
+  stock_quantity INTEGER NOT NULL CHECK (stock_quantity > 0),
+  reason VARCHAR(500) NOT NULL,
+  photo_data_url TEXT NOT NULL DEFAULT '',
+  receipt_number VARCHAR(50) NOT NULL DEFAULT '',
+  location_id UUID REFERENCES locations(id) ON DELETE SET NULL,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE sales_returns ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "sales_returns_select" ON sales_returns FOR SELECT USING (true);
+CREATE POLICY "sales_returns_insert" ON sales_returns FOR INSERT WITH CHECK (true);
+CREATE POLICY "sales_returns_update" ON sales_returns FOR UPDATE USING (true);
+CREATE POLICY "sales_returns_delete" ON sales_returns FOR DELETE USING (true);
+CREATE INDEX IF NOT EXISTS idx_sales_returns_store ON sales_returns(store_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_sales_returns_item ON sales_returns(transaction_item_id);
 
 -- ============================================================
 -- WEEKLY PAYOUTS (admin marks Paystack remittances to stores)

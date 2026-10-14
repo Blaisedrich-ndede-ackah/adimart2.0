@@ -42,10 +42,15 @@ export interface EscPosReceiptData {
   paymentMethod: string;
   cashAmount?: number;
   paystackAmount?: number;
+  momoAmount?: number;
+  chequeAmount?: number;
   manualPaymentAmount?: number;
   paymentReference?: string;
   customerName?: string;
   outstandingBalance?: number;
+  amountPaid?: number;
+  balanceAfterPayment?: number;
+  receiptPurpose?: 'sale' | 'credit-payment';
   currencyCode?: string;
 }
 
@@ -113,6 +118,12 @@ function printOnComputer(
     data.paymentMethod === 'split' && data.paystackAmount
       ? `<div class="row"><span>Mobile money/card:</span><span>${escapeHtml(amt(data, data.paystackAmount))}</span></div>`
       : '',
+    data.momoAmount
+      ? `<div class="row"><span>MoMo:</span><span>${escapeHtml(amt(data, data.momoAmount))}</span></div>`
+      : '',
+    data.chequeAmount
+      ? `<div class="row"><span>Cheque:</span><span>${escapeHtml(amt(data, data.chequeAmount))}</span></div>`
+      : '',
     data.manualPaymentAmount
       ? `<div class="row"><span>Amount received:</span><span>${escapeHtml(amt(data, data.manualPaymentAmount))}</span></div>`
       : '',
@@ -121,6 +132,9 @@ function printOnComputer(
       : '',
     data.outstandingBalance !== undefined && data.outstandingBalance > 0
       ? `<div class="row"><span>Credit due:</span><span>${escapeHtml(amt(data, data.outstandingBalance))}</span></div>`
+      : '',
+    data.receiptPurpose === 'credit-payment' || data.paymentMethod === 'credit'
+      ? `<div class="row"><strong>Amount paid:</strong><strong>${escapeHtml(amt(data, data.amountPaid || 0))}</strong></div><div class="row"><strong>Outstanding balance:</strong><strong>${escapeHtml(amt(data, data.balanceAfterPayment ?? data.outstandingBalance ?? 0))}</strong></div>`
       : '',
     data.paymentReference
       ? `<div class="row"><span>Reference:</span><span>${escapeHtml(data.paymentReference)}</span></div>`
@@ -329,6 +343,15 @@ export async function buildEscPosReceipt(data: EscPosReceiptData): Promise<Uint8
     bytes.push(...textToBytes(rightAlign('  Customer:', data.customerName)));
     bytes.push(LF);
   }
+  if (data.receiptPurpose === 'credit-payment' || data.paymentMethod === 'credit') {
+    bytes.push(...textToBytes(rightAlign('Amount paid:', amt(data, data.amountPaid || 0))));
+    bytes.push(LF);
+    bytes.push(...textToBytes(rightAlign(
+      'Balance remaining:',
+      amt(data, data.balanceAfterPayment ?? data.outstandingBalance ?? 0)
+    )));
+    bytes.push(LF);
+  }
   if (data.outstandingBalance !== undefined && data.outstandingBalance > 0) {
     bytes.push(...textToBytes(rightAlign('  Credit due:', amt(data, data.outstandingBalance))));
     bytes.push(LF);
@@ -337,6 +360,14 @@ export async function buildEscPosReceipt(data: EscPosReceiptData): Promise<Uint8
   if (data.paymentMethod === 'split') {
     if (data.cashAmount) {
       bytes.push(...textToBytes(rightAlign('  Cash:', amt(data, data.cashAmount))));
+      bytes.push(LF);
+    }
+    if (data.momoAmount) {
+      bytes.push(...textToBytes(rightAlign('  MoMo:', amt(data, data.momoAmount))));
+      bytes.push(LF);
+    }
+    if (data.chequeAmount) {
+      bytes.push(...textToBytes(rightAlign('  Cheque:', amt(data, data.chequeAmount))));
       bytes.push(LF);
     }
     if (data.paystackAmount) {

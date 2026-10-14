@@ -113,6 +113,7 @@ export default function ReportsPage() {
       const allCreditPayments = await db.credit_payments.where('store_id').equals(storeId).toArray();
       const allCustomerOpeningPayments = await db.customer_opening_payments.where('store_id').equals(storeId).toArray();
       setCustomerOpeningPayments(allCustomerOpeningPayments.filter((payment) => {
+        if (payment.entry_type !== 'payment') return false;
         const day = payment.created_at.slice(0, 10);
         return day >= start.toISOString().slice(0, 10) && day <= end.toISOString().slice(0, 10);
       }));
@@ -294,14 +295,20 @@ export default function ReportsPage() {
   };
 
   const totalRevenue = summary?.revenue ?? 0;
+  const accountPaymentRows = [...creditPayments, ...customerOpeningPayments];
   const cashRevenue = roundMoney(
     transactions.reduce((sum, transaction) =>
       sum + (transaction.payment_method === 'credit' ? 0 : Number(transaction.cash_amount) || 0), 0
-    ) + creditPayments.reduce((sum, payment) => sum + payment.amount, 0) +
-      customerOpeningPayments.reduce((sum, payment) => sum + payment.amount, 0)
+    ) + accountPaymentRows.reduce(
+      (sum, payment) => sum + Number(payment.cash_amount ?? (payment.payment_method === 'cash' || !payment.payment_method ? payment.amount : 0)),
+      0
+    )
   );
   const nonCashRevenue = roundMoney(transactions.reduce(
     (s, t) => s + (Number(t.paystack_amount) || 0) + (Number(t.manual_payment_amount) || 0),
+    0
+  ) + accountPaymentRows.reduce(
+    (sum, payment) => sum + (Number(payment.momo_amount) || 0) + (Number(payment.cheque_amount) || 0),
     0
   ));
   const creditRevenue = roundMoney(transactions.reduce(

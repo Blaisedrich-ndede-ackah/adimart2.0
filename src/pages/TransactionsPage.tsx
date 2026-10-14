@@ -10,7 +10,6 @@ import {
   getTransactionsForCashier,
   getTransactionItems,
   getCreditPaymentsForTransaction,
-  recordCreditPayment,
 } from '@/lib/dexie';
 import { useAuthStore } from '@/store/useAuthStore';
 import { reprintTransactionReceipt } from '@/lib/receiptReprint';
@@ -21,7 +20,6 @@ import { getPaymentMethodLabel } from '@/lib/paymentMethods';
 import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
 import CloudSyncPanel from '@/components/CloudSyncPanel';
-import { triggerPushSync } from '@/lib/sync';
 
 export default function TransactionsPage() {
   const { currentUser } = useAuthStore();
@@ -35,8 +33,6 @@ export default function TransactionsPage() {
   const [loading, setLoading] = useState(true);
   const [printingId, setPrintingId] = useState<string | null>(null);
   const [status, setStatus] = useState('');
-  const [paymentAmounts, setPaymentAmounts] = useState<Record<string, string>>({});
-  const [savingCreditPaymentId, setSavingCreditPaymentId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!currentUser) return;
@@ -85,26 +81,6 @@ export default function TransactionsPage() {
     );
     setPrintingId(null);
     setTimeout(() => setStatus(''), 4000);
-  };
-
-  const handleCreditPayment = async (txn: LocalTransaction) => {
-    setStatus('');
-    setSavingCreditPaymentId(txn.id);
-    try {
-      const amount = Number(paymentAmounts[txn.id]);
-      const payment = await recordCreditPayment(txn.id, amount, currentUser?.name || '');
-      setPaymentAmounts((current) => ({ ...current, [txn.id]: '' }));
-      setCreditPaymentsByTxn((current) => ({
-        ...current,
-        [txn.id]: [...(current[txn.id] || []), payment],
-      }));
-      await load();
-      void triggerPushSync('credit-payment');
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Could not record payment.');
-    } finally {
-      setSavingCreditPaymentId(null);
-    }
   };
 
   return (
@@ -231,33 +207,6 @@ export default function TransactionsPage() {
                             {payment.created_by ? ` · ${payment.created_by}` : ''}
                           </p>
                         ))}
-                        {isOwner && (txn.credit_balance || 0) > 0 && (
-                          <div className="flex gap-2">
-                            <input
-                              type="number"
-                              inputMode="decimal"
-                              min="0.01"
-                              max={txn.credit_balance || 0}
-                              step="0.01"
-                              value={paymentAmounts[txn.id] || ''}
-                              onChange={(event) => setPaymentAmounts((current) => ({
-                                ...current,
-                                [txn.id]: event.target.value,
-                              }))}
-                              placeholder="Payment amount"
-                              aria-label={`Payment amount for ${txn.customer_name || txn.receipt_number}`}
-                              className="flex-1 min-w-0 px-3 py-2 border border-amber-200 rounded-lg text-sm"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => void handleCreditPayment(txn)}
-                              disabled={savingCreditPaymentId === txn.id || !paymentAmounts[txn.id]}
-                              className="px-3 py-2 bg-amber-700 text-white rounded-lg text-xs font-semibold disabled:opacity-50"
-                            >
-                              {savingCreditPaymentId === txn.id ? 'Saving…' : 'Record payment'}
-                            </button>
-                          </div>
-                        )}
                       </div>
                     )}
                     {(txn.payment_reference || txn.paystack_reference) && (

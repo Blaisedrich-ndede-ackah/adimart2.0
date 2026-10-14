@@ -250,16 +250,32 @@ function buildPosition(params: {
 
   const posCash = roundMoney(
     params.toDateTxns.reduce((sum, t) => sum + (Number(t.cash_amount) || 0), 0) +
-      params.toDateCreditPayments.reduce((sum, payment) => sum + payment.amount, 0) +
+      params.toDateCreditPayments.reduce(
+        (sum, payment) => sum + Number(payment.cash_amount ?? (payment.payment_method === 'cash' ? payment.amount : 0)),
+        0
+      ) +
       params.toDateCustomerOpeningPayments
         .filter((payment) => payment.entry_type === 'payment')
-        .reduce((sum, payment) => sum + payment.amount, 0)
+        .reduce(
+          (sum, payment) => sum + Number(payment.cash_amount ?? (payment.payment_method === 'cash' ? payment.amount : 0)),
+          0
+        )
   );
   const digitalCollections = roundMoney(
     params.toDateTxns.reduce(
       (sum, t) => sum + (Number(t.paystack_amount) || 0) + (Number(t.manual_payment_amount) || 0),
       0
-    )
+    ) +
+      params.toDateCreditPayments.reduce(
+        (sum, payment) => sum + (Number(payment.momo_amount) || 0) + (Number(payment.cheque_amount) || 0),
+        0
+      ) +
+      params.toDateCustomerOpeningPayments
+        .filter((payment) => payment.entry_type === 'payment')
+        .reduce(
+          (sum, payment) => sum + (Number(payment.momo_amount) || 0) + (Number(payment.cheque_amount) || 0),
+          0
+        )
   );
 
   let cashBookCashIncomeExSales = 0;
