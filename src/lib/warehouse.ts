@@ -1122,6 +1122,126 @@ export async function allocateFefo(
   return allocations;
 }
 
+export async function transferStockBetweenStores(params: {
+  sourceStoreId: string;
+  destinationStoreId: string;
+  sourceProductId: string;
+  destinationProductId: string;
+  quantity: number;
+  userId?: string | null;
+  note?: string;
+}): Promise<void> {
+  const quantity = Math.floor(Number(params.quantity) || 0);
+  if (quantity <= 0) throw new Error('Quantity must be greater than zero');
+  if (params.sourceStoreId === params.destinationStoreId) {
+    throw new Error('Choose two different stores');
+  }
+
+  const [sourceProduct, destinationProduct] = await Promise.all([
+    db.products.get(params.sourceProductId),
+    db.products.get(params.destinationProductId),
+  ]);
+  if (!sourceProduct || sourceProduct.store_id !== params.sourceStoreId) throw new Error('Source product not found');
+  if (!destinationProduct || destinationProduct.store_id !== params.destinationStoreId) throw new Error('Destination product not found');
+
+  const [sourceLocations, destinationLocations] = await Promise.all([
+    ensureStoreLocations(params.sourceStoreId),
+    ensureStoreLocations(params.destinationStoreId),
+  ]);
+  const sourceLocation = sourceLocations.find((location) => location.is_default === 1 && location.location_type === 'shop') || sourceLocations[0];
+  const destinationLocation = destinationLocations.find((location) => location.is_default === 1 && location.location_type === 'shop') || destinationLocations[0];
+  if (!sourceLocation || !destinationLocation) throw new Error('Both stores need an active shop location');
+
+  const sourceBatches = sortBatchesFefo(
+    (await db.stock_batches.where('product_id').equals(params.sourceProductId).toArray())
+      .filter((batch) => batch.store_id === params.sourceStoreId && batch.location_id === sourceLocation.id && toQty(batch.quantity) > 0)
+  );
+  let remaining = quantity;
+  const allocations: Array<{ batch: LocalStockBatch; quantity: number }> = [];
+  for (const batch of sourceBatches) {
+    if (remaining <= 0) break;
+    const take = Math.min(toQty(batch.quantity), remaining);
+    if (take > 0) {
+      allocations.push({ batch, quantity: take });
+      remaining -= take;
+    }
+  }
+  if (remaining > 0) throw new Error(`Insufficient stock at ${sourceLocation.name}`);
+
+  const now = nowIso();
+  const sourceMovementId = generateId();
+  const destinationMovementId = generateId();
+  await db.transaction(
+    'rw',
+    [db.stock_batches, db.stock_movements, db.products],
+    async () => {
+      for (const allocation of allocations) {
+        await db.stock_batches.update(allocation.batch.id, {
+          quantity: toQty(allocation.batch.quantity) - allocation.quantity,
+          updated_at: now,
+          synced: 0,
+        });
+        await db.stock_batches.add({
+          id: generateId(),
+          store_id: params.destinationStoreId,
+          product_id: params.destinationProductId,
+          location_id: destinationLocation.id,
+          batch_code: allocation.batch.batch_code,
+          expiry_date: allocation.batch.expiry_date,
+          quantity: allocation.quantity,
+          cost_price: toMoney(allocation.batch.cost_price),
+          created_at: now,
+          updated_at: now,
+          synced: 0,
+        });
+      }
+      const total = allocations.reduce((sum, allocation) => sum + allocation.quantity, 0);
+      const note = params.note || `Branch transfer to ${params.destinationStoreId}`;
+      await db.stock_movements.bulkAdd([
+        {
+          id: sourceMovementId,
+          store_id: params.sourceStoreId,
+          product_id: params.sourceProductId,
+          batch_id: allocations[0]?.batch.id || null,
+          from_location_id: sourceLocation.id,
+          to_location_id: null,
+          movement_type: 'transfer',
+          quantity: total,
+          note,
+          user_id: params.userId || null,
+          created_at: now,
+          synced: 0,
+        },
+        {
+          id: destinationMovementId,
+          store_id: params.destinationStoreId,
+          product_id: params.destinationProductId,
+          batch_id: null,
+          from_location_id: null,
+          to_location_id: destinationLocation.id,
+          movement_type: 'receive',
+          quantity: total,
+          note: `Branch transfer from ${params.sourceStoreId}`,
+          user_id: params.userId || null,
+          created_at: now,
+          synced: 0,
+        },
+      ]);
+      await db.products.update(params.sourceProductId, {
+        stock_level: await getProductTotalStock(params.sourceProductId),
+        updated_at: now,
+        synced: 0,
+      });
+      const destinationTotal = await getProductTotalStock(params.destinationProductId);
+      await db.products.update(params.destinationProductId, {
+        stock_level: destinationTotal,
+        updated_at: now,
+        synced: 0,
+      });
+    }
+  );
+}
+
 export async function transferStock(params: {
   storeId: string;
   productId: string;
