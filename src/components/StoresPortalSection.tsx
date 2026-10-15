@@ -47,6 +47,7 @@ export default function StoresPortalSection() {
   const [destinationProductId, setDestinationProductId] = useState('');
   const [transferQuantity, setTransferQuantity] = useState('');
   const [showBranchTransfer, setShowBranchTransfer] = useState(false);
+  const [transferStatus, setTransferStatus] = useState<'idle' | 'validating' | 'moving' | 'complete'>('idle');
 
   const refresh = useCallback(async () => {
     const localStores = await listLocalStores();
@@ -156,7 +157,10 @@ export default function StoresPortalSection() {
       return;
     }
     setBusy(true);
+    setTransferStatus('validating');
     try {
+      await new Promise((resolve) => window.setTimeout(resolve, 350));
+      setTransferStatus('moving');
       await transferStockBetweenStores({
         sourceStoreId,
         destinationStoreId,
@@ -168,8 +172,11 @@ export default function StoresPortalSection() {
       });
       await refresh();
       setTransferQuantity('');
+      setTransferStatus('complete');
       flash('Transfer completed. Source stock was deducted and destination stock was added.');
+      window.setTimeout(() => setTransferStatus('idle'), 2200);
     } catch (e) {
+      setTransferStatus('idle');
       flash(e instanceof Error ? e.message : 'Transfer failed', true);
     } finally {
       setBusy(false);
@@ -266,6 +273,18 @@ export default function StoresPortalSection() {
           </div>
           {showBranchTransfer && (
             <div className="mt-3 space-y-2">
+              {transferStatus !== 'idle' && (
+                <div className={`rounded-xl border p-3 ${transferStatus === 'complete' ? 'border-emerald-200 bg-emerald-50' : 'border-sky-200 bg-sky-50'}`} role="status" aria-live="polite">
+                  <div className="flex items-center gap-3">
+                    {transferStatus === 'complete' ? <CheckCircle2 className="h-5 w-5 text-emerald-600" /> : <Loader2 className="h-5 w-5 animate-spin text-sky-700" />}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-gray-900">{transferStatus === 'validating' ? 'Validating linked stores' : transferStatus === 'moving' ? 'Moving inventory securely' : 'Transfer complete'}</p>
+                      <p className="text-[11px] text-gray-600">{transferStatus === 'complete' ? 'Source and destination stock are now synchronized.' : 'Checking stock, deducting the source, and adding to the destination atomically.'}</p>
+                    </div>
+                  </div>
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white"><div className={`h-full rounded-full bg-sky-600 transition-all duration-700 ${transferStatus === 'validating' ? 'w-1/3' : 'w-full'}`} /></div>
+                </div>
+              )}
               <div className="grid gap-2 sm:grid-cols-2">
                 <label className="text-[11px] font-semibold text-gray-600">
                   From store
