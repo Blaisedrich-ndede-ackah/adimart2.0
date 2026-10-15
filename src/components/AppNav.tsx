@@ -3,7 +3,7 @@ import {
   ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, House,
   CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare,
   ShoppingCart, RotateCcw,
-  ContactRound,
+  ContactRound, ArrowLeftRight,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -53,6 +53,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         { id: 'learn', label: 'Learn Adimat', icon: BookOpen, show: true },
         { id: 'subscription', label: t('nav.plan'), icon: CalendarClock, show: isOwner },
         { id: 'inventory', label: t('nav.inventory'), icon: Package, show: isOwner },
+        { id: 'warehouse', label: 'Branch transfers', icon: ArrowLeftRight, show: isOwner },
         { id: 'purchasing', label: 'Purchasing', icon: ShoppingCart, show: isOwner },
         {
           id: 'ecommerce',
