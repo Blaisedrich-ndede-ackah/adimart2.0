@@ -287,19 +287,22 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
     void (async () => {
       await loadHub();
       if (!currentStore?.id) return;
-      const unlockedId = getUnlockedWarehouseLocationId(currentStore.id);
-      if (unlockedId) {
-        setUnlockRequired(false);
-        setActiveLocationId(unlockedId);
-        setTab('stock');
-        setMode('workspace');
-        setExpandedProductId(null);
-        setStockQuery('');
-      } else {
-        setUnlockRequired(true);
-        setMode('hub');
-        setActiveLocationId(null);
-      }
+    const unlockedId = getUnlockedWarehouseLocationId(currentStore.id);
+    if (unlockedId) {
+      setUnlockRequired(false);
+      setActiveLocationId(unlockedId);
+      setTab('stock');
+      setMode('workspace');
+      setExpandedProductId(null);
+      setStockQuery('');
+    } else {
+      // Store-to-store transfers are available from the owner account even when
+      // the optional warehouse module is disabled. Warehouse locations still
+      // require their existing warehouse PIN unlock flow.
+      setUnlockRequired(false);
+      setMode('hub');
+      setActiveLocationId(null);
+    }
     })();
   }, [loadHub, currentStore?.id]);
 
@@ -513,40 +516,6 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
     setBusy(false);
   };
 
-  if (!warehouseEnabled) {
-    return (
-      <div className="page-shell">
-        <div className="page-header">
-          <div className="flex items-center gap-2">
-            <Warehouse className="w-5 h-5 text-white" />
-            <h1 className="text-white font-bold text-lg">Warehouse</h1>
-          </div>
-        </div>
-        <div className="flex-1 flex items-center justify-center px-6 pb-8">
-          <div className="text-center max-w-sm">
-            <div className="w-16 h-16 rounded-2xl bg-emerald-50 flex items-center justify-center mx-auto mb-4">
-              <Warehouse className="w-8 h-8 text-primary" />
-            </div>
-            <h2 className="text-lg font-bold text-gray-900 mb-2">Warehouse not enabled</h2>
-            <p className="text-sm text-gray-500 leading-relaxed">
-              Warehouse not enabled — contact administrator
-            </p>
-            {onBackToSettings && (
-              <button
-                type="button"
-                onClick={onBackToSettings}
-                className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-primary"
-              >
-                <ChevronLeft className="w-4 h-4" />
-                Back to store login
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   if (unlockRequired && mode === 'hub') {
     return (
       <div className="page-shell">
@@ -594,11 +563,11 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
           <div className="mb-1">
             <div className="flex items-center gap-2">
               <Warehouse className="w-5 h-5 text-white" />
-              <h1 className="text-white font-bold text-lg">Warehouse System</h1>
+              <h1 className="text-white font-bold text-lg">Branch inventory</h1>
             </div>
             <p className="text-emerald-200 text-[11px] mt-1 leading-snug">
-              Separate from POS — select a location to manage its stock, receiving, transfers, expiry,
-              adjustments, and history.
+              Select any store or warehouse attached to this owner account to manage stock, receiving,
+              transfers, expiry, adjustments, and history.
             </p>
             <p className="text-emerald-100/80 text-[10px] mt-1.5">
               {shopCount} shop{shopCount !== 1 ? 's' : ''} · {warehouseCount} warehouse
