@@ -1,6 +1,6 @@
 /**
- * ESC/POS print service for Adimat POS thermal printers.
- * Formats receipt payloads and transmits them over the connected Bluetooth printer.
+ * Receipt printing for Adimat POS: ESC/POS over Bluetooth when connected,
+ * otherwise the computer's native print dialog.
  */
 
 import {
@@ -10,10 +10,13 @@ import {
 } from './bluetoothPeripherals';
 import { buildEscPosLogoRaster } from './escPosImage';
 import { formatOfficialMoney } from './currency';
+import { getPaymentMethodLabel } from './paymentMethods';
 
 const ESC = 0x1b;
 const GS = 0x1d;
 const LF = 0x0a;
+const COMPANY_LOGO_URL = '/logo.png';
+const COMPANY_SERVICES_CONTACT = 'Need our services? Contact: +233-555-857-224';
 
 export interface EscPosReceiptItem {
   name: string;
@@ -39,6 +42,16 @@ export interface EscPosReceiptData {
   paymentMethod: string;
   cashAmount?: number;
   paystackAmount?: number;
+  momoAmount?: number;
+  chequeAmount?: number;
+  walletAmount?: number;
+  manualPaymentAmount?: number;
+  paymentReference?: string;
+  customerName?: string;
+  outstandingBalance?: number;
+  amountPaid?: number;
+  balanceAfterPayment?: number;
+  receiptPurpose?: 'sale' | 'credit-payment';
   currencyCode?: string;
 }
 
@@ -47,6 +60,166 @@ export type ReceiptData = EscPosReceiptData;
 
 function amt(data: EscPosReceiptData, n: number): string {
   return formatOfficialMoney(n, data.currencyCode);
+}
+
+function companyLogoUrl(): string {
+  return typeof window === 'undefined'
+    ? COMPANY_LOGO_URL
+    : new URL(COMPANY_LOGO_URL, window.location.href).href;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[character] || character);
+}
+
+/** Open the native print window synchronously from a user gesture (needed for reprints). */
+export function openComputerPrinterWindow(): Window | null {
+  if (typeof window === 'undefined') return null;
+  return window.open('', '_blank');
+}
+
+function printOnComputer(
+  data: EscPosReceiptData,
+  printWindow: Window | null | undefined
+): { success: boolean; error?: string } {
+  const target = printWindow === undefined ? openComputerPrinterWindow() : printWindow;
+  if (!target || target.closed) {
+    return {
+      success: false,
+      error: 'Could not open the computer print dialog. Allow pop-ups and try again.',
+    };
+  }
+
+  const itemRows = data.items.map((item) => `
+    <div class="item">
+      <div>${escapeHtml(item.name)}</div>
+      <div class="item-detail">
+        <span>${escapeHtml(`${item.quantity} x ${amt(data, item.unitPrice)}`)}</span>
+        <span>${escapeHtml(amt(data, item.subtotal))}</span>
+      </div>
+    </div>
+  `).join('');
+  const charges = (data.otherCharges || [])
+    .filter((charge) => charge?.amount)
+    .map((charge) => `<div class="row"><span>${escapeHtml(charge.label)}:</span><span>${escapeHtml(amt(data, charge.amount))}</span></div>`)
+    .join('');
+  const paymentMethod = data.paymentMethod === 'paystack'
+    ? 'Paystack'
+    : getPaymentMethodLabel(data.paymentMethod);
+  const paymentDetails = [
+    data.paymentMethod === 'split' && data.cashAmount
+      ? `<div class="row"><span>Cash:</span><span>${escapeHtml(amt(data, data.cashAmount))}</span></div>`
+      : '',
+    data.paymentMethod === 'split' && data.paystackAmount
+      ? `<div class="row"><span>Mobile money/card:</span><span>${escapeHtml(amt(data, data.paystackAmount))}</span></div>`
+      : '',
+    data.momoAmount
+      ? `<div class="row"><span>MoMo:</span><span>${escapeHtml(amt(data, data.momoAmount))}</span></div>`
+      : '',
+    data.chequeAmount
+      ? `<div class="row"><span>Cheque:</span><span>${escapeHtml(amt(data, data.chequeAmount))}</span></div>`
+      : '',
+    data.walletAmount
+      ? `<div class="row"><span>Store credit used:</span><span>${escapeHtml(amt(data, data.walletAmount))}</span></div>`
+      : '',
+    data.manualPaymentAmount
+      ? `<div class="row"><span>Amount received:</span><span>${escapeHtml(amt(data, data.manualPaymentAmount))}</span></div>`
+      : '',
+    data.customerName
+      ? `<div class="row"><span>Customer:</span><span>${escapeHtml(data.customerName)}</span></div>`
+      : '',
+    data.outstandingBalance !== undefined && data.outstandingBalance > 0
+      ? `<div class="row"><span>Credit due:</span><span>${escapeHtml(amt(data, data.outstandingBalance))}</span></div>`
+      : '',
+    data.receiptPurpose === 'credit-payment' || data.paymentMethod === 'credit'
+      ? `<div class="row"><strong>Amount paid:</strong><strong>${escapeHtml(amt(data, data.amountPaid || 0))}</strong></div><div class="row"><strong>Outstanding balance:</strong><strong>${escapeHtml(amt(data, data.balanceAfterPayment ?? data.outstandingBalance ?? 0))}</strong></div>`
+      : '',
+    data.paymentReference
+      ? `<div class="row"><span>Reference:</span><span>${escapeHtml(data.paymentReference)}</span></div>`
+      : '',
+  ].join('');
+  const logoUrl = companyLogoUrl();
+  const storeLogo = data.storeLogoUrl
+    ? `<img class="store-logo" src="${escapeHtml(data.storeLogoUrl)}" alt="">`
+    : '';
+
+  target.document.open();
+  target.document.write(`<!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Receipt ${escapeHtml(data.receiptNumber)}</title>
+        <style>
+          @page { size: 80mm auto; margin: 0; }
+          * { box-sizing: border-box; }
+          body { margin: 0; padding: 4mm; color: #111; font: 12px/1.35 Arial, sans-serif; }
+          .receipt { width: 72mm; max-width: 100%; margin: 0 auto; }
+          .center { text-align: center; }
+          .company-logo { display: block; width: 72mm; height: 24mm; object-fit: cover; object-position: center; margin: 0 auto 2mm; }
+          .store-logo { display: block; max-width: 42mm; max-height: 18mm; object-fit: contain; margin: 0 auto 2mm; }
+          .store { font-size: 17px; font-weight: 700; }
+          .rule { border: 0; border-top: 1px dashed #333; margin: 8px 0; }
+          .row, .item-detail { display: flex; justify-content: space-between; gap: 8px; }
+          .row span:last-child, .item-detail span:last-child { text-align: right; }
+          .item { margin: 6px 0; overflow-wrap: anywhere; }
+          .item-detail { margin-top: 2px; }
+          .total { font-size: 15px; font-weight: 700; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <main class="receipt">
+          <header class="center">
+            <img id="company-logo" class="company-logo" src="${escapeHtml(logoUrl)}" alt="Adimat">
+            ${storeLogo}
+            <div class="store">${escapeHtml(data.storeName || 'Store')}</div>
+            ${data.storeAddress ? `<div>${escapeHtml(data.storeAddress)}</div>` : ''}
+            ${data.supportNumber ? `<div>Tel: ${escapeHtml(data.supportNumber)}</div>` : ''}
+          </header>
+          <hr class="rule">
+          <div class="row"><span>Receipt:</span><span>${escapeHtml(data.receiptNumber)}</span></div>
+          <div class="row"><span>Cashier:</span><span>${escapeHtml(data.cashierName)}</span></div>
+          <div class="row"><span>Date:</span><span>${escapeHtml(data.dateTime)}</span></div>
+          <hr class="rule">
+          <strong>Items</strong>
+          ${itemRows}
+          <hr class="rule">
+          <div class="row"><span>Subtotal:</span><span>${escapeHtml(amt(data, data.subtotal))}</span></div>
+          ${data.discount > 0 ? `<div class="row"><span>Discount:</span><span>-${escapeHtml(amt(data, data.discount))}</span></div>` : ''}
+          ${charges}
+          <hr class="rule">
+          <div class="row total"><span>TOTAL:</span><span>${escapeHtml(amt(data, data.total))}</span></div>
+          <hr class="rule">
+          <div class="row"><span>Payment:</span><span>${escapeHtml(paymentMethod)}</span></div>
+          ${paymentDetails}
+          <p class="center">Thank you for shopping with us!<br>Powered by Adimat POS</p>
+          <p class="center">${escapeHtml(COMPANY_SERVICES_CONTACT)}</p>
+        </main>
+      </body>
+    </html>`);
+  target.document.close();
+
+  target.addEventListener('afterprint', () => target.close(), { once: true });
+  const startPrint = () => target.setTimeout(() => {
+    if (!target.closed) {
+      target.focus();
+      target.print();
+    }
+  }, 250);
+  const companyLogo = target.document.getElementById('company-logo') as HTMLImageElement | null;
+  if (companyLogo && !companyLogo.complete) {
+    companyLogo.addEventListener('load', startPrint, { once: true });
+    companyLogo.addEventListener('error', startPrint, { once: true });
+  } else {
+    startPrint();
+  }
+  return { success: true };
 }
 
 function textToBytes(text: string): number[] {
@@ -79,7 +252,11 @@ export async function buildEscPosReceipt(data: EscPosReceiptData): Promise<Uint8
   // Initialize printer
   bytes.push(...cmd(ESC, 0x40));
 
-  // Optional store logo (centered raster)
+  // Put the Adimat brand mark first, then the store logo when configured.
+  const companyLogoBytes = await buildEscPosLogoRaster(companyLogoUrl());
+  if (companyLogoBytes?.length) {
+    bytes.push(...companyLogoBytes);
+  }
   if (data.storeLogoUrl) {
     const logoBytes = await buildEscPosLogoRaster(data.storeLogoUrl);
     if (logoBytes?.length) {
@@ -163,22 +340,57 @@ export async function buildEscPosReceipt(data: EscPosReceiptData): Promise<Uint8
   bytes.push(...textToBytes(line('=')));
   bytes.push(LF);
 
-  const methodLabel =
-    data.paymentMethod === 'cash' ? 'Cash' :
-    data.paymentMethod === 'paystack' ? 'Paystack' :
-    'Split Payment';
+  const methodLabel = data.paymentMethod === 'paystack' ? 'Paystack' : getPaymentMethodLabel(data.paymentMethod);
   bytes.push(...textToBytes(rightAlign('Payment:', methodLabel)));
   bytes.push(LF);
+  if (data.customerName) {
+    bytes.push(...textToBytes(rightAlign('  Customer:', data.customerName)));
+    bytes.push(LF);
+  }
+  if (data.walletAmount) {
+    bytes.push(...textToBytes(rightAlign('Store credit used:', amt(data, data.walletAmount))));
+    bytes.push(LF);
+  }
+  if (data.receiptPurpose === 'credit-payment' || data.paymentMethod === 'credit') {
+    bytes.push(...textToBytes(rightAlign('Amount paid:', amt(data, data.amountPaid || 0))));
+    bytes.push(LF);
+    bytes.push(...textToBytes(rightAlign(
+      'Balance remaining:',
+      amt(data, data.balanceAfterPayment ?? data.outstandingBalance ?? 0)
+    )));
+    bytes.push(LF);
+  }
+  if (data.outstandingBalance !== undefined && data.outstandingBalance > 0) {
+    bytes.push(...textToBytes(rightAlign('  Credit due:', amt(data, data.outstandingBalance))));
+    bytes.push(LF);
+  }
 
   if (data.paymentMethod === 'split') {
     if (data.cashAmount) {
       bytes.push(...textToBytes(rightAlign('  Cash:', amt(data, data.cashAmount))));
       bytes.push(LF);
     }
-    if (data.paystackAmount) {
-      bytes.push(...textToBytes(rightAlign('  Paystack:', amt(data, data.paystackAmount))));
+    if (data.momoAmount) {
+      bytes.push(...textToBytes(rightAlign('  MoMo:', amt(data, data.momoAmount))));
       bytes.push(LF);
     }
+    if (data.chequeAmount) {
+      bytes.push(...textToBytes(rightAlign('  Cheque:', amt(data, data.chequeAmount))));
+      bytes.push(LF);
+    }
+    if (data.paystackAmount) {
+      bytes.push(...textToBytes(rightAlign('  Mobile money/card:', amt(data, data.paystackAmount))));
+      bytes.push(LF);
+    }
+  }
+
+  if (data.manualPaymentAmount) {
+    bytes.push(...textToBytes(rightAlign('  Amount received:', amt(data, data.manualPaymentAmount))));
+    bytes.push(LF);
+  }
+  if (data.paymentReference) {
+    bytes.push(...textToBytes(rightAlign('  Reference:', data.paymentReference)));
+    bytes.push(LF);
   }
 
   bytes.push(LF);
@@ -187,6 +399,10 @@ export async function buildEscPosReceipt(data: EscPosReceiptData): Promise<Uint8
   bytes.push(LF);
   bytes.push(...textToBytes('Powered by Adimat POS'));
   bytes.push(LF);
+  bytes.push(...cmd(ESC, 0x61, 1));
+  bytes.push(...textToBytes(COMPANY_SERVICES_CONTACT));
+  bytes.push(LF);
+  bytes.push(...cmd(ESC, 0x61, 0));
   bytes.push(LF);
   bytes.push(LF);
   bytes.push(LF);
@@ -231,10 +447,11 @@ export function buildEscPosTestPage(deviceName?: string): Uint8Array {
  * Format and transmit a receipt to the connected Bluetooth thermal printer.
  */
 export async function printReceipt(
-  data: EscPosReceiptData
+  data: EscPosReceiptData,
+  computerPrintWindow?: Window | null
 ): Promise<{ success: boolean; error?: string }> {
   if (!isPrinterConnected()) {
-    return { success: false, error: 'No printer connected. Pair a printer in Settings → Bluetooth Hardware.' };
+    return printOnComputer(data, computerPrintWindow);
   }
 
   try {

@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt,
+  ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, House,
   CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare,
-  ArrowLeftRight,
+  ShoppingCart, RotateCcw,
+  ContactRound,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useAccessibilityStore } from '@/lib/accessibility';
 import { COMMUNITY_CHAT_URL } from '@/lib/community';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
+import AccessibilityControls from '@/components/AccessibilityControls';
 import { useT } from '@/lib/i18n';
 import { canAccessCashbook } from '@/lib/staffAccess';
 
@@ -29,6 +32,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const { currentUser, currentStore, switchUser } = useAuthStore();
   const t = useT();
   const [moreOpen, setMoreOpen] = useState(false);
+  const leftHanded = useAccessibilityStore((state) => state.leftHanded);
   const isOwner = currentUser?.role === 'owner';
   const ecommerceEnabled = (currentStore?.ecommerce_enabled ?? 0) === 1;
   const canManageEcommerce =
@@ -38,14 +42,18 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const navItems = useMemo<NavItem[]>(
     () =>
       [
+        { id: 'home', label: 'Home', icon: House, show: isOwner },
         { id: 'pos', label: t('nav.pos'), icon: ScanBarcode, show: true },
         { id: 'transactions', label: isOwner ? t('nav.sales') : t('nav.mySales'), icon: Receipt, show: true },
+        { id: 'customers', label: 'Customers', icon: ContactRound, show: isOwner },
+        { id: 'returns', label: 'Returns', icon: RotateCcw, show: isOwner },
         { id: 'expenses', label: t('nav.expenses'), icon: PiggyBank, show: true },
         { id: 'cashbook', label: t('nav.cashbook'), icon: BookOpen, show: cashbookOk },
         { id: 'devices', label: t('nav.devices'), icon: Bluetooth, show: true },
+        { id: 'learn', label: 'Learn Adimat', icon: BookOpen, show: true },
         { id: 'subscription', label: t('nav.plan'), icon: CalendarClock, show: isOwner },
         { id: 'inventory', label: t('nav.inventory'), icon: Package, show: isOwner },
-        { id: 'warehouse', label: 'Transfers', icon: ArrowLeftRight, show: isOwner },
+        { id: 'purchasing', label: 'Purchasing', icon: ShoppingCart, show: isOwner },
         {
           id: 'ecommerce',
           label: t('nav.online'),
@@ -66,9 +74,11 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   );
 
   // Keep bottom bar to a few primary destinations; rest live under More
-  const primaryIds: readonly string[] = cashbookOk
-    ? ['pos', 'transactions', 'cashbook']
-    : ['pos', 'transactions', 'expenses'];
+  const primaryIds: readonly string[] = isOwner
+    ? ['home', 'pos', 'transactions']
+    : cashbookOk
+      ? ['pos', 'transactions', 'cashbook']
+      : ['pos', 'transactions', 'expenses'];
 
   const primaryItems = navItems.filter((item) => primaryIds.includes(item.id));
   const moreItems = navItems.filter((item) => !primaryIds.includes(item.id));
@@ -91,7 +101,9 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className="hidden lg:flex w-56 xl:w-64 shrink-0 flex-col self-stretch bg-primary text-white border-r border-primary-dark">
+      <aside className={`hidden lg:flex w-56 xl:w-64 shrink-0 flex-col self-stretch bg-primary text-white border-primary-dark ${
+        leftHanded ? 'lg:order-2 border-l border-r-0' : 'border-r'
+      }`}>
         <div className="px-4 py-5 border-b border-white/10">
           <p className="text-emerald-200 text-[10px] font-semibold uppercase tracking-[0.14em]">Adimat</p>
           <p className="font-bold text-xl tracking-tight truncate mt-1">{currentStore?.name || 'Store'}</p>
@@ -141,6 +153,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
           })}
         </nav>
         <div className="p-2 border-t border-white/10 space-y-2">
+          <AccessibilityControls variant="sidebar" />
           <LanguageSwitcher variant="onPrimary" compact />
           <button
             type="button"
@@ -287,6 +300,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
             </div>
 
             <div className="px-4 pb-2 space-y-2">
+              <AccessibilityControls variant="menu" />
               <LanguageSwitcher compact />
               <button
                 type="button"

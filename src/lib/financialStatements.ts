@@ -9,7 +9,11 @@ import {
   getCurrentStoreExpenses,
   getCurrentStoreId,
   type LocalCashBookEntry,
+  type LocalCustomer,
+  type LocalCustomerOpeningPayment,
+  type LocalCreditPayment,
   type LocalExpense,
+  type LocalSaleReturn,
   type LocalTransaction,
 } from './dexie';
 import { FormalPdf, formatGhsOfficial, formatOfficialDate, orgFromStore, type FormalOrg } from './formalPdf';
@@ -49,9 +53,12 @@ export interface FinancialPosition {
   asOfDate: string;
   inventory: number;
   cash: number;
+  bank: number;
   digitalCollections: number;
+  accountsReceivable: number;
   totalAssets: number;
   loans: number;
+  customerStoreCredit: number;
   totalLiabilities: number;
   capital: number;
   retainedEarnings: number;
@@ -101,13 +108,17 @@ export async function buildStoreFinancialStatements(
   const storeId = await getCurrentStoreId();
   if (!storeId) throw new Error('No store selected');
 
-  const [store, transactions, items, products, expenses, cashBook] = await Promise.all([
+  const [store, transactions, items, products, expenses, cashBook, creditPayments, customers, openingPayments, salesReturns] = await Promise.all([
     db.stores.get(storeId),
     db.transactions.where('store_id').equals(storeId).toArray(),
     db.transaction_items.where('store_id').equals(storeId).toArray(),
     db.products.where('store_id').equals(storeId).toArray(),
     getCurrentStoreExpenses(),
     getCurrentStoreCashBookEntries(),
+    db.credit_payments.where('store_id').equals(storeId).toArray(),
+    db.customers.where('store_id').equals(storeId).toArray(),
+    db.customer_opening_payments.where('store_id').equals(storeId).toArray(),
+    db.sales_returns.where('store_id').equals(storeId).toArray(),
   ]);
 
   const storeName = store?.name?.trim() || 'Store';
@@ -119,14 +130,25 @@ export async function buildStoreFinancialStatements(
 
   const periodTxnIds = new Set(periodTxns.map((t) => t.id));
   const periodItems = items.filter((i) => periodTxnIds.has(i.transaction_id));
+  const periodReturns = salesReturns.filter((saleReturn) =>
+    inRange(dateOnlyFromIso(saleReturn.created_at), fromDate, toDate)
+  );
 
-  const sales = roundMoney(periodTxns.reduce((sum, t) => sum + (Number(t.total_amount) || 0), 0));
-  const costOfGoods = roundMoney(
+  const sales = roundMoney(
+    periodTxns.reduce((sum, t) => sum + (Number(t.total_amount) || 0), 0) -
+    periodReturns.reduce((sum, saleReturn) => sum + (Number(saleReturn.refund_amount) || 0), 0)
+  );
+  const grossCostOfGoods = roundMoney(
     periodItems.reduce((sum, item) => {
       const product = productMap.get(item.product_id);
       return sum + (product?.cost_price ?? 0) * lineBaseQty(item);
     }, 0)
   );
+  const returnedCost = roundMoney(periodReturns.reduce((sum, saleReturn) => {
+    const product = productMap.get(saleReturn.product_id);
+    return sum + (product?.cost_price ?? 0) * toQty(saleReturn.stock_quantity);
+  }, 0));
+  const costOfGoods = roundMoney(Math.max(0, grossCostOfGoods - returnedCost));
   const grossProfit = roundMoney(sales - costOfGoods);
 
   const periodExpenses = expenses.filter((e) => inRange(dateOnlyFromIso(e.created_at), fromDate, toDate));
@@ -137,6 +159,10 @@ export async function buildStoreFinancialStatements(
 
   const periodCash = cashBook.filter((e) => inRange(e.entry_date, fromDate, toDate));
   const toDateCash = cashBook.filter((e) => e.entry_date <= toDate);
+  const toDateReturns = salesReturns.filter((saleReturn) => dateOnlyFromIso(saleReturn.created_at) <= toDate);
+  const toDateCreditPayments = creditPayments.filter(
+    (payment) => dateOnlyFromIso(payment.created_at) <= toDate
+  );
 
   const otherIncomeRows: { category: string; amount: number }[] = [];
   let cashBookOperatingExpenses = 0;
@@ -151,6 +177,8 @@ export async function buildStoreFinancialStatements(
       otherIncomeRows.push({ category: entry.category || 'Other', amount });
     } else if (DRAWINGS.has(cat)) {
       drawings += amount;
+    } else if (cat === 'sales refund') {
+      continue;
     } else {
       cashBookOperatingExpenses += amount;
       cashOpexRows.push({ category: entry.category || 'Other', amount });
@@ -201,6 +229,12 @@ export async function buildStoreFinancialStatements(
     toDateTxns,
     toDateExpenses,
     toDateCash,
+    toDateCreditPayments,
+    toDateCustomers: customers.filter((customer) => dateOnlyFromIso(customer.created_at) <= toDate),
+    toDateCustomerOpeningPayments: openingPayments.filter(
+      (payment) => dateOnlyFromIso(payment.created_at) <= toDate
+    ),
+    toDateReturns,
     items,
     productMap,
   });
@@ -213,12 +247,127 @@ export async function buildStoreFinancialStatements(
   };
 }
 
+function calculateReceivablesAsOf(params: {
+  customers: LocalCustomer[];
+  transactions: LocalTransaction[];
+  openingPayments: LocalCustomerOpeningPayment[];
+  creditPayments: LocalCreditPayment[];
+  returns: LocalSaleReturn[];
+}): { opening: number; sales: number } {
+  type Event =
+    | { kind: 'opening'; date: string; customerId: string; amount: number }
+    | { kind: 'sale'; date: string; customerId: string; transaction: LocalTransaction }
+    | { kind: 'opening-payment'; date: string; customerId: string; amount: number }
+    | { kind: 'credit-payment'; date: string; transactionId: string; amount: number }
+    | { kind: 'return'; date: string; customerId: string; amount: number };
+
+  const events: Event[] = [];
+  for (const customer of params.customers) {
+    events.push({
+      kind: 'opening',
+      date: customer.created_at,
+      customerId: customer.id,
+      amount: Number(customer.opening_balance) || 0,
+    });
+  }
+  for (const transaction of params.transactions) {
+    if (transaction.payment_method !== 'credit' || !transaction.customer_id) continue;
+    events.push({
+      kind: 'sale',
+      date: transaction.created_at,
+      customerId: transaction.customer_id,
+      transaction,
+    });
+  }
+  for (const payment of params.openingPayments) {
+    if (payment.entry_type !== 'payment') continue;
+    events.push({
+      kind: 'opening-payment',
+      date: payment.created_at,
+      customerId: payment.customer_id,
+      amount: Number(payment.amount) || 0,
+    });
+  }
+  for (const payment of params.creditPayments) {
+    events.push({
+      kind: 'credit-payment',
+      date: payment.created_at,
+      transactionId: payment.transaction_id,
+      amount: Number(payment.amount) || 0,
+    });
+  }
+  for (const saleReturn of params.returns) {
+    if (saleReturn.refund_method !== 'account' || !saleReturn.customer_id) continue;
+    events.push({
+      kind: 'return',
+      date: saleReturn.created_at,
+      customerId: saleReturn.customer_id,
+      amount: Number(saleReturn.debt_applied) || 0,
+    });
+  }
+
+  const priority: Record<Event['kind'], number> = {
+    opening: 0,
+    sale: 1,
+    'opening-payment': 2,
+    'credit-payment': 2,
+    return: 3,
+  };
+  events.sort((a, b) =>
+    a.date.localeCompare(b.date) || priority[a.kind] - priority[b.kind]
+  );
+
+  const openingBalances = new Map<string, number>();
+  const salesBalances = new Map<string, { customerId: string; date: string; balance: number }>();
+  for (const event of events) {
+    if (event.kind === 'opening') {
+      openingBalances.set(event.customerId, Math.max(0, event.amount));
+    } else if (event.kind === 'sale') {
+      salesBalances.set(event.transaction.id, {
+        customerId: event.customerId,
+        date: event.date,
+        balance: Math.max(0, Number(event.transaction.total_amount) || 0),
+      });
+    } else if (event.kind === 'opening-payment') {
+      const balance = openingBalances.get(event.customerId) || 0;
+      openingBalances.set(event.customerId, Math.max(0, balance - event.amount));
+    } else if (event.kind === 'credit-payment') {
+      const sale = salesBalances.get(event.transactionId);
+      if (sale) sale.balance = Math.max(0, sale.balance - event.amount);
+    } else {
+      let remaining = event.amount;
+      const openingBalance = openingBalances.get(event.customerId) || 0;
+      const openingApplied = Math.min(openingBalance, remaining);
+      openingBalances.set(event.customerId, openingBalance - openingApplied);
+      remaining -= openingApplied;
+      const customerSales = [...salesBalances.entries()]
+        .filter(([, sale]) => sale.customerId === event.customerId && sale.balance > 0)
+        .sort((a, b) => a[1].date.localeCompare(b[1].date));
+      for (const [, sale] of customerSales) {
+        if (remaining <= 0) break;
+        const applied = Math.min(sale.balance, remaining);
+        sale.balance -= applied;
+        remaining -= applied;
+      }
+    }
+  }
+
+  return {
+    opening: roundMoney([...openingBalances.values()].reduce((sum, balance) => sum + balance, 0)),
+    sales: roundMoney([...salesBalances.values()].reduce((sum, sale) => sum + sale.balance, 0)),
+  };
+}
+
 function buildPosition(params: {
   asOfDate: string;
   products: { stock_level: number; cost_price: number; is_active?: number }[];
   toDateTxns: LocalTransaction[];
   toDateExpenses: LocalExpense[];
   toDateCash: LocalCashBookEntry[];
+  toDateCreditPayments: LocalCreditPayment[];
+  toDateCustomers: LocalCustomer[];
+  toDateCustomerOpeningPayments: LocalCustomerOpeningPayment[];
+  toDateReturns: LocalSaleReturn[];
   items: { transaction_id: string; product_id: string; quantity: number; base_quantity?: number | null }[];
   productMap: Map<string, { cost_price: number }>;
 }): FinancialPosition {
@@ -230,14 +379,39 @@ function buildPosition(params: {
   );
 
   const posCash = roundMoney(
-    params.toDateTxns.reduce((sum, t) => sum + (Number(t.cash_amount) || 0), 0)
+    params.toDateTxns.reduce((sum, t) => sum + (Number(t.cash_amount) || 0), 0) +
+      params.toDateCreditPayments.reduce(
+        (sum, payment) => sum + Number(payment.cash_amount ?? (payment.payment_method === 'cash' ? payment.amount : 0)),
+        0
+      ) +
+      params.toDateCustomerOpeningPayments
+        .filter((payment) => payment.entry_type === 'payment')
+        .reduce(
+          (sum, payment) => sum + Number(payment.cash_amount ?? (payment.payment_method === 'cash' ? payment.amount : 0)),
+          0
+        )
   );
   const digitalCollections = roundMoney(
-    params.toDateTxns.reduce((sum, t) => sum + (Number(t.paystack_amount) || 0), 0)
+    params.toDateTxns.reduce(
+      (sum, t) => sum + (Number(t.paystack_amount) || 0) + (Number(t.manual_payment_amount) || 0),
+      0
+    ) +
+      params.toDateCreditPayments.reduce(
+        (sum, payment) => sum + (Number(payment.momo_amount) || 0) + (Number(payment.cheque_amount) || 0),
+        0
+      ) +
+      params.toDateCustomerOpeningPayments
+        .filter((payment) => payment.entry_type === 'payment')
+        .reduce(
+          (sum, payment) => sum + (Number(payment.momo_amount) || 0) + (Number(payment.cheque_amount) || 0),
+          0
+        )
   );
 
-  let cashBookIncomeExSales = 0;
-  let cashBookExpenses = 0;
+  let cashBookCashIncomeExSales = 0;
+  let cashBookBankIncome = 0;
+  let cashBookCashExpenses = 0;
+  let cashBookBankExpenses = 0;
   let loans = 0;
   let capital = 0;
   let drawings = 0;
@@ -247,13 +421,18 @@ function buildPosition(params: {
   for (const entry of params.toDateCash) {
     const cat = normCat(entry.category);
     const amount = Number(entry.amount) || 0;
+    const isBank = entry.account_type === 'bank';
     if (entry.entry_type === 'income') {
-      if (!POS_SALES_INCOME.has(cat)) cashBookIncomeExSales += amount;
+      if (!POS_SALES_INCOME.has(cat)) {
+        if (isBank) cashBookBankIncome += amount;
+        else cashBookCashIncomeExSales += amount;
+      }
       if (LIABILITY_INCOME.has(cat)) loans += amount;
       else if (EQUITY_INCOME.has(cat)) capital += amount;
       else if (!POS_SALES_INCOME.has(cat)) otherIncome += amount;
     } else {
-      cashBookExpenses += amount;
+      if (isBank) cashBookBankExpenses += amount;
+      else cashBookCashExpenses += amount;
       if (DRAWINGS.has(cat)) drawings += amount;
       else cashBookOpex += amount;
     }
@@ -261,8 +440,17 @@ function buildPosition(params: {
 
   const expensePage = params.toDateExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
 
-  // POS cash sales plus cash-book movements, without double-counting "Cash sales".
-  const cash = roundMoney(posCash + cashBookIncomeExSales - cashBookExpenses);
+  // POS cash sales plus cash-book cash movements, without double-counting "Cash sales".
+  const cash = roundMoney(posCash + cashBookCashIncomeExSales - cashBookCashExpenses);
+  const bank = roundMoney(cashBookBankIncome - cashBookBankExpenses);
+  const receivables = calculateReceivablesAsOf({
+    customers: params.toDateCustomers,
+    transactions: params.toDateTxns,
+    openingPayments: params.toDateCustomerOpeningPayments,
+    creditPayments: params.toDateCreditPayments,
+    returns: params.toDateReturns,
+  });
+  const accountsReceivable = roundMoney(receivables.sales + receivables.opening);
 
   const txnIds = new Set(params.toDateTxns.map((t) => t.id));
   const cogsToDate = roundMoney(
@@ -274,18 +462,27 @@ function buildPosition(params: {
       }, 0)
   );
   const salesToDate = roundMoney(
-    params.toDateTxns.reduce((sum, t) => sum + (Number(t.total_amount) || 0), 0)
+    params.toDateTxns.reduce((sum, t) => sum + (Number(t.total_amount) || 0), 0) -
+    params.toDateReturns.reduce((sum, saleReturn) => sum + (Number(saleReturn.refund_amount) || 0), 0)
   );
+  const returnedCostToDate = roundMoney(params.toDateReturns.reduce((sum, saleReturn) => {
+    const product = params.productMap.get(saleReturn.product_id);
+    return sum + (product?.cost_price ?? 0) * toQty(saleReturn.stock_quantity);
+  }, 0));
+  const cogsAfterReturns = roundMoney(Math.max(0, cogsToDate - returnedCostToDate));
   const retainedEarnings = roundMoney(
-    salesToDate - cogsToDate + otherIncome - expensePage - cashBookOpex
+    salesToDate - cogsAfterReturns + otherIncome - expensePage - cashBookOpex
   );
 
   loans = roundMoney(loans);
   capital = roundMoney(capital);
   drawings = roundMoney(drawings);
 
-  const totalAssets = roundMoney(inventory + cash + digitalCollections);
-  const totalLiabilities = loans;
+  const totalAssets = roundMoney(inventory + cash + bank + digitalCollections + accountsReceivable);
+  const customerStoreCredit = roundMoney(
+    params.toDateCustomers.reduce((sum, customer) => sum + toMoney(customer.wallet_balance || 0), 0)
+  );
+  const totalLiabilities = roundMoney(loans + customerStoreCredit);
   const equityBeforePlug = roundMoney(capital + retainedEarnings - drawings);
   const balancingDifference = roundMoney(totalAssets - totalLiabilities - equityBeforePlug);
   const equity = roundMoney(equityBeforePlug + balancingDifference);
@@ -293,9 +490,12 @@ function buildPosition(params: {
   const lines: StatementLine[] = [
     { label: 'Inventory (current, at cost)', amount: inventory },
     { label: 'Cash (POS cash + cash book)', amount: cash },
-    { label: 'Digital collections (Paystack)', amount: digitalCollections },
+    { label: 'Bank (cash book)', amount: bank },
+    { label: 'Non-cash collections', amount: digitalCollections },
+    { label: 'Accounts receivable (credit sales)', amount: accountsReceivable },
     { label: 'Total assets', amount: totalAssets, emphasis: 'total' },
     { label: 'Loans', amount: loans },
+    { label: 'Customer store credit', amount: customerStoreCredit },
     { label: 'Total liabilities', amount: totalLiabilities, emphasis: 'subtotal' },
     { label: 'Capital', amount: capital },
     { label: 'Retained earnings', amount: retainedEarnings },
@@ -311,9 +511,12 @@ function buildPosition(params: {
     asOfDate: params.asOfDate,
     inventory,
     cash,
+    bank,
     digitalCollections,
+    accountsReceivable,
     totalAssets,
     loans,
+    customerStoreCredit,
     totalLiabilities,
     capital,
     retainedEarnings,

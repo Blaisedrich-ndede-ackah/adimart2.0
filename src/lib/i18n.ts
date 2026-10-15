@@ -51,6 +51,18 @@ export const en: Record<string, string> = {
   'nav.switchUser': 'Switch user',
   'nav.moreMenu': 'More menu',
 
+  'accessibility.title': 'Accessibility',
+  'accessibility.open': 'Open accessibility settings',
+  'accessibility.description': 'Adjust display and layout preferences for this device.',
+  'accessibility.textSize': 'Text size',
+  'accessibility.textNormal': 'Normal',
+  'accessibility.textLarge': 'Large',
+  'accessibility.textLarger': 'Extra large',
+  'accessibility.highContrast': 'High contrast',
+  'accessibility.highContrastHint': 'Use stronger text, borders, and focus outlines.',
+  'accessibility.leftHanded': 'Left-handed layout',
+  'accessibility.leftHandedHint': 'Move the navigation to the right and the cart to the left.',
+
   'settings.canCashbook': 'Can open cash book',
   'settings.canCashbookHint': 'When off, this cashier cannot see Cash Book.',
 
@@ -257,6 +269,18 @@ export const fr: Record<string, string> = {
   'nav.community': 'Communauté',
   'nav.switchUser': 'Changer d’utilisateur',
   'nav.moreMenu': 'Plus d’options',
+
+  'accessibility.title': 'Accessibilité',
+  'accessibility.open': 'Ouvrir les paramètres d’accessibilité',
+  'accessibility.description': 'Ajustez l’affichage et la disposition sur cet appareil.',
+  'accessibility.textSize': 'Taille du texte',
+  'accessibility.textNormal': 'Normale',
+  'accessibility.textLarge': 'Grande',
+  'accessibility.textLarger': 'Très grande',
+  'accessibility.highContrast': 'Contraste élevé',
+  'accessibility.highContrastHint': 'Renforce le texte, les bordures et les contours de focus.',
+  'accessibility.leftHanded': 'Disposition pour gaucher',
+  'accessibility.leftHandedHint': 'Place la navigation à droite et le panier à gauche.',
 
   'settings.canCashbook': 'Peut ouvrir le livre de caisse',
   'settings.canCashbookHint': 'Si désactivé, ce caissier ne voit pas le livre de caisse.',

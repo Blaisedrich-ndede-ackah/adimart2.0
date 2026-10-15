@@ -2,6 +2,7 @@ import { isSupabaseConfigured, supabase } from './supabase';
 import { syncStockFast, syncToSupabase } from './dexie';
 
 const AUTO_SYNC_KEY = 'adimat_auto_sync';
+const LAST_SYNC_ERROR_KEY = 'adimat_last_sync_error';
 const AUTO_SYNC_INTERVAL_MS = 45 * 1000;
 const LIVE_DEBOUNCE_MS = 1500;
 
@@ -40,10 +41,11 @@ export async function triggerAutoSync(reason = 'auto'): Promise<void> {
 
   syncInProgress = true;
   try {
-    await syncStockFast();
+    const result = await syncStockFast();
+    recordSyncOutcome(result);
     lastAutoSyncAt = Date.now();
-  } catch {
-    // Silent fail for background sync
+  } catch (error) {
+    recordSyncOutcome({ success: false, message: error instanceof Error ? error.message : String(error) });
   } finally {
     syncInProgress = false;
     if (syncQueued) {
@@ -63,16 +65,26 @@ export async function triggerPushSync(reason = 'push'): Promise<void> {
 
   syncInProgress = true;
   try {
-    await syncToSupabase();
+    const result = await syncToSupabase();
+    recordSyncOutcome(result);
     lastAutoSyncAt = Date.now();
-  } catch {
-    // Silent fail for background sync
+  } catch (error) {
+    recordSyncOutcome({ success: false, message: error instanceof Error ? error.message : String(error) });
   } finally {
     syncInProgress = false;
     if (syncQueued) {
       syncQueued = false;
       void triggerAutoSync('queued');
     }
+  }
+}
+
+export function recordSyncOutcome(result: { success: boolean; message: string }): void {
+  try {
+    if (result.success) localStorage.removeItem(LAST_SYNC_ERROR_KEY);
+    else localStorage.setItem(LAST_SYNC_ERROR_KEY, result.message);
+  } catch (error) {
+    console.error('[Sync] Could not persist sync health status:', error);
   }
 }
 

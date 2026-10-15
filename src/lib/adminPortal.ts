@@ -4,7 +4,7 @@
  */
 
 import { isSupabaseConfigured, supabase } from './supabase';
-import { generateId, hashPin } from './dexie';
+import { generateId, hashUserPin } from './dexie';
 import {
   getSubscriptionInfo,
   type SubscriptionStatus,
@@ -821,7 +821,7 @@ export async function addAdminStoreCashier(
     store_id: storeId,
     name: name.trim(),
     role: 'cashier',
-    pin_hash: hashPin(pin),
+    pin_hash: await hashUserPin(pin),
     is_active: true,
     phone: phone.trim(),
     assigned_location_id: null,
@@ -867,7 +867,7 @@ export async function resetAdminUserPin(
   if (!/^\d{4}$/.test(pin)) return { success: false, error: 'PIN must be 4 digits' };
   const { error } = await supabase
     .from('users')
-    .update({ pin_hash: hashPin(pin) })
+    .update({ pin_hash: await hashUserPin(pin) })
     .eq('id', userId);
   if (error) return { success: false, error: error.message };
   return { success: true };
@@ -992,7 +992,7 @@ export async function createAdminStore(
     store_id: storeId,
     name: ownerName,
     role: 'owner' as const,
-    pin_hash: hashPin(ownerPin),
+    pin_hash: await hashUserPin(ownerPin),
     is_active: true,
     phone: ownerPhone,
     assigned_location_id: null,

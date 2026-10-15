@@ -1,7 +1,10 @@
-import { useState, type FormEvent } from 'react';
+import { useState } from 'react';
 import { Shield, ArrowLeft, Loader2 } from 'lucide-react';
-import { signInPlatformAdmin } from '@/lib/adminAuth';
-import { isSupabaseConfigured } from '@/lib/supabase';
+import {
+  adminFunctionErrorMessage,
+  verifyAdminPin,
+  startAdminSession,
+} from '@/lib/adminAuth';
 import AuthShowcase from '@/components/AuthShowcase';
 
 interface AdminLoginPageProps {
@@ -10,27 +13,43 @@ interface AdminLoginPageProps {
 }
 
 export default function AdminLoginPage({ onSuccess, onBack }: AdminLoginPageProps) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const pinLength = 8;
 
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setError('');
-    if (!isSupabaseConfigured()) {
-      setError('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY for this app.');
-      return;
-    }
-
-    setLoading(true);
-    const result = await signInPlatformAdmin(email, password);
+  const finishLogin = () => {
     setLoading(false);
-    if (!result.success) {
-      setError(result.error || 'Administrator sign-in could not be completed.');
+    onSuccess();
+  };
+
+  const submitPin = async (value: string) => {
+    if (loading) return;
+    setLoading(true);
+    setError('');
+
+    try {
+      const session = await verifyAdminPin(value);
+      startAdminSession(session);
+      finishLogin();
+    } catch (loginError) {
+      const message = adminFunctionErrorMessage(loginError);
+      setError(/invalid.*pin|unauthorized/i.test(message) ? 'Invalid administrator PIN.' : message);
+      setPin('');
+      setLoading(false);
+    }
+  };
+
+  const onKey = (key: string) => {
+    if (loading) return;
+    setError('');
+    if (key === 'del') {
+      setPin((value) => value.slice(0, -1));
       return;
     }
-    onSuccess();
+    const next = (pin + key).slice(0, pinLength);
+    setPin(next);
+    if (next.length === pinLength) void submitPin(next);
   };
 
   return (
@@ -59,49 +78,63 @@ export default function AdminLoginPage({ onSuccess, onBack }: AdminLoginPageProp
             Administrator
           </h1>
           <p className="text-emerald-100/80 text-sm text-center mt-2 max-w-xs">
-            Sign in with your platform administrator email and password.
+            Enter your admin PIN, then tap the arrow if your PIN has fewer than eight digits.
           </p>
 
-          <form onSubmit={(event) => void submit(event)} className="mt-7 w-full space-y-4">
-            <label className="grid gap-1.5 text-sm font-semibold text-white">
-              Email
-              <input
-                type="email"
-                autoComplete="username"
-                required
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                className="min-h-12 rounded-xl border border-white/30 bg-white px-3 font-normal text-slate-900 outline-none focus:ring-2 focus:ring-emerald-300"
-              />
-            </label>
-            <label className="grid gap-1.5 text-sm font-semibold text-white">
-              Password
-              <input
-                type="password"
-                autoComplete="current-password"
-                required
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                className="min-h-12 rounded-xl border border-white/30 bg-white px-3 font-normal text-slate-900 outline-none focus:ring-2 focus:ring-emerald-300"
-              />
-            </label>
-
-            {error && (
-              <p role="alert" className="text-red-200 text-sm text-center px-2">{error}</p>
+          <div className="relative mt-4 mb-4 tracking-[0.5em] text-2xl font-mono text-white min-h-[2rem]">
+            {loading ? (
+              <Loader2 className="w-6 h-6 animate-spin text-emerald-400 mx-auto" />
+            ) : (
+              '•'.repeat(pin.length) || (
+                <span className="text-emerald-200/60 tracking-normal text-sm">
+                  Enter admin PIN
+                </span>
+              )
             )}
+            <input
+              type="password"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={pinLength}
+              autoComplete="off"
+              autoFocus
+              aria-label="Administrator PIN"
+              value={pin}
+              onChange={(event) => {
+                const value = event.target.value.replace(/\D/g, '').slice(0, pinLength);
+                setPin(value);
+                if (value.length === pinLength) void submitPin(value);
+              }}
+              className="absolute inset-0 h-full w-full cursor-text opacity-0"
+            />
+          </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-white px-4 text-sm font-bold text-emerald-950 hover:bg-emerald-50 disabled:opacity-60"
-            >
-              {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-              {loading ? 'Signing in…' : 'Sign in'}
-            </button>
-          </form>
+          {error && (
+            <p role="alert" className="text-red-300 text-xs text-center mb-4 max-w-sm px-2">{error}</p>
+          )}
 
-          <p className="text-emerald-200/70 text-xs text-center mt-6 max-w-sm px-2">
-            This must be a Supabase Auth account with the platform administrator role. Setup steps are in the Administrator Portal section of the README.
+          <div className="grid grid-cols-3 gap-2.5 sm:gap-3 w-full max-w-xs">
+            {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'del', '0', 'go'].map((key) => (
+              <button
+                key={key}
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  if (key === 'go') {
+                    if (pin.length >= 4) void submitPin(pin);
+                    return;
+                  }
+                  onKey(key);
+                }}
+                className="h-14 sm:h-16 rounded-2xl bg-white/15 text-white text-xl font-semibold active:bg-white/25 disabled:opacity-50 touch-target"
+              >
+                {key === 'del' ? '⌫' : key === 'go' ? '→' : key}
+              </button>
+            ))}
+          </div>
+
+          <p className="text-emerald-200/70 text-[11px] text-center mt-6 max-w-sm px-2">
+            Enter the administrator PIN to sign in.
           </p>
         </div>
       </div>

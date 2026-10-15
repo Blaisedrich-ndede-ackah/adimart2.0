@@ -13,8 +13,6 @@ export interface PlatformSettings {
   contact_email: string;
   mnotify_api_key: string;
   mnotify_sender_id: string;
-  /** Phone that receives admin login SMS OTP */
-  admin_phone: string;
   updated_at?: string;
 }
 
@@ -24,7 +22,6 @@ const EMPTY_SETTINGS: PlatformSettings = {
   contact_email: '',
   mnotify_api_key: '',
   mnotify_sender_id: 'Adimat',
-  admin_phone: '',
 };
 
 /** Public contact fields safe to show to store owners/cashiers */
@@ -45,7 +42,6 @@ function mapRow(row: Record<string, unknown> | null | undefined): PlatformSettin
     contact_email: String(row.contact_email || ''),
     mnotify_api_key: String(row.mnotify_api_key || ''),
     mnotify_sender_id: String(row.mnotify_sender_id || 'Adimat').slice(0, 11) || 'Adimat',
-    admin_phone: String(row.admin_phone || ''),
     updated_at: row.updated_at ? String(row.updated_at) : undefined,
   };
 }
@@ -118,7 +114,6 @@ export async function savePlatformSettings(
     mnotify_sender_id: ((patch.mnotify_sender_id ?? current.mnotify_sender_id) || 'Adimat')
       .trim()
       .slice(0, 11),
-    admin_phone: (patch.admin_phone ?? current.admin_phone).trim(),
   };
 
   const { error } = await supabase.from('platform_settings').upsert(
@@ -128,7 +123,6 @@ export async function savePlatformSettings(
       contact_email: next.contact_email,
       mnotify_api_key: next.mnotify_api_key,
       mnotify_sender_id: next.mnotify_sender_id,
-      admin_phone: next.admin_phone,
       updated_at: new Date().toISOString(),
     },
     { onConflict: 'id' }
@@ -137,8 +131,8 @@ export async function savePlatformSettings(
   if (error) {
     return {
       success: false,
-      error: error.message.includes('platform_settings') || error.message.includes('admin_phone')
-        ? `${error.message} — run supabase-migrate-user-phone-admin-otp.sql in Supabase.`
+      error: error.message.includes('platform_settings')
+        ? `${error.message} — run supabase-migrate-platform-settings.sql in Supabase.`
         : error.message,
     };
   }

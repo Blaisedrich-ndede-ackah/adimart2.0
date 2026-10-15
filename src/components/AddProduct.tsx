@@ -24,11 +24,10 @@ interface AddProductProps {
   onClose: () => void;
   onSaved: () => void;
   editProduct?: LocalProduct | null;
+  categories: string[];
   /** Prefill barcode from handheld scanner (inventory logging) */
   initialBarcode?: string | null;
 }
-
-const CATEGORIES = ['Food', 'Beverages', 'Dairy', 'Household', 'Electronics', 'Clothing', 'Health', 'Accessories', 'Other'];
 
 const WHOLESALE_MODES: { value: WholesaleMode; label: string }[] = [
   { value: 'none', label: 'None (retail only)' },
@@ -37,14 +36,16 @@ const WHOLESALE_MODES: { value: WholesaleMode; label: string }[] = [
   { value: 'tiers', label: 'Quantity tiers' },
 ];
 
-export default function AddProduct({ isOpen, onClose, onSaved, editProduct, initialBarcode }: AddProductProps) {
+export default function AddProduct({ isOpen, onClose, onSaved, editProduct, initialBarcode, categories }: AddProductProps) {
   const currencySymbol = getStoreCurrency(useAuthStore((s) => s.currentStore?.currency_code)).symbol;
+  const currentUserId = useAuthStore((s) => s.currentUser?.id);
   const [name, setName] = useState('');
   const [category, setCategory] = useState('Food');
   const [barcode, setBarcode] = useState('');
   const [costPrice, setCostPrice] = useState('');
   const [sellingPrice, setSellingPrice] = useState('');
   const [stockLevel, setStockLevel] = useState('');
+  const [reorderLevel, setReorderLevel] = useState('0');
   const [skuType, setSkuType] = useState('unit');
   const [packSize, setPackSize] = useState('1');
   const [trackExpiry, setTrackExpiry] = useState(false);
@@ -66,6 +67,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const cameraImageInputRef = useRef<HTMLInputElement>(null);
 
   const stopCameraScanner = useCallback(() => {
     if (readerRef.current) {
@@ -94,6 +96,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         setCostPrice(editProduct.cost_price.toString());
         setSellingPrice(editProduct.selling_price.toString());
         setStockLevel(editProduct.stock_level.toString());
+        setReorderLevel(String(editProduct.reorder_level ?? 0));
         setSkuType(editProduct.sku_type);
         setImageUrl(editProduct.image_url || '');
         setPackSize(String(editProduct.pack_size ?? 1));
@@ -113,11 +116,12 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         setTiers(existingTiers.length > 0 ? existingTiers : [{ min_qty: 10, unit_price: 0 }]);
       } else {
         setName('');
-        setCategory('Food');
+        setCategory(categories.includes('Food') ? 'Food' : categories[0] || 'Other');
         setBarcode(initialBarcode?.trim() || '');
         setCostPrice('');
         setSellingPrice('');
         setStockLevel('');
+        setReorderLevel('0');
         setSkuType('unit');
         setImageUrl('');
         setPackSize('1');
@@ -223,9 +227,11 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
       setImageUrl(dataUrl);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to process image');
+    } finally {
+      setImageBusy(false);
+      if (imageInputRef.current) imageInputRef.current.value = '';
+      if (cameraImageInputRef.current) cameraImageInputRef.current.value = '';
     }
-    setImageBusy(false);
-    if (imageInputRef.current) imageInputRef.current.value = '';
   };
 
   const handleSave = async () => {
@@ -303,6 +309,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           barcode: barcode.trim(),
           cost_price: cost,
           selling_price: sell,
+          reorder_level: Math.max(0, Math.floor(Number(reorderLevel) || 0)),
           sku_type: skuType,
           image_url: imageUrl || '',
           ...wholesaleFields,
@@ -314,6 +321,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           productId: editProduct.id,
           targetQty: parseInt(stockLevel) || 0,
           note: 'Product edit stock',
+          userId: currentUserId,
         });
       } else {
         const productId = generateId();
@@ -326,6 +334,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           barcode: barcode.trim(),
           cost_price: cost,
           selling_price: sell,
+          reorder_level: Math.max(0, Math.floor(Number(reorderLevel) || 0)),
           stock_level: 0,
           is_active: 1,
           image_url: imageUrl || '',
@@ -341,6 +350,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
             productId,
             targetQty: openingQty,
             note: 'Opening stock',
+            userId: currentUserId,
           });
         }
       }
@@ -401,6 +411,15 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
                     <ImagePlus className="w-3.5 h-3.5" />
                     {imageBusy ? 'Processing…' : imageUrl ? 'Choose another photo' : 'Choose from phone'}
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => cameraImageInputRef.current?.click()}
+                    disabled={imageBusy}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 border border-primary/20 text-primary rounded-lg text-xs font-medium touch-target disabled:opacity-50"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    Take photo
+                  </button>
                   {imageUrl && (
                     <button
                       type="button"
@@ -418,6 +437,14 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
               ref={imageInputRef}
               type="file"
               accept="image/*"
+              className="hidden"
+              onChange={(e) => void handleImagePick(e.target.files?.[0] || null)}
+            />
+            <input
+              ref={cameraImageInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
               className="hidden"
               onChange={(e) => void handleImagePick(e.target.files?.[0] || null)}
             />
@@ -530,8 +557,22 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
                 onChange={e => setCategory(e.target.value)}
                 className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none bg-white"
               >
-                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                {[...new Set([...categories, category])].map(c => <option key={c} value={c}>{c}</option>)}
               </select>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-gray-700 mb-1.5 block">Restock alert level</label>
+              <input
+                type="number"
+                value={reorderLevel}
+                onChange={(e) => setReorderLevel(e.target.value)}
+                placeholder="0"
+                min="0"
+                step="1"
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
+              />
+              <p className="mt-1 text-[11px] text-gray-500">Suggest restocking when available stock reaches this quantity. Set to 0 to disable.</p>
             </div>
             <div>
               <label className="text-sm font-medium text-gray-700 mb-1.5 block">Unit Type</label>

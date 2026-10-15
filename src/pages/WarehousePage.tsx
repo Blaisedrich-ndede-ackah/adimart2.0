@@ -394,7 +394,6 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
       flash('Enter a valid quantity', true);
       return;
     }
-
     setBusy(true);
     try {
       const cost = recvCost.trim() ? Number(recvCost) : undefined;
@@ -476,6 +475,10 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
       flash('Enter a valid quantity', true);
       return;
     }
+    if (!adjNote.trim()) {
+      flash('Enter a reason so this adjustment is recorded in the stock audit.', true);
+      return;
+    }
 
     setBusy(true);
     try {
@@ -484,7 +487,7 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
         productId: adjProductId,
         locationId: activeLocationId,
         delta: adjDirection === 'in' ? qty : -qty,
-        note: adjNote.trim() || undefined,
+        note: adjNote.trim(),
         userId: currentUser?.id || null,
       });
       setAdjQty('');
@@ -1178,7 +1181,7 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
                 </div>
                 <div>
                   <label className="text-sm font-medium text-gray-700 mb-1.5 block">
-                    Note <span className="text-gray-400 font-normal">(optional)</span>
+                    Reason *
                   </label>
                   <input
                     type="text"

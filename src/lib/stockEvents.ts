@@ -11,7 +11,7 @@ export type StockChange = {
 export type StockChangedEvent = {
   storeId: string;
   locationId?: string | null;
-  reason: 'sale' | 'adjust' | 'order' | 'receive' | 'sync';
+  reason: 'sale' | 'adjust' | 'order' | 'receive' | 'return' | 'sync';
   changes: StockChange[];
   at: number;
 };

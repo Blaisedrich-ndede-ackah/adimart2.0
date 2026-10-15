@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Flame, Package } from 'lucide-react';
+import { Flame } from 'lucide-react';
 import { getCurrentStoreId, getCurrentStoreActiveProducts, getTransactionItems, db, type LocalProduct } from '@/lib/dexie';
 import ProductImage from '@/components/ProductImage';
 import { useFormatMoney } from '@/lib/currency';
@@ -30,7 +30,7 @@ export default function FrequentItems({ onAddProduct }: { onAddProduct?: (produc
         const transactions = await db.transactions
           .where('store_id')
           .equals(storeId)
-          .filter((t) => t.created_at && t.created_at > thirtyDaysAgo && t.status === 'completed')
+          .filter((t) => Boolean(t.created_at && t.created_at > thirtyDaysAgo && t.status === 'completed'))
           .toArray();
 
         // Count product frequency
@@ -99,14 +99,14 @@ export default function FrequentItems({ onAddProduct }: { onAddProduct?: (produc
             >
               <div className="aspect-square bg-gray-50 rounded-t-[6px] flex items-center justify-center overflow-hidden">
                 <ProductImage
-                  productId={product.id}
+                  src={product.image_url}
                   alt={product.name}
                   className="w-full h-full object-cover"
                 />
               </div>
               <div className="p-1.5 space-y-0.5">
                 <p className="text-[10px] font-semibold text-gray-800 truncate">{product.name}</p>
-                <p className="text-[9px] text-amber-700 font-bold">{money(product.price || 0)}</p>
+                <p className="text-[9px] text-amber-700 font-bold">{money(product.selling_price || 0)}</p>
                 {outOfStock && <p className="text-[8px] text-red-600 font-bold">Out of stock</p>}
               </div>
             </button>

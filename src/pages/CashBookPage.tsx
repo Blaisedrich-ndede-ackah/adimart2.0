@@ -97,6 +97,7 @@ export default function CashBookPage() {
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('Other');
+  const [accountType, setAccountType] = useState<'cash' | 'bank'>('cash');
   const [notes, setNotes] = useState('');
   const [entryDate, setEntryDate] = useState(() => toDateOnly(new Date()));
   const [saving, setSaving] = useState(false);
@@ -172,14 +173,21 @@ export default function CashBookPage() {
   const totals = useMemo(() => {
     let income = 0;
     let expense = 0;
+    let cashVolume = 0;
+    let bankVolume = 0;
     for (const e of entries) {
+      const signed = (Number(e.amount) || 0) * (e.entry_type === 'income' ? 1 : -1);
       if (e.entry_type === 'income') income += Number(e.amount) || 0;
       else expense += Number(e.amount) || 0;
+      if ((e.account_type || 'cash') === 'bank') bankVolume += signed;
+      else cashVolume += signed;
     }
     return {
       income: roundMoney(income),
       expense: roundMoney(expense),
       net: roundMoney(income - expense),
+      cashVolume: roundMoney(cashVolume),
+      bankVolume: roundMoney(bankVolume),
     };
   }, [entries]);
 
@@ -197,6 +205,7 @@ export default function CashBookPage() {
     setDescription('');
     setAmount('');
     setNotes('');
+    setAccountType('cash');
     setError('');
     setEntryDate(today > toDate ? toDate : today < fromDate ? fromDate : today);
     setCategory(type === 'income' ? INCOME_CATEGORIES[0] : EXPENSE_CATEGORIES[0]);
@@ -221,6 +230,7 @@ export default function CashBookPage() {
         entry_type: composer,
         description: description.trim(),
         category,
+        account_type: accountType,
         amount: value,
         notes: notes.trim(),
         entry_date: entryDate || today,
@@ -399,6 +409,20 @@ export default function CashBookPage() {
               <p className="text-sm text-slate-500">Income</p>
               <p className="text-xl font-bold text-emerald-600 mt-1">{money(totals.income)}</p>
             </div>
+            <div className="grid grid-cols-2 divide-x divide-slate-100 border-t border-slate-100">
+              <div className="px-4 py-3 text-center">
+                <p className="text-xs text-slate-500">Cash volume</p>
+                <p className={`text-base font-bold mt-1 ${totals.cashVolume < 0 ? 'text-red-500' : 'text-slate-900'}`}>
+                  {money(totals.cashVolume)}
+                </p>
+              </div>
+              <div className="px-4 py-3 text-center">
+                <p className="text-xs text-slate-500">Bank volume</p>
+                <p className={`text-base font-bold mt-1 ${totals.bankVolume < 0 ? 'text-red-500' : 'text-slate-900'}`}>
+                  {money(totals.bankVolume)}
+                </p>
+              </div>
+            </div>
             <div className="px-4 py-4 text-center">
               <p className="text-sm text-slate-500">Expense</p>
               <p className="text-xl font-bold text-red-500 mt-1">{money(totals.expense)}</p>
@@ -448,6 +472,8 @@ export default function CashBookPage() {
                     </div>
                     <p className="text-xs text-slate-500 mt-1 pl-8">
                       {cashbookCategoryLabel(entry.category, t)} · {entry.entry_date}
+                      {' · '}
+                      {(entry.account_type || 'cash') === 'bank' ? 'Bank' : 'Cash'}
                       {entry.created_by ? ` · ${entry.created_by}` : ''}
                     </p>
                     {entry.notes ? (
@@ -548,6 +574,20 @@ export default function CashBookPage() {
                       {cashbookCategoryLabel(c, t)}
                     </option>
                   ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="cashbook-account-type" className="block text-xs font-medium text-gray-500 mb-1">
+                  Account
+                </label>
+                <select
+                  id="cashbook-account-type"
+                  value={accountType}
+                  onChange={(e) => setAccountType(e.target.value === 'bank' ? 'bank' : 'cash')}
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm"
+                >
+                  <option value="cash">Cash</option>
+                  <option value="bank">Bank</option>
                 </select>
               </div>
               <input

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { X, Lock, CheckCircle2, AlertTriangle, User } from 'lucide-react';
-import { db, hashPin, LocalUser } from '@/lib/dexie';
+import { updateUserPin, LocalUser } from '@/lib/dexie';
 
 interface ResetUserPinModalProps {
   isOpen: boolean;
@@ -37,11 +37,7 @@ export default function ResetUserPinModal({ isOpen, user, onClose, onSuccess }: 
     setSaving(true);
 
     try {
-      const newPinHash = hashPin(newPin);
-      await db.users.update(user.id, {
-        pin_hash: newPinHash,
-        synced: 0,
-      });
+      await updateUserPin(user.id, newPin);
 
       setSuccess(true);
       setTimeout(() => {

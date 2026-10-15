@@ -7,6 +7,7 @@ import {
 import { FormalPdf, formatGhsOfficial, orgFromStore, type FormalOrg } from './formalPdf';
 import { getLocationInventory, listLocations, toMoney, toQty } from './warehouse';
 import { lineBaseQty, roundMoney } from './money';
+import { getPaymentMethodLabel } from './paymentMethods';
 
 export interface PeriodRange {
   start: Date;
@@ -269,9 +270,9 @@ export function exportReportCsv(
       `"${e.description}","${e.category}",${e.amount.toFixed(2)},${new Date(e.created_at).toLocaleDateString()}`
     ),
     '',
-    'Transactions,Receipt,Cashier,Total,Payment,Date',
+    'Transactions,Receipt,Cashier,Total,Payment,Reference,Date',
     ...transactions.map(t =>
-      `${t.id},"${t.receipt_number}","${t.cashier_name}",${t.total_amount.toFixed(2)},${t.payment_method},${t.created_at}`
+      `${t.id},"${t.receipt_number}","${t.cashier_name}",${t.total_amount.toFixed(2)},"${getPaymentMethodLabel(t.payment_method)}","${(t.payment_reference || t.paystack_reference || '').replace(/"/g, '""')}",${t.created_at}`
     ),
   ];
 

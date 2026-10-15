@@ -5,14 +5,18 @@ import {
 import {
   LocalTransaction,
   LocalTransactionItem,
+  LocalCreditPayment,
   getCurrentStoreTransactions,
   getTransactionsForCashier,
   getTransactionItems,
+  getCreditPaymentsForTransaction,
 } from '@/lib/dexie';
 import { useAuthStore } from '@/store/useAuthStore';
 import { reprintTransactionReceipt } from '@/lib/receiptReprint';
 import { isPrinterConnected } from '@/lib/bluetoothPeripherals';
+import { openComputerPrinterWindow } from '@/lib/printService';
 import { parseOtherCharges } from '@/lib/otherCharges';
+import { getPaymentMethodLabel } from '@/lib/paymentMethods';
 import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
 import CloudSyncPanel from '@/components/CloudSyncPanel';
@@ -25,6 +29,7 @@ export default function TransactionsPage() {
   const [transactions, setTransactions] = useState<LocalTransaction[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [itemsByTxn, setItemsByTxn] = useState<Record<string, LocalTransactionItem[]>>({});
+  const [creditPaymentsByTxn, setCreditPaymentsByTxn] = useState<Record<string, LocalCreditPayment[]>>({});
   const [loading, setLoading] = useState(true);
   const [printingId, setPrintingId] = useState<string | null>(null);
   const [status, setStatus] = useState('');
@@ -55,23 +60,24 @@ export default function TransactionsPage() {
     }
     setExpandedId(txnId);
     if (!itemsByTxn[txnId]) {
-      const items = await getTransactionItems(txnId);
+      const [items, payments] = await Promise.all([
+        getTransactionItems(txnId),
+        getCreditPaymentsForTransaction(txnId),
+      ]);
       setItemsByTxn((prev) => ({ ...prev, [txnId]: items }));
+      setCreditPaymentsByTxn((prev) => ({ ...prev, [txnId]: payments }));
     }
   };
 
   const handleReprint = async (txn: LocalTransaction) => {
     setStatus('');
-    if (!isPrinterConnected()) {
-      setStatus('No printer connected. Pair one under Devices first.');
-      return;
-    }
+    const printWindow = isPrinterConnected() ? undefined : openComputerPrinterWindow();
     setPrintingId(txn.id);
-    const result = await reprintTransactionReceipt(txn);
+    const printResult = await reprintTransactionReceipt(txn, printWindow);
     setStatus(
-      result.success
+      printResult.success
         ? `Reprinted ${txn.receipt_number}`
-        : result.error || 'Reprint failed'
+        : printResult.error || 'Reprint failed'
     );
     setPrintingId(null);
     setTimeout(() => setStatus(''), 4000);
@@ -151,7 +157,7 @@ export default function TransactionsPage() {
                       {new Date(txn.created_at).toLocaleString('en-GH')}
                       {isOwner ? ` · ${txn.cashier_name || 'Cashier'}` : ''}
                       {' · '}
-                      {txn.payment_method}
+                      {getPaymentMethodLabel(txn.payment_method)}
                     </p>
                   </div>
                   <div className="text-right flex-shrink-0">
@@ -186,6 +192,28 @@ export default function TransactionsPage() {
                         {charge.label}: {money(charge.amount)}
                       </p>
                     ))}
+                    {txn.payment_method === 'credit' && (
+                      <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 space-y-2">
+                        <p className="text-xs text-amber-900">
+                          Customer: <span className="font-semibold">{txn.customer_name || 'Not recorded'}</span>
+                          {txn.customer_phone ? ` · ${txn.customer_phone}` : ''}
+                        </p>
+                        <p className="text-xs text-amber-900">
+                          Outstanding balance: <span className="font-bold">{money(txn.credit_balance || 0)}</span>
+                        </p>
+                        {(creditPaymentsByTxn[txn.id] || []).map((payment) => (
+                          <p key={payment.id} className="text-[11px] text-amber-800">
+                            Payment {money(payment.amount)} · {new Date(payment.created_at).toLocaleString('en-GH')}
+                            {payment.created_by ? ` · ${payment.created_by}` : ''}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                    {(txn.payment_reference || txn.paystack_reference) && (
+                      <p className="text-xs text-gray-600">
+                        Payment reference: <span className="font-mono">{txn.payment_reference || txn.paystack_reference}</span>
+                      </p>
+                    )}
                     <button
                       onClick={() => void handleReprint(txn)}
                       disabled={printingId === txn.id}

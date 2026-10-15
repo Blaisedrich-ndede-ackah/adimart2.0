@@ -4,6 +4,8 @@ A mobile-first Point of Sale (POS) and inventory management Progressive Web App 
 
 **Full system documentation:** see [`SYSTEM_DOCUMENTATION.md`](./SYSTEM_DOCUMENTATION.md) for architecture, data models, sync, security, integrations, and operations.
 
+**Learn Adimat:** The signed-in app shows owner or cashier lessons for that user's role, with screen illustrations and a matching downloadable PDF. Platform administrators have a separate **Learn** area inside the authenticated administrator portal, including its own technical guide. The [store owner guide PDF](./public/guides/adimat-store-owner-guide.pdf), [cashier guide PDF](./public/guides/adimat-cashier-guide.pdf), [administrator and technical guide PDF](./public/guides/adimat-admin-technical-guide.pdf), and [technical system documentation](./SYSTEM_DOCUMENTATION.md) are also available in the repository.
+
 ![Adimat POS](public/logo.png)
 
 ## Features
@@ -13,15 +15,18 @@ A mobile-first Point of Sale (POS) and inventory management Progressive Web App 
 - **Manual Entry** — Search products by name or enter barcodes manually
 - **Real-time Cart** — Add, remove, and adjust quantities with instant totals
 - **Stock Validation** — Prevents selling out-of-stock items, warns on low stock
-- **Flexible Payments** — Cash, Paystack (Mobile Money/Card/QR), or split payments
+- **Flexible Payments** — Cash, Paystack, split payments, offline-recorded MTN/Telecel/AirtelTigo MoMo, bank transfers, card-terminal payments, and customer credit with outstanding-balance tracking
+- **Hold Sale** — Park a cart while serving another customer, then resume it in the same POS session
 - **Discount Management** — Apply discounts with optional owner PIN authorization for amounts exceeding the configured cap
 - **PDF Receipts** — Generate, download, and share receipts as PDF files
 
 ### 📦 Inventory Management
-- **Product Catalog** — Full CRUD operations for products with categories
+- **Product Catalog** — Full product CRUD, plus owner-managed category create, rename, and delete
 - **Optional Product Photos** — Add a picture when creating/editing a product; shown in inventory and at checkout
 - **Stock Tracking** — Automatic stock deduction on sales, low stock and out-of-stock alerts
 - **Stock Adjustment** — Manually add, remove, or set stock levels with reason tracking
+- **Restock Alerts** — Configure a reorder level per product and review suggested restock quantities
+- **Stock Audit Trail** — Review and export recorded receipts, transfers, sales, and adjustments with staff and location details
 - **Barcode Assignment** — Scan barcodes directly when adding products
 - **Profit Margin Calculator** — Auto-calculates margin based on cost and selling price
 - **Dashboard Cards** — Total SKUs, out of stock count, low stock count, total inventory value
@@ -29,17 +34,37 @@ A mobile-first Point of Sale (POS) and inventory management Progressive Web App 
 
 ### 📊 Reports & Analytics
 - **Period Filtering** — Today, This Week, This Month views
-- **Revenue Breakdown** — Cash vs Paystack isolation
+- **Revenue Breakdown** — Cash vs non-cash collections; manual payments are kept separate from Paystack payout totals
+- **Credit Sales** — Save customer details, track outstanding balances, and record cash repayments from Sales history
 - **7-Day Rolling Chart** — Visual revenue trend using bar charts
 - **Transaction Register** — Chronological audit log with expandable item details
+
+### 📒 Cash Book
+- **Cash and Bank Accounts** — Record each income or expense against Cash or Bank and review each account’s net volume
+
+### 👥 Customers Book
+- **Registered Customers** — Store customer names and phone numbers and review their credit sales and account balances
+- **Starting Balances** — Enter existing customer debt when registering a customer; repayments are recorded against that opening balance
+- **Credit Checkout** — Credit sales require selecting an active registered customer and add the sale to their outstanding balance
+- **Customer Records** — Edit customer details or archive/reactivate a customer; customers with outstanding debt cannot be archived
 
 ### ⚙️ Settings
 - **Store Profile** — Configure store name, address, and support number
 - **Discount Controls** — Set discount cap percentage and toggle PIN enforcement
 - **User Management** — Add/remove cashiers and owners with 4-digit PINs
 - **Automatic Session Timeout** — Owners set how long the till may sit idle (off, or 1–30 minutes; default 5). Staff are returned to the PIN screen, the cart is cleared, and a refresh cannot restore a stale session.
-- **Thermal Printer** — Connect Bluetooth thermal printers for receipt printing
+- **Receipt Printing** — Print directly to a connected Bluetooth thermal printer, or choose a computer printer from the browser print dialog
 - **Cloud Sync** — Manual sync to Supabase with last-synced timestamp. Owners use **Settings**; cashiers use **My Sales** or **Devices → Cloud Sync** (Full Sync / Pull / Push) so they can send sales and pick up stock updates.
+- **Backup & Sync Health** — Daily on-device snapshots, downloadable store backups, restore, pending-change count, and last sync/backup errors
+
+### 📈 Owner dashboard & product search
+- **Owner Home** — Today’s sales, cash and non-cash totals, low-stock count, and one-tap new sale/product/expense actions; cashiers continue directly to POS
+- **Smarter POS Search** — Typo-tolerant product-name search, partial barcode matching, recently and frequently sold products prioritized, and optional voice input where the browser supports it
+
+### 💸 Expense controls
+- **Recurring Expenses** — Schedule monthly costs such as rent and salaries, which are recorded automatically on or after the chosen day
+- **Receipt Photos** — Attach a compressed photo of an expense receipt
+- **Monthly Budgets** — Set category limits and see an over-budget warning as spending passes the limit
 
 ### 📱 PWA & Offline Support
 - **Installable** — Add to home screen on mobile devices
@@ -103,29 +128,24 @@ VITE_PAYSTACK_PUBLIC_KEY=pk_live_your-public-key
 
 ### Administrator Portal
 
-Platform admins can open **Administrator portal** from the store login or first-launch screen, then sign in using a Supabase Auth email and password. Campaign management uses this same Supabase Auth session and database/storage row-level security; it does not require an Edge Function, CLI deployment, SMS provider, or service-role key in the app.
+Platform admins sign in with the administrator PIN only; admin login does not send SMS or use Supabase Auth. The app reads the existing `VITE_ADMIN_PIN` from the Vercel server function at `/api/manage-promotional-campaigns`; the PIN is not checked in browser code.
 
-To configure the administrator account once:
+Campaign management uses that PIN-only session through the Vercel API route. Apply `supabase-migrate-promotional-campaigns.sql`, then make sure the Vercel project has these environment variables:
 
-1. Apply `supabase-migrate-promotional-campaigns.sql` in the Supabase SQL Editor.
-2. In the Supabase Dashboard, open **Authentication → Users** and create the administrator email/password account.
-3. In the SQL Editor, replace the email below with that exact account email and run:
+- `VITE_ADMIN_PIN` — the admin PIN already configured in Vercel.
+- `VITE_SUPABASE_URL` — the existing Supabase project URL.
+- `SUPABASE_SERVICE_ROLE_KEY` — the Supabase service-role key as a private Vercel environment variable (not prefixed with `VITE_`).
 
-   ```sql
-   UPDATE auth.users
-   SET raw_app_meta_data = COALESCE(raw_app_meta_data, '{}'::jsonb)
-     || '{"is_platform_admin": true}'::jsonb
-   WHERE email = 'admin@example.com';
-   ```
+The API function uses Supabase service credentials server-side to write campaigns. Do not expose the service-role key to browser code or open campaign write policies to `anon`. Vercel automatically deploys the API route with the app.
 
-4. Sign in from the app with that email and password. The `is_platform_admin` claim is checked by the campaign table and storage policies; do not put it in user-editable metadata.
+Published campaigns appear on the store login screen for all store users. Campaign details and media are cached on each device after that device loads them while online, so they can be shown offline later. A device must load the campaigns at least once while online; campaign changes made elsewhere appear after it reconnects.
 
 The portal loads cloud data and shows:
 
 - All stores, users, and products
 - Subscription grants and usage
 - **Create a store** — Admin → Stores creates the shop, owner PIN, and **downloads a subscription invoice PDF immediately** (Aktum / Adimat bill matching the official invoice). Share the Store ID so the owner can open it on their phone.
-- **Contact** settings: WhatsApp number + email shown on every store’s **Plan** tab, plus mNotify SMS API key/sender ID
+- **Contact** settings: WhatsApp number + email shown on every store’s **Plan** tab, and mNotify SMS API key/sender ID for store alerts
 - All-time revenue and Paystack (online) totals per store
 - Weekly Paystack collections with each store’s MoMo account name/number for remittance
 - **Mark sent** to record that a weekly payout was transferred
@@ -148,6 +168,16 @@ Products support pack size, expiry tracking, and owner-defined wholesale pricing
 If your Supabase project predates this feature, run `supabase-migrate-warehouse.sql` in the SQL Editor.
 For store quotas + warehouse PINs, run `supabase-migrate-store-quotas.sql` (includes `max_stores` and the canonical `store_quotas` table).
 
+### Supplier purchasing and restocking
+
+Owners can open **Purchasing** to save supplier contact details, create purchase orders, receive orders in full or in partial quantities into a selected shop/warehouse, and cancel open orders. Receiving adds stock batches and stock-movement audit entries, and updates product cost prices. Set a product’s **Restock alert quantity** from its Inventory edit form; **Inventory → Restock & audit** shows items at or below that level and a suggested quantity.
+
+If your Supabase project predates these tables/columns, run `supabase-migrate-purchasing-reorder.sql` in the SQL Editor before syncing purchasing or reorder-level data. New projects receive the schema from `supabase-init.sql`.
+
+### Backups and sync health
+
+Owners can open **Settings → Backup & sync health** to download a JSON backup, restore a backup for the currently selected store, inspect pending local changes and recent sync/backup errors, and download the latest automatic snapshot. Authenticated sessions also create one daily snapshot in the browser, retaining up to seven. Browser snapshots are not off-device protection: download backups to a separate secure location. Backup files include sensitive store and staff data, including PIN hashes, and are limited to 50 MB. Restoring replaces that store’s local data on the current device; unsynced rows in a restored backup may be uploaded during the next cloud sync.
+
 ### E-commerce storefront
 
 Platform admins can enable a public online shop per store (Admin → Subscriptions → **E-commerce storefront**) and set a slug used in `#/shop/{slug}`.
@@ -167,6 +197,9 @@ Store owners set their preferred MoMo account under **Settings → Mobile Money 
 If your Supabase project was created before these features, run `supabase-migrate-admin.sql`, `supabase-migrate-subscriptions.sql`, `supabase-migrate-platform-settings.sql`, `supabase-migrate-clear-store-ledger.sql`, and `supabase-migrate-cashier-cashbook.sql` in the SQL Editor (or re-apply the latest `supabase-init.sql`).
 For self-serve Paystack subscription renewals, also run `supabase-migrate-subscription-payments.sql`.
 For automatic session timeout (idle PIN lock), run `supabase-migrate-session-timeout.sql`.
+For manually recorded MoMo, bank transfer, and card-terminal sales, run `supabase-migrate-manual-payments.sql`.
+For credit sales, owner-managed product categories, and Cash/Bank cash-book entries, run `supabase-migrate-credit-sales-bank-categories.sql` before syncing.
+For the Customers book and registered-customer credit checkout, run `supabase-migrate-customers-book.sql` after the credit-sales migration and before syncing. It also links existing credit sales to registered customer records.
 
 ### Multi-store on one device
 
@@ -278,7 +311,11 @@ The app also uses `@zxing/library` for on-device camera scanning. Supported form
 
 ### Thermal Printer (ESC/POS)
 
-`src/lib/printService.ts` formats receipts with ESC/POS commands and transmits them over the connected Bluetooth printer. Tested with:
+`src/lib/printService.ts` formats receipts with the Adimat logo and services contact for connected Bluetooth printers. When no Bluetooth printer is connected, checkout and receipt reprints open the computer's native print dialog to select a printer.
+
+For unattended printing on a dedicated Windows computer, first set the desired printer as the Windows default, then launch Chrome with `--kiosk-printing --app="https://YOUR-ADIMAT-URL"`. Chrome sends print jobs to the default printer without showing the chooser. Ordinary browser tabs continue to show the print dialog; browsers may remember the last printer and settings, but the web app cannot force or persist them. Android Chrome requires its system print UI for web pages; silent printing there requires a managed kiosk/native printing solution.
+
+The standard app does not configure kiosk mode automatically. Test the printer's paper size and other defaults from Windows printer settings before using unattended printing. Tested with:
 - Generic 58mm Bluetooth thermal printers
 - Most printers using the `000018f0-0000-1000-8000-00805f9b34fb` service UUID
 
@@ -365,7 +402,7 @@ To install on iPhone or iPad:
 
 MIT License — see LICENSE file for details.
 
-## Support
+  ## Support
 
 For issues and feature requests, please open a GitHub issue.
 

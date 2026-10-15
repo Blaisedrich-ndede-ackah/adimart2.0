@@ -1,14 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Package, AlertTriangle, TrendingDown, DollarSign, Coins,
-  Plus, Search, ArrowUpDown, Edit, Trash2, ToggleLeft, ToggleRight,
-  PackagePlus, RefreshCw, Upload, Barcode, Bluetooth
+  Plus, Search, ArrowUpDown, Edit, Trash2, ToggleLeft, ToggleRight, Tags,
+  PackagePlus, RefreshCw, Upload, Barcode, Bluetooth, Download
 } from 'lucide-react';
 import {
   db,
   deleteProductCompletely,
   LocalProduct,
   getCurrentStoreProducts,
+  getCurrentStoreProductCategories,
   syncBidirectional,
   syncStockFast,
 } from '@/lib/dexie';
@@ -24,13 +25,24 @@ import { useFormatMoney } from '@/lib/currency';
 import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 import { playScanBeep } from '@/lib/scanBeep';
 import ProductImage from '@/components/ProductImage';
+import InventoryInsights from '@/components/InventoryInsights';
+import ManageProductCategoriesModal from '@/components/ManageProductCategoriesModal';
+import { downloadInventoryCsv, downloadInventoryPdf } from '@/lib/inventoryExport';
 
 type SortMode = 'recent' | 'alpha' | 'stock-low' | 'stock-high';
 
-export default function InventoryPage() {
-  const { currentStore } = useAuthStore();
+export default function InventoryPage({
+  openAddOnLoad = false,
+  onQuickActionHandled,
+}: {
+  openAddOnLoad?: boolean;
+  onQuickActionHandled?: () => void;
+}) {
+  const { currentStore, currentUser } = useAuthStore();
   const money = useFormatMoney();
   const [products, setProducts] = useState<LocalProduct[]>([]);
+  const [productsLoaded, setProductsLoaded] = useState(false);
+  const [inventoryLoadError, setInventoryLoadError] = useState('');
   const [filteredProducts, setFilteredProducts] = useState<LocalProduct[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -47,7 +59,19 @@ export default function InventoryPage() {
   const [syncStatus, setSyncStatus] = useState('');
   const [scannedBarcodeForAdd, setScannedBarcodeForAdd] = useState<string | null>(null);
   const [highlightedProductId, setHighlightedProductId] = useState<string | null>(null);
+  const [showInsights, setShowInsights] = useState(false);
+  const [showManageCategories, setShowManageCategories] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [exportStatus, setExportStatus] = useState('');
   const lastSyncAtRef = useRef(0);
+
+  useEffect(() => {
+    if (!openAddOnLoad) return;
+    setEditProduct(null);
+    setScannedBarcodeForAdd(null);
+    setShowAddProduct(true);
+    onQuickActionHandled?.();
+  }, [openAddOnLoad, onQuickActionHandled]);
 
   const loadProducts = useCallback(async (opts?: { sync?: boolean }) => {
     const shouldSync = Boolean(opts?.sync);
@@ -55,9 +79,11 @@ export default function InventoryPage() {
     const paintLocal = async () => {
       const allProducts = await getCurrentStoreProducts();
       const aligned = await alignProductsWithBatchStock(allProducts);
+      const productCategories = await getCurrentStoreProductCategories();
       setProducts(aligned);
-      const cats = [...new Set(aligned.map((p) => p.category || 'Other'))].sort();
-      setCategories(['All', ...cats]);
+      setProductsLoaded(true);
+      setInventoryLoadError('');
+      setCategories(['All', ...productCategories.map((category) => category.name)]);
     };
 
     try {
@@ -75,21 +101,27 @@ export default function InventoryPage() {
             setSyncStatus(result.message || 'Cloud update delayed — tap Refresh');
           }
           await paintLocal();
-        } catch {
-          setSyncStatus('Cloud update delayed — tap Refresh');
+        } catch (error) {
+          console.error('[Inventory] Cloud refresh failed:', error);
+          setSyncStatus('No internet or cloud connection. Showing saved inventory; refresh when reconnected.');
         }
       }
-    } catch {
+    } catch (error) {
+      console.error('[Inventory] Could not load inventory:', error);
       try {
         const allProducts = await getCurrentStoreProducts();
         setProducts(allProducts);
-        const cats = [...new Set(allProducts.map((p) => p.category || 'Other'))].sort();
-        setCategories(['All', ...cats]);
+        setProductsLoaded(true);
+        setInventoryLoadError('');
+        const productCategories = await getCurrentStoreProductCategories();
+        setCategories(['All', ...productCategories.map((category) => category.name)]);
         setSyncStatus('Showing this browser’s inventory');
         window.setTimeout(() => setSyncStatus(''), 2500);
       } catch {
         setProducts([]);
         setCategories(['All']);
+        setProductsLoaded(true);
+        setInventoryLoadError('Could not load inventory from this device. Check storage and refresh.');
       }
     }
   }, [currentStore?.id]);
@@ -222,7 +254,8 @@ export default function InventoryPage() {
   const outOfStock = activeProducts.filter((p) => toQty(p.stock_level) === 0).length;
   const lowStock = activeProducts.filter((p) => {
     const stock = toQty(p.stock_level);
-    return stock > 0 && stock < 5;
+    const threshold = Number(p.reorder_level) > 0 ? Number(p.reorder_level) : 5;
+    return stock > 0 && stock <= threshold;
   }).length;
   const totalValue = activeProducts.reduce(
     (sum, p) => sum + toQty(p.stock_level) * toMoney(p.selling_price),
@@ -236,6 +269,24 @@ export default function InventoryPage() {
   const formatInventoryMoney = (amount: number) => money(amount);
 
   const formatStockQty = (value: unknown) => String(toQty(value));
+
+  const handleInventoryExport = (format: 'csv' | 'pdf') => {
+    setShowExportMenu(false);
+    setExportStatus('');
+    try {
+      const currencyCode = currentStore?.currency_code || 'GHS';
+      const storeName = currentStore?.name || 'Store';
+      if (format === 'csv') {
+        downloadInventoryCsv(filteredProducts, currencyCode, storeName);
+      } else {
+        downloadInventoryPdf(filteredProducts, currencyCode, storeName);
+      }
+      setExportStatus(`Exported ${filteredProducts.length} inventory products as ${format.toUpperCase()}.`);
+    } catch (error) {
+      console.error('[Inventory] Could not export inventory:', error);
+      setExportStatus(error instanceof Error ? `Could not export inventory: ${error.message}` : 'Could not export inventory.');
+    }
+  };
 
   const handleDelete = async (id: string) => {
     if (
@@ -282,6 +333,48 @@ export default function InventoryPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowExportMenu((visible) => !visible)}
+                disabled={!productsLoaded || filteredProducts.length === 0}
+                className="bg-white/20 p-2 rounded-xl touch-target disabled:opacity-50"
+                title="Export inventory"
+                aria-label="Export inventory"
+                aria-expanded={showExportMenu}
+              >
+                <Download className="w-4 h-4 text-white" />
+              </button>
+              {showExportMenu && (
+                <div className="absolute right-0 top-full mt-1 z-30 min-w-36 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg">
+                  <button
+                    type="button"
+                    onClick={() => handleInventoryExport('csv')}
+                    className="w-full px-3 py-2.5 text-left text-xs font-medium text-gray-700 hover:bg-gray-50 touch-target"
+                  >
+                    Export CSV
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleInventoryExport('pdf')}
+                    className="w-full border-t border-gray-100 px-3 py-2.5 text-left text-xs font-medium text-gray-700 hover:bg-gray-50 touch-target"
+                  >
+                    Export PDF
+                  </button>
+                </div>
+              )}
+            </div>
+            {currentUser?.role === 'owner' && (
+              <button
+                type="button"
+                onClick={() => setShowManageCategories(true)}
+                className="bg-white/20 p-2 rounded-xl touch-target"
+                title="Manage product categories"
+                aria-label="Manage product categories"
+              >
+                <Tags className="w-4 h-4 text-white" />
+              </button>
+            )}
             <button
               onClick={handleRefresh}
               className="bg-white/20 p-2 rounded-xl touch-target"
@@ -310,6 +403,11 @@ export default function InventoryPage() {
         )}
         {syncStatus && (
           <p className="text-emerald-100/90 text-[11px] text-center mb-2">{syncStatus}</p>
+        )}
+        {exportStatus && (
+          <p role={exportStatus.startsWith('Could not') ? 'alert' : 'status'} className="text-emerald-100/90 text-[11px] text-center mb-2">
+            {exportStatus}
+          </p>
         )}
 
         {/* Dashboard Cards — identical layout and figures on phone and desktop */}
@@ -431,15 +529,49 @@ export default function InventoryPage() {
 
       {/* Product List */}
       <div className="page-body no-scrollbar">
-        {filteredProducts.length === 0 ? (
+        <div className="mb-3 flex gap-2">
+          <button type="button" onClick={() => setShowInsights(false)} className={`rounded-lg px-3 py-2 text-xs font-semibold touch-target ${!showInsights ? 'bg-primary text-white' : 'bg-white text-gray-700 border border-gray-200'}`}>
+            Products
+          </button>
+          <button type="button" onClick={() => setShowInsights(true)} className={`rounded-lg px-3 py-2 text-xs font-semibold touch-target ${showInsights ? 'bg-primary text-white' : 'bg-white text-gray-700 border border-gray-200'}`}>
+            Restock & audit
+          </button>
+        </div>
+        {showInsights ? (
+          currentStore?.id ? (
+            <InventoryInsights
+              storeId={currentStore.id}
+              products={products}
+              onEditProduct={(product) => { setEditProduct(product); setShowAddProduct(true); }}
+            />
+          ) : null
+        ) : !productsLoaded ? (
+          <div className="space-y-2" aria-label="Loading inventory" aria-busy="true">
+            {Array.from({ length: 5 }, (_, index) => (
+              <div key={index} className="animate-pulse rounded-xl border border-gray-100 bg-white p-4">
+                <div className="flex items-center gap-3">
+                  <div className="h-12 w-12 rounded-lg bg-gray-100" />
+                  <div className="flex-1 space-y-2"><div className="h-3 w-2/3 rounded bg-gray-100" /><div className="h-2 w-1/3 rounded bg-gray-100" /></div>
+                  <div className="h-4 w-16 rounded bg-gray-100" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : inventoryLoadError ? (
+          <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            <p>{inventoryLoadError}</p>
+            <button type="button" onClick={() => void loadProducts({ sync: true })} className="mt-2 rounded-lg bg-white px-3 py-2 text-xs font-semibold">Refresh inventory</button>
+          </div>
+        ) : filteredProducts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-gray-400">
             <Package className="w-12 h-12 mb-3" />
-            <p className="text-sm font-medium">No products found</p>
+            <p className="text-sm font-medium">{products.length === 0 ? 'No products yet' : 'No products found'}</p>
+            <p className="mt-1 text-center text-xs">{products.length === 0 ? 'Scan or import to start adding items to your store.' : 'Try another search or category.'}</p>
             <button
               onClick={() => { setEditProduct(null); setShowAddProduct(true); }}
               className="mt-4 px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium"
             >
-              Add First Product
+              {products.length === 0 ? 'Add First Product' : 'Add Product'}
             </button>
           </div>
         ) : (
@@ -467,7 +599,9 @@ export default function InventoryPage() {
                               OUT OF STOCK
                             </span>
                           )}
-                          {toQty(product.stock_level) > 0 && toQty(product.stock_level) < 5 && product.is_active === 1 && (
+                          {toQty(product.stock_level) > 0 &&
+                            toQty(product.stock_level) <= (Number(product.reorder_level) > 0 ? Number(product.reorder_level) : 5) &&
+                            product.is_active === 1 && (
                             <span className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 text-[9px] font-bold rounded">
                               LOW
                             </span>
@@ -498,7 +632,7 @@ export default function InventoryPage() {
                           className={`text-xs font-semibold ${
                             toQty(product.stock_level) === 0
                               ? 'text-red-500'
-                              : toQty(product.stock_level) < 5
+                              : toQty(product.stock_level) <= (Number(product.reorder_level) > 0 ? Number(product.reorder_level) : 5)
                                 ? 'text-amber-500'
                                 : 'text-gray-700'
                           }`}
@@ -560,7 +694,17 @@ export default function InventoryPage() {
         onClose={() => { setShowAddProduct(false); setEditProduct(null); setScannedBarcodeForAdd(null); }}
         onSaved={() => { setScannedBarcodeForAdd(null); void loadProducts({ sync: true }); }}
         editProduct={editProduct}
+        categories={categories.filter((category) => category !== 'All')}
         initialBarcode={scannedBarcodeForAdd}
+      />
+
+      <ManageProductCategoriesModal
+        isOpen={showManageCategories}
+        onClose={() => setShowManageCategories(false)}
+        onChanged={() => {
+          setSelectedCategory('All');
+          void loadProducts({ sync: false });
+        }}
       />
 
       <StockAdjustment

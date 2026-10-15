@@ -23,11 +23,14 @@ There is **no first-party application server**. Production deployment is static 
 
 | Area | Capabilities |
 |------|----------------|
-| POS | Scan/search products, cart, stock checks, cash / Paystack / split checkout, discounts with owner PIN gate, PDF/WhatsApp receipts, Bluetooth print |
-| Inventory | Product CRUD, categories, stock adjust, CSV import, barcode labels, low/out-of-stock views |
+| POS | Scan/search products, cart, stock checks, cash / Paystack / split / registered-customer credit checkout, discounts with owner PIN gate, PDF/WhatsApp receipts, Bluetooth print |
+| Customers | Owner-managed customer book, consolidated opening and credit-sale balances, cash/MoMo/cheque/split repayments with receipts, wallet/store credit, and active/archive status |
+| Returns | Owner-only return processing with receipt/item validation, cash refunds, wallet credit, debt offsets, optional photo evidence, and automatic inventory restocking |
+| Inventory | Product CRUD, owner-managed product categories, stock adjust, CSV import, barcode labels, reorder suggestions, stock audit/export |
+| Purchasing | Supplier directory, purchase orders, partial receipts, stock/cost updates |
 | Reports | Period filters, revenue mix, charts, product performance, expenses, net profit, CSV/PDF export |
 | Staff & security | Owner/cashier roles, 4-digit PIN auth, biometric unlock, discount authorization |
-| Ops | Store setup or cloud restore, bidirectional/auto sync, PWA install + offline shell |
+| Ops | Store setup or cloud restore, bidirectional/auto sync, daily local backups + sync health, PWA install + offline shell |
 
 ---
 
@@ -126,8 +129,8 @@ Entry: `index.html` → `src/main.tsx` → `<App />`.
    - `StoreSetupPage` if no local store
    - `LoginPage` if store exists but user not authenticated
    - Main shell otherwise
-4. Main navigation is **in-memory page state** (`pos` | `inventory` | `reports` | `settings`), not URL routing
-5. Cashiers are forced to `pos`; owner-only items appear in `BottomNav`
+4. Main navigation is **in-memory page state**, not URL routing. Owners land on Home; cashiers are forced to POS.
+5. Owners can open Home, POS, inventory, purchasing, reports, and settings.
 
 > Note: Manifest shortcut `/?page=pos` is not currently read by `App.tsx`.
 
@@ -161,8 +164,10 @@ One browser profile typically holds one active store at a time.
 |--------|-----------|--------|
 | Store setup / restore | `StoreSetupPage` | No local store |
 | Login | `LoginPage` | Store present, unauthenticated |
+| Home dashboard | `OwnerHomePage` | Owner |
 | POS | `POSPage` | Owner + cashier |
 | Inventory | `InventoryPage` | Owner (nav) |
+| Purchasing | `PurchasingPage` | Owner (nav) |
 | Reports | `ReportsPage` | Owner (nav) |
 | Settings | `SettingsPage` | Owner (nav) |
 
@@ -180,7 +185,8 @@ Default store settings on create:
 
 ### 6.3 Authentication
 
-- 4-digit PIN → `hashPin()` → match active user in current store
+- Account 4-digit PINs use PBKDF2-SHA-256 (600,000 iterations, per-PIN random salt); successful login upgrades legacy `hashPin()` values.
+- After five incorrect local PIN attempts, account PIN login and owner-PIN checks are locked for 5 minutes. This IndexedDB/device lockout is not server-enforced and can be cleared with browser data.
 - Optional WebAuthn biometric: credential id + `userId` in `localStorage` key `adimat_biometric_credential`
 - Signed-in user is persisted in IndexedDB (`app_config.current_user_id`) so a refresh stays on the till unless idle timeout has elapsed
 - Roles:
@@ -189,15 +195,17 @@ Default store settings on create:
 
 ### 6.4 POS / checkout
 
-1. Scan barcode (ZXing, prefers rear camera, debounce ~2s) or search/manual entry  
+1. Scan barcode (ZXing, prefers rear camera, debounce ~2s) or search/manual entry. Search supports typo-tolerant product names, partial barcode matches, recent/frequently sold ranking, and browser-supported speech input.
 2. Cart quantity with stock validation + scan beeps (`scanBeep.ts`)  
-3. Checkout overlay steps: payment method → discount → optional owner PIN → split/Paystack → processing → success  
-4. Payment methods: `cash` | `paystack` | `split`  
-5. On success: stock deducted locally, receipt `#ADM-YYYYMMDD-XXXX`, optional Bluetooth print, PDF/share/WhatsApp, auto-sync trigger
+3. Checkout overlay steps: payment method → discount → optional owner PIN → payment details → processing → success
+4. Payment methods: `cash` | `paystack` | `split` | manual MTN/Telecel/AirtelTigo MoMo | bank transfer | card terminal | `credit` | `wallet`. Manual methods record a required reference offline; they do not initiate a provider payment. Credit sales require a registered customer and store the outstanding balance. Owners record cash, MoMo, cheque, or split account repayments in Customers; payments apply to the oldest outstanding debt, and a receipt records the paid amount and resulting balance. Customer wallet credit can pay a full sale or combine with cash. Manual collections are kept separate from Paystack payout totals.
+5. Cashiers can hold a cart and resume it later in the same POS session. Resuming another held sale holds the active cart automatically.
+6. On success: stock deducted locally, receipt `#ADM-YYYYMMDD-XXXX`, optional Bluetooth print, PDF/share/WhatsApp, auto-sync trigger
 
 ### 6.5 Inventory (owner)
 
-- Product CRUD with categories: Food, Beverages, Dairy, Household, Electronics, Clothing, Health, Other
+- Product CRUD with store-specific categories; owners can add, rename, and delete categories. Renaming updates products, and deleting moves assigned products to Other.
+- Loading skeleton and guided empty/error states
 - Activate/deactivate products
 - Stock adjust: set / add / subtract (UI collects reason; reason is **not persisted**)
 - CSV import
@@ -208,13 +216,19 @@ Default store settings on create:
 ### 6.6 Reports (owner)
 
 - Periods: today / week / month
+- Loading, retryable error, and no-data states
 - Tabs: overview / products / expenses
-- Revenue cash vs Paystack, 7-day chart, top/slow movers, category & cashier stats
+- Revenue cash vs non-cash (online and manual), 7-day chart, top/slow movers, category & cashier stats
 - Net profit ≈ revenue − COGS − expenses
 - Expense categories: Rent, Utilities, Supplier, Salaries, Transport, Other
+- Expenses support receipt photos, recurring monthly templates, and monthly category budgets with over-budget warnings. Due recurring expenses are generated idempotently when the app is active or the Expenses screen is opened.
 - Export CSV / PDF
 
-### 6.7 Settings (owner)
+### 6.7 Owner home
+
+The owner landing screen summarizes today's completed sales, cash and non-cash payment amounts, and low-stock count. Quick actions open New Sale, Add Product, and Add Expense. Cashiers continue to land directly on POS.
+
+### 6.8 Settings (owner)
 
 - Store profile (name, address, support number)
 - Discount cap + PIN-on-discount toggle
@@ -232,7 +246,7 @@ Default store settings on create:
 ### 7.1 Local database (Dexie)
 
 **Database name:** `AdimatPOS`  
-**Schema versions:** v2 base tables; v3 adds `expenses`  
+**Schema versions:** v2 base tables; v8 adds cash book, warehouse, supplier/purchasing, and backup snapshot tables; v9 adds expense workflows; v10 adds local PIN lockout storage; v12 adds product categories; v13 adds credit payment history; v14 adds the customer book; v15 adds customer-linked credit sales; v16 adds account payment receipts and sales returns
 **Module:** `src/lib/dexie.ts`
 
 | Table | Primary key | Notable indexes / fields |
@@ -240,9 +254,23 @@ Default store settings on create:
 | `stores` | `id` | name, address, support_number, discount_cap_percentage, pin_on_discount_enabled (0/1), created_at, synced |
 | `users` | `id` | store_id, name, role (`owner`\|`cashier`), pin_hash, is_active (0/1), can_access_cashbook, created_at, synced |
 | `products` | `id` | store_id, name, category, sku_type, barcode, cost_price, selling_price, stock_level, is_active, created_at, updated_at, synced |
-| `transactions` | `id` | store_id, receipt_number, cashier_id/name, totals, payment_method, cash/paystack amounts, paystack_reference, status, created_at, synced |
+| `product_categories` | `id` | store_id, name, is_active, created_at, updated_at, synced |
+| `transactions` | `id` | store_id, receipt_number, cashier_id/name, totals, payment_method, cash/paystack amounts, customer details, credit paid/balance, status, created_at, synced |
 | `transaction_items` | `id` | store_id, transaction_id, product_id, product_name, quantity, unit_price, subtotal, synced |
-| `expenses` | `id` | store_id, description, category, amount, notes, created_at, updated_at, synced |
+| `customers` | `id` | store_id, name, phone, opening balance and remaining balance, wallet balance, is_active, timestamps |
+| `customer_opening_payments` | `id` | store_id, customer_id, entry_type, amount, tender breakdown, optional account receipt, created_at, synced |
+| `customer_account_receipts` | `id` | store_id, customer_id, receipt_number, amount, cash/MoMo/cheque amounts, balance before/after, created_at, synced |
+| `customer_wallet_transactions` | `id` | store_id, customer_id, return credit or sale debit, amount, balance after, source reference, created_at, synced |
+| `credit_payments` | `id` | store_id, customer_id, transaction_id, account receipt, amount, tender breakdown, created_at, synced |
+| `sales_returns` | `id` | store_id, transaction/item/product, returned and restocked quantities, reason, refund method and amount, debt/wallet allocation, optional photo data URL, location, created_at, synced |
+| `expenses` | `id` | store_id, description, category, amount, notes, receipt image, recurring template/month, created_at, updated_at, synced |
+| `cash_book_entries` | `id` | store_id, entry_type, category, Cash/Bank account, amount, entry_date, created_at, synced |
+| `recurring_expenses` | `id` | store_id, category, amount, due_day, is_active, synced |
+| `expense_budgets` | `id` | store_id, category, monthly_limit, synced |
+| `pin_attempts` | `store_id` | failed_attempts, locked_until, updated_at; local-only account PIN lockout state |
+| `suppliers` | `id` | store_id, contact details, is_active, created_at, synced |
+| `purchase_orders` | `id` | store_id, supplier_id, order_number, status, `items_json` (ordered/received quantities and unit costs), totals, timestamps, synced |
+| `backup_snapshots` | `id` | store_id, created_at, `data_json` (daily local store backup; up to seven retained) |
 | `sync_meta` | `id` | `last_sync` → `last_synced_at` |
 | `app_config` | `id` (`main`) | current_store_id, current_user_id |
 
@@ -252,7 +280,8 @@ Booleans are stored as integers `0|1` locally and mapped to real booleans when s
 
 - `generateId()` — UUID v4  
 - `generateReceiptNumber()` — `#ADM-YYYYMMDD-XXXX` (random 4-digit seq)  
-- `hashPin(pin)` — salted string hash → base36 (client-side; not bcrypt/argon2)
+- `hashUserPin(pin)` — PBKDF2-SHA-256 account PIN hash; successful auth upgrades older hashes
+- `hashPin(pin)` — legacy helper still used for warehouse access PINs
 
 ### 7.2 Cloud database (Supabase / PostgreSQL)
 
@@ -274,7 +303,10 @@ stores 1──* users
 stores 1──* products
 stores 1──* transactions 1──* transaction_items (*──? products)
 stores 1──* expenses
+stores 1──* suppliers 1──* purchase_orders
 ```
+
+Products also have `reorder_level` (0 disables configurable restock suggestions). Receiving a purchase order adds stock batches and stock-movement records, and updates product cost price to the order’s unit cost.
 
 ---
 
@@ -312,6 +344,18 @@ Requires: Supabase configured + `navigator.onLine` + auto-sync enabled + no sync
 
 Supabase is considered configured when URL/key env vars are present and the anon key length is > 20 (`src/lib/supabase.ts`). Without configuration the app remains fully local.
 
+### 8.5 Purchasing and inventory history
+
+`src/lib/purchasing.ts` validates supplier/order ownership and line quantities. Receipts are processed in a Dexie transaction, support partial quantities, create stock batches and `stock_movements` entries, and update product cost. Open orders may be cancelled; received orders cannot be cancelled or received again. Owners set product reorder levels in the product editor. Inventory suggestions flag stock at/below a positive reorder level and target twice that level.
+
+The Inventory stock-audit view pulls cloud `stock_movements` when configured, displays the latest 500 local/cloud records, and exports all locally available movements to CSV. Audit notes include receiving/adjustment context; older activity is not retroactively reconstructable.
+
+### 8.6 Store backups and sync health
+
+Authenticated app sessions attempt a daily, store-scoped IndexedDB snapshot and retain up to seven snapshots in `backup_snapshots`. Settings supports full JSON download, latest-snapshot download, and local restore. Snapshot failures are logged and exposed in Settings. The sync-health panel counts unsynced business rows and shows the last successful sync and recorded sync error. Sync and backup issue text is stored in browser `localStorage`.
+
+Snapshots are on-device only and cannot protect against device loss, browser-data clearing, or storage failure. Download backups to a separate secure location. Exported backups include user rows and therefore PIN hashes; treat them as sensitive credentials. Backups over 50 MB are rejected. Restore replaces local data for the selected store on that device; rows marked unsynced in the backup may be uploaded on the next cloud sync, while synced local rows can be reconciled with the cloud copy.
+
 ---
 
 ## 9. Authentication, Authorization, and Client Security
@@ -337,14 +381,15 @@ Supabase is considered configured when URL/key env vars are present and the anon
 
 Documented as implemented today:
 
-1. PIN hashing is a lightweight client hash — suitable for local UX friction, not high-assurance secret storage  
-2. Supabase RLS is enabled, but policies are open (`USING (true)` / `WITH CHECK (true)`), so the anon key can read/write all tables  
-3. Anon key and Paystack public key ship in the client bundle (expected for public keys; RLS must enforce tenancy for real multi-tenant security)  
-4. Role restrictions are enforced in the UI, not by a server authority  
-5. Session is restored from IndexedDB `app_config.current_user_id` on refresh; idle timeout (see 9.4) refuses that restore when the till has been inactive too long  
-6. Biometric unlock does not re-verify PIN against a remote identity provider  
+1. Account PINs are hashed locally with PBKDF2-SHA-256; the lockout is device-local and can be bypassed by clearing browser data. Warehouse access PINs still use the legacy `hashPin()` helper.
+2. Supabase RLS is enabled, but policies are open (`USING (true)` / `WITH CHECK (true)`), so the anon key can read/write all tables.
+3. Anon key and Paystack public key ship in the client bundle (expected for public keys; RLS must enforce tenancy for real multi-tenant security).
+4. Role restrictions are enforced in the UI, not by a server authority.
+5. Cloud restore still relies on Store ID plus owner PIN; it does not yet have independent server-side authorization.
+6. Session is restored from IndexedDB `app_config.current_user_id` on refresh; idle timeout (see 9.4) refuses that restore when the till has been inactive too long.
+7. Biometric unlock does not re-verify PIN against a remote identity provider.
 
-Operators deploying multi-tenant cloud sync should harden RLS before production exposure.
+Server-side RLS and stronger cloud-restore authorization are deferred. Operators deploying multi-tenant cloud sync should harden both before production exposure.
 
 ### 9.4 Automatic session timeout
 
@@ -376,6 +421,9 @@ Store owners set **Settings → Security → Automatic session timeout** (`store
 - Payload chunking (~100 bytes)
 - ESC/POS receipts; barcode labels via `barcodeLabels.ts` (Code128)
 - Connection is in-memory for the session (reconnect from Settings as needed)
+- Receipts include the Adimat company logo and services contact.
+- When no Bluetooth printer is connected, checkout and receipt reprints open the computer's native print dialog so a system printer can be selected.
+- Unattended Windows printing can use Chrome's `--kiosk-printing` launch flag and the Windows default printer. This is computer/browser configuration, not an app setting. Android Chrome retains the system print UI unless deployed in a managed kiosk/native printing environment.
 
 ### 10.3 Barcode scanning
 
@@ -392,7 +440,7 @@ Store owners set **Settings → Security → Automatic session timeout** (`store
 ### 10.5 Receipts & sharing
 
 - Module: `src/lib/receiptGenerator.ts`
-- PDF generation (jsPDF), text share, WhatsApp deep link, optional auto-print when Bluetooth connected
+- PDF generation (jsPDF), text share, WhatsApp deep link, ESC/POS printing over Bluetooth, or computer-printer selection from the browser print dialog when Bluetooth is disconnected. Standard web pages cannot save a printer destination or suppress the dialog; unattended printing requires supported kiosk/browser configuration.
 
 ---
 
@@ -415,6 +463,8 @@ Typed in `src/vite-env.d.ts`. App runs offline without them.
 | Key | Storage | Purpose |
 |-----|---------|---------|
 | `adimat_auto_sync` | localStorage | Auto-sync enable/disable |
+| `adimat_last_sync_error` | localStorage | Most recent recorded sync issue |
+| `adimat_backup_error` | localStorage | Most recent automatic backup issue |
 | `adimat_biometric_credential` | localStorage | WebAuthn credential + userId |
 | `adimat_last_activity_{storeId}` | localStorage | Last till activity (idle timeout) |
 | `adimat_idle_lock` | sessionStorage | PIN-screen notice after idle lock |
@@ -467,6 +517,8 @@ npm run preview
 3. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`  
 4. Optionally harden RLS before multi-tenant production use  
 
+For an existing cloud project, run `supabase-migrate-purchasing-reorder.sql` before syncing reorder levels, suppliers, or purchase orders. Run `supabase-migrate-expense-workflows.sql` in the Supabase SQL Editor before syncing receipt photos, recurring expenses, or category budgets; it creates the required tables and requests a PostgREST schema-cache refresh. If sync still reports `PGRST205`, verify both tables exist in the `public` schema and rerun the migration. Run `supabase-migrate-manual-payments.sql` before syncing manually recorded payment methods, `supabase-migrate-credit-sales-bank-categories.sql` before syncing credit sales, product categories, or Cash/Bank cash-book entries, and then `supabase-migrate-customers-book.sql` before syncing registered customers, opening balances, or customer-linked credit sales. The customer migration links existing credit sales to registered customers where customer details were recorded. Apply `supabase-migrate-customer-repayments-returns.sql` after the customer-book migration before syncing consolidated repayment receipts or sale returns.
+
 ### 13.5 Hosting
 
 Deploy `dist` to any static host (Vercel recommended in README): Netlify, Cloudflare Pages, GitHub Pages, S3 + CloudFront, etc. Configure the same `VITE_*` env vars in the host dashboard.
@@ -491,8 +543,10 @@ No lint/test/CI scripts are present in-repo.
 |------|---------|
 | `src/pages/StoreSetupPage.tsx` | Create store or restore from cloud |
 | `src/pages/LoginPage.tsx` | PIN / biometric login |
+| `src/pages/OwnerHomePage.tsx` | Owner sales/stock dashboard and quick actions |
 | `src/pages/POSPage.tsx` | Selling surface |
 | `src/pages/InventoryPage.tsx` | Catalog & stock ops |
+| `src/pages/PurchasingPage.tsx` | Supplier records and purchase-order receiving |
 | `src/pages/ReportsPage.tsx` | Analytics & expenses |
 | `src/pages/SettingsPage.tsx` | Store, staff, printer, sync |
 
@@ -506,6 +560,8 @@ No lint/test/CI scripts are present in-repo.
 | `CheckoutOverlay.tsx` | Multi-step checkout |
 | `CsvImportModal.tsx` | Bulk product import |
 | `StockAdjustment.tsx` | Manual stock changes |
+| `InventoryInsights.tsx` | Restock suggestions and stock movement audit/export |
+| `BackupSyncTools.tsx` | Local backups, restore, and sync-health status |
 | `ChangePinModal.tsx` / `ResetUserPinModal.tsx` | PIN management |
 | `PWAInstallBanner.tsx` | Install guidance |
 
@@ -514,6 +570,8 @@ No lint/test/CI scripts are present in-repo.
 | File | Purpose |
 |------|---------|
 | `dexie.ts` | Schema, CRUD, receipt/id helpers, push/pull/restore |
+| `purchasing.ts` | Supplier and purchase-order validation/receipt workflow |
+| `storeBackup.ts` | Store-scoped export/restore, daily snapshots, sync-health counts |
 | `sync.ts` | Auto-sync scheduler & triggers |
 | `supabase.ts` | Client init & configuration checks |
 | `paystack.ts` | Inline payment wrapper |
@@ -542,14 +600,16 @@ No lint/test/CI scripts are present in-repo.
 
 1. Open app → Create store → owner PIN  
 2. Settings → complete profile, discount rules, staff  
-3. Inventory → add products (or CSV import)  
-4. Optional: connect printer, enable biometrics, configure Supabase env + sync  
+3. Inventory → add products (or CSV import), set reorder levels as needed
+4. Optional: Purchasing → add suppliers and create purchase orders
+5. Optional: connect printer, enable biometrics, configure Supabase env + sync
 
 ### 15.2 Move store to another device
 
 1. Ensure source device has synced (Settings → full sync)  
 2. On new device: Store setup → Restore → Store ID + owner PIN  
 3. Verify products/users/transactions pulled  
+4. Download a separate backup from **Settings → Backup & sync health** for device-loss protection
 
 ### 15.3 Offline selling day
 

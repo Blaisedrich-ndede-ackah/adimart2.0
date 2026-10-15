@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="440" height="700" viewBox="0 0 440 700" role="img" aria-labelledby="title desc">
+  <title id="title">Adimat cashier point of sale screen illustration</title>
+  <desc id="desc">A sample Adimat POS screen with product search, product cards, cart items, and checkout total.</desc>
+  <rect width="440" height="700" rx="28" fill="#f1f5f4"/>
+  <rect x="16" y="16" width="408" height="668" rx="24" fill="#fff" stroke="#dbe4e1" stroke-width="2"/>
+  <path d="M40 16h360a24 24 0 0 1 24 24v69H16V40a24 24 0 0 1 24-24Z" fill="#065f46"/>
+  <text x="40" y="52" fill="#a7f3d0" font-family="Arial,sans-serif" font-size="12" font-weight="700" letter-spacing="1.4">SALES COUNTER</text>
+  <text x="40" y="88" fill="#fff" font-family="Arial,sans-serif" font-size="25" font-weight="700">POS</text>
+  <rect x="32" y="126" width="376" height="49" rx="14" fill="#f8fafc" stroke="#dbe4e1"/>
+  <circle cx="54" cy="150" r="8" fill="none" stroke="#64748b" stroke-width="2"/>
+  <path d="m60 156 6 6" stroke="#64748b" stroke-width="2" stroke-linecap="round"/>
+  <text x="78" y="155" fill="#94a3b8" font-family="Arial,sans-serif" font-size="13">Search by name or barcode</text>
+  <text x="36" y="207" fill="#0f172a" font-family="Arial,sans-serif" font-size="15" font-weight="700">Products</text>
+  <rect x="32" y="220" width="181" height="82" rx="14" fill="#fff" stroke="#dbe4e1"/>
+  <rect x="43" y="232" width="51" height="56" rx="10" fill="#ecfdf5"/>
+  <path d="M57 248h23l-3 26H60Z" fill="#a7f3d0" stroke="#065f46" stroke-width="1.5"/>
+  <text x="104" y="249" fill="#0f172a" font-family="Arial,sans-serif" font-size="12" font-weight="700">Fresh milk</text>
+  <text x="104" y="270" fill="#065f46" font-family="Arial,sans-serif" font-size="12" font-weight="700">GH₵ 18.00</text>
+  <text x="104" y="288" fill="#64748b" font-family="Arial,sans-serif" font-size="10">Stock: 12</text>
+  <rect x="227" y="220" width="181" height="82" rx="14" fill="#fff" stroke="#dbe4e1"/>
+  <rect x="238" y="232" width="51" height="56" rx="10" fill="#eff6ff"/>
+  <path d="M252 248h23v25h-23z" fill="#bfdbfe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="299" y="249" fill="#0f172a" font-family="Arial,sans-serif" font-size="12" font-weight="700">Bread</text>
+  <text x="299" y="270" fill="#065f46" font-family="Arial,sans-serif" font-size="12" font-weight="700">GH₵ 12.00</text>
+  <text x="299" y="288" fill="#64748b" font-family="Arial,sans-serif" font-size="10">Stock: 8</text>
+  <rect x="32" y="316" width="181" height="82" rx="14" fill="#fff" stroke="#dbe4e1"/>
+  <rect x="43" y="328" width="51" height="56" rx="10" fill="#fff7ed"/>
+  <path d="M57 341h22v30H57z" fill="#fed7aa" stroke="#c2410c" stroke-width="1.5"/>
+  <text x="104" y="345" fill="#0f172a" font-family="Arial,sans-serif" font-size="12" font-weight="700">Rice 1 kg</text>
+  <text x="104" y="366" fill="#065f46" font-family="Arial,sans-serif" font-size="12" font-weight="700">GH₵ 25.00</text>
+  <text x="104" y="384" fill="#64748b" font-family="Arial,sans-serif" font-size="10">Stock: 20</text>
+  <text x="36" y="431" fill="#0f172a" font-family="Arial,sans-serif" font-size="15" font-weight="700">Cart · 2 items</text>
+  <rect x="32" y="444" width="376" height="54" rx="13" fill="#f8fafc"/>
+  <text x="48" y="467" fill="#0f172a" font-family="Arial,sans-serif" font-size="12" font-weight="700">Fresh milk</text>
+  <text x="48" y="485" fill="#64748b" font-family="Arial,sans-serif" font-size="10">1 × GH₵ 18.00</text>
+  <text x="388" y="477" fill="#0f172a" font-family="Arial,sans-serif" font-size="12" font-weight="700" text-anchor="end">GH₵ 18.00</text>
+  <rect x="32" y="507" width="376" height="54" rx="13" fill="#f8fafc"/>
+  <text x="48" y="530" fill="#0f172a" font-family="Arial,sans-serif" font-size="12" font-weight="700">Bread</text>
+  <text x="48" y="548" fill="#64748b" font-family="Arial,sans-serif" font-size="10">1 × GH₵ 12.00</text>
+  <text x="388" y="540" fill="#0f172a" font-family="Arial,sans-serif" font-size="12" font-weight="700" text-anchor="end">GH₵ 12.00</text>
+  <path d="M32 578h376" stroke="#dbe4e1"/>
+  <text x="40" y="604" fill="#64748b" font-family="Arial,sans-serif" font-size="12">Total</text>
+  <text x="400" y="608" fill="#0f172a" font-family="Arial,sans-serif" font-size="20" font-weight="700" text-anchor="end">GH₵ 30.00</text>
+  <rect x="32" y="625" width="376" height="43" rx="13" fill="#065f46"/>
+  <text x="220" y="652" fill="#fff" font-family="Arial,sans-serif" font-size="14" font-weight="700" text-anchor="middle">Checkout</text>
+</svg>

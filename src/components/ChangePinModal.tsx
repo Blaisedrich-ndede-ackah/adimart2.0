@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { X, Lock, Eye, EyeOff, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { db, hashPin } from '@/lib/dexie';
+import { updateUserPin, verifyUserPin } from '@/lib/dexie';
 import { useAuthStore } from '@/store/useAuthStore';
 
 interface ChangePinModalProps {
@@ -34,8 +34,7 @@ export default function ChangePinModal({ isOpen, onClose }: ChangePinModalProps)
     }
 
     // Verify current PIN is correct
-    const currentPinHash = hashPin(currentPin);
-    if (currentPinHash !== currentUser.pin_hash) {
+    if (!(await verifyUserPin(currentPin, currentUser.pin_hash))) {
       setError('Current PIN is incorrect');
       return;
     }
@@ -60,11 +59,7 @@ export default function ChangePinModal({ isOpen, onClose }: ChangePinModalProps)
     setSaving(true);
 
     try {
-      const newPinHash = hashPin(newPin);
-      await db.users.update(currentUser.id, {
-        pin_hash: newPinHash,
-        synced: 0,
-      });
+      const newPinHash = await updateUserPin(currentUser.id, newPin);
 
       // Update the current user in auth store
       useAuthStore.setState({
