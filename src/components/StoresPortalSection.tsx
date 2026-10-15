@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Building2, Loader2, Plus, CloudDownload, CheckCircle2, ArrowRightLeft,
+  Building2, Loader2, Plus, CloudDownload, CheckCircle2, ArrowRightLeft, Boxes,
 } from 'lucide-react';
+import { db, type LocalProduct } from '@/lib/dexie';
+import { transferStockBetweenStores } from '@/lib/warehouse';
 import {
   addStoreFromCloud,
   assertCanCreateAdditionalStore,
@@ -38,9 +40,18 @@ export default function StoresPortalSection() {
 
   const [cloudStoreId, setCloudStoreId] = useState('');
   const [cloudPin, setCloudPin] = useState('');
+  const [products, setProducts] = useState<LocalProduct[]>([]);
+  const [sourceStoreId, setSourceStoreId] = useState('');
+  const [destinationStoreId, setDestinationStoreId] = useState('');
+  const [sourceProductId, setSourceProductId] = useState('');
+  const [destinationProductId, setDestinationProductId] = useState('');
+  const [transferQuantity, setTransferQuantity] = useState('');
+  const [showBranchTransfer, setShowBranchTransfer] = useState(false);
 
   const refresh = useCallback(async () => {
-    setStores(await listLocalStores());
+    const localStores = await listLocalStores();
+    setStores(localStores);
+    setProducts(await db.products.toArray());
     await refreshStore();
     const phoneHint =
       currentUser?.phone || currentStore?.support_number || newPhone || '';
@@ -125,6 +136,46 @@ export default function StoresPortalSection() {
     }
   };
 
+  const sourceProducts = useMemo(
+    () => products.filter((product) => product.store_id === sourceStoreId && product.is_active === 1),
+    [products, sourceStoreId]
+  );
+  const destinationProducts = useMemo(
+    () => products.filter((product) => product.store_id === destinationStoreId && product.is_active === 1),
+    [products, destinationStoreId]
+  );
+
+  const handleBranchTransfer = async () => {
+    const quantity = Number(transferQuantity);
+    if (!sourceStoreId || !destinationStoreId || !sourceProductId || !destinationProductId) {
+      flash('Choose the source store, destination store, and matching products.', true);
+      return;
+    }
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      flash('Enter a whole quantity greater than zero.', true);
+      return;
+    }
+    setBusy(true);
+    try {
+      await transferStockBetweenStores({
+        sourceStoreId,
+        destinationStoreId,
+        sourceProductId,
+        destinationProductId,
+        quantity,
+        userId: currentUser?.id,
+        note: `Branch inventory transfer from ${sourceStoreId} to ${destinationStoreId}`,
+      });
+      await refresh();
+      setTransferQuantity('');
+      flash('Transfer completed. Source stock was deducted and destination stock was added.');
+    } catch (e) {
+      flash(e instanceof Error ? e.message : 'Transfer failed', true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleAddCloud = async () => {
     setError('');
     if (!cloudStoreId.trim() || cloudPin.length !== 4) {
@@ -152,9 +203,8 @@ export default function StoresPortalSection() {
         <h3 className="font-bold text-gray-900">My Stores</h3>
       </div>
       <p className="text-xs text-gray-500 mb-3">
-        Open a store to manage that store&apos;s inventory and staff. Switching signs you out so you
-        log in under the selected store. Creating more stores requires admin permission
-        {quotaLabel ? ` (${quotaLabel})` : ''}.
+        Link unlimited existing stores to this owner account with each Store ID and its 4-digit owner PIN. Linked stores stay available in Branch inventory for secure stock transfers.
+        {quotaLabel ? ` New store creation: ${quotaLabel}.` : ''}
       </p>
 
       <div className="space-y-2 mb-3">
@@ -194,6 +244,100 @@ export default function StoresPortalSection() {
           );
         })}
       </div>
+
+      {stores.length > 1 && (
+        <div className="mb-3 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="flex items-center gap-1.5 text-sm font-bold text-gray-900">
+                <Boxes className="h-4 w-4 text-emerald-700" /> Branch inventory
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed text-gray-600">
+                Move stock between any stores linked to this owner account. Every transfer deducts the source first and records the matching addition at the destination.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowBranchTransfer((value) => !value)}
+              className="shrink-0 rounded-lg bg-emerald-700 px-2.5 py-2 text-[11px] font-bold text-white"
+            >
+              {showBranchTransfer ? 'Close' : 'Transfer'}
+            </button>
+          </div>
+          {showBranchTransfer && (
+            <div className="mt-3 space-y-2">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="text-[11px] font-semibold text-gray-600">
+                  From store
+                  <select
+                    value={sourceStoreId}
+                    onChange={(event) => {
+                      setSourceStoreId(event.target.value);
+                      setSourceProductId('');
+                    }}
+                    className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-normal"
+                  >
+                    <option value="">Select source store</option>
+                    {stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
+                  </select>
+                </label>
+                <label className="text-[11px] font-semibold text-gray-600">
+                  To store
+                  <select
+                    value={destinationStoreId}
+                    onChange={(event) => {
+                      setDestinationStoreId(event.target.value);
+                      setDestinationProductId('');
+                    }}
+                    className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-normal"
+                  >
+                    <option value="">Select destination store</option>
+                    {stores.filter((store) => store.id !== sourceStoreId).map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
+                  </select>
+                </label>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-[1fr_1fr_110px]">
+                <select
+                  value={sourceProductId}
+                  onChange={(event) => setSourceProductId(event.target.value)}
+                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
+                  aria-label="Source product"
+                >
+                  <option value="">Product leaving source</option>
+                  {sourceProducts.map((product) => <option key={product.id} value={product.id}>{product.name} · {product.stock_level} available</option>)}
+                </select>
+                <select
+                  value={destinationProductId}
+                  onChange={(event) => setDestinationProductId(event.target.value)}
+                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
+                  aria-label="Destination product"
+                >
+                  <option value="">Matching destination product</option>
+                  {destinationProducts.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
+                </select>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={transferQuantity}
+                  onChange={(event) => setTransferQuantity(event.target.value)}
+                  placeholder="Qty"
+                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
+                  aria-label="Transfer quantity"
+                />
+              </div>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void handleBranchTransfer()}
+                className="w-full rounded-xl bg-gray-900 py-2.5 text-sm font-bold text-white disabled:opacity-50"
+              >
+                {busy ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : 'Confirm stock transfer'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2">
         <button
@@ -289,7 +433,10 @@ export default function StoresPortalSection() {
       {showAddCloud && (
         <div className="mt-3 space-y-2 rounded-xl border border-sky-100 bg-sky-50/50 p-3">
           <p className="text-xs font-semibold text-gray-800">
-            Open another synced store (keeps your other stores on this device)
+            Add to Branch inventory
+            <span className="block mt-1 text-[11px] font-normal text-gray-500">
+              Enter the Store ID and the 4-digit owner PIN for that store. This adds it without removing your other linked stores.
+            </span>
           </p>
           <input
             value={cloudStoreId}
@@ -303,7 +450,7 @@ export default function StoresPortalSection() {
             maxLength={4}
             value={cloudPin}
             onChange={(e) => setCloudPin(e.target.value.replace(/\D/g, ''))}
-            placeholder="Owner PIN"
+            placeholder="Enter your 4-digit owner PIN"
             className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-center tracking-widest"
           />
           <button
@@ -312,7 +459,7 @@ export default function StoresPortalSection() {
             onClick={() => void handleAddCloud()}
             className="w-full rounded-xl bg-slate-900 py-2.5 text-sm font-bold text-white disabled:opacity-50"
           >
-            {busy ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : 'Open store'}
+            {busy ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : 'Add store to Branch inventory'}
           </button>
         </div>
       )}
