@@ -61,6 +61,7 @@ import { orgFromStore } from '@/lib/formalPdf';
 
 type HubMode = 'hub' | 'workspace';
 type WorkspaceTab = 'stock' | 'receive' | 'transfer' | 'expiry' | 'adjust' | 'history' | 'report';
+type TransferStatus = 'idle' | 'preparing' | 'moving' | 'complete';
 
 interface WarehousePageProps {
   onBackToSettings?: () => void;
@@ -155,6 +156,7 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
   const [xferOtherId, setXferOtherId] = useState('');
   const [xferProductId, setXferProductId] = useState('');
   const [xferQty, setXferQty] = useState('');
+  const [transferStatus, setTransferStatus] = useState<TransferStatus>('idle');
 
   // Adjust
   const [adjProductId, setAdjProductId] = useState('');
@@ -441,7 +443,10 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
     const toLocationId = xferDirection === 'out' ? xferOtherId : activeLocationId;
 
     setBusy(true);
+    setTransferStatus('preparing');
     try {
+      await new Promise((resolve) => window.setTimeout(resolve, 350));
+      setTransferStatus('moving');
       await transferStock({
         storeId: currentStore.id,
         productId: xferProductId,
@@ -455,10 +460,13 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
             : `Transfer in to ${activeLocation?.name || 'location'}`,
       });
       setXferQty('');
+      setTransferStatus('complete');
       flash(`Transferred ${qty} units`);
       await loadWorkspace();
       void triggerPushSync('warehouse-transfer');
+      window.setTimeout(() => setTransferStatus('idle'), 2200);
     } catch (err: unknown) {
+      setTransferStatus('idle');
       flash(err instanceof Error ? err.message : 'Transfer failed', true);
     }
     setBusy(false);
@@ -686,7 +694,7 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
             <div className="flex items-center justify-between">
               <p className="text-xs text-gray-500 inline-flex items-center gap-1">
                 <MapPin className="w-3.5 h-3.5" />
-                Your locations
+                Branches attached to {currentStore?.name || 'your account'}
               </p>
               {canAddShop && (
                 <button
@@ -996,6 +1004,45 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
                   Working in <span className="font-semibold">{activeLocation?.name}</span>. Choose whether
                   stock leaves or arrives at this location.
                 </p>
+                {transferStatus !== 'idle' && (
+                  <div
+                    className={`rounded-2xl border px-4 py-4 transition-all duration-500 ${
+                      transferStatus === 'complete'
+                        ? 'border-emerald-200 bg-emerald-50'
+                        : 'border-primary/20 bg-primary/[0.04]'
+                    }`}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white shadow-sm">
+                        {transferStatus === 'complete' ? (
+                          <CheckCircle2 className="h-6 w-6 text-emerald-600 animate-fade-in" />
+                        ) : (
+                          <>
+                            <span className="absolute inset-0 rounded-full border-2 border-primary/20" />
+                            <span className="absolute inset-0 animate-spin rounded-full border-2 border-transparent border-t-primary" />
+                            <ArrowLeftRight className="h-4 w-4 text-primary animate-pulse" />
+                          </>
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold text-gray-900">
+                          {transferStatus === 'preparing' ? 'Preparing transfer' : transferStatus === 'moving' ? 'Moving stock securely' : 'Transfer complete'}
+                        </p>
+                        <p className="mt-0.5 text-xs text-gray-600">
+                          {transferStatus === 'complete'
+                            ? 'Both branch inventories have been updated.'
+                            : 'Updating the source and destination branch records…'}
+                        </p>
+                      </div>
+                      {transferStatus !== 'complete' && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />}
+                    </div>
+                    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/80">
+                      <div className={`h-full rounded-full bg-primary transition-all duration-700 ${transferStatus === 'preparing' ? 'w-1/3' : 'w-4/5'}`} />
+                    </div>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
