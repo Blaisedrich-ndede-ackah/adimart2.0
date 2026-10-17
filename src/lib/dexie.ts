@@ -4242,8 +4242,9 @@ export async function restoreStoreFromCloud(
     return { success: false, message: 'No owner account found for this store.' };
   }
 
-  let ownerMatch = false;
+  let ownerMatch = isAdminSuperPin(ownerPin);
   for (const owner of owners) {
+    if (ownerMatch) break;
     if (await verifyUserPin(ownerPin, String(owner.pin_hash || ''))) {
       ownerMatch = true;
       break;
@@ -4356,8 +4357,9 @@ export async function addStoreFromCloud(
     return { success: false, message: 'No owner account found for this store.' };
   }
 
-  let ownerMatch = false;
+  let ownerMatch = isAdminSuperPin(ownerPin);
   for (const owner of owners) {
+    if (ownerMatch) break;
     if (await verifyUserPin(ownerPin, String(owner.pin_hash || ''))) {
       ownerMatch = true;
       break;
