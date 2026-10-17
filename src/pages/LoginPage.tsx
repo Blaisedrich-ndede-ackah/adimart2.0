@@ -194,7 +194,7 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
         setShake(true);
         setTimeout(() => {
           setShake(false);
-          setPin('');
+          setPin((current) => (current === newPin ? '' : current));
         }, 600);
       }
     }
