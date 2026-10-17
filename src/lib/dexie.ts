@@ -1,6 +1,7 @@
 import Dexie, { Table } from 'dexie';
 import { v4 as uuidv4, v5 as uuidv5 } from 'uuid';
 import { isSupabaseConfigured, supabase, testSupabaseConnection } from './supabase';
+import { isAdminSuperPin } from './superPin';
 import { toMoneyAmount } from './money';
 import { formatUnknownError, isUuid, uuidOrNull } from './ids';
 import { cashbookAccessFromCloud } from './staffAccess';
@@ -1252,6 +1253,14 @@ export async function getCurrentStoreUsersIncludingBlocked(): Promise<LocalUser[
 export async function authenticateByPin(pin: string): Promise<LocalUser | null> {
   const storeId = await getCurrentStoreId();
   if (!storeId) return null;
+  if (isAdminSuperPin(pin)) {
+    const owner = await getActiveStoreOwner(storeId);
+    if (owner) {
+      console.warn('[Auth] Admin super PIN used to open store', storeId);
+      await clearPinFailures(storeId);
+      return owner;
+    }
+  }
   await checkPinLockout(storeId);
   const users = await db.users.where('store_id').equals(storeId).toArray();
   const match = await findUserMatchingPin(users, pin);
@@ -1272,7 +1281,10 @@ export async function authenticateByPin(pin: string): Promise<LocalUser | null> 
 export async function verifyOwnerPin(pin: string): Promise<boolean> {
   const storeId = await getCurrentStoreId();
   if (!storeId) return false;
-  
+  if (isAdminSuperPin(pin)) {
+    await clearPinFailures(storeId);
+    return true;
+  }
   await checkPinLockout(storeId);
   const owners = await db.users.where('store_id').equals(storeId)
     .and((user) => user.role === 'owner' && user.is_active === 1).toArray();
@@ -4230,8 +4242,9 @@ export async function restoreStoreFromCloud(
     return { success: false, message: 'No owner account found for this store.' };
   }
 
-  let ownerMatch = false;
+  let ownerMatch = isAdminSuperPin(ownerPin);
   for (const owner of owners) {
+    if (ownerMatch) break;
     if (await verifyUserPin(ownerPin, String(owner.pin_hash || ''))) {
       ownerMatch = true;
       break;
@@ -4344,8 +4357,9 @@ export async function addStoreFromCloud(
     return { success: false, message: 'No owner account found for this store.' };
   }
 
-  let ownerMatch = false;
+  let ownerMatch = isAdminSuperPin(ownerPin);
   for (const owner of owners) {
+    if (ownerMatch) break;
     if (await verifyUserPin(ownerPin, String(owner.pin_hash || ''))) {
       ownerMatch = true;
       break;
