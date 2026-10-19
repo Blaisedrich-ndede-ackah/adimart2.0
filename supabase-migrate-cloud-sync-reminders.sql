@@ -22,8 +22,14 @@ CREATE INDEX IF NOT EXISTS idx_cloud_sync_reminders_store_sent
 
 ALTER TABLE public.cloud_sync_reminders ENABLE ROW LEVEL SECURITY;
 
+-- PostgreSQL rejects a direct timestamptz::date index because its result depends
+-- on the session timezone. Store the UTC calendar day explicitly instead.
+ALTER TABLE public.cloud_sync_reminders
+  ADD COLUMN IF NOT EXISTS sent_day_utc DATE
+  GENERATED ALWAYS AS ((sent_at AT TIME ZONE 'UTC')::date) STORED;
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cloud_sync_reminders_daily
-  ON public.cloud_sync_reminders(store_id, (sent_at::date));
+  ON public.cloud_sync_reminders(store_id, sent_day_utc);
 
 COMMENT ON COLUMN public.stores.last_cloud_sync_at IS
   'Timestamp of the most recent completed full cloud sync from a store device.';
