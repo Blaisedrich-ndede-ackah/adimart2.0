@@ -72,7 +72,7 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
         <div className="store-setup-form bg-white rounded-2xl p-5 sm:p-6 shadow-xl animate-fade-in space-y-4">
           <div>
             <p className="text-sm font-bold text-slate-900">{t('setup.restore')}</p>
-            <p className="text-xs text-slate-500 mt-1 leading-relaxed">{t('setup.restoreHint')}</p>
+            <p className="text-xs text-slate-500 mt-1 leading-relaxed text-center">{t('setup.restoreHint')}</p>
           </div>
           <div>
             <label className="text-sm font-medium text-gray-700 mb-2 block">Store ID</label>

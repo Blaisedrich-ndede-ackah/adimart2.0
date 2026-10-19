@@ -685,6 +685,17 @@ class AdimatDB extends Dexie {
     this.version(17).stores({
       customer_wallet_transactions: 'id, store_id, customer_id, type, created_at, synced',
     });
+    // Repair databases created by older builds where branch-transfer stores
+    // were declared in a partial version and never materialized locally.
+    // Re-declaring existing stores is safe; Dexie only creates missing stores.
+    this.version(18).stores({
+      stores: 'id, synced',
+      users: 'id, store_id, role, pin_hash, is_active, synced',
+      products: 'id, store_id, name, category, barcode, is_active, sell_online, synced, updated_at',
+      locations: 'id, store_id, location_type, is_default, is_active, synced',
+      stock_batches: 'id, store_id, product_id, location_id, expiry_date, synced, updated_at',
+      stock_movements: 'id, store_id, product_id, batch_id, movement_type, created_at, synced',
+    });
   }
 }
 

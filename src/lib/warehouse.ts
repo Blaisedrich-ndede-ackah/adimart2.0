@@ -1173,6 +1173,11 @@ export async function transferStockBetweenStores(params: {
   const now = nowIso();
   const sourceMovementId = generateId();
   const destinationMovementId = generateId();
+  
+  // Calculate totals before transaction to avoid nested async calls that access additional stores
+  const sourceBatchesForTotal = await db.stock_batches.where('product_id').equals(params.sourceProductId).toArray();
+  const destinationBatchesForTotal = await db.stock_batches.where('product_id').equals(params.destinationProductId).toArray();
+  
   await db.transaction(
     'rw',
     [db.stock_batches, db.stock_movements, db.products],
@@ -1229,12 +1234,16 @@ export async function transferStockBetweenStores(params: {
           synced: 0,
         },
       ]);
+      
+      // Calculate stock totals from batches within the transaction
+      const sourceTotal = sourceBatchesForTotal.reduce((sum, b) => sum + toQty(b.quantity), 0);
+      const destinationTotal = destinationBatchesForTotal.reduce((sum, b) => sum + toQty(b.quantity), 0);
+      
       await db.products.update(params.sourceProductId, {
-        stock_level: await getProductTotalStock(params.sourceProductId),
+        stock_level: sourceTotal,
         updated_at: now,
         synced: 0,
       });
-      const destinationTotal = await getProductTotalStock(params.destinationProductId);
       await db.products.update(params.destinationProductId, {
         stock_level: destinationTotal,
         updated_at: now,
