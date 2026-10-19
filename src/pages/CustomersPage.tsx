@@ -494,6 +494,84 @@ export default function CustomersPage() {
           )}
         </section>
 
+        {/* Bulk SMS composer — owner-only promotional broadcast */}
+        <section className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-4">
+          <div className="flex items-center gap-2 mb-1">
+            <Send className="h-4 w-4 text-emerald-700" />
+            <h2 className="font-semibold text-gray-900">{t('bulkSms.title')}</h2>
+          </div>
+          <p className="text-xs text-gray-500 mb-3">{t('bulkSms.subtitle')}</p>
+
+          <label className="block text-sm text-gray-700">
+            {t('bulkSms.message')}
+            <textarea
+              rows={3}
+              maxLength={460}
+              value={smsMessage}
+              onChange={(event) => setSmsMessage(event.target.value)}
+              placeholder="e.g. New stock arrived — visit us this weekend for fresh items!"
+              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2.5 resize-y"
+            />
+            <span className="mt-1 flex items-center justify-between text-[11px] text-gray-400">
+              <span>{t('bulkSms.messageHint')}</span>
+              <span className={smsMessage.length > 460 ? 'text-red-500 font-medium' : ''}>{smsMessage.length}/460</span>
+            </span>
+          </label>
+
+          <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-white border border-gray-200 px-3 py-2">
+            <div>
+              <p className="text-xs text-gray-500">{t('bulkSms.recipients')}</p>
+              <p className="text-sm font-semibold text-gray-900">
+                {recipientCount === 0 ? t('bulkSms.recipientsEmpty') : t('bulkSms.recipientsCount', { count: recipientCount })}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleSendBulkSms()}
+              disabled={smsSending || recipientCount === 0 || smsMessage.trim().length === 0}
+              className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {smsSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              {smsSending ? t('bulkSms.sending') : t('bulkSms.send')}
+            </button>
+          </div>
+
+          {smsError && (
+            <p role="alert" className="mt-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {smsError}
+            </p>
+          )}
+          {smsNotice && (
+            <p role="status" className="mt-3 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+              {smsNotice}
+            </p>
+          )}
+
+          {smsCampaigns.length > 0 && (
+            <div className="mt-4">
+              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">{t('bulkSms.history')}</p>
+              <div className="space-y-2">
+                {smsCampaigns.slice(0, 5).map((campaign) => (
+                  <div key={campaign.id} className="rounded-lg bg-white border border-gray-200 px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs text-gray-700 line-clamp-1">{campaign.message}</p>
+                      <span className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        campaign.status === 'sent' ? 'bg-emerald-100 text-emerald-800' :
+                        campaign.status === 'partial' ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'
+                      }`}>
+                        {campaign.status}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[11px] text-gray-400">
+                      {campaign.sent_count}/{campaign.recipient_count} sent · {new Date(campaign.created_at).toLocaleString()}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+
         {isFormOpen && (
           <form
             onSubmit={(event) => void handleSaveCustomer(event)}
