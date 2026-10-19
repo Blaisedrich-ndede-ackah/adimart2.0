@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> 75111c339fc65516ea87c6ad87d156ba01428340
 import {
   AlertCircle,
   CheckCircle,
@@ -14,6 +18,12 @@ import {
   History,
   Clock,
 } from 'lucide-react';
+<<<<<<< HEAD
+=======
+=======
+import { AlertCircle, Loader2, Pencil, Plus, Send, Users, X } from 'lucide-react';
+>>>>>>> 560533be375d1087079e346c6429d3e2369daf3a
+>>>>>>> 75111c339fc65516ea87c6ad87d156ba01428340
 import {
   createCustomer,
   db,
