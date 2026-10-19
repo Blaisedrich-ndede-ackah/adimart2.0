@@ -8,10 +8,25 @@ import { formatSubscriptionDate } from './subscription';
 
 const MNOTIFY_QUICK_SMS_URL = 'https://api.mnotify.com/api/sms/quick';
 
+/** mNotify quick SMS accepts an array of recipients. We cap the batch so
+ * a single store can never submit an unbounded list in one request. */
+const BULK_SMS_MAX_RECIPIENTS = 1000;
+
 export interface SendSmsResult {
   success: boolean;
   error?: string;
   skipped?: boolean;
+}
+
+/** Result of a single bulk send attempt. */
+export interface BulkSmsResult {
+  success: boolean;
+  recipientCount: number;
+  sentCount: number;
+  failedCount: number;
+  status: 'sent' | 'failed' | 'partial';
+  error?: string;
+  providerMessageId?: string;
 }
 
 function envFallbackApiKey(): string {
@@ -22,28 +37,66 @@ function envFallbackSender(): string {
   return (import.meta.env.VITE_MNOTIFY_SENDER_ID || 'Adimat').trim().slice(0, 11) || 'Adimat';
 }
 
+/** Deduplicate and normalize a list of raw phone numbers. */
+export function normalizeRecipientList(rawPhones: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of rawPhones || []) {
+    const normalized = normalizeGhanaPhone(String(raw || ''));
+    if (normalized && !seen.has(normalized)) {
+      seen.add(normalized);
+      out.push(normalized);
+    }
+  }
+  return out;
+}
+
 /**
- * Send an SMS via mNotify quick SMS API.
- * Soft-fails when API key / recipient is missing so UI flows are not blocked.
+ * Send one message to many recipients in a single mNotify quick SMS call.
+ * mNotify accepts an array of recipients; we still cap the batch so a
+ * misbehaving store can never spam the network in one request.
  */
-export async function sendSmsViaMnotify(
-  recipientRaw: string,
+export async function sendBulkSmsViaMnotify(
+  recipients: string[],
   message: string
-): Promise<SendSmsResult> {
+): Promise<BulkSmsResult> {
   const settings = await loadPlatformSettings();
   const apiKey = settings.mnotify_api_key || envFallbackApiKey();
   const sender = settings.mnotify_sender_id || envFallbackSender();
-  const recipient = normalizeGhanaPhone(recipientRaw);
+  const normalized = normalizeRecipientList(recipients);
 
   if (!apiKey) {
-    return { success: false, skipped: true, error: 'mNotify API key not configured' };
+    return {
+      success: false,
+      recipientCount: normalized.length,
+      sentCount: 0,
+      failedCount: normalized.length,
+      status: 'failed',
+      error: 'mNotify API key not configured',
+    };
   }
-  if (!recipient) {
-    return { success: false, skipped: true, error: 'No recipient phone number' };
+  if (normalized.length === 0) {
+    return {
+      success: false,
+      recipientCount: 0,
+      sentCount: 0,
+      failedCount: 0,
+      status: 'failed',
+      error: 'No customer phone numbers to send to',
+    };
   }
   if (!message.trim()) {
-    return { success: false, error: 'Message is empty' };
+    return {
+      success: false,
+      recipientCount: normalized.length,
+      sentCount: 0,
+      failedCount: normalized.length,
+      status: 'failed',
+      error: 'Message is empty',
+    };
   }
+
+  const batch = normalized.slice(0, BULK_SMS_MAX_RECIPIENTS);
 
   try {
     const url = `${MNOTIFY_QUICK_SMS_URL}?key=${encodeURIComponent(apiKey)}`;
@@ -51,7 +104,7 @@ export async function sendSmsViaMnotify(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        recipient: [recipient],
+        recipient: batch,
         sender,
         message: message.trim(),
         is_schedule: false,
@@ -77,15 +130,55 @@ export async function sendSmsViaMnotify(
     if (!ok) {
       return {
         success: false,
+        recipientCount: batch.length,
+        sentCount: 0,
+        failedCount: batch.length,
+        status: 'failed',
         error: body.message || `mNotify request failed (${res.status})`,
+        providerMessageId: body.summary?.message_id,
       };
     }
 
-    return { success: true };
+    return {
+      success: true,
+      recipientCount: batch.length,
+      sentCount: batch.length,
+      failedCount: 0,
+      status: 'sent',
+      providerMessageId: body.summary?.message_id,
+    };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { success: false, error: msg };
+    return {
+      success: false,
+      recipientCount: batch.length,
+      sentCount: 0,
+      failedCount: batch.length,
+      status: 'failed',
+      error: msg,
+    };
   }
+}
+
+/**
+ * Send an SMS via mNotify quick SMS API.
+ * Soft-fails when API key / recipient is missing so UI flows are not blocked.
+ */
+export async function sendSmsViaMnotify(
+  recipientRaw: string,
+  message: string
+): Promise<SendSmsResult> {
+  const result = await sendBulkSmsViaMnotify([recipientRaw], message);
+  if (result.error === 'No customer phone numbers to send to') {
+    return { success: false, skipped: true, error: 'No recipient phone number' };
+  }
+  if (result.error === 'mNotify API key not configured') {
+    return { success: false, skipped: true, error: 'mNotify API key not configured' };
+  }
+  if (!result.success) {
+    return { success: false, error: result.error };
+  }
+  return { success: true };
 }
 
 function smsDedupeKey(kind: 'activated' | 'expiring', storeId: string, expiresAt: string): string {

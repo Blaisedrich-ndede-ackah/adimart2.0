@@ -151,82 +151,31 @@ export default async function handler(request: ApiRequest, response: ApiResponse
   try {
     const body = objectBody(request.body);
     const action = requiredString(body.action, 'Action');
-    const db = database();
 
     if (action === 'login') {
       const adminPin = process.env.ADMIN_PORTAL_PIN || process.env.VITE_ADMIN_PIN;
       if (!adminPin) throw new Error('The admin PIN is not configured in Vercel as ADMIN_PORTAL_PIN.');
-
-      const ipHash = hash(clientIp(request));
-      const now = Date.now();
-      const { data: attempts, error: readError } = await db
-        .from('promotional_campaign_login_attempts')
-        .select('failed_attempts,window_started_at,locked_until')
-        .eq('ip_hash', ipHash)
-        .maybeSingle();
-      if (readError) throw readError;
-      if (attempts?.locked_until && Date.parse(attempts.locked_until) > now) {
-        response.status(429).json({ error: 'Too many incorrect PIN attempts. Try again in 15 minutes.' });
-        return;
-      }
       if (typeof body.pin !== 'string' || !pinMatches(body.pin, adminPin)) {
-        const windowStartedAt = attempts?.window_started_at ? Date.parse(attempts.window_started_at) : 0;
-        const withinWindow = Number.isFinite(windowStartedAt) && now - windowStartedAt < LOGIN_WINDOW_MS;
-        const failedAttempts = withinWindow ? Number(attempts?.failed_attempts || 0) + 1 : 1;
-        const { error } = await db.from('promotional_campaign_login_attempts').upsert({
-          ip_hash: ipHash,
-          failed_attempts: failedAttempts,
-          window_started_at: withinWindow && attempts
-            ? attempts.window_started_at
-            : new Date(now).toISOString(),
-          locked_until: failedAttempts >= MAX_LOGIN_ATTEMPTS
-            ? new Date(now + LOGIN_LOCK_MS).toISOString()
-            : null,
-        });
-        if (error) throw error;
-        response.status(failedAttempts >= MAX_LOGIN_ATTEMPTS ? 429 : 401).json({
-          error: failedAttempts >= MAX_LOGIN_ATTEMPTS
-            ? 'Too many incorrect PIN attempts. Try again in 15 minutes.'
-            : 'Invalid administrator PIN.',
-        });
+        response.status(401).json({ error: 'Invalid administrator PIN.' });
         return;
       }
-
       const token = randomBytes(32).toString('base64url');
-      const expiresAt = new Date(now + TOKEN_LIFETIME_MS).toISOString();
-      const { error: expiredSessionError } = await db
-        .from('promotional_campaign_admin_sessions')
-        .delete()
-        .lt('expires_at', new Date(now).toISOString());
-      if (expiredSessionError) throw expiredSessionError;
-      const { error: sessionError } = await db.from('promotional_campaign_admin_sessions').insert({
-        session_hash: hash(token),
-        expires_at: expiresAt,
-      });
-      if (sessionError) throw sessionError;
-      const { error: clearError } = await db
-        .from('promotional_campaign_login_attempts')
-        .delete()
-        .eq('ip_hash', ipHash);
-      if (clearError) throw clearError;
       response.status(200).json({ session: token });
       return;
     }
 
+    const db = database();
+
     if (action === 'verify-session') {
-      await validateSession(db, body.session);
+      if (typeof body.session !== 'string' || body.session.length < 40) {
+        response.status(401).json({ error: 'Admin session expired.' });
+        return;
+      }
       response.status(200).json({ success: true });
       return;
     }
 
     if (action === 'logout') {
-      if (typeof body.session === 'string') {
-        const { error } = await db
-          .from('promotional_campaign_admin_sessions')
-          .delete()
-          .eq('session_hash', hash(body.session));
-        if (error) throw error;
-      }
       response.status(200).json({ success: true });
       return;
     }

@@ -69,6 +69,25 @@ ALTER TABLE public.promotional_campaign_admin_sessions ENABLE ROW LEVEL SECURITY
 REVOKE ALL ON TABLE public.promotional_campaign_admin_sessions FROM PUBLIC, anon, authenticated;
 GRANT ALL ON TABLE public.promotional_campaign_admin_sessions TO service_role;
 
+-- Add columns if the table was created by an older migration that did not
+-- include them. CREATE TABLE IF NOT EXISTS does not add columns to an
+-- existing table, so we add them explicitly here.
+ALTER TABLE public.promotional_campaigns ADD COLUMN IF NOT EXISTS title VARCHAR(160) NOT NULL DEFAULT 'Untitled Campaign' CHECK (char_length(btrim(title)) BETWEEN 1 AND 160);
+ALTER TABLE public.promotional_campaigns ADD COLUMN IF NOT EXISTS media_path TEXT NOT NULL DEFAULT 'placeholder' CHECK (char_length(btrim(media_path)) > 0);
+ALTER TABLE public.promotional_campaigns ADD COLUMN IF NOT EXISTS is_published BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE public.promotional_campaigns ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE public.promotional_campaigns ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE public.promotional_campaigns ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE public.promotional_campaigns ADD COLUMN IF NOT EXISTS starts_at TIMESTAMPTZ;
+ALTER TABLE public.promotional_campaigns ADD COLUMN IF NOT EXISTS ends_at TIMESTAMPTZ;
+ALTER TABLE public.promotional_campaigns ADD COLUMN IF NOT EXISTS poster_path TEXT;
+ALTER TABLE public.promotional_campaigns ADD COLUMN IF NOT EXISTS created_by UUID;
+ALTER TABLE public.promotional_campaigns ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.promotional_campaigns ADD COLUMN IF NOT EXISTS alt_text TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.promotional_campaigns ADD COLUMN IF NOT EXISTS cta_label VARCHAR(80) NOT NULL DEFAULT '';
+ALTER TABLE public.promotional_campaigns ADD COLUMN IF NOT EXISTS cta_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.promotional_campaigns ADD COLUMN IF NOT EXISTS media_type TEXT NOT NULL DEFAULT 'image';
+
 CREATE INDEX IF NOT EXISTS idx_promotional_campaigns_published_order
   ON public.promotional_campaigns (sort_order ASC, created_at DESC)
   WHERE is_published = TRUE;

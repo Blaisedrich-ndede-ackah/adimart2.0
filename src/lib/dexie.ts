@@ -308,6 +308,23 @@ export interface LocalCustomerWalletTransaction {
   synced: number;
 }
 
+/** Audit row for a store-owner bulk SMS campaign. */
+export interface LocalBulkSmsCampaign {
+  id: string;
+  store_id: string;
+  message: string;
+  recipient_count: number;
+  sent_count: number;
+  failed_count: number;
+  provider: string;
+  provider_message_id?: string;
+  status: 'sent' | 'failed' | 'partial';
+  error_message?: string;
+  created_by?: string;
+  created_at: string;
+  synced: number;
+}
+
 export interface LocalLocation {
   id: string;
   store_id: string;
@@ -495,6 +512,7 @@ class AdimatDB extends Dexie {
   customer_account_receipts!: Table<LocalCustomerAccountReceipt, string>;
   sales_returns!: Table<LocalSaleReturn, string>;
   customer_wallet_transactions!: Table<LocalCustomerWalletTransaction, string>;
+  bulk_sms_campaigns!: Table<LocalBulkSmsCampaign, string>;
   expenses!: Table<LocalExpense, string>;
   recurring_expenses!: Table<LocalRecurringExpense, string>;
   expense_budgets!: Table<LocalExpenseBudget, string>;
@@ -695,6 +713,9 @@ class AdimatDB extends Dexie {
       locations: 'id, store_id, location_type, is_default, is_active, synced',
       stock_batches: 'id, store_id, product_id, location_id, expiry_date, synced, updated_at',
       stock_movements: 'id, store_id, product_id, batch_id, movement_type, created_at, synced',
+    });
+    this.version(19).stores({
+      bulk_sms_campaigns: 'id, store_id, status, created_at, synced',
     });
   }
 }
@@ -3291,6 +3312,36 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
       errors
     );
 
+    const unsyncedBulkSms = await db.bulk_sms_campaigns
+      .where('store_id')
+      .equals(storeId)
+      .and((campaign) => campaign.synced === 0)
+      .toArray();
+    syncedCount += await upsertToSupabase(
+      'Bulk SMS campaigns',
+      'bulk_sms_campaigns',
+      unsyncedBulkSms.map((campaign) => ({
+        id: campaign.id,
+        store_id: campaign.store_id,
+        message: campaign.message,
+        recipient_count: campaign.recipient_count,
+        sent_count: campaign.sent_count,
+        failed_count: campaign.failed_count,
+        provider: campaign.provider,
+        provider_message_id: campaign.provider_message_id || null,
+        status: campaign.status,
+        error_message: campaign.error_message || null,
+        created_by: uuidOrNull(campaign.created_by),
+        created_at: campaign.created_at,
+      })),
+      async () => {
+        await Promise.all(unsyncedBulkSms.map((campaign) =>
+          db.bulk_sms_campaigns.update(campaign.id, { synced: 1 })
+        ));
+      },
+      errors
+    );
+
     const unsyncedSuppliers = await db.suppliers.where('store_id').equals(storeId).and((s) => s.synced === 0).toArray();
     syncedCount += await upsertToSupabase(
       'Suppliers',
@@ -4079,6 +4130,32 @@ export async function syncFromSupabase(opts?: {
             : local;
         },
       },
+      {
+        label: 'Bulk SMS campaigns',
+        table: 'bulk_sms_campaigns',
+        map: (row: Record<string, unknown>) => ({
+          id: String(row.id),
+          store_id: String(row.store_id),
+          message: String(row.message || ''),
+          recipient_count: Number(row.recipient_count) || 0,
+          sent_count: Number(row.sent_count) || 0,
+          failed_count: Number(row.failed_count) || 0,
+          provider: String(row.provider || 'mnotify'),
+          provider_message_id: typeof row.provider_message_id === 'string' ? row.provider_message_id : undefined,
+          status: (row.status as 'sent' | 'failed' | 'partial') || 'sent',
+          error_message: typeof row.error_message === 'string' ? row.error_message : undefined,
+          created_by: typeof row.created_by === 'string' ? row.created_by : undefined,
+          created_at: String(row.created_at || ''),
+          synced: 1,
+        }),
+        dbTable: db.bulk_sms_campaigns,
+        merge: async (remote: LocalBulkSmsCampaign, local: LocalBulkSmsCampaign | undefined) => {
+          // Bulk SMS campaigns are append-only audit rows; never clobber an
+          // unsynced local campaign with a remote row.
+          if (!local || local.synced !== 0) return remote;
+          return local;
+        },
+      },
     ] as const;
 
     for (const config of tables) {
@@ -4296,6 +4373,7 @@ export async function restoreStoreFromCloud(
       db.online_order_items,
       db.suppliers,
       db.purchase_orders,
+      db.bulk_sms_campaigns,
       db.deleted_records,
       db.app_config,
     ],
@@ -4318,6 +4396,7 @@ export async function restoreStoreFromCloud(
       await db.online_order_items.clear();
       await db.suppliers.clear();
       await db.purchase_orders.clear();
+      await db.bulk_sms_campaigns.clear();
       await db.deleted_records.clear();
     }
   );
