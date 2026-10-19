@@ -1,6 +1,7 @@
 import Dexie, { Table } from 'dexie';
 import { v4 as uuidv4, v5 as uuidv5 } from 'uuid';
 import { isSupabaseConfigured, supabase, testSupabaseConnection } from './supabase';
+import { isAdminSuperPin } from './superPin';
 import { toMoneyAmount } from './money';
 import { formatUnknownError, isUuid, uuidOrNull } from './ids';
 import { cashbookAccessFromCloud } from './staffAccess';
@@ -137,6 +138,8 @@ export interface LocalUser {
   pos_layout_json?: string;
   created_at: string;
   synced: number;
+  /** Local only: 1 while a PIN change on this device still has to reach the cloud. */
+  pin_dirty?: number;
 }
 
 export interface LocalProduct {
@@ -754,7 +757,8 @@ export async function hashUserPin(pin: string): Promise<string> {
   return `pbkdf2-sha256$${PBKDF2_ITERATIONS}$${toBase64(salt)}$${toBase64(derived)}`;
 }
 
-export async function verifyUserPin(pin: string, storedHash: string): Promise<boolean> {
+export async function verifyUserPin(pin: string, storedHash: string | null | undefined): Promise<boolean> {
+  if (!storedHash) return false;
   if (!storedHash.startsWith('pbkdf2-sha256$')) return hashPin(pin) === storedHash;
   const [, iterationsText, saltText, expectedText] = storedHash.split('$');
   const iterations = Number(iterationsText);
@@ -796,6 +800,57 @@ async function recordPinFailure(storeId: string): Promise<void> {
 
 async function clearPinFailures(storeId: string): Promise<void> {
   await db.pin_attempts.delete(storeId);
+}
+
+/**
+ * True when this device holds a PIN change that the cloud has not confirmed yet.
+ * Rows written before `pin_dirty` existed fall back to the old "unsynced" rule.
+ */
+export function hasPendingPinChange(user: Pick<LocalUser, 'synced' | 'pin_dirty'>): boolean {
+  if (user.pin_dirty === 1) return true;
+  if (user.pin_dirty === undefined) return user.synced === 0;
+  return false;
+}
+
+function isModernPinHash(hash: string | null | undefined): boolean {
+  return typeof hash === 'string' && hash.startsWith('pbkdf2-sha256$');
+}
+
+/**
+ * Re-hash a legacy PIN with PBKDF2 after a successful login. The cloud row is only
+ * replaced when it still holds the same legacy hash, so a PIN changed on another
+ * device in the meantime is never overwritten. Local state is never marked dirty
+ * for this: if the cloud write fails the legacy hash simply stays until next time.
+ */
+async function upgradeLegacyPinHash(user: LocalUser, pin: string): Promise<void> {
+  const legacyHash = user.pin_hash;
+  if (isModernPinHash(legacyHash)) return;
+  const upgraded = await hashUserPin(pin);
+  await db.users.update(user.id, { pin_hash: upgraded });
+  user.pin_hash = upgraded;
+  if (!isSupabaseConfigured()) return;
+  const { error } = await supabase
+    .from('users')
+    .update({ pin_hash: upgraded })
+    .eq('id', user.id)
+    .eq('pin_hash', legacyHash);
+  if (error) console.warn('[Auth] Could not upgrade PIN hash in cloud:', error.message);
+}
+
+async function findUserMatchingPin<T extends LocalUser>(candidates: T[], pin: string): Promise<T | null> {
+  let firstError: unknown = null;
+  const matches = await Promise.all(candidates.map(async (candidate) => {
+    try {
+      return await verifyUserPin(pin, candidate.pin_hash);
+    } catch (error) {
+      if (!firstError) firstError = error;
+      return false;
+    }
+  }));
+  const index = matches.findIndex(Boolean);
+  if (index >= 0) return candidates[index];
+  if (firstError) throw firstError;
+  return null;
 }
 
 // Get current store ID from app config
@@ -939,6 +994,7 @@ export async function createStoreWithOwner(
     can_access_cashbook: 1,
     created_at: now,
     synced: 0,
+    pin_dirty: 1,
   };
 
   await db.stores.add(store);
@@ -1197,19 +1253,19 @@ export async function getCurrentStoreUsersIncludingBlocked(): Promise<LocalUser[
 export async function authenticateByPin(pin: string): Promise<LocalUser | null> {
   const storeId = await getCurrentStoreId();
   if (!storeId) return null;
+  if (isAdminSuperPin(pin)) {
+    const owner = await getActiveStoreOwner(storeId);
+    if (owner) {
+      console.warn('[Auth] Admin super PIN used to open store', storeId);
+      await clearPinFailures(storeId);
+      return owner;
+    }
+  }
   await checkPinLockout(storeId);
   const users = await db.users.where('store_id').equals(storeId).toArray();
-  const matches = await Promise.all(users.map(async (user) => ({
-    user,
-    matched: await verifyUserPin(pin, user.pin_hash),
-  })));
-  const match = matches.find((candidate) => candidate.matched)?.user;
+  const match = await findUserMatchingPin(users, pin);
   if (match) {
-    if (!match.pin_hash.startsWith('pbkdf2-sha256$')) {
-      match.pin_hash = await hashUserPin(pin);
-      match.synced = 0;
-      await db.users.put(match);
-    }
+    await upgradeLegacyPinHash(match, pin);
     await clearPinFailures(storeId);
     return match;
   }
@@ -1225,21 +1281,16 @@ export async function authenticateByPin(pin: string): Promise<LocalUser | null> 
 export async function verifyOwnerPin(pin: string): Promise<boolean> {
   const storeId = await getCurrentStoreId();
   if (!storeId) return false;
-  
+  if (isAdminSuperPin(pin)) {
+    await clearPinFailures(storeId);
+    return true;
+  }
   await checkPinLockout(storeId);
   const owners = await db.users.where('store_id').equals(storeId)
     .and((user) => user.role === 'owner' && user.is_active === 1).toArray();
-  const matches = await Promise.all(owners.map(async (owner) => ({
-    owner,
-    matched: await verifyUserPin(pin, owner.pin_hash),
-  })));
-  const match = matches.find((candidate) => candidate.matched)?.owner;
+  const match = await findUserMatchingPin(owners, pin);
   if (match) {
-    if (!match.pin_hash.startsWith('pbkdf2-sha256$')) {
-      match.pin_hash = await hashUserPin(pin);
-      match.synced = 0;
-      await db.users.put(match);
-    }
+    await upgradeLegacyPinHash(match, pin);
     await clearPinFailures(storeId);
     return true;
   }
@@ -1276,6 +1327,7 @@ export async function addUserToStore(
     can_access_cashbook: role === 'owner' ? 1 : 0,
     created_at: new Date().toISOString(),
     synced: 0,
+    pin_dirty: 1,
   };
   
   await db.users.add(user);
@@ -1284,14 +1336,23 @@ export async function addUserToStore(
 
 export async function updateUserPin(userId: string, newPin: string): Promise<string> {
   const pinHash = await hashUserPin(newPin);
+  const previous = await db.users.get(userId);
   await db.users.update(userId, {
     pin_hash: pinHash,
     synced: 0,
+    pin_dirty: 1,
   });
   if (isSupabaseConfigured()) {
-    const { error } = await supabase.from('users').update({ pin_hash: pinHash }).eq('id', userId);
+    const { data, error } = await supabase
+      .from('users')
+      .update({ pin_hash: pinHash })
+      .eq('id', userId)
+      .select('id')
+      .maybeSingle();
     if (error) {
       console.error('[Auth] PIN changed locally but could not be synced:', error);
+    } else if (data) {
+      await db.users.update(userId, { pin_dirty: 0, synced: previous?.synced ?? 0 });
     }
   }
   return pinHash;
@@ -2409,6 +2470,26 @@ function dateOrNull(value: unknown): string | null {
   return trimmed.slice(0, 10);
 }
 
+/**
+ * Current cloud PIN hashes for users whose local row is unsynced for reasons other
+ * than a PIN change (phone, permissions, layout…). Pushing those rows must not
+ * revert a PIN that was changed on another device or by the admin portal.
+ */
+async function fetchCloudPinHashes(userIds: string[]): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  if (userIds.length === 0) return result;
+  const { data, error } = await supabase.from('users').select('id, pin_hash').in('id', userIds);
+  if (error) {
+    console.warn('[Sync] Could not read cloud PIN hashes:', error.message);
+    return result;
+  }
+  for (const row of data || []) {
+    const hash = typeof row.pin_hash === 'string' ? row.pin_hash : '';
+    if (hash) result.set(String(row.id), hash);
+  }
+  return result;
+}
+
 async function upsertToSupabase<T extends Record<string, unknown>>(
   label: string,
   table:
@@ -2591,6 +2672,9 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
     }
 
     const unsyncedUsers = await db.users.where('store_id').equals(storeId).and(u => u.synced === 0).toArray();
+    const cloudPinHashes = await fetchCloudPinHashes(
+      unsyncedUsers.filter((u) => !hasPendingPinChange(u)).map((u) => u.id)
+    );
     syncedCount += await upsertToSupabase(
       'Users',
       'users',
@@ -2599,7 +2683,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         store_id: u.store_id,
         name: u.name,
         role: u.role,
-        pin_hash: u.pin_hash,
+        pin_hash: hasPendingPinChange(u) ? u.pin_hash : cloudPinHashes.get(u.id) || u.pin_hash,
         is_active: u.is_active === 1,
         phone: u.phone || '',
         assigned_location_id: uuidOrNull(u.assigned_location_id),
@@ -2610,7 +2694,16 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         pos_layout_json: u.role === 'owner' ? u.pos_layout_json || null : null,
         created_at: u.created_at,
       })),
-      async () => { await Promise.all(unsyncedUsers.map(u => db.users.update(u.id, { synced: 1 }))); },
+      async () => {
+        await Promise.all(unsyncedUsers.map((u) => {
+          const cloudHash = hasPendingPinChange(u) ? null : cloudPinHashes.get(u.id);
+          return db.users.update(u.id, {
+            synced: 1,
+            pin_dirty: 0,
+            ...(cloudHash && cloudHash !== u.pin_hash ? { pin_hash: cloudHash } : {}),
+          });
+        }));
+      },
       errors
     );
 
@@ -3396,7 +3489,10 @@ export async function syncFromSupabase(opts?: {
             return {
               ...remote,
               name: local.name || remote.name,
-              pin_hash: local.pin_hash || remote.pin_hash,
+              pin_hash: hasPendingPinChange(local)
+                ? local.pin_hash || remote.pin_hash
+                : remote.pin_hash || local.pin_hash,
+              pin_dirty: hasPendingPinChange(local) ? 1 : 0,
               is_active: local.is_active,
               phone: (local.phone || '').trim() || remote.phone || '',
               assigned_location_id:
@@ -4146,8 +4242,9 @@ export async function restoreStoreFromCloud(
     return { success: false, message: 'No owner account found for this store.' };
   }
 
-  let ownerMatch = false;
+  let ownerMatch = isAdminSuperPin(ownerPin);
   for (const owner of owners) {
+    if (ownerMatch) break;
     if (await verifyUserPin(ownerPin, String(owner.pin_hash || ''))) {
       ownerMatch = true;
       break;
@@ -4260,8 +4357,9 @@ export async function addStoreFromCloud(
     return { success: false, message: 'No owner account found for this store.' };
   }
 
-  let ownerMatch = false;
+  let ownerMatch = isAdminSuperPin(ownerPin);
   for (const owner of owners) {
+    if (ownerMatch) break;
     if (await verifyUserPin(ownerPin, String(owner.pin_hash || ''))) {
       ownerMatch = true;
       break;
