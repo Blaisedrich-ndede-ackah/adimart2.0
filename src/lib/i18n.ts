@@ -312,7 +312,7 @@ export const fr: Record<string, string> = {
   'setup.letsSetup': 'Ouvrez votre boutique',
   'setup.createStore': 'Créer une boutique',
   'setup.restore': 'Ouvrir votre boutique',
-  'setup.restoreHint': 'Demandez à l'administrateur Adimat +233-555-857-224 l'identifiant de boutique et le PIN propriétaire.',
+  'setup.restoreHint': "Demandez à l'administrateur Adimat +233-555-857-224 l'identifiant de boutique et le PIN propriétaire.",
   'setup.storeIdPlaceholder': 'Collez votre identifiant de boutique',
   'setup.openStore': 'Ouvrir la boutique',
   'setup.storeName': 'Nom de la boutique',
