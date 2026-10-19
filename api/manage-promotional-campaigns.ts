@@ -50,10 +50,13 @@ function objectBody(value: unknown): Record<string, unknown> {
 }
 
 function database() {
-  const url = process.env.VITE_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+  // Vercel projects created from the Vite app may expose the secret under
+  // either name. Never expose this value to browser code.
+  const serviceRoleKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !serviceRoleKey) {
-    throw new Error('Set VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in the Vercel project environment.');
+    throw new Error('The server-side Supabase URL and service-role key are not available to this API route. Configure SUPABASE_SERVICE_ROLE_KEY in Vercel (not a VITE_ client variable).');
   }
   return createClient(url, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -150,8 +153,8 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     const db = database();
 
     if (action === 'login') {
-      const adminPin = process.env.VITE_ADMIN_PIN;
-      if (!adminPin) throw new Error('The admin PIN is not configured in Vercel as VITE_ADMIN_PIN.');
+      const adminPin = process.env.ADMIN_PORTAL_PIN || process.env.VITE_ADMIN_PIN;
+      if (!adminPin) throw new Error('The admin PIN is not configured in Vercel as ADMIN_PORTAL_PIN.');
 
       const ipHash = hash(clientIp(request));
       const now = Date.now();
