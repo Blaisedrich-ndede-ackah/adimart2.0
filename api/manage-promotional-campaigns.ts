@@ -50,15 +50,16 @@ function objectBody(value: unknown): Record<string, unknown> {
 }
 
 function database() {
-  const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-  // Vercel projects created from the Vite app may expose the secret under
-  // either name. Never expose this value to browser code.
-  const serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceRoleKey) {
-    throw new Error('The server-side Supabase URL and service-role key are not available to this API route. Configure SUPABASE_SERVICE_ROLE_KEY in Vercel (not a VITE_ client variable).');
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  // Prefer the server-only service key when it is configured. The admin PIN
+  // flow also works with the project's publishable/anon key, which is the only
+  // Supabase key exposed in this Vercel project. RLS still protects database
+  // access; the service key is never read from a VITE_ variable.
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  if (!url || !key) {
+    throw new Error('Supabase server configuration is incomplete. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in the Vercel project environment.');
   }
-  return createClient(url, serviceRoleKey, {
+  return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
