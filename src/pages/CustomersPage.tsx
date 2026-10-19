@@ -1,5 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertCircle, Loader2, Pencil, Plus, Users, X } from 'lucide-react';
+import {
+  AlertCircle,
+  CheckCircle,
+  Loader2,
+  Pencil,
+  Plus,
+  Send,
+  Users,
+  X,
+  Phone,
+  CreditCard,
+  Wallet,
+  History,
+  Clock,
+} from 'lucide-react';
 import {
   createCustomer,
   db,
@@ -21,9 +35,16 @@ import {
 } from '@/lib/dexie';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useFormatMoney } from '@/lib/currency';
+import { useT } from '@/lib/i18n';
 import { triggerPushSync } from '@/lib/sync';
 import { shareReceipt, downloadReceipt, type PDFReceiptData } from '@/lib/receiptGenerator';
 import { printReceipt } from '@/lib/printService';
+import {
+  countCurrentStoreCustomerRecipients,
+  sendBulkSmsToCurrentStoreCustomers,
+  getCurrentStoreBulkSmsCampaigns,
+  type LocalBulkSmsCampaign,
+} from '@/lib/bulkSms';
 
 export default function CustomersPage() {
   const { currentUser, currentStore } = useAuthStore();
@@ -55,18 +76,30 @@ export default function CustomersPage() {
   const [paymentAmounts, setPaymentAmounts] = useState<Record<string, string>>({});
   const [repaymentMethods, setRepaymentMethods] = useState<Record<string, 'cash' | 'momo' | 'cheque' | 'split'>>({});
   const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null);
+  const [smsMessage, setSmsMessage] = useState('');
+  const [smsSending, setSmsSending] = useState(false);
+  const [smsError, setSmsError] = useState('');
+  const [smsNotice, setSmsNotice] = useState('');
+  const [smsCampaigns, setSmsCampaigns] = useState<LocalBulkSmsCampaign[]>([]);
+  const [recipientCount, setRecipientCount] = useState(0);
+
+  const t = useT();
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [allCustomers, allTransactions] = await Promise.all([
+      const [allCustomers, allTransactions, campaigns, recipients] = await Promise.all([
         getCurrentStoreCustomers(),
         getCurrentStoreTransactions(),
+        getCurrentStoreBulkSmsCampaigns(),
+        countCurrentStoreCustomerRecipients(),
       ]);
       const activeAndArchived = allCustomers.sort((a, b) =>
         Number(b.is_active) - Number(a.is_active) || a.name.localeCompare(b.name)
       );
       setCustomers(activeAndArchived);
+      setSmsCampaigns(campaigns);
+      setRecipientCount(recipients);
       const creditTransactions = allTransactions.filter((transaction) =>
         transaction.payment_method === 'credit' && Boolean(transaction.customer_id)
       );
@@ -247,6 +280,36 @@ export default function CustomersPage() {
     }
   };
 
+  const handleSendBulkSms = async () => {
+    if (smsMessage.trim().length === 0) {
+      setSmsError(t('bulkSms.message'));
+      return;
+    }
+    setSmsSending(true);
+    setSmsError('');
+    setSmsNotice('');
+    try {
+      const result = await sendBulkSmsToCurrentStoreCustomers({ message: smsMessage });
+      if (!result.success) {
+        setSmsError(result.error || t('bulkSms.failed', { error: 'Unknown error' }));
+        return;
+      }
+      const count = result.sentCount;
+      setSmsNotice(
+        count === result.recipientCount
+          ? t('bulkSms.sent', { count })
+          : t('bulkSms.partial', { sent: result.sentCount, total: result.recipientCount, failed: result.failedCount })
+      );
+      setSmsMessage('');
+      await load();
+      void triggerPushSync('bulk-sms');
+    } catch (sendError) {
+      setSmsError(sendError instanceof Error ? sendError.message : t('bulkSms.failed', { error: 'Unknown error' }));
+    } finally {
+      setSmsSending(false);
+    }
+  };
+
   const creditByCustomer = new Map<string, LocalTransaction[]>();
   for (const transaction of transactions) {
     const customerTransactions = creditByCustomer.get(transaction.customer_id!) || [];
@@ -267,92 +330,230 @@ export default function CustomersPage() {
       <div className="page-header">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-white font-bold text-lg">Customers book</h1>
-            <p className="text-emerald-200 text-xs">Registered customers, credit sales and account balances</p>
+            <div className="inline-flex items-center gap-2 rounded-xl bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-700 mb-2">
+              <Users className="h-3.5 w-3.5" />
+              <span>Customers book</span>
+            </div>
+            <h1 className="text-white font-bold text-lg tracking-tight">Customer management</h1>
+            <p className="text-emerald-200 text-xs mt-0.5">
+              Registered customers, credit sales, and account balances
+            </p>
           </div>
           <button
             type="button"
             onClick={() => { resetForm(); setIsFormOpen(true); }}
-            className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-semibold text-emerald-800"
+            className="inline-flex items-center gap-2 rounded-xl bg-white px-3.5 py-2 text-sm font-semibold text-emerald-800 shadow-sm hover:bg-emerald-50 transition-all"
           >
             <Plus className="h-4 w-4" /> Add customer
           </button>
         </div>
       </div>
 
-      <div className="page-body space-y-4">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-          <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
-            <p className="text-xs text-gray-500">Registered customers</p>
-            <p className="mt-1 text-xl font-bold text-gray-900">
-              {customers.filter((customer) => customer.is_active === 1).length}
-            </p>
+      <div className="page-body space-y-5">
+        {/* Stat cards */}
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          <div className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-emerald-100/50 p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wider">Active customers</p>
+                <p className="mt-1.5 text-2xl font-bold text-gray-900">
+                  {customers.filter((customer) => customer.is_active === 1).length}
+                </p>
+              </div>
+              <div className="rounded-lg bg-white/60 p-2">
+                <Users className="h-5 w-5 text-emerald-500" />
+              </div>
+            </div>
           </div>
-          <div className="rounded-xl border border-amber-100 bg-amber-50 p-4 shadow-sm">
-            <p className="text-xs text-amber-800">Total outstanding</p>
-            <p className="mt-1 text-xl font-bold text-amber-900">{money(totalReceivable)}</p>
+          <div className="rounded-2xl border border-amber-100 bg-gradient-to-br from-amber-50 to-amber-100/50 p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold text-amber-600 uppercase tracking-wider">Total outstanding</p>
+                <p className="mt-1.5 text-2xl font-bold text-amber-900">{money(totalReceivable)}</p>
+              </div>
+              <div className="rounded-lg bg-white/60 p-2">
+                <CreditCard className="h-5 w-5 text-amber-500" />
+              </div>
+            </div>
           </div>
-          <div className="rounded-xl border border-teal-100 bg-teal-50 p-4 shadow-sm">
-            <p className="text-xs text-teal-800">Customer store credit</p>
-            <p className="mt-1 text-xl font-bold text-teal-900">{money(totalWalletCredit)}</p>
+          <div className="rounded-2xl border border-teal-100 bg-gradient-to-br from-teal-50 to-teal-100/50 p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold text-teal-600 uppercase tracking-wider">Store credit (wallet)</p>
+                <p className="mt-1.5 text-2xl font-bold text-teal-900">{money(totalWalletCredit)}</p>
+              </div>
+              <div className="rounded-lg bg-white/60 p-2">
+                <Wallet className="h-5 w-5 text-teal-500" />
+              </div>
+            </div>
+          </div>
+          <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Total customers</p>
+                <p className="mt-1.5 text-2xl font-bold text-gray-900">{customers.length}</p>
+              </div>
+              <div className="rounded-lg bg-gray-50 p-2">
+                <History className="h-5 w-5 text-gray-400" />
+              </div>
+            </div>
           </div>
         </div>
 
+        {/* Alert / status toast */}
         {error && (
-          <div role="alert" className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> {error}
+          <div role="alert" className="flex items-start gap-3 rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-700 shadow-sm">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{error}</span>
           </div>
         )}
-        {status && <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">{status}</p>}
+        {status && (
+          <div className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-sm text-emerald-800 shadow-sm">
+            <CheckCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{status}</span>
+          </div>
+        )}
+
+        {/* Bulk SMS composer — owner-only promotional broadcast */}
+        <section className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-5 shadow-sm">
+          <div className="flex items-center gap-2.5 mb-1">
+            <div className="rounded-lg bg-emerald-100 p-1.5">
+              <Send className="h-4 w-4 text-emerald-600" />
+            </div>
+            <h2 className="font-semibold text-gray-900">{t('bulkSms.title')}</h2>
+          </div>
+          <p className="text-sm text-gray-500 mb-4">{t('bulkSms.subtitle')}</p>
+
+          <label className="block text-sm font-medium text-gray-700">
+            {t('bulkSms.message')}
+            <textarea
+              rows={3}
+              maxLength={460}
+              value={smsMessage}
+              onChange={(event) => setSmsMessage(event.target.value)}
+              placeholder="e.g. New stock arrived — visit us this weekend for fresh items!"
+              className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 resize-y focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
+            />
+            <span className="mt-1 flex items-center justify-between text-[11px] text-gray-400">
+              <span>{t('bulkSms.messageHint')}</span>
+              <span className={smsMessage.length > 460 ? 'text-red-500 font-medium' : ''}>{smsMessage.length}/460</span>
+            </span>
+          </label>
+
+          <div className="mt-4 flex items-center justify-between gap-3 rounded-xl bg-white border border-gray-200 px-3.5 py-2.5 shadow-sm">
+            <div>
+              <p className="text-xs text-gray-500">{t('bulkSms.recipients')}</p>
+              <p className="text-sm font-semibold text-gray-900">
+                {recipientCount === 0 ? t('bulkSms.recipientsEmpty') : t('bulkSms.recipientsCount', { count: recipientCount })}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleSendBulkSms()}
+              disabled={smsSending || recipientCount === 0 || smsMessage.trim().length === 0}
+              className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50 disabled:hover:bg-emerald-600 transition-all"
+            >
+              {smsSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              {smsSending ? t('bulkSms.sending') : t('bulkSms.send')}
+            </button>
+          </div>
+
+          {smsError && (
+            <p role="alert" className="mt-3 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+              {smsError}
+            </p>
+          )}
+          {smsNotice && (
+            <p role="status" className="mt-3 text-sm text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
+              {smsNotice}
+            </p>
+          )}
+
+          {smsCampaigns.length > 0 && (
+            <div className="mt-5">
+              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-3">{t('bulkSms.history')}</p>
+              <div className="space-y-2">
+                {smsCampaigns.slice(0, 5).map((campaign) => (
+                  <div key={campaign.id} className="rounded-xl bg-white border border-gray-100 p-3 shadow-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm text-gray-700 line-clamp-1">{campaign.message}</p>
+                      <span className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        campaign.status === 'sent' ? 'bg-emerald-100 text-emerald-700' :
+                        campaign.status === 'partial' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
+                      }`}>
+                        {campaign.status}
+                      </span>
+                    </div>
+                    <p className="mt-1.5 text-[11px] text-gray-400">
+                      {campaign.sent_count}/{campaign.recipient_count} sent · {new Date(campaign.created_at).toLocaleString()}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
 
         {isFormOpen && (
-          <form onSubmit={(event) => void handleSaveCustomer(event)} className="space-y-3 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+          <form
+            onSubmit={(event) => void handleSaveCustomer(event)}
+            className="space-y-4 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm"
+          >
             <div className="flex items-center justify-between">
-              <h2 className="font-semibold text-gray-900">{editing ? 'Edit customer' : 'Register customer'}</h2>
-              <button type="button" onClick={resetForm} aria-label="Close form"><X className="h-5 w-5 text-gray-500" /></button>
+              <div className="flex items-center gap-2">
+                <div className="rounded-lg bg-emerald-100 p-1.5">
+                  {editing ? <Pencil className="h-4 w-4 text-emerald-600" /> : <Plus className="h-4 w-4 text-emerald-600" />}
+                </div>
+                <h2 className="font-semibold text-gray-900">{editing ? 'Edit customer' : 'Register customer'}</h2>
+              </div>
+              <button type="button" onClick={resetForm} aria-label="Close form">
+                <X className="h-5 w-5 text-gray-400 hover:text-gray-600 transition-colors" />
+              </button>
             </div>
-            <label className="block text-sm text-gray-700">
-              Customer name *
+            <label className="block text-sm font-medium text-gray-700">
+              Customer name <span className="text-red-500">*</span>
               <input
                 required
                 maxLength={255}
                 value={name}
                 onChange={(event) => setName(event.target.value)}
-                className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2.5"
+                className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
               />
             </label>
-            <label className="block text-sm text-gray-700">
-              Phone (optional)
+            <label className="block text-sm font-medium text-gray-700">
+              Phone <span className="text-gray-400 text-xs">(optional)</span>
               <input
                 type="tel"
                 maxLength={30}
                 value={phone}
                 onChange={(event) => setPhone(event.target.value)}
-                className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2.5"
+                className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
               />
             </label>
             {!editing && (
-              <label className="block text-sm text-gray-700">
-                Starting account balance (optional)
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min="0"
-                  step="0.01"
-                  value={openingBalance}
-                  onChange={(event) => setOpeningBalance(event.target.value)}
-                  placeholder="0.00"
-                  className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2.5"
-                />
-              </label>
-            )}
-            {!editing && (
-              <p className="text-xs text-gray-500">Enter credit not already recorded as a credit sale. It will be added to their account balance.</p>
+              <>
+                <label className="block text-sm font-medium text-gray-700">
+                  Starting account balance <span className="text-gray-400 text-xs">(optional)</span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    step="0.01"
+                    value={openingBalance}
+                    onChange={(event) => setOpeningBalance(event.target.value)}
+                    placeholder="0.00"
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
+                  />
+                </label>
+                <p className="text-xs text-gray-400">
+                  Enter credit not already recorded as a credit sale. It will be added to their account balance.
+                </p>
+              </>
             )}
             <button
               type="submit"
               disabled={saving}
-              className="w-full rounded-xl bg-primary py-3 font-semibold text-white disabled:opacity-50"
+              className="w-full rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50 disabled:hover:bg-emerald-600 transition-all"
             >
               {saving ? 'Saving…' : editing ? 'Save customer' : 'Register customer'}
             </button>
@@ -360,14 +561,25 @@ export default function CustomersPage() {
         )}
 
         {loading ? (
-          <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+          <div className="flex flex-col items-center justify-center py-12 gap-3">
+            <Loader2 className="h-6 w-6 animate-spin text-emerald-600" />
+            <p className="text-sm text-gray-500">Loading customers…</p>
+          </div>
         ) : customers.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-8 text-center">
-            <Users className="mx-auto h-9 w-9 text-gray-400" />
-            <p className="mt-3 font-semibold text-gray-800">No customers registered yet</p>
-            <p className="mt-1 text-sm text-gray-500">Register a customer before recording a credit sale.</p>
-            <button type="button" onClick={() => { resetForm(); setIsFormOpen(true); }} className="mt-4 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white">
-              Add first customer
+          <div className="rounded-2xl border border-dashed border-gray-200 bg-white p-8 text-center shadow-sm">
+            <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-emerald-50 mb-4">
+              <Users className="h-8 w-8 text-emerald-500" />
+            </div>
+            <h3 className="font-semibold text-gray-900">No customers registered yet</h3>
+            <p className="mt-1 text-sm text-gray-500">
+              Register a customer before recording a credit sale.
+            </p>
+            <button
+              type="button"
+              onClick={() => { resetForm(); setIsFormOpen(true); }}
+              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 transition-all"
+            >
+              <Plus className="h-4 w-4" /> Add first customer
             </button>
           </div>
         ) : (
@@ -380,8 +592,14 @@ export default function CustomersPage() {
               );
               const balance = salesBalance + (Number(customer.opening_balance_remaining) || 0);
               const expanded = expandedCustomerId === customer.id;
+              const initials = customer.name
+                .split(' ')
+                .map((n) => n[0])
+                .join('')
+                .toUpperCase()
+                .slice(0, 2);
               return (
-                <section key={customer.id} className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+                <section key={customer.id} className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm transition-all hover:shadow-md">
                   <div className="p-4">
                     <div className="flex items-start justify-between gap-3">
                       <button
@@ -389,32 +607,47 @@ export default function CustomersPage() {
                         onClick={() => setExpandedCustomerId(expanded ? null : customer.id)}
                         className="min-w-0 flex-1 text-left"
                       >
-                        <span className="flex items-center gap-2 font-semibold text-gray-900">
-                          <span className="truncate">{customer.name}</span>
-                          {customer.is_active !== 1 && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-500">Archived</span>}
-                        </span>
-                        <span className="mt-1 block text-xs text-teal-800">
-                          Wallet credit: {money(customer.wallet_balance || 0)}
-                        </span>
-                        <span className="mt-1 block text-xs text-gray-500">{customer.phone || 'No phone number'}</span>
+                        <div className="flex items-center gap-3">
+                          <div className="flex-shrink-0 h-10 w-10 rounded-xl bg-emerald-100 flex items-center justify-center">
+                            <span className="text-emerald-700 font-semibold text-sm">{initials}</span>
+                          </div>
+                          <div className="min-w-0">
+                            <span className="flex items-center gap-2 font-semibold text-gray-900">
+                              <span className="truncate block">{customer.name}</span>
+                              {customer.is_active !== 1 && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-500">
+                                  Archived
+                                </span>
+                              )}
+                            </span>
+                            <span className="mt-1 block text-xs text-teal-700 font-medium">
+                              <Wallet className="h-3 w-3 mr-1" /> Wallet {money(customer.wallet_balance || 0)}
+                            </span>
+                            <span className="mt-0.5 block text-xs text-gray-500">
+                              <Phone className="h-3 w-3 mr-1" /> {customer.phone || 'No phone number'}
+                            </span>
+                          </div>
+                        </div>
                       </button>
-                      <div className="text-right">
-                        <p className="text-xs text-gray-500">Account balance</p>
-                        <p className={`font-bold ${balance > 0 ? 'text-amber-800' : 'text-emerald-700'}`}>{money(balance)}</p>
+                      <div className="text-right flex flex-col">
+                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Account balance</p>
+                        <p className={`font-bold ${balance > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                          {money(balance)}
+                        </p>
                       </div>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
                         onClick={() => startEdit(customer)}
-                        className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-2 text-xs font-medium text-gray-700"
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                       >
-                        <Pencil className="h-3.5 w-3.5" /> Edit
+                        <Pencil className="h-3 w-3" /> Edit
                       </button>
                       <button
                         type="button"
                         onClick={() => void handleArchive(customer)}
-                        className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-medium text-gray-700"
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                       >
                         {customer.is_active === 1 ? 'Archive' : 'Reactivate'}
                       </button>
@@ -422,10 +655,15 @@ export default function CustomersPage() {
                   </div>
 
                   {expanded && (
-                    <div className="space-y-3 border-t border-gray-100 bg-gray-50 p-4">
+                    <div className="space-y-3 border-t border-gray-100 bg-gray-50/50 p-4 backdrop-blur-sm">
                       {customer.is_active === 1 && balance > 0 && (
-                        <div className="space-y-3 rounded-xl border border-amber-200 bg-white p-3">
-                          <p className="text-sm font-semibold text-gray-900">Record account payment</p>
+                        <div className="space-y-3 rounded-xl border border-amber-100 bg-amber-50 p-4 shadow-sm">
+                          <div className="flex items-center gap-2">
+                            <div className="rounded-lg bg-amber-100 p-1.5">
+                              <CreditCard className="h-4 w-4 text-amber-600" />
+                            </div>
+                            <p className="text-sm font-semibold text-gray-900">Record account payment</p>
+                          </div>
                           <label className="block text-xs font-medium text-gray-600">
                             Payment method
                             <select
@@ -434,7 +672,7 @@ export default function CustomersPage() {
                                 ...current,
                                 [customer.id]: event.target.value as 'cash' | 'momo' | 'cheque' | 'split',
                               }))}
-                              className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm"
+                              className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 transition-all"
                             >
                               <option value="cash">Cash</option>
                               <option value="momo">Mobile Money (MoMo)</option>
@@ -445,8 +683,10 @@ export default function CustomersPage() {
                           {(repaymentMethods[customer.id] || 'cash') === 'split' ? (
                             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                               {(['cash', 'momo', 'cheque'] as const).map((kind) => (
-                                <label key={kind} className="text-xs font-medium capitalize text-gray-600">
-                                  {kind === 'momo' ? 'MoMo' : kind}
+                                <label key={kind} className="flex flex-col gap-1">
+                                  <span className="text-xs font-medium text-gray-600 capitalize">
+                                    {kind === 'momo' ? 'MoMo' : kind}
+                                  </span>
                                   <input
                                     type="number"
                                     inputMode="decimal"
@@ -458,14 +698,14 @@ export default function CustomersPage() {
                                       ...current,
                                       [`${customer.id}:${kind}`]: event.target.value,
                                     }))}
-                                    className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm"
+                                    className="rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 transition-all"
                                   />
                                 </label>
                               ))}
                             </div>
                           ) : (
-                            <label className="block text-xs font-medium text-gray-600">
-                              Amount
+                            <div className="flex flex-col gap-1">
+                              <label className="block text-xs font-medium text-gray-600">Amount</label>
                               <input
                                 type="number"
                                 inputMode="decimal"
@@ -477,11 +717,11 @@ export default function CustomersPage() {
                                   ...current,
                                   [customer.id]: event.target.value,
                                 }))}
-                                className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm"
+                                className="rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 transition-all"
                               />
-                            </label>
+                            </div>
                           )}
-                          <p className="text-xs text-gray-500">Payment is automatically applied to the oldest outstanding balance first.</p>
+                          <p className="text-xs text-gray-400">Payment is automatically applied to the oldest outstanding balance first.</p>
                           <button
                             type="button"
                             onClick={() => void handleAccountPayment(customer)}
@@ -490,73 +730,92 @@ export default function CustomersPage() {
                                 ? paymentAmounts[`${customer.id}:cash`] || paymentAmounts[`${customer.id}:momo`] || paymentAmounts[`${customer.id}:cheque`]
                                 : paymentAmounts[customer.id]
                             )}
-                            className="w-full rounded-lg bg-amber-700 px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+                            className="w-full rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-amber-700 disabled:opacity-50 disabled:hover:bg-amber-700 transition-all"
                           >
                             {saving ? 'Saving payment…' : `Record payment · balance ${money(balance)}`}
                           </button>
                         </div>
                       )}
                       {customer.opening_balance > 0 && (
-                        <div className="rounded-xl border border-amber-100 bg-amber-50 p-3">
-                          <div className="flex justify-between text-sm">
-                            <span className="font-medium text-amber-900">Starting balance</span>
-                            <span className="font-bold text-amber-900">{money(customer.opening_balance_remaining)}</span>
+                        <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 shadow-sm">
+                          <div className="flex justify-between items-center">
+                            <div>
+                              <p className="text-xs font-medium text-amber-900 uppercase tracking-wider">Starting balance</p>
+                              <p className="text-sm font-bold text-amber-900">{money(customer.opening_balance_remaining)}</p>
+                            </div>
+                            <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                              Originally recorded
+                            </span>
                           </div>
-                          <p className="mt-1 text-xs text-amber-800">Originally recorded: {money(customer.opening_balance)}</p>
+                          <p className="mt-2 text-xs text-amber-800">
+                            Originally recorded: {money(customer.opening_balance)}
+                          </p>
                         </div>
                       )}
                       {customerSales.map((transaction) => (
-                        <div key={transaction.id} className="space-y-2 rounded-xl border border-gray-200 bg-white p-3">
-                          <div className="flex justify-between gap-3 text-sm">
+                        <div key={transaction.id} className="rounded-xl border border-gray-100 bg-white p-3.5 shadow-sm">
+                          <div className="flex justify-between gap-3">
                             <div>
-                              <p className="font-medium text-gray-800">Credit sale · {transaction.receipt_number}</p>
+                              <p className="text-sm font-medium text-gray-900">
+                                Credit sale · <span className="text-gray-400 text-xs">{transaction.receipt_number}</span>
+                              </p>
                               <p className="mt-1 text-xs text-gray-500">{new Date(transaction.created_at).toLocaleDateString()}</p>
                               {(creditPaymentsByTransaction[transaction.id] || []).map((payment) => (
                                 <p key={payment.id} className="mt-1 text-[11px] text-gray-500">
-                                      Payment {money(payment.amount)} ({payment.payment_method || 'cash'}) · {new Date(payment.created_at).toLocaleDateString()}
+                                  Payment {money(payment.amount)} ({payment.payment_method || 'cash'}) · {new Date(payment.created_at).toLocaleDateString()}
                                 </p>
                               ))}
                             </div>
-                            <span className="font-semibold text-amber-800">{money(transaction.credit_balance || 0)}</span>
+                            <span className="font-semibold text-amber-700">{money(transaction.credit_balance || 0)}</span>
                           </div>
                         </div>
                       ))}
                       {(paymentsByCustomer[customer.id] || []).map((payment) => (
-                        <div key={payment.id} className="flex justify-between gap-3 text-xs text-gray-600">
-                          <span>{payment.entry_type === 'opening_balance' ? 'Opening balance added' : `Account payment (${payment.payment_method || 'cash'})`} · {new Date(payment.created_at).toLocaleDateString()}</span>
-                          <span>{money(payment.amount)}</span>
+                        <div key={payment.id} className="flex items-center justify-between gap-3 text-sm text-gray-600">
+                          <span className="text-gray-700">
+                            {payment.entry_type === 'opening_balance' ? 'Opening balance added' : `Account payment (${payment.payment_method || 'cash'})`} ·
+                            {new Date(payment.created_at).toLocaleDateString()}
+                          </span>
+                          <span className="font-semibold text-gray-900">{money(payment.amount)}</span>
                         </div>
                       ))}
                       {(accountReceiptsByCustomer[customer.id] || []).map((receipt) => (
-                        <div key={receipt.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-100 bg-white p-3">
-                          <div className="text-xs">
-                            <p className="font-semibold text-gray-800">Receipt {receipt.receipt_number}</p>
-                            <p className="mt-1 text-gray-500">
+                        <div key={receipt.id} className="flex items-center justify-between gap-2 rounded-xl border border-emerald-100 bg-white p-3 shadow-sm">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <div className="rounded-lg bg-emerald-50 p-1.5">
+                                <CreditCard className="h-3.5 w-3.5 text-emerald-500" />
+                              </div>
+                              <p className="font-medium text-gray-900 text-sm">
+                                Receipt {receipt.receipt_number}
+                              </p>
+                            </div>
+                            <p className="mt-0.5 text-xs text-gray-500">
                               Paid {money(receipt.amount)} · Balance {money(receipt.balance_after)}
                               {receipt.cash_amount ? ` · Cash ${money(receipt.cash_amount)}` : ''}
                               {receipt.momo_amount ? ` · MoMo ${money(receipt.momo_amount)}` : ''}
                               {receipt.cheque_amount ? ` · Cheque ${money(receipt.cheque_amount)}` : ''}
                             </p>
                           </div>
-                          <div className="flex gap-2">
+                          <div className="flex gap-1.5">
                             <button
                               type="button"
                               onClick={() => { void printReceipt(buildAccountReceiptData(receipt, customer.name)); }}
-                              className="rounded-lg border border-gray-200 px-2.5 py-2 text-xs font-semibold text-gray-700"
+                              className="rounded-xl border border-emerald-200 px-2.5 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 transition-colors"
                             >
                               Print
                             </button>
                             <button
                               type="button"
                               onClick={() => downloadReceipt(buildAccountReceiptData(receipt, customer.name))}
-                              className="rounded-lg border border-gray-200 px-2.5 py-2 text-xs font-semibold text-gray-700"
+                              className="rounded-xl border border-emerald-200 px-2.5 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 transition-colors"
                             >
                               PDF
                             </button>
                             <button
                               type="button"
                               onClick={() => { void shareReceipt(buildAccountReceiptData(receipt, customer.name)); }}
-                              className="rounded-lg border border-gray-200 px-2.5 py-2 text-xs font-semibold text-gray-700"
+                              className="rounded-xl border border-emerald-200 px-2.5 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 transition-colors"
                             >
                               Share
                             </button>
@@ -564,21 +823,36 @@ export default function CustomersPage() {
                         </div>
                       ))}
                       {(walletTransactionsByCustomer[customer.id] || []).map((entry) => (
-                        <div key={entry.id} className="flex justify-between gap-3 text-xs text-teal-800">
-                          <span>{entry.description} · {new Date(entry.created_at).toLocaleDateString()}</span>
-                          <span>{entry.type === 'return_credit' ? '+' : '−'}{money(entry.amount)} · wallet {money(entry.balance_after)}</span>
+                        <div key={entry.id} className="flex items-center justify-between gap-3 text-sm text-teal-700">
+                          <span className="text-gray-700">{entry.description}</span>
+                          <span className="text-xs text-gray-400">{new Date(entry.created_at).toLocaleDateString()}</span>
+                          <span className={`font-semibold ${entry.type === 'return_credit' ? 'text-emerald-700' : 'text-teal-700'}`}>
+                            {entry.type === 'return_credit' ? '+' : '−'}{money(entry.amount)}
+                          </span>
+                          <span className="text-xs text-gray-400">wallet {money(entry.balance_after)}</span>
                         </div>
                       ))}
                       {(returnsByCustomer[customer.id] || [])
                         .filter((saleReturn) => saleReturn.refund_method === 'account')
                         .map((saleReturn) => (
-                          <div key={saleReturn.id} className="flex justify-between gap-3 text-xs text-amber-800">
-                            <span>Return adjustment · {saleReturn.receipt_number} · {new Date(saleReturn.created_at).toLocaleDateString()}</span>
-                            <span>Debt −{money(saleReturn.debt_applied)}{saleReturn.wallet_credit > 0 ? ` · wallet +${money(saleReturn.wallet_credit)}` : ''}</span>
+                          <div key={saleReturn.id} className="flex items-center justify-between gap-3 text-sm text-amber-700">
+                            <span className="text-gray-700">
+                              Return adjustment · {saleReturn.receipt_number}
+                            </span>
+                            <span className="text-xs text-gray-400">{new Date(saleReturn.created_at).toLocaleDateString()}</span>
+                            <span className="font-semibold text-amber-700">
+                              Debt −{money(saleReturn.debt_applied)}
+                            </span>
+                            {saleReturn.wallet_credit > 0 && (
+                              <span className="text-xs text-emerald-600">wallet +{money(saleReturn.wallet_credit)}</span>
+                            )}
                           </div>
                         ))}
                       {customerSales.length === 0 && customer.opening_balance <= 0 && (
-                        <p className="text-sm text-gray-500">No credit balance or credit sales recorded.</p>
+                        <div className="flex items-center gap-2 py-2 rounded-xl bg-gray-50 px-3">
+                          <Clock className="h-3 w-3 text-gray-400" />
+                          <span className="text-xs text-gray-500">No credit balance or credit sales recorded.</span>
+                        </div>
                       )}
                     </div>
                   )}
