@@ -215,42 +215,48 @@ export default function StoresPortalSection() {
       </p>
 
       <div className="space-y-2 mb-3">
-        {stores.map((store) => {
-          const active = store.id === currentStore?.id;
-          return (
-            <div
-              key={store.id}
-              className={`rounded-xl border px-3 py-3 ${
-                active ? 'border-emerald-300 bg-emerald-50' : 'border-gray-100 bg-gray-50'
-              }`}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-              <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-700">Store / branch name</p>
-              <p className="font-semibold text-gray-900 truncate">{store.name}</p>
-              <p className="text-[11px] text-gray-500 truncate">{store.address || 'No address'}</p>
-                  <p className="text-[11px] text-gray-500 truncate">{store.support_number || 'No phone'}</p>
-                  {active && (
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-primary mt-1">
-                      Current store
-                    </p>
+        {stores.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-gray-300 px-3 py-4 text-center">
+            <p className="text-xs text-gray-600">No linked stores yet. Use the button below to link your first store.</p>
+          </div>
+        ) : (
+          stores.map((store) => {
+            const active = store.id === currentStore?.id;
+            return (
+              <div
+                key={store.id}
+                className={`rounded-xl border px-3 py-3 ${
+                  active ? 'border-emerald-300 bg-emerald-50' : 'border-gray-100 bg-gray-50'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-700">Store / branch name</p>
+                <p className="font-semibold text-gray-900 truncate">{store.name}</p>
+                <p className="text-[11px] text-gray-500 truncate">{store.address || 'No address'}</p>
+                    <p className="text-[11px] text-gray-500 truncate">{store.support_number || 'No phone'}</p>
+                    {active && (
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-primary mt-1">
+                        Current store
+                      </p>
+                    )}
+                  </div>
+                  {!active && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void handleOpenStore(store.id)}
+                      className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white touch-target disabled:opacity-50"
+                    >
+                      <ArrowRightLeft className="w-3.5 h-3.5" />
+                      Open
+                    </button>
                   )}
                 </div>
-                {!active && (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void handleOpenStore(store.id)}
-                    className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white touch-target disabled:opacity-50"
-                  >
-                    <ArrowRightLeft className="w-3.5 h-3.5" />
-                    Open
-                  </button>
-                )}
               </div>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </div>
 
       {stores.length > 1 && (
