@@ -4130,10 +4130,20 @@ export async function syncFromSupabase(opts?: {
       return { success: false, message: `Partial pull. Errors: ${errors.join('; ')}`, pulledCount };
     }
 
+    const completedSyncAt = new Date().toISOString();
     await db.sync_meta.put({
       id: 'last_sync',
-      last_synced_at: new Date().toISOString(),
+      last_synced_at: completedSyncAt,
     });
+    if (isSupabaseConfigured() && !opts?.onlyTables) {
+      const { error: syncMarkerError } = await supabase
+        .from('stores')
+        .update({ last_cloud_sync_at: completedSyncAt })
+        .eq('id', storeId);
+      if (syncMarkerError && !/column .*last_cloud_sync_at.*does not exist/i.test(syncMarkerError.message)) {
+        console.warn('[Sync] Could not record cloud sync timestamp:', syncMarkerError.message);
+      }
+    }
 
     // Cloud snapshot is the shared ledger — replace local extras so devices match
     if (!opts?.skipCatalogAlign) {
