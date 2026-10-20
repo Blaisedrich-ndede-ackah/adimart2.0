@@ -2324,42 +2324,102 @@ export async function importProductsFromRows(
     selling_price: number;
     stock_level: number;
     sku_type?: string;
+    product_id?: string;
   }>
-): Promise<{ imported: number; skipped: number }> {
+): Promise<{ imported: number; skipped: number; updated?: number; conflicts?: Array<any> }> {
   const storeId = await getCurrentStoreId();
   if (!storeId) throw new Error('No store selected');
 
-  const { setProductStockLevel } = await import('./warehouse');
+  const { setProductStockLevel, getProductTotalStock } = await import('./warehouse');
+  const { moneyEquals } = await import('./money');
   let imported = 0;
+  let updated = 0;
   let skipped = 0;
+  const conflicts: Array<any> = [];
   const now = new Date().toISOString();
 
   for (const row of rows) {
-    if (!row.name.trim()) {
+    if (!row.name || !String(row.name).trim()) {
       skipped++;
       continue;
     }
 
-    if (row.barcode) {
-      const existing = await db.products
+    let existing: any = undefined;
+    if ((row as any).product_id && typeof (row as any).product_id === 'string' && (row as any).product_id.trim()) {
+      existing = await db.products.where('store_id').equals(storeId).and(p => p.id === (row as any).product_id.trim()).first();
+    }
+    if (!existing && row.barcode && String(row.barcode).trim()) {
+      existing = await db.products
         .where('store_id')
         .equals(storeId)
-        .and(p => p.barcode === row.barcode)
+        .and(p => p.barcode === String(row.barcode).trim())
         .first();
-      if (existing) {
+    }
+
+    if (existing) {
+      const incomingName = String(row.name).trim();
+      const incomingCategory = (String(row.category || '').trim()) || existing.category || 'Other';
+      const incomingBarcode = String(row.barcode || '').trim();
+      const incomingSkuType = (String(row.sku_type || '').trim()) || existing.sku_type || 'unit';
+      const incomingCost = toMoneyAmount(row.cost_price);
+      const incomingSell = toMoneyAmount(row.selling_price);
+
+      const nameMatch = incomingName.toLowerCase() === String(existing.name || '').toLowerCase();
+      const categoryMatch = incomingCategory.toLowerCase() === String(existing.category || '').toLowerCase();
+      const skuTypeMatch = incomingSkuType === String(existing.sku_type || '');
+      const costMatch = moneyEquals ? moneyEquals(incomingCost, existing.cost_price) : Math.abs(incomingCost - existing.cost_price) < 0.01;
+      const sellMatch = moneyEquals ? moneyEquals(incomingSell, existing.selling_price) : Math.abs(incomingSell - existing.selling_price) < 0.01;
+      const barcodeChanged = incomingBarcode && incomingBarcode !== String(existing.barcode || '');
+
+      const significantDiff = !nameMatch || !categoryMatch || !skuTypeMatch || !costMatch || !sellMatch || barcodeChanged;
+      if (significantDiff) {
+        conflicts.push({
+          existing,
+          incoming: {
+            name: incomingName,
+            category: incomingCategory,
+            barcode: incomingBarcode,
+            cost_price: incomingCost,
+            selling_price: incomingSell,
+            stock_level: Math.max(0, Math.round(Number(row.stock_level) || 0)),
+            sku_type: incomingSkuType,
+          },
+        });
         skipped++;
         continue;
       }
+
+      const qtyToAdd = Math.max(0, Math.round(Number(row.stock_level) || 0));
+      if (qtyToAdd > 0) {
+        try {
+          const current = await getProductTotalStock(existing.id);
+          await setProductStockLevel({
+            storeId,
+            productId: existing.id,
+            targetQty: current + qtyToAdd,
+            note: 'CSV import stock increment',
+          });
+        } catch {
+          await setProductStockLevel({
+            storeId,
+            productId: existing.id,
+            targetQty: (Number(existing.stock_level) || 0) + qtyToAdd,
+            note: 'CSV import stock increment',
+          });
+        }
+      }
+      updated++;
+      continue;
     }
 
     const productId = generateId();
     await db.products.add({
       id: productId,
       store_id: storeId,
-      name: row.name.trim(),
-      category: row.category.trim() || 'Other',
-      sku_type: row.sku_type?.trim() || 'unit',
-      barcode: row.barcode.trim(),
+      name: String(row.name).trim(),
+      category: (String(row.category || '').trim()) || 'Other',
+      sku_type: (String(row.sku_type || '').trim()) || 'unit',
+      barcode: String(row.barcode || '').trim(),
       cost_price: toMoneyAmount(row.cost_price),
       selling_price: toMoneyAmount(row.selling_price),
       stock_level: 0,
@@ -2375,7 +2435,7 @@ export async function importProductsFromRows(
       updated_at: now,
       synced: 0,
     });
-    const openingQty = Math.max(0, Math.floor(Number(row.stock_level) || 0));
+    const openingQty = Math.max(0, Math.round(Number(row.stock_level) || 0));
     if (openingQty > 0) {
       await setProductStockLevel({
         storeId,
@@ -2387,8 +2447,10 @@ export async function importProductsFromRows(
     imported++;
   }
 
-  return { imported, skipped };
+  return { imported, skipped, updated, conflicts };
 }
+
+
 
 function formatSyncError(label: string, error: unknown): string {
   const message = formatUnknownError(error);

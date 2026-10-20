@@ -8,6 +8,7 @@ export interface CsvProductRow {
   selling_price: number;
   stock_level: number;
   sku_type: string;
+  product_id?: string;
 }
 
 export interface CsvParseResult {
@@ -100,6 +101,7 @@ export function parseProductCsv(content: string): CsvParseResult {
       selling_price: parseMoney(getValue(cells, ['selling_price', 'price', 'sell_price', 'sale_price'])),
       stock_level: Math.max(0, Math.round(parseNumber(getValue(cells, ['stock_level', 'stock', 'quantity', 'qty'])))),
       sku_type: getValue(cells, ['sku_type', 'unit']) || 'unit',
+      product_id: getValue(cells, ['product_id', 'id', 'productid']) || undefined,
     });
   });
 

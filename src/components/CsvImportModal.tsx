@@ -1,4 +1,6 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import { db, getCurrentStoreId } from '@/lib/dexie';
+import { useEffect } from 'react';
 import { X, Upload, FileSpreadsheet, Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { parseProductCsv, CSV_TEMPLATE } from '@/lib/csvImport';
 import { importProductsFromRows } from '@/lib/dexie';
@@ -16,6 +18,9 @@ export default function CsvImportModal({ isOpen, onClose, onImported }: CsvImpor
   const [parsedRows, setParsedRows] = useState<ReturnType<typeof parseProductCsv>['rows']>([]);
   const [status, setStatus] = useState('');
   const [isImporting, setIsImporting] = useState(false);
+  const [conflicts, setConflicts] = useState<any[]>([]);
+
+  useEffect(() => { if (!isOpen) { setConflicts([]); setParsedRows([]); setParseErrors([]); setPreviewCount(0); setStatus(''); } }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -131,3 +136,5 @@ export default function CsvImportModal({ isOpen, onClose, onImported }: CsvImpor
     </div>
   );
 }
+
+import { getCurrentStoreId } from '@/lib/dexie';
