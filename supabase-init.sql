@@ -43,6 +43,14 @@ CREATE TABLE IF NOT EXISTS stores (
   preferred_language VARCHAR(8) DEFAULT 'en',
   /** Super-admin wipe of trial sales; devices drop local ledger rows at or before this time */
   transactions_cleared_at TIMESTAMPTZ,
+  /** Automated debt reminder chase: on/off, how often, minimum balance, wording */
+  debt_reminders_enabled BOOLEAN DEFAULT FALSE,
+  debt_reminder_interval_days INTEGER DEFAULT 7 CHECK (debt_reminder_interval_days >= 1 AND debt_reminder_interval_days <= 90),
+  debt_reminder_min_balance NUMERIC DEFAULT 0 CHECK (debt_reminder_min_balance >= 0),
+  debt_reminder_message TEXT DEFAULT 'Hi {name}, this is {store}. Your outstanding balance is {balance}. Please pay at the store. Thank you!',
+  /** Owner sales targets used by the live dashboard progress bars */
+  sales_target_daily NUMERIC DEFAULT 0 CHECK (sales_target_daily >= 0),
+  sales_target_monthly NUMERIC DEFAULT 0 CHECK (sales_target_monthly >= 0),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -203,6 +211,8 @@ CREATE TABLE IF NOT EXISTS customers (
   opening_balance_remaining DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (opening_balance_remaining >= 0),
   wallet_balance DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (wallet_balance >= 0),
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  /** Customer asked not to receive automated debt reminder SMS */
+  debt_reminder_opt_out BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -841,6 +851,38 @@ CREATE TRIGGER update_online_orders_updated_at
 ALTER TABLE products ADD COLUMN IF NOT EXISTS reorder_level INTEGER NOT NULL DEFAULT 0 CHECK (reorder_level >= 0);
 
 -- ============================================================
+-- DEBT REMINDERS (audit trail of the automatic credit chase)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS debt_reminders (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  customer_name TEXT NOT NULL DEFAULT '',
+  customer_phone TEXT NOT NULL DEFAULT '',
+  balance DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (balance >= 0),
+  message TEXT NOT NULL DEFAULT '',
+  provider VARCHAR(40) NOT NULL DEFAULT 'mnotify',
+  provider_message_id TEXT,
+  status VARCHAR(20) NOT NULL DEFAULT 'sent'
+    CHECK (status IN ('sent', 'failed', 'skipped')),
+  error_message TEXT,
+  sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_debt_reminders_store_sent ON debt_reminders(store_id, sent_at DESC);
+CREATE INDEX IF NOT EXISTS idx_debt_reminders_customer ON debt_reminders(customer_id, sent_at DESC);
+
+ALTER TABLE debt_reminders ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "debt_reminders_select" ON debt_reminders FOR SELECT USING (true);
+CREATE POLICY "debt_reminders_insert" ON debt_reminders FOR INSERT WITH CHECK (true);
+CREATE POLICY "debt_reminders_update" ON debt_reminders FOR UPDATE USING (false) WITH CHECK (false);
+CREATE POLICY "debt_reminders_delete" ON debt_reminders FOR DELETE USING (false);
+
+GRANT SELECT, INSERT ON TABLE debt_reminders TO anon, authenticated;
+GRANT ALL ON TABLE debt_reminders TO service_role;
+
+-- ============================================================
 -- STOCK DEDUCTION FUNCTION (called after transaction item insert)
 -- ============================================================
 CREATE OR REPLACE FUNCTION deduct_stock_after_sale()
@@ -866,6 +908,13 @@ BEGIN
   END;
   BEGIN
     ALTER PUBLICATION supabase_realtime ADD TABLE products;
+  EXCEPTION
+    WHEN duplicate_object THEN NULL;
+    WHEN undefined_object THEN NULL;
+  END;
+  BEGIN
+    -- Live owner dashboard: new sales appear on the dashboard as they happen.
+    ALTER PUBLICATION supabase_realtime ADD TABLE transactions;
   EXCEPTION
     WHEN duplicate_object THEN NULL;
     WHEN undefined_object THEN NULL;

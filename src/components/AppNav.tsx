@@ -3,10 +3,11 @@ import {
   ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, House,
   CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare,
   ShoppingCart, RotateCcw,
-  ContactRound, ArrowLeftRight,
+  ContactRound, ArrowLeftRight, Building2,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
+import { listLocalStores } from '@/lib/dexie';
 import { useAccessibilityStore } from '@/lib/accessibility';
 import { COMMUNITY_CHAT_URL } from '@/lib/community';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
@@ -32,12 +33,23 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const { currentUser, currentStore, switchUser } = useAuthStore();
   const t = useT();
   const [moreOpen, setMoreOpen] = useState(false);
+  const [storeCount, setStoreCount] = useState(1);
   const leftHanded = useAccessibilityStore((state) => state.leftHanded);
   const isOwner = currentUser?.role === 'owner';
   const ecommerceEnabled = (currentStore?.ecommerce_enabled ?? 0) === 1;
   const canManageEcommerce =
     isOwner || (currentUser?.can_manage_ecommerce ?? 0) === 1;
   const cashbookOk = canAccessCashbook(currentUser);
+
+  useEffect(() => {
+    let active = true;
+    void listLocalStores().then((stores) => {
+      if (active) setStoreCount(Math.max(1, stores.length));
+    });
+    return () => {
+      active = false;
+    };
+  }, [currentStore?.id]);
 
   const navItems = useMemo<NavItem[]>(
     () =>
@@ -54,6 +66,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         { id: 'subscription', label: t('nav.plan'), icon: CalendarClock, show: isOwner },
         { id: 'inventory', label: t('nav.inventory'), icon: Package, show: isOwner },
         { id: 'warehouse', label: 'Branch inventory', icon: ArrowLeftRight, show: isOwner },
+        { id: 'multistore', label: t('nav.allStores'), icon: Building2, show: isOwner && storeCount > 1 },
         { id: 'purchasing', label: 'Purchasing', icon: ShoppingCart, show: isOwner },
         {
           id: 'ecommerce',
@@ -71,7 +84,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
           href: COMMUNITY_CHAT_URL,
         },
       ].filter((item) => item.show),
-    [isOwner, ecommerceEnabled, canManageEcommerce, cashbookOk, t]
+    [isOwner, ecommerceEnabled, canManageEcommerce, cashbookOk, storeCount, t]
   );
 
   // Keep bottom bar to a few primary destinations; rest live under More

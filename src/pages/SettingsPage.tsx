@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Store, Shield, Percent,
   Save, Loader2, CheckCircle2, UserPlus,
-  Trash2, Users, Fingerprint, AlertCircle, Key, Smartphone, Ban, ImagePlus, Timer
+  Trash2, Users, Fingerprint, AlertCircle, Key, Smartphone, Ban, ImagePlus, Timer,
+  BellRing, Target
 } from 'lucide-react';
 import ChangePinModal from '@/components/ChangePinModal';
 import ResetUserPinModal from '@/components/ResetUserPinModal';
@@ -37,6 +38,15 @@ import {
   SESSION_TIMEOUT_OPTIONS,
   normalizeSessionTimeoutMinutes,
 } from '@/lib/sessionTimeout';
+import {
+  DEBT_REMINDER_INTERVAL_OPTIONS,
+  DEBT_REMINDER_MAX_CHARS,
+  DEFAULT_DEBT_REMINDER_INTERVAL_DAYS,
+  DEFAULT_DEBT_REMINDER_TEMPLATE,
+  normalizeDebtReminderIntervalDays,
+  normalizeDebtReminderMinBalance,
+  normalizeDebtReminderTemplate,
+} from '@/lib/debtReminderConfig';
 
 interface SettingsPageProps {
   onNavigate?: (page: string) => void;
@@ -63,6 +73,12 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [momoNumber, setMomoNumber] = useState('');
   const [momoNetwork, setMomoNetwork] = useState('');
   const [currencyCode, setCurrencyCode] = useState(DEFAULT_CURRENCY);
+  const [debtRemindersEnabled, setDebtRemindersEnabled] = useState(false);
+  const [debtReminderIntervalDays, setDebtReminderIntervalDays] = useState(String(DEFAULT_DEBT_REMINDER_INTERVAL_DAYS));
+  const [debtReminderMinBalance, setDebtReminderMinBalance] = useState('0');
+  const [debtReminderMessage, setDebtReminderMessage] = useState(DEFAULT_DEBT_REMINDER_TEMPLATE);
+  const [salesTargetDaily, setSalesTargetDaily] = useState('0');
+  const [salesTargetMonthly, setSalesTargetMonthly] = useState('0');
   
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -102,6 +118,18 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
       setMomoNumber(currentStore.momo_number || '');
       setMomoNetwork(currentStore.momo_network || '');
       setCurrencyCode(normalizeCurrencyCode(currentStore.currency_code));
+      setDebtRemindersEnabled((currentStore.debt_reminders_enabled ?? 0) === 1);
+      setDebtReminderIntervalDays(
+        String(normalizeDebtReminderIntervalDays(currentStore.debt_reminder_interval_days))
+      );
+      setDebtReminderMinBalance(
+        String(normalizeDebtReminderMinBalance(currentStore.debt_reminder_min_balance))
+      );
+      setDebtReminderMessage(
+        normalizeDebtReminderTemplate(currentStore.debt_reminder_message)
+      );
+      setSalesTargetDaily(String(Number(currentStore.sales_target_daily) || 0));
+      setSalesTargetMonthly(String(Number(currentStore.sales_target_monthly) || 0));
       await ensureStoreLocations(currentStore.id);
       setLocations(await listLocations(currentStore.id));
     }
@@ -152,6 +180,11 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         setSaving(false);
         return;
       }
+      if (debtReminderMessage.trim().length > DEBT_REMINDER_MAX_CHARS) {
+        setSaveError(`Debt reminder message is too long. Keep it under ${DEBT_REMINDER_MAX_CHARS} characters.`);
+        setSaving(false);
+        return;
+      }
 
       await db.stores.update(storeId, {
         name: storeName.trim(),
@@ -169,6 +202,12 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         momo_network: momoNetwork.trim(),
         currency_code: normalizeCurrencyCode(currencyCode),
         preferred_language: language,
+        debt_reminders_enabled: debtRemindersEnabled ? 1 : 0,
+        debt_reminder_interval_days: normalizeDebtReminderIntervalDays(debtReminderIntervalDays),
+        debt_reminder_min_balance: normalizeDebtReminderMinBalance(debtReminderMinBalance),
+        debt_reminder_message: normalizeDebtReminderTemplate(debtReminderMessage),
+        sales_target_daily: Math.max(0, Number(salesTargetDaily) || 0),
+        sales_target_monthly: Math.max(0, Number(salesTargetMonthly) || 0),
         synced: 0,
       });
       
@@ -546,6 +585,129 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
                 Applies to percentage discounts and as a % of subtotal for fixed discounts
               </p>
             </div>
+          </div>
+        </div>
+
+        {/* Debt reminders */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">
+          <div className="flex items-center gap-2 mb-1">
+            <BellRing className="w-5 h-5 text-amber-600" />
+            <h3 className="font-bold text-gray-900">Debt reminders</h3>
+          </div>
+          <p className="text-[11px] text-gray-500 mb-3">
+            Automatically text customers who still owe money. Each customer is only chased once
+            per interval, and customers can opt out from the Customers screen.
+          </p>
+
+          <button
+            type="button"
+            role="switch"
+            aria-checked={debtRemindersEnabled}
+            onClick={() => setDebtRemindersEnabled((value) => !value)}
+            className="mb-3 flex w-full items-center justify-between rounded-xl border border-gray-200 px-3 py-2.5 text-left"
+          >
+            <span>
+              <span className="block text-sm font-medium text-gray-800">Send reminders automatically</span>
+              <span className="block text-[11px] text-gray-500">
+                {debtRemindersEnabled
+                  ? 'Adimat chases overdue balances while the app is open.'
+                  : 'Reminders are off. You can still send them from Customers.'}
+              </span>
+            </span>
+            <span
+              className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+                debtRemindersEnabled ? 'bg-primary' : 'bg-gray-300'
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${
+                  debtRemindersEnabled ? 'left-[22px]' : 'left-0.5'
+                }`}
+              />
+            </span>
+          </button>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-xs font-medium text-gray-600">
+              Remind me every (days)
+              <select
+                value={debtReminderIntervalDays}
+                onChange={(event) => setDebtReminderIntervalDays(event.target.value)}
+                className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm font-normal"
+              >
+                {DEBT_REMINDER_INTERVAL_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option} day{option === 1 ? '' : 's'}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs font-medium text-gray-600">
+              Only remind above
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                value={debtReminderMinBalance}
+                onChange={(event) => setDebtReminderMinBalance(event.target.value)}
+                className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm"
+              />
+            </label>
+          </div>
+
+          <label className="mt-3 block text-xs font-medium text-gray-600">
+            Reminder message
+            <textarea
+              rows={3}
+              maxLength={DEBT_REMINDER_MAX_CHARS}
+              value={debtReminderMessage}
+              onChange={(event) => setDebtReminderMessage(event.target.value)}
+              className="mt-1 w-full resize-y rounded-xl border border-gray-300 px-3 py-2.5 text-sm"
+            />
+            <span className="mt-1 flex items-center justify-between text-[10px] text-gray-400">
+              <span>Use {`{name}`}, {`{store}`} and {`{balance}`} to personalise it.</span>
+              <span className={debtReminderMessage.length > DEBT_REMINDER_MAX_CHARS ? 'text-red-500 font-medium' : ''}>
+                {debtReminderMessage.length}/{DEBT_REMINDER_MAX_CHARS}
+              </span>
+            </span>
+          </label>
+        </div>
+
+        {/* Sales targets */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">
+          <div className="flex items-center gap-2 mb-1">
+            <Target className="w-5 h-5 text-primary" />
+            <h3 className="font-bold text-gray-900">Sales targets</h3>
+          </div>
+          <p className="text-[11px] text-gray-500 mb-3">
+            Shown as progress on the owner dashboard. Leave at 0 to hide a target.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-xs font-medium text-gray-600">
+              Daily target
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                value={salesTargetDaily}
+                onChange={(event) => setSalesTargetDaily(event.target.value)}
+                className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm"
+              />
+            </label>
+            <label className="text-xs font-medium text-gray-600">
+              Monthly target
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                value={salesTargetMonthly}
+                onChange={(event) => setSalesTargetMonthly(event.target.value)}
+                className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm"
+              />
+            </label>
           </div>
         </div>
 

@@ -13,6 +13,7 @@ import {
   Wallet,
   History,
   Clock,
+  BellRing,
 } from 'lucide-react';
 import {
   createCustomer,
@@ -45,8 +46,14 @@ import {
   getCurrentStoreBulkSmsCampaigns,
   type LocalBulkSmsCampaign,
 } from '@/lib/bulkSms';
+import DebtRemindersPanel from '@/components/DebtRemindersPanel';
+import { setCustomerDebtReminderOptOut } from '@/lib/debtReminders';
 
-export default function CustomersPage() {
+interface CustomersPageProps {
+  onNavigate?: (page: string) => void;
+}
+
+export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
   const { currentUser, currentStore } = useAuthStore();
   const money = useFormatMoney();
   const [customers, setCustomers] = useState<LocalCustomer[]>([]);
@@ -277,6 +284,23 @@ export default function CustomersPage() {
       void triggerPushSync('customer-status');
     } catch (archiveError) {
       setError(archiveError instanceof Error ? archiveError.message : 'Could not update customer.');
+    }
+  };
+
+  const handleToggleReminderOptOut = async (customer: LocalCustomer) => {
+    setError('');
+    const optedOut = (customer.debt_reminder_opt_out ?? 0) === 1;
+    try {
+      await setCustomerDebtReminderOptOut(customer.id, !optedOut);
+      await load();
+      setStatus(
+        optedOut
+          ? `${customer.name} will receive debt reminders again.`
+          : `${customer.name} will no longer receive automated debt reminders.`
+      );
+      void triggerPushSync('customer-reminder-optout');
+    } catch (optOutError) {
+      setError(optOutError instanceof Error ? optOutError.message : 'Could not update reminder preference.');
     }
   };
 
@@ -572,6 +596,8 @@ export default function CustomersPage() {
           )}
         </section>
 
+        <DebtRemindersPanel onOpenSettings={onNavigate ? () => onNavigate('settings') : undefined} />
+
         {isFormOpen && (
           <form
             onSubmit={(event) => void handleSaveCustomer(event)}
@@ -728,6 +754,20 @@ export default function CustomersPage() {
                         className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                       >
                         {customer.is_active === 1 ? 'Archive' : 'Reactivate'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleToggleReminderOptOut(customer)}
+                        className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium transition-colors ${
+                          (customer.debt_reminder_opt_out ?? 0) === 1
+                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                            : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+                        }`}
+                      >
+                        <BellRing className="h-3 w-3" />
+                        {(customer.debt_reminder_opt_out ?? 0) === 1
+                          ? 'Reminders off'
+                          : 'Reminders on'}
                       </button>
                     </div>
                   </div>

@@ -200,6 +200,7 @@ For automatic session timeout (idle PIN lock), run `supabase-migrate-session-tim
 For manually recorded MoMo, bank transfer, and card-terminal sales, run `supabase-migrate-manual-payments.sql`.
 For credit sales, owner-managed product categories, and Cash/Bank cash-book entries, run `supabase-migrate-credit-sales-bank-categories.sql` before syncing.
 For the Customers book and registered-customer credit checkout, run `supabase-migrate-customers-book.sql` after the credit-sales migration and before syncing. It also links existing credit sales to registered customer records.
+For automated debt reminders, the live owner dashboard and the multi-store consolidated view, run `supabase-migrate-debt-reminders-dashboard.sql`. It adds the reminder rules and sales targets to `stores`, the per-customer opt-out to `customers`, the `debt_reminders` audit table, and publishes `transactions` to the realtime channel so the dashboard live feed works.
 
 ### Multi-store on one device
 
@@ -210,6 +211,14 @@ Store owners can keep **multiple stores** on the same phone/tablet:
 3. After opening a store, **Inventory** and **Settings → Staff** apply only to that store  
 
 Platform admins can also **Admin → Stores → tap a store** to view that store’s inventory, download an invoice PDF, and manage its staff in the portal.
+
+### Owner dashboard, debt reminders and all-stores view
+
+Owners get three new tools:
+
+1. **Home (owner dashboard)** — a live view of today’s sales, cash vs non-cash, average basket, customer credit owed, low-stock count and the latest sales as they happen. The badge shows **Live** when the realtime feed is connected and **Offline** when the device falls back to its regular refresh. Set a daily or monthly sales target under **Settings → Sales targets** to see a progress bar.
+2. **Automated debt reminders** — under **Settings → Debt reminders**, turn on the automatic chase, pick how often a customer is reminded (1–30 days), set a minimum balance, and edit the message. Use `{name}`, `{store}` and `{balance}` in the text. Customers can be excluded from the chase with the **Reminders on/off** button on their row in the Customers book. Every attempt is recorded so the owner can see who was chased and when. Owners can also press **Send reminders now** on the Customers screen to chase a balance immediately.
+3. **All stores (consolidated view)** — when the device has more than one store, the nav shows **All stores**: combined today/month sales, cash, profit after costs, customer credit and low stock, with a card per store, one-tap store switching and a CSV export.
 
 ### First launch (phones & tablets)
 

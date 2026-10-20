@@ -30,6 +30,7 @@ import WarehousePage from '@/pages/WarehousePage';
 import EcommercePage from '@/pages/EcommercePage';
 import PurchasingPage from '@/pages/PurchasingPage';
 import OwnerHomePage from '@/pages/OwnerHomePage';
+import MultiStorePage from '@/pages/MultiStorePage';
 import LearnAdimatPage from '@/pages/LearnAdimatPage';
 import PublicShopPage from '@/pages/PublicShopPage';
 import TermsPage from '@/pages/TermsPage';
@@ -38,6 +39,7 @@ import AdminLoginPage from '@/pages/AdminLoginPage';
 import AdminDashboardPage from '@/pages/AdminDashboardPage';
 import { isStoreAccessBlocked } from '@/lib/subscription';
 import { checkAndSendSubscriptionExpirySms } from '@/lib/subscriptionReminders';
+import { checkAndSendDebtReminders } from '@/lib/debtReminders';
 import { canAccessCashbook } from '@/lib/staffAccess';
 import { createAutomaticStoreBackup, recordBackupIssue } from '@/lib/storeBackup';
 import { createDueRecurringExpenses } from '@/lib/dexie';
@@ -171,7 +173,7 @@ export default function App() {
   useEffect(() => {
     // Cashiers cannot stay on owner-only pages after switch/login
     if (currentUser?.role !== 'cashier') return;
-    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'customers', 'returns'];
+    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'customers', 'returns', 'multistore'];
     const ecommerceOk = (currentUser.can_manage_ecommerce ?? 0) === 1;
     const cashbookOk = canAccessCashbook(currentUser);
     if (
@@ -197,6 +199,18 @@ export default function App() {
     const timer = window.setInterval(() => void checkAndSendSubscriptionExpirySms(), 6 * 60 * 60 * 1000);
     return () => window.clearInterval(timer);
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentStore?.id) return;
+    // Only the owner's device runs the automatic chase. A cashier device must
+    // never send owner-configured reminders.
+    if (currentUser?.role !== 'owner') return;
+    // Chase overdue customer credit on its own schedule. The per-customer
+    // interval stored on the store keeps this from over-texting anyone.
+    void checkAndSendDebtReminders();
+    const timer = window.setInterval(() => void checkAndSendDebtReminders(), 6 * 60 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [isAuthenticated, currentStore?.id, currentUser?.role]);
 
   if (publicShopSlug) {
     return <PublicShopPage slug={publicShopSlug} />;
@@ -322,7 +336,9 @@ export default function App() {
       case 'transactions':
         return <TransactionsPage />;
       case 'customers':
-        return role === 'owner' ? <CustomersPage /> : <POSPage />;
+        return role === 'owner' ? <CustomersPage onNavigate={setCurrentPage} /> : <POSPage />;
+      case 'multistore':
+        return role === 'owner' ? <MultiStorePage onNavigate={setCurrentPage} /> : <POSPage />;
       case 'returns':
         return role === 'owner' ? <ReturnsPage /> : <POSPage />;
       case 'devices':

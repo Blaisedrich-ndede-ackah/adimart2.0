@@ -6,6 +6,12 @@ import { toMoneyAmount } from './money';
 import { formatUnknownError, isUuid, uuidOrNull } from './ids';
 import { cashbookAccessFromCloud } from './staffAccess';
 import { normalizeSessionTimeoutMinutes } from './sessionTimeout';
+import {
+  DEFAULT_DEBT_REMINDER_INTERVAL_DAYS,
+  DEFAULT_DEBT_REMINDER_TEMPLATE,
+  normalizeDebtReminderIntervalDays,
+  normalizeDebtReminderMinBalance,
+} from './debtReminderConfig';
 import type { PaymentMethod } from './paymentMethods';
 
 // Store represents a business/shop
@@ -58,6 +64,18 @@ export interface LocalStore {
   preferred_language?: string;
   /** Super-admin wipe of trial sales; drop local ledger rows at or before this ISO time */
   transactions_cleared_at?: string | null;
+  /** Send automatic debt reminder SMS to customers with an outstanding balance (0/1) */
+  debt_reminders_enabled?: number;
+  /** Days between automated reminders for the same customer. */
+  debt_reminder_interval_days?: number;
+  /** Only remind customers whose balance is at least this amount. */
+  debt_reminder_min_balance?: number;
+  /** Reminder template. Supports {name}, {store}, {balance}. */
+  debt_reminder_message?: string;
+  /** Owner-set daily sales target used by the live dashboard. */
+  sales_target_daily?: number;
+  /** Owner-set monthly sales target used by the live dashboard. */
+  sales_target_monthly?: number;
   created_at: string;
   synced: number;
 }
@@ -81,6 +99,8 @@ export interface LocalCustomer {
   opening_balance_remaining: number;
   wallet_balance?: number;
   is_active: number;
+  /** Customer asked not to receive automated debt reminder SMS (0/1) */
+  debt_reminder_opt_out?: number;
   created_at: string;
   updated_at: string;
   synced: number;
@@ -325,6 +345,25 @@ export interface LocalBulkSmsCampaign {
   synced: number;
 }
 
+/** Audit row for one automated debt reminder SMS sent to a customer. */
+export interface LocalDebtReminder {
+  id: string;
+  store_id: string;
+  customer_id: string;
+  customer_name: string;
+  customer_phone: string;
+  /** Outstanding balance that was quoted in the message. */
+  balance: number;
+  message: string;
+  provider: string;
+  provider_message_id?: string | null;
+  status: 'sent' | 'failed' | 'skipped';
+  error_message?: string | null;
+  sent_at: string;
+  created_at: string;
+  synced: number;
+}
+
 export interface LocalLocation {
   id: string;
   store_id: string;
@@ -513,6 +552,7 @@ class AdimatDB extends Dexie {
   sales_returns!: Table<LocalSaleReturn, string>;
   customer_wallet_transactions!: Table<LocalCustomerWalletTransaction, string>;
   bulk_sms_campaigns!: Table<LocalBulkSmsCampaign, string>;
+  debt_reminders!: Table<LocalDebtReminder, string>;
   expenses!: Table<LocalExpense, string>;
   recurring_expenses!: Table<LocalRecurringExpense, string>;
   expense_budgets!: Table<LocalExpenseBudget, string>;
@@ -717,6 +757,43 @@ class AdimatDB extends Dexie {
     this.version(19).stores({
       bulk_sms_campaigns: 'id, store_id, status, created_at, synced',
     });
+    // v20: automated debt reminders (owner-configured SMS chase for
+    // outstanding customer credit) + owner sales targets for the live
+    // dashboard. New columns are optional so older rows stay valid.
+    this.version(20)
+      .stores({
+        debt_reminders: 'id, store_id, customer_id, status, sent_at, created_at, synced',
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table('customers')
+          .toCollection()
+          .modify((customer: LocalCustomer) => {
+            if (typeof customer.debt_reminder_opt_out !== 'number') {
+              customer.debt_reminder_opt_out = 0;
+            }
+          });
+        await tx
+          .table('stores')
+          .toCollection()
+          .modify((store: LocalStore) => {
+            if (typeof store.debt_reminders_enabled !== 'number') {
+              store.debt_reminders_enabled = 0;
+            }
+            if (typeof store.debt_reminder_interval_days !== 'number') {
+              store.debt_reminder_interval_days = 7;
+            }
+            if (typeof store.debt_reminder_min_balance !== 'number') {
+              store.debt_reminder_min_balance = 0;
+            }
+            if (typeof store.sales_target_daily !== 'number') {
+              store.sales_target_daily = 0;
+            }
+            if (typeof store.sales_target_monthly !== 'number') {
+              store.sales_target_monthly = 0;
+            }
+          });
+      });
   }
 }
 
@@ -2547,7 +2624,8 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
     | 'online_orders'
     | 'online_order_items'
     | 'suppliers'
-    | 'purchase_orders',
+    | 'purchase_orders'
+    | 'debt_reminders',
   rows: T[],
   markSynced: () => Promise<void>,
   errors: string[]
@@ -2561,7 +2639,8 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
       table === 'stock_movements' ||
       table === 'transaction_items' ||
       table === 'credit_payments' ||
-      table === 'customer_wallet_transactions';
+      table === 'customer_wallet_transactions' ||
+      table === 'debt_reminders';
     const { error } = await supabase.from(table).upsert(rows as Record<string, unknown>[], {
       onConflict: 'id',
       ignoreDuplicates: appendOnly,
@@ -2574,6 +2653,49 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
         const stripped = rows.map((row) => {
           const copy = { ...(row as Record<string, unknown>) };
           delete copy.session_timeout_minutes;
+          return copy;
+        });
+        const retry = await supabase.from(table).upsert(stripped, {
+          onConflict: 'id',
+          ignoreDuplicates: appendOnly,
+        });
+        if (!retry.error) {
+          await markSynced();
+          return rows.length;
+        }
+      }
+      if (
+        table === 'stores' &&
+        /debt_reminder|sales_target/i.test(error.message)
+      ) {
+        // Cloud project predates the debt-reminder / sales-target columns.
+        // Push the store without them so the rest of the profile still syncs.
+        const stripped = rows.map((row) => {
+          const copy = { ...(row as Record<string, unknown>) };
+          delete copy.debt_reminders_enabled;
+          delete copy.debt_reminder_interval_days;
+          delete copy.debt_reminder_min_balance;
+          delete copy.debt_reminder_message;
+          delete copy.sales_target_daily;
+          delete copy.sales_target_monthly;
+          return copy;
+        });
+        const retry = await supabase.from(table).upsert(stripped, {
+          onConflict: 'id',
+          ignoreDuplicates: appendOnly,
+        });
+        if (!retry.error) {
+          await markSynced();
+          return rows.length;
+        }
+      }
+      if (
+        table === 'customers' &&
+        /debt_reminder_opt_out/i.test(error.message)
+      ) {
+        const stripped = rows.map((row) => {
+          const copy = { ...(row as Record<string, unknown>) };
+          delete copy.debt_reminder_opt_out;
           return copy;
         });
         const retry = await supabase.from(table).upsert(stripped, {
@@ -2603,6 +2725,14 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
           await markSynced();
           return rows.length;
         }
+      }
+      if (
+        table === 'debt_reminders' &&
+        /does not exist|PGRST205|schema cache/i.test(error.message || '')
+      ) {
+        // The cloud project has no debt_reminders table yet. Keep the local
+        // audit trail unsynced so it uploads once the migration is applied.
+        return 0;
       }
       errors.push(formatSyncError(label, error));
       return 0;
@@ -2695,6 +2825,12 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
           ecommerce_links: store.ecommerce_links || '[]',
           currency_code: store.currency_code || 'GHS',
           preferred_language: store.preferred_language === 'fr' ? 'fr' : 'en',
+          debt_reminders_enabled: (store.debt_reminders_enabled ?? 0) === 1,
+          debt_reminder_interval_days: normalizeDebtReminderIntervalDays(store.debt_reminder_interval_days),
+          debt_reminder_min_balance: Math.max(0, Number(store.debt_reminder_min_balance) || 0),
+          debt_reminder_message: store.debt_reminder_message || DEFAULT_DEBT_REMINDER_TEMPLATE,
+          sales_target_daily: Math.max(0, Number(store.sales_target_daily) || 0),
+          sales_target_monthly: Math.max(0, Number(store.sales_target_monthly) || 0),
           created_at: store.created_at,
         }],
         async () => { await db.stores.update(storeId, { synced: 1 }); },
@@ -2946,12 +3082,44 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         opening_balance_remaining: customer.opening_balance_remaining,
         wallet_balance: Number(customer.wallet_balance) || 0,
         is_active: customer.is_active === 1,
+        debt_reminder_opt_out: (customer.debt_reminder_opt_out ?? 0) === 1,
         created_at: customer.created_at,
         updated_at: customer.updated_at,
       })),
       async () => {
         await Promise.all(unsyncedCustomers.map((customer) =>
           db.customers.update(customer.id, { synced: 1 })
+        ));
+      },
+      errors
+    );
+
+    const unsyncedDebtReminders = await db.debt_reminders
+      .where('store_id')
+      .equals(storeId)
+      .and((reminder) => reminder.synced === 0)
+      .toArray();
+    syncedCount += await upsertToSupabase(
+      'Debt reminders',
+      'debt_reminders',
+      unsyncedDebtReminders.map((reminder) => ({
+        id: reminder.id,
+        store_id: reminder.store_id,
+        customer_id: reminder.customer_id,
+        customer_name: reminder.customer_name,
+        customer_phone: reminder.customer_phone,
+        balance: reminder.balance,
+        message: reminder.message,
+        provider: reminder.provider,
+        provider_message_id: reminder.provider_message_id || null,
+        status: reminder.status,
+        error_message: reminder.error_message || null,
+        sent_at: reminder.sent_at,
+        created_at: reminder.created_at,
+      })),
+      async () => {
+        await Promise.all(unsyncedDebtReminders.map((reminder) =>
+          db.debt_reminders.update(reminder.id, { synced: 1 })
         ));
       },
       errors
@@ -3509,6 +3677,32 @@ export async function syncFromSupabase(opts?: {
         transactions_cleared_at: remoteStore.transactions_cleared_at
           ? String(remoteStore.transactions_cleared_at)
           : localStore?.transactions_cleared_at ?? null,
+        debt_reminders_enabled:
+          remoteStore.debt_reminders_enabled === undefined
+            ? (localStore?.debt_reminders_enabled ?? 0)
+            : remoteStore.debt_reminders_enabled
+              ? 1
+              : 0,
+        debt_reminder_interval_days:
+          remoteStore.debt_reminder_interval_days == null
+            ? (localStore?.debt_reminder_interval_days ?? DEFAULT_DEBT_REMINDER_INTERVAL_DAYS)
+            : normalizeDebtReminderIntervalDays(remoteStore.debt_reminder_interval_days),
+        debt_reminder_min_balance:
+          remoteStore.debt_reminder_min_balance == null
+            ? (localStore?.debt_reminder_min_balance ?? 0)
+            : normalizeDebtReminderMinBalance(remoteStore.debt_reminder_min_balance),
+        debt_reminder_message:
+          remoteStore.debt_reminder_message ||
+          localStore?.debt_reminder_message ||
+          DEFAULT_DEBT_REMINDER_TEMPLATE,
+        sales_target_daily:
+          remoteStore.sales_target_daily == null
+            ? (localStore?.sales_target_daily ?? 0)
+            : Math.max(0, Number(remoteStore.sales_target_daily) || 0),
+        sales_target_monthly:
+          remoteStore.sales_target_monthly == null
+            ? (localStore?.sales_target_monthly ?? 0)
+            : Math.max(0, Number(remoteStore.sales_target_monthly) || 0),
         created_at: remoteStore.created_at,
         synced: localStore?.synced === 0 ? 0 : 1,
       });
@@ -3607,6 +3801,7 @@ export async function syncFromSupabase(opts?: {
           opening_balance_remaining: Number(row.opening_balance_remaining) || 0,
           wallet_balance: Number(row.wallet_balance) || 0,
           is_active: row.is_active === false ? 0 : 1,
+          debt_reminder_opt_out: row.debt_reminder_opt_out === true ? 1 : 0,
           created_at: String(row.created_at || ''),
           updated_at: String(row.updated_at || row.created_at || ''),
           synced: 1,
@@ -4156,6 +4351,33 @@ export async function syncFromSupabase(opts?: {
           return local;
         },
       },
+      {
+        label: 'Debt reminders',
+        table: 'debt_reminders',
+        map: (row: Record<string, unknown>) => ({
+          id: String(row.id),
+          store_id: String(row.store_id),
+          customer_id: String(row.customer_id),
+          customer_name: String(row.customer_name || ''),
+          customer_phone: String(row.customer_phone || ''),
+          balance: Number(row.balance) || 0,
+          message: String(row.message || ''),
+          provider: String(row.provider || 'mnotify'),
+          provider_message_id: typeof row.provider_message_id === 'string' ? row.provider_message_id : null,
+          status: (row.status as 'sent' | 'failed' | 'skipped') || 'sent',
+          error_message: typeof row.error_message === 'string' ? row.error_message : null,
+          sent_at: String(row.sent_at || row.created_at || ''),
+          created_at: String(row.created_at || ''),
+          synced: 1,
+        }),
+        dbTable: db.debt_reminders,
+        merge: async (remote: LocalDebtReminder, local: LocalDebtReminder | undefined) => {
+          // Debt reminders are append-only audit rows; never clobber an
+          // unsynced local reminder with a remote row.
+          if (!local || local.synced !== 0) return remote;
+          return local;
+        },
+      },
     ] as const;
 
     for (const config of tables) {
@@ -4165,6 +4387,15 @@ export async function syncFromSupabase(opts?: {
       const { data, error } = await fetchAllStoreRows(config.table, storeId);
 
       if (error) {
+        // The debt_reminders table only exists after
+        // supabase-migrate-debt-reminders-dashboard.sql has been run. Skip it
+        // quietly until then instead of failing the whole pull.
+        if (
+          config.table === 'debt_reminders' &&
+          /does not exist|PGRST205|schema cache/i.test(error.message || '')
+        ) {
+          continue;
+        }
         errors.push(formatSyncError(config.label, error));
         continue;
       }
@@ -4374,6 +4605,7 @@ export async function restoreStoreFromCloud(
       db.suppliers,
       db.purchase_orders,
       db.bulk_sms_campaigns,
+      db.debt_reminders,
       db.deleted_records,
       db.app_config,
     ],
@@ -4397,6 +4629,7 @@ export async function restoreStoreFromCloud(
       await db.suppliers.clear();
       await db.purchase_orders.clear();
       await db.bulk_sms_campaigns.clear();
+      await db.debt_reminders.clear();
       await db.deleted_records.clear();
     }
   );
