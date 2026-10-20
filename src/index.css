@@ -95,6 +95,27 @@ input[type="number"] {
   gap: 0.625rem;
 }
 
+@media (max-width: 767px) {
+  .pos-product-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .pos-product-card {
+    min-height: 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.45rem;
+    padding: 0.625rem;
+    border-radius: 0.875rem;
+  }
+
+  .pos-product-card .product-image {
+    width: 100%;
+    aspect-ratio: 1.45;
+  }
+}
+
 @media (min-width: 768px) {
   .pos-product-grid {
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));

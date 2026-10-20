@@ -2836,7 +2836,7 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
 }
 
 // Sync to Supabase
-export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ success: boolean; message: string }> {
+export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicalize?: boolean }): Promise<{ success: boolean; message: string }> {
   if (!isSupabaseConfigured()) {
     return { success: false, message: 'Supabase not configured. Add environment variables to enable cloud sync.' };
   }
@@ -2857,11 +2857,13 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
   let syncedCount = 0;
 
   try {
-    try {
-      const { canonicalizeStoreStock } = await import('@/lib/warehouse');
-      await canonicalizeStoreStock(storeId);
-    } catch {
-      // Push remaining UUID-safe rows even if heal fails
+    if (!opts?.skipCanonicalize) {
+      try {
+        const { canonicalizeStoreStock } = await import('@/lib/warehouse');
+        await canonicalizeStoreStock(storeId);
+      } catch {
+        // Push remaining UUID-safe rows even if heal fails
+      }
     }
 
     // Push hard-deletes first so cloud rows (and CASCADE children) are removed
@@ -4590,7 +4592,9 @@ export async function pullStockLedgerFromCloud(storeId?: string): Promise<boolea
 }
 
 export async function syncStockFast(): Promise<{ success: boolean; message: string }> {
-  const push = await syncToSupabase({ skipPing: true });
+  // POS/autosync should push pending sales immediately; the full repair pass
+  // remains available through Full Sync and inventory workflows.
+  const push = await syncToSupabase({ skipPing: true, skipCanonicalize: true });
   const adopted = await refreshStockFromCloud();
   if (adopted.ok) {
     if (!push.success) return { success: false, message: `${adopted.message}. ${push.message}` };
