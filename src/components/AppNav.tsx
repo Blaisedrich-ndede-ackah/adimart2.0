@@ -98,6 +98,20 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const moreItems = navItems.filter((item) => !primaryIds.includes(item.id));
   const moreActive = moreItems.some((item) => item.id === currentPage);
 
+  // Group secondary items into logical sections for the mobile More sheet.
+  type NavGroup = { label: string; ids: string[] };
+  const navGroups: NavGroup[] = [
+    { label: 'Shop', ids: ['inventory', 'purchasing', 'warehouse', 'ecommerce', 'multistore'] },
+    { label: 'Operations', ids: ['reports', 'expenses', 'cashbook', 'devices', 'subscription', 'returns', 'customers'] },
+    { label: 'Help', ids: ['learn', 'community', 'settings'] },
+  ];
+  const groupedMoreItems = navGroups
+    .map((group) => ({
+      group,
+      items: moreItems.filter((item) => group.ids.includes(item.id)),
+    }))
+    .filter((entry) => entry.items.length > 0);
+
   useEffect(() => {
     if (!moreOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -126,43 +140,54 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
           </p>
         </div>
         <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-1">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = !item.href && currentPage === item.id;
-            const className = `w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors touch-target ${
-              isActive
-                ? 'bg-white text-primary shadow-sm'
-                : 'text-emerald-50 hover:bg-white/10'
-            }`;
-            const content = (
-              <>
-                <Icon className="w-5 h-5 flex-shrink-0" />
-                <span className="truncate">{item.label}</span>
-              </>
-            );
-            if (item.href) {
-              return (
-                <a
-                  key={item.id}
-                  href={item.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label={t('community.aria')}
-                  className={className}
-                >
-                  {content}
-                </a>
-              );
-            }
+          {navGroups.map((group) => {
+            const groupItems = navItems.filter((item) => group.ids.includes(item.id));
+            if (groupItems.length === 0) return null;
             return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => onNavigate(item.id)}
-                className={className}
-              >
-                {content}
-              </button>
+              <div key={group.label} className="pt-1">
+                <p className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-300/70">
+                  {group.label}
+                </p>
+                {groupItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = !item.href && currentPage === item.id;
+                  const className = `w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors touch-target ${
+                    isActive
+                      ? 'bg-white text-primary shadow-sm'
+                      : 'text-emerald-50 hover:bg-white/10'
+                  }`;
+                  const content = (
+                    <>
+                      <Icon className="w-5 h-5 flex-shrink-0" />
+                      <span className="truncate">{item.label}</span>
+                    </>
+                  );
+                  if (item.href) {
+                    return (
+                      <a
+                        key={item.id}
+                        href={item.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={t('community.aria')}
+                        className={className}
+                      >
+                        {content}
+                      </a>
+                    );
+                  }
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => onNavigate(item.id)}
+                      className={className}
+                    >
+                      {content}
+                    </button>
+                  );
+                })}
+              </div>
             );
           })}
         </nav>
@@ -230,7 +255,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         </div>
       </nav>
 
-      {/* Mobile More sheet */}
+      {/* Mobile More sheet — grouped vertical list for 12+ items */}
       {moreOpen && (
         <div className="lg:hidden fixed inset-0 z-50 flex flex-col justify-end">
           <button
@@ -240,93 +265,96 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
             onClick={() => setMoreOpen(false)}
           />
           <div
-            className="relative max-h-[75vh] overflow-y-auto rounded-t-3xl bg-white shadow-2xl animate-slide-up"
+            className="relative max-h-[82vh] overflow-y-auto rounded-t-3xl bg-surface-card shadow-2xl animate-slide-up"
             style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
           >
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white px-4 py-3 rounded-t-3xl">
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-surface-muted bg-surface-card px-4 py-3 rounded-t-3xl">
               <div className="min-w-0">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-primary">
                   {t('common.menu')}
                 </p>
-                <p className="truncate text-sm font-bold text-slate-900">
+                <p className="truncate text-sm font-bold text-ink">
                   {currentStore?.name || t('common.store')}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setMoreOpen(false)}
-                className="rounded-full bg-slate-100 p-2 text-slate-600 touch-target"
+                className="icon-btn"
                 aria-label="Close"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            <div className="grid grid-cols-3 gap-2 p-4">
-              {moreItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = !item.href && currentPage === item.id;
-                const className = `flex flex-col items-center justify-center gap-2 rounded-2xl border px-2 py-4 touch-target transition-colors ${
-                  isActive
-                    ? 'border-emerald-200 bg-emerald-50 text-primary'
-                    : 'border-slate-100 bg-slate-50 text-slate-700 active:bg-emerald-50'
-                }`;
-                const content = (
-                  <>
-                    <span
-                      className={`flex h-11 w-11 items-center justify-center rounded-2xl ${
-                        isActive ? 'bg-primary text-white' : 'bg-white text-primary shadow-sm'
-                      }`}
-                    >
-                      <Icon className="h-5 w-5" />
-                    </span>
-                    <span className={`text-xs ${isActive ? 'font-bold' : 'font-semibold'}`}>
-                      {item.label}
-                    </span>
-                  </>
-                );
-                if (item.href) {
-                  return (
-                    <a
-                      key={item.id}
-                      href={item.href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      aria-label={t('community.aria')}
-                      onClick={() => setMoreOpen(false)}
-                      className={className}
-                    >
-                      {content}
-                    </a>
-                  );
-                }
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => go(item.id)}
-                    className={className}
-                  >
-                    {content}
-                  </button>
-                );
-              })}
-            </div>
+            <div className="px-2 py-2">
+              {groupedMoreItems.map(({ group, items }) => (
+                <div key={group.label} className="py-1">
+                  <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">
+                    {group.label}
+                  </div>
+                  <div className="space-y-0.5">
+                    {items.map((item) => {
+                      const Icon = item.icon;
+                      const isActive = !item.href && currentPage === item.id;
+                      const className = `flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left touch-target transition-colors ${
+                        isActive
+                          ? 'bg-primary-subtle text-primary'
+                          : 'text-ink hover:bg-surface-muted'
+                      }`;
+                      const content = (
+                        <>
+                          <Icon className={`h-5 w-5 flex-shrink-0 ${isActive ? 'stroke-[2.5]' : ''}`} />
+                          <span className={`text-sm ${isActive ? 'font-bold' : 'font-medium'}`}>
+                            {item.label}
+                          </span>
+                        </>
+                      );
+                      if (item.href) {
+                        return (
+                          <a
+                            key={item.id}
+                            href={item.href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={t('community.aria')}
+                            onClick={() => setMoreOpen(false)}
+                            className={className}
+                          >
+                            {content}
+                          </a>
+                        );
+                      }
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => go(item.id)}
+                          className={className}
+                        >
+                          {content}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
 
-            <div className="px-4 pb-2 space-y-2">
-              <AccessibilityControls variant="menu" />
-              <LanguageSwitcher compact />
-              <button
-                type="button"
-                onClick={() => {
-                  setMoreOpen(false);
-                  switchUser();
-                }}
-                className="flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3.5 text-sm font-semibold text-rose-700 touch-target"
-              >
-                <LogOut className="h-4 w-4" />
-                {t('nav.switchUser')}
-              </button>
+              <div className="mt-2 border-t border-surface-muted px-3 pt-2 pb-1 space-y-2">
+                <AccessibilityControls variant="menu" />
+                <LanguageSwitcher compact />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreOpen(false);
+                    switchUser();
+                  }}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 touch-target"
+                >
+                  <LogOut className="h-4 w-4" />
+                  {t('nav.switchUser')}
+                </button>
+              </div>
             </div>
           </div>
         </div>

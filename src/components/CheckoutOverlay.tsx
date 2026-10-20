@@ -979,8 +979,10 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
               <div className="text-center">
                 <Shield className="w-12 h-12 text-accent mx-auto mb-3" />
                 <p className="text-sm text-gray-600">
-                  Discount of {cart.discountPercent}% exceeds the {discountCap}% cap.
-                  Enter owner PIN to authorize.
+                  {pendingDiscountKind === 'percentage'
+                    ? `Discount of ${pendingDiscountValue}% exceeds the ${discountCap}% cap.`
+                    : `Discount of ${money(pendingDiscountValue)} exceeds the ${discountCap}% cap (${money(((cart.subtotal * discountCap) / 100))}).`}
+                  {' '}Enter owner PIN to authorize.
                 </p>
               </div>
               <input

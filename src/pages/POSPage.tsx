@@ -527,8 +527,29 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
     }
   };
 
+  const handleDecrement = (itemId: string) => {
+    const item = cart.items.find((i) => i.id === itemId);
+    if (!item) return;
+    if (item.quantity <= 1) {
+      // Removing the last unit: confirm to avoid accidental clears during busy service.
+      if (window.confirm(`Remove ${item.name} from the cart?`)) {
+        cart.removeItem(itemId);
+      }
+      return;
+    }
+    void cart.decrementItem(itemId);
+  };
+
   const handleUpdateQuantity = async (itemId: string, newQty: number) => {
-    const result = await cart.updateQuantity(itemId, newQty);
+    const qty = Math.floor(newQty);
+    if (qty <= 0) {
+      const item = cart.items.find((i) => i.id === itemId);
+      if (item && window.confirm(`Remove ${item.name} from the cart?`)) {
+        cart.removeItem(itemId);
+      }
+      return;
+    }
+    const result = await cart.updateQuantity(itemId, qty);
     if (!result.success && result.error) {
       setStockError(result.error);
       setTimeout(() => setStockError(null), 3000);
@@ -827,29 +848,43 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                 aria-label="Search products by name, barcode, or category"
                 aria-describedby="pos-search-keyboard-hint"
                 data-allow-typing="true"
-                className="w-full pl-9 pr-20 py-3 bg-white border border-emerald-100 rounded-xl text-base outline-none focus:ring-2 focus:ring-primary"
+                className="w-full pl-9 pr-20 py-3 bg-surface-card border border-border rounded-xl text-base outline-none focus:ring-2 focus:ring-primary"
               />
-              {voiceSearchAvailable && (
+              <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                {voiceSearchAvailable && (
+                  <button
+                    type="button"
+                    onClick={startVoiceSearch}
+                    aria-label={voiceSearchActive ? 'Listening for product name' : 'Search products by voice'}
+                    title={voiceSearchActive ? 'Listening…' : 'Search by voice'}
+                    className={`icon-btn ${voiceSearchActive ? 'text-primary' : ''}`}
+                  >
+                    <Mic className="h-4 w-4" />
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={startVoiceSearch}
-                  aria-label={voiceSearchActive ? 'Listening for product name' : 'Search products by voice'}
-                  title={voiceSearchActive ? 'Listening…' : 'Search by voice'}
-                  className={`absolute right-10 top-1/2 -translate-y-1/2 rounded-lg p-2 touch-target ${voiceSearchActive ? 'text-primary animate-pulse' : 'text-gray-500 hover:bg-gray-100'}`}
+                  onClick={() => {
+                    setShowCameraScanner((v) => !v);
+                    if (!showCameraScanner) setScannerActive(true);
+                  }}
+                  aria-label="Scan product barcode with camera"
+                  title="Scan barcode"
+                  className="icon-btn-primary"
                 >
-                  <Mic className="h-4 w-4" />
+                  <ScanBarcode className="h-4 w-4" />
                 </button>
-              )}
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery('')}
-                  aria-label="Clear product search"
-                  className="absolute right-1 top-1/2 -translate-y-1/2 rounded-lg text-gray-500 hover:bg-gray-100 touch-target"
-                >
-                  <X className="w-4 h-4 mx-auto" aria-hidden="true" />
-                </button>
-              )}
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    aria-label="Clear product search"
+                    className="icon-btn"
+                  >
+                    <X className="w-4 h-4" aria-hidden="true" />
+                  </button>
+                )}
+              </div>
               <span id="pos-search-keyboard-hint" className="sr-only">
                 Press Enter to add the only matching in-stock product. Press Escape to clear the search.
               </span>
@@ -915,6 +950,8 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                       ? locationStock[product.id]
                       : toQty(product.stock_level);
                   const outOfStock = stockHere <= 0;
+                  const reorderLevel = Math.max(0, Number(product.reorder_level) || 0);
+                  const lowStock = !outOfStock && reorderLevel > 0 && stockHere <= reorderLevel;
                   const packSize = Math.max(1, Number(product.pack_size) || 1);
                   const modes = getAvailableSaleModes(product);
                   const productSaleMode = saleMode === 'wholesale' && modes.includes('wholesale') ? 'wholesale' : 'retail';
@@ -936,6 +973,8 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                       aria-label={
                         outOfStock
                           ? `${product.name}, out of stock`
+                          : lowStock
+                          ? `${product.name}, low stock — ${stockHere} left`
                           : `Add ${product.name} to cart for ${money(toMoney(pricePreview.unitPrice))} per ${unitLabel}`
                       }
                       className="pos-product-card"
@@ -956,13 +995,13 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                             {isWholesalePrice ? 'Wholesale price' : ''}
                           </span>
                         )}
-                        <span className={`mt-1 block text-[10px] font-semibold ${outOfStock ? 'text-red-600' : 'text-gray-500'}`}>
-                          {outOfStock ? 'Out of stock' : `${toQty(stockHere)} available`}
+                        <span className={`mt-1 block text-[10px] font-semibold ${outOfStock ? 'text-danger' : lowStock ? 'text-accent' : 'text-gray-500'}`}>
+                          {outOfStock ? 'Out of stock' : lowStock ? `Low stock · ${stockHere} left` : `${stockHere} available`}
                         </span>
                       </span>
                       <span className="pos-product-add" aria-hidden="true">
                         <Plus className="h-4 w-4" strokeWidth={2.5} />
-                        <span>Add</span>
+                        <span>{outOfStock ? 'Wait' : 'Add'}</span>
                       </span>
                     </button>
                   );
@@ -1126,12 +1165,11 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                           <div role="group" aria-label={`Quantity for ${item.name}`} className="flex items-center gap-2">
                             <button
                               type="button"
-                              onClick={() => cart.decrementItem(item.id)}
-                              disabled={item.quantity <= 1}
-                              aria-label={`Decrease quantity of ${item.name}`}
-                              className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center touch-target disabled:opacity-40"
+                              onClick={() => handleDecrement(item.id)}
+                              aria-label={`Remove or decrease ${item.name}`}
+                              className="w-8 h-8 rounded-lg bg-surface-muted flex items-center justify-center touch-target hover:bg-border/60 transition-colors"
                             >
-                              <Minus className="w-3.5 h-3.5 text-gray-600" />
+                              <Minus className="w-3.5 h-3.5 text-ink" />
                             </button>
                             <input
                               type="number"
@@ -1139,7 +1177,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                               onChange={(e) => void handleUpdateQuantity(item.id, parseInt(e.target.value) || 1)}
                               aria-label={`Quantity of ${item.name}`}
                               inputMode="numeric"
-                              className="w-10 text-sm font-bold text-center bg-transparent border-b border-gray-200 focus:border-primary outline-none"
+                              className="w-10 text-sm font-bold text-center bg-transparent border-b border-border focus:border-primary outline-none"
                               min="1"
                             />
                             <button
