@@ -75,7 +75,7 @@ export default function FrequentItems({ onAddProduct }: { onAddProduct?: (produc
   }
 
   return (
-    <div className="px-3 md:px-4 py-3 bg-gradient-to-r from-orange-50 to-amber-50 border-b border-amber-200 flex-shrink-0">
+    <div className="hidden md:block px-3 md:px-4 py-3 bg-gradient-to-r from-orange-50 to-amber-50 border-b border-amber-200 flex-shrink-0">
       <div className="flex items-center gap-2 mb-2">
         <Flame className="w-4 h-4 text-amber-600 flex-shrink-0" />
         <p className="text-xs font-bold text-amber-900">TOP 10 FREQUENTLY BOUGHT</p>
