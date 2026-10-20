@@ -8,6 +8,8 @@ import { db, generateId, getCurrentStore, getCurrentStoreCustomers, getCurrentSt
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { sendBulkSmsViaMnotify, normalizeRecipientList, type BulkSmsResult } from '@/lib/mnotify';
 
+export type { LocalBulkSmsCampaign } from '@/lib/dexie';
+
 export interface BulkSmsCampaignInput {
   message: string;
 }

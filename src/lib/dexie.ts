@@ -2625,6 +2625,7 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
     | 'online_order_items'
     | 'suppliers'
     | 'purchase_orders'
+    | 'bulk_sms_campaigns'
     | 'debt_reminders',
   rows: T[],
   markSynced: () => Promise<void>,

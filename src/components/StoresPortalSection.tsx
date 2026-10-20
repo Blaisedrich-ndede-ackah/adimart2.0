@@ -598,7 +598,14 @@ export default function StoresPortalSection() {
                     : 'bg-gray-200 text-gray-500'
                 }`}
               >
-                {busy ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4 mr-2" />Bulk transfer stock}
+                {busy ? (
+                  <Loader2 className="mx-auto h-4 w-4 animate-spin" />
+                ) : (
+                  <span className="inline-flex items-center justify-center">
+                    <Copy className="h-4 w-4 mr-2" />
+                    Bulk transfer stock
+                  </span>
+                )}
               </button>
 
               {/* Transfer history / audit trail */}
@@ -812,6 +819,8 @@ export default function StoresPortalSection() {
         </p>
       )}
       {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+    </div>
+      )}
     </div>
   );
 }
