@@ -174,6 +174,7 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
 
   const actions: QuickAction[] = [
     { label: 'New sale', detail: 'Open the till', page: 'pos', icon: ShoppingCart, className: 'bg-primary text-white' },
+    { label: 'Sales records', detail: 'View and print receipts', page: 'transactions', icon: Receipt, className: 'bg-white text-primary border border-emerald-100' },
     { label: 'Add product', detail: 'Update your catalog', page: 'inventory', quickAdd: true, icon: Package, className: 'bg-white text-primary border border-emerald-100' },
     { label: 'Restock', detail: 'Replenish low stock', page: 'inventory', icon: Package, className: 'bg-white text-primary border border-amber-100' },
     { label: 'Add expense', detail: 'Record a store cost', page: 'expenses', quickAdd: true, icon: Plus, className: 'bg-white text-primary border border-emerald-100' },
@@ -320,11 +321,20 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
         <section className="rounded-2xl bg-white p-4 shadow-sm border border-gray-100" aria-label="Latest sales">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-bold text-gray-900">{t('dashboard.latestSales')}</h2>
-            {liveStatus === 'live' && (
-              <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-emerald-600">
-                <Radio className="h-3 w-3" /> {t('dashboard.live')}
-              </span>
-            )}
+            <div className="flex items-center gap-3">
+              {liveStatus === 'live' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-emerald-600">
+                  <Radio className="h-3 w-3" /> {t('dashboard.live')}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => onNavigate('transactions')}
+                className="text-[11px] font-semibold text-primary hover:underline"
+              >
+                {t('sales.recordsTitle')}
+              </button>
+            </div>
           </div>
           {loading ? (
             <div className="mt-3 space-y-2">
@@ -356,7 +366,7 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
           <h2 className="mb-2 text-sm font-bold text-gray-900">Quick actions</h2>
           <div className="grid gap-2 sm:grid-cols-3">
             {actions.map(({ label, detail, page, quickAdd, icon: Icon, className }) => (
-              <button key={page} type="button" onClick={() => onNavigate(page, quickAdd)} className={`flex items-center gap-3 rounded-xl p-3 text-left shadow-sm touch-target ${className}`}>
+              <button key={`${page}-${label}`} type="button" onClick={() => onNavigate(page, quickAdd)} className={`flex items-center gap-3 rounded-xl p-3 text-left shadow-sm touch-target ${className}`}>
                 <Icon className="h-5 w-5 shrink-0" />
                 <span><span className="block text-sm font-semibold">{label}</span><span className="block text-[11px] opacity-75">{detail}</span></span>
               </button>
@@ -382,7 +392,7 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
         )}
 
         <button type="button" onClick={() => onNavigate('transactions')} className="flex w-full items-center justify-between rounded-xl bg-white p-4 text-left shadow-sm touch-target">
-          <span><span className="block text-sm font-semibold text-gray-900">Sales history</span><span className="block text-xs text-gray-500">Review receipts and transactions</span></span>
+          <span><span className="block text-sm font-semibold text-gray-900">Sales Records</span><span className="block text-xs text-gray-500">See every receipt and print it again</span></span>
           <Receipt className="h-5 w-5 text-primary" />
         </button>
       </div>

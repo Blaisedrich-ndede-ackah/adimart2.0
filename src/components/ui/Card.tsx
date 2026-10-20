@@ -1,7 +1,7 @@
 import { type ReactNode } from 'react';
 import { cn } from '@/utils/cn';
 
-interface CardProps {
+export interface CardProps {
   children: ReactNode;
   className?: string;
   padding?: 'none' | 'sm' | 'md' | 'lg';
@@ -30,7 +30,7 @@ export function Card({ children, className, padding = 'md', hover = false }: Car
   );
 }
 
-interface CardHeaderProps {
+export interface CardHeaderProps {
   title: string;
   description?: string;
   action?: ReactNode;

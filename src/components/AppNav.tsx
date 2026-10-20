@@ -23,6 +23,8 @@ interface AppNavProps {
 interface NavItem {
   id: string;
   label: string;
+  /** Compact label used in the mobile bottom bar. */
+  shortLabel?: string;
   icon: LucideIcon;
   show: boolean;
   /** External destination opened in a new tab instead of in-app navigation. */
@@ -54,9 +56,15 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const navItems = useMemo<NavItem[]>(
     () =>
       [
-        { id: 'home', label: 'Home', icon: House, show: isOwner },
+        { id: 'home', label: t('nav.dashboard'), icon: House, show: isOwner },
         { id: 'pos', label: t('nav.pos'), icon: ScanBarcode, show: true },
-        { id: 'transactions', label: isOwner ? t('nav.sales') : t('nav.mySales'), icon: Receipt, show: true },
+        {
+          id: 'transactions',
+          label: isOwner ? t('nav.salesRecords') : t('nav.mySales'),
+          shortLabel: isOwner ? t('nav.sales') : t('nav.mySales'),
+          icon: Receipt,
+          show: true,
+        },
         { id: 'customers', label: 'Customers', icon: ContactRound, show: isOwner },
         { id: 'returns', label: 'Returns', icon: RotateCcw, show: isOwner },
         { id: 'expenses', label: t('nav.expenses'), icon: PiggyBank, show: true },
@@ -101,6 +109,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   // Group secondary items into logical sections for the mobile More sheet.
   type NavGroup = { label: string; ids: string[] };
   const navGroups: NavGroup[] = [
+    { label: t('nav.main'), ids: ['home', 'pos', 'transactions'] },
     { label: 'Shop', ids: ['inventory', 'purchasing', 'warehouse', 'ecommerce', 'multistore'] },
     { label: 'Operations', ids: ['reports', 'expenses', 'cashbook', 'devices', 'subscription', 'returns', 'customers'] },
     { label: 'Help', ids: ['learn', 'community', 'settings'] },
@@ -108,7 +117,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const groupedMoreItems = navGroups
     .map((group) => ({
       group,
-      items: moreItems.filter((item) => group.ids.includes(item.id)),
+      items: navItems.filter((item) => group.ids.includes(item.id)),
     }))
     .filter((entry) => entry.items.length > 0);
 
@@ -230,8 +239,8 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
                 }`}
               >
                 <Icon className={`h-5 w-5 ${isActive ? 'stroke-[2.5]' : ''}`} />
-                <span className={`text-[11px] leading-none ${isActive ? 'font-bold' : 'font-medium'}`}>
-                  {item.label}
+                <span className={`text-[11px] leading-none whitespace-nowrap ${isActive ? 'font-bold' : 'font-medium'}`}>
+                  {item.shortLabel || item.label}
                 </span>
               </button>
             );

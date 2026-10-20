@@ -5,12 +5,14 @@ const AUTO_SYNC_KEY = 'adimat_auto_sync';
 const LAST_SYNC_ERROR_KEY = 'adimat_last_sync_error';
 const AUTO_SYNC_INTERVAL_MS = 45 * 1000;
 const LIVE_DEBOUNCE_MS = 1500;
+const MIN_ONLINE_GAP_MS = 30_000;
 
 let syncInProgress = false;
 let syncQueued = false;
 let syncTimer: ReturnType<typeof setInterval> | null = null;
 let lastAutoSyncAt = 0;
 let liveChannel: ReturnType<typeof supabase.channel> | null = null;
+let lastOnlineSyncAt = 0;
 
 export function isAutoSyncEnabled(): boolean {
   return localStorage.getItem(AUTO_SYNC_KEY) !== 'false';
@@ -27,8 +29,21 @@ export function setAutoSyncEnabled(enabled: boolean): void {
 
 let liveDebounce: ReturnType<typeof setTimeout> | null = null;
 
+function dispatchSyncEvent(phase: 'start' | 'complete' | 'error', detail: Record<string, unknown>): void {
+  try {
+    window.dispatchEvent(new CustomEvent('adimat-sync', { detail: { phase, ...detail } }));
+  } catch {
+    // Swallow dispatch errors so sync never fails because of event delivery.
+  }
+}
+
+function isOnline(): boolean {
+  return typeof navigator === 'undefined' || navigator.onLine !== false;
+}
+
 export async function triggerAutoSync(reason = 'auto'): Promise<void> {
   if (!isAutoSyncEnabled() || !isSupabaseConfigured()) return;
+  if ((reason === 'online' || reason === 'focus' || reason === 'visible') && !isOnline()) return;
   if (syncInProgress) {
     syncQueued = true;
     return;
@@ -39,13 +54,29 @@ export async function triggerAutoSync(reason = 'auto'): Promise<void> {
     return;
   }
 
+  if (reason === 'online') {
+    if (now - lastOnlineSyncAt < MIN_ONLINE_GAP_MS) return;
+    lastOnlineSyncAt = now;
+  }
+
   syncInProgress = true;
+  dispatchSyncEvent('start', { reason });
   try {
     const result = await syncStockFast();
     recordSyncOutcome(result);
     lastAutoSyncAt = Date.now();
+    dispatchSyncEvent('complete', {
+      success: result.success,
+      message: result.message,
+      reason,
+    });
   } catch (error) {
     recordSyncOutcome({ success: false, message: error instanceof Error ? error.message : String(error) });
+    dispatchSyncEvent('error', {
+      success: false,
+      message: error instanceof Error ? error.message : String(error),
+      reason,
+    });
   } finally {
     syncInProgress = false;
     if (syncQueued) {
@@ -58,18 +89,30 @@ export async function triggerAutoSync(reason = 'auto'): Promise<void> {
 /** Push local changes only — much faster after checkout / order fulfill. */
 export async function triggerPushSync(reason = 'push'): Promise<void> {
   if (!isAutoSyncEnabled() || !isSupabaseConfigured()) return;
+  if (!isOnline()) return;
   if (syncInProgress) {
     syncQueued = true;
     return;
   }
 
   syncInProgress = true;
+  dispatchSyncEvent('start', { reason });
   try {
     const result = await syncToSupabase();
     recordSyncOutcome(result);
     lastAutoSyncAt = Date.now();
+    dispatchSyncEvent('complete', {
+      success: result.success,
+      message: result.message,
+      reason,
+    });
   } catch (error) {
     recordSyncOutcome({ success: false, message: error instanceof Error ? error.message : String(error) });
+    dispatchSyncEvent('error', {
+      success: false,
+      message: error instanceof Error ? error.message : String(error),
+      reason,
+    });
   } finally {
     syncInProgress = false;
     if (syncQueued) {

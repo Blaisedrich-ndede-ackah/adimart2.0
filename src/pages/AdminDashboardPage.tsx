@@ -3,17 +3,21 @@ import {
   Building2, Users, Package, Wallet, RefreshCcw, LogOut, ChevronLeft, ChevronRight,
   Smartphone, CheckCircle2, AlertCircle, Loader2, Store, CreditCard, CalendarClock, Mail,
   FileBarChart, Download, FileText, Ban, LayoutDashboard, MoreHorizontal, X, Search, Megaphone,
-  BookOpen,
+  BookOpen, Printer,
 } from 'lucide-react';
 import {
   AdminDashboardData,
+  AdminTransactionItemRow,
+  AdminTransactionRow,
   StorePerformance,
   StoreSubscriptionUsage,
+  buildAdminReceiptData,
   formatGhs,
   getWeekEnd,
   getWeekStart,
   grantStoreSubscription,
   loadAdminDashboard,
+  loadAdminTransactionItems,
   markWeeklyPayoutSent,
   setStoreAccessBlocked,
   shiftWeek,
@@ -21,6 +25,8 @@ import {
   updateStoreWarehouseLimits,
   buildLinkedUserStores,
 } from '@/lib/adminPortal';
+import { isPrinterConnected } from '@/lib/bluetoothPeripherals';
+import { openComputerPrinterWindow, printReceipt } from '@/lib/printService';
 import {
   AdminSystemReport,
   buildAdminSystemReport,
@@ -89,6 +95,12 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
   const [reportError, setReportError] = useState('');
   const [moreOpen, setMoreOpen] = useState(false);
   const [storeQuery, setStoreQuery] = useState('');
+  const [salesQuery, setSalesQuery] = useState('');
+  const [salesStoreFilter, setSalesStoreFilter] = useState('all');
+  const [salesItems, setSalesItems] = useState<Record<string, AdminTransactionItemRow[]>>({});
+  const [salesPreviewId, setSalesPreviewId] = useState<string | null>(null);
+  const [printingSalesId, setPrintingSalesId] = useState<string | null>(null);
+  const [salesStatus, setSalesStatus] = useState('');
 
   const weekEnd = useMemo(() => getWeekEnd(weekStart), [weekStart]);
 
@@ -350,6 +362,81 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
   const linkedAccounts = useMemo(
     () => (data ? buildLinkedUserStores(data.users, data.stores) : []),
     [data]
+  );
+
+  const visibleSales = useMemo<AdminTransactionRow[]>(() => {
+    if (!data) return [];
+    const needle = salesQuery.trim().toLowerCase();
+    return data.transactions
+      .filter((tx) => salesStoreFilter === 'all' || tx.store_id === salesStoreFilter)
+      .filter((tx) => {
+        if (!needle) return true;
+        const store = data.stores.find((s) => s.id === tx.store_id)?.name || '';
+        return (
+          tx.receipt_number.toLowerCase().includes(needle) ||
+          (tx.cashier_name || '').toLowerCase().includes(needle) ||
+          store.toLowerCase().includes(needle)
+        );
+      })
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, 100);
+  }, [data, salesQuery, salesStoreFilter]);
+
+  const salesPreview = useMemo<AdminTransactionRow | null>(
+    () => visibleSales.find((tx) => tx.id === salesPreviewId) || null,
+    [visibleSales, salesPreviewId]
+  );
+
+  // Receipt line items are fetched once per receipt so the admin can print it.
+  useEffect(() => {
+    if (tab !== 'sales' || !data) return;
+    const missing = visibleSales
+      .map((tx) => tx.id)
+      .filter((id) => !salesItems[id]);
+    if (missing.length === 0) return;
+    let active = true;
+    void loadAdminTransactionItems(missing)
+      .then((items) => {
+        if (!active) return;
+        setSalesItems((prev) => {
+          const next = { ...prev };
+          for (const item of items) {
+            next[item.transaction_id] = [...(next[item.transaction_id] || []), item];
+          }
+          return next;
+        });
+      })
+      .catch(() => {
+        /* Items are optional — the receipt still prints without its lines. */
+      });
+    return () => {
+      active = false;
+    };
+  }, [tab, data, visibleSales, salesItems]);
+
+  const printAdminReceipt = useCallback(
+    async (tx: AdminTransactionRow) => {
+      setSalesStatus('');
+      // Opened inside the click so the browser allows the print window.
+      const printWindow = isPrinterConnected() ? undefined : openComputerPrinterWindow();
+      setPrintingSalesId(tx.id);
+      try {
+        const items = salesItems[tx.id] || (await loadAdminTransactionItems([tx.id]));
+        const store = data?.stores.find((s) => s.id === tx.store_id);
+        const result = await printReceipt(buildAdminReceiptData(tx, items, store), printWindow);
+        setSalesStatus(
+          result.success
+            ? `Receipt ${tx.receipt_number} sent to the printer`
+            : result.error || 'Printing failed'
+        );
+      } catch (err: unknown) {
+        setSalesStatus(err instanceof Error ? err.message : 'Printing failed');
+      } finally {
+        setPrintingSalesId(null);
+        setTimeout(() => setSalesStatus(''), 4000);
+      }
+    },
+    [data, salesItems]
   );
 
   const generateSystemReport = async () => {
@@ -984,17 +1071,212 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         )}
 
         {data && tab === 'sales' && (
-          <div className="space-y-2">
-            {data.transactions.slice(0, 100).map((tx) => (
-              <div key={tx.id} className="bg-white rounded-xl border border-slate-200 p-3 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-slate-900 font-mono">{tx.receipt_number}</p>
-                  <p className="text-[11px] text-slate-500">{tx.store_id} · {tx.payment_method} · {new Date(tx.created_at).toLocaleString()}</p>
-                </div>
-                <p className="text-sm font-bold text-slate-900">{formatGhs(tx.total_amount)}</p>
+          <div className="space-y-3">
+            <div className="bg-white rounded-2xl border border-slate-200 p-3 space-y-3">
+              <div className="flex items-center gap-2">
+                <Search className="w-4 h-4 text-slate-400" />
+                <input
+                  value={salesQuery}
+                  onChange={(e) => setSalesQuery(e.target.value)}
+                  placeholder="Search receipt number, cashier or store…"
+                  className="w-full text-sm outline-none"
+                />
               </div>
-            ))}
-            {data.transactions.length === 0 && <p className="text-sm text-slate-500 text-center py-10">No sales.</p>}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSalesStoreFilter('all')}
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold ${
+                    salesStoreFilter === 'all'
+                      ? 'bg-emerald-700 text-white'
+                      : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  All stores
+                </button>
+                {data.stores.map((store) => (
+                  <button
+                    key={store.id}
+                    type="button"
+                    onClick={() => setSalesStoreFilter(store.id)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-semibold ${
+                      salesStoreFilter === store.id
+                        ? 'bg-emerald-700 text-white'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    {store.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {salesStatus && (
+              <p className="rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-800">{salesStatus}</p>
+            )}
+
+            <div className="space-y-2">
+              {visibleSales.map((tx) => (
+                <div
+                  key={tx.id}
+                  className="bg-white rounded-xl border border-slate-200 p-3 flex items-center justify-between gap-3"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setSalesPreviewId(tx.id)}
+                    className="min-w-0 text-left"
+                  >
+                    <p className="text-sm font-semibold text-slate-900 font-mono truncate">
+                      {tx.receipt_number || 'Receipt'}
+                    </p>
+                    <p className="text-[11px] text-slate-500 truncate">
+                      {storeName(tx.store_id)}
+                      {tx.cashier_name ? ` · ${tx.cashier_name}` : ''}
+                      {' · '}
+                      {new Date(tx.created_at).toLocaleString()}
+                    </p>
+                  </button>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <p className="text-sm font-bold text-slate-900">{formatGhs(tx.total_amount)}</p>
+                    <button
+                      type="button"
+                      onClick={() => void printAdminReceipt(tx)}
+                      disabled={printingSalesId === tx.id}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 disabled:opacity-50"
+                    >
+                      {printingSalesId === tx.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Printer className="w-3.5 h-3.5" />
+                      )}
+                      Print
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {visibleSales.length === 0 && (
+                <p className="text-sm text-slate-500 text-center py-10">No sales match this filter.</p>
+              )}
+            </div>
+
+            {salesPreview && (
+              <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+                <button
+                  type="button"
+                  className="absolute inset-0 bg-slate-900/50"
+                  aria-label="Close"
+                  onClick={() => setSalesPreviewId(null)}
+                />
+                <div className="relative w-full sm:max-w-md max-h-[90vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl bg-white shadow-2xl animate-slide-up">
+                  <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 rounded-t-3xl">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-700">
+                        Receipt
+                      </p>
+                      <p className="truncate text-sm font-bold text-slate-900 font-mono">
+                        {salesPreview.receipt_number}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSalesPreviewId(null)}
+                      className="icon-btn"
+                      aria-label="Close"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                  </div>
+                  <div className="px-4 py-4 space-y-3">
+                    <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600 space-y-1">
+                      <p className="flex justify-between gap-3">
+                        <span>Store</span>
+                        <span className="font-semibold text-slate-900">{storeName(salesPreview.store_id)}</span>
+                      </p>
+                      <p className="flex justify-between gap-3">
+                        <span>Date</span>
+                        <span className="font-semibold text-slate-900">
+                          {new Date(salesPreview.created_at).toLocaleString()}
+                        </span>
+                      </p>
+                      <p className="flex justify-between gap-3">
+                        <span>Cashier</span>
+                        <span className="font-semibold text-slate-900">{salesPreview.cashier_name || 'Cashier'}</span>
+                      </p>
+                      <p className="flex justify-between gap-3">
+                        <span>Payment</span>
+                        <span className="font-semibold text-slate-900">{salesPreview.payment_method}</span>
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 px-3 py-2">
+                      {(salesItems[salesPreview.id] || []).length === 0 ? (
+                        <p className="py-4 text-center text-xs text-slate-400">No items on this receipt.</p>
+                      ) : (
+                        (salesItems[salesPreview.id] || []).map((item) => (
+                          <div
+                            key={item.id}
+                            className="flex justify-between gap-3 py-1.5 text-xs text-slate-700 border-b border-slate-100 last:border-0"
+                          >
+                            <span className="min-w-0">
+                              <span className="font-semibold text-slate-900">{item.quantity}×</span>{' '}
+                              <span className="break-words">{item.product_name}</span>
+                            </span>
+                            <span className="font-semibold flex-shrink-0">{formatGhs(item.subtotal)}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs space-y-1">
+                      <p className="flex justify-between gap-3 text-slate-600">
+                        <span>Subtotal</span>
+                        <span>
+                          {formatGhs(
+                            (salesItems[salesPreview.id] || []).reduce(
+                              (sum, item) => sum + (item.subtotal || 0),
+                              0
+                            )
+                          )}
+                        </span>
+                      </p>
+                      {salesPreview.discount_applied > 0 && (
+                        <p className="flex justify-between gap-3 text-red-500">
+                          <span>Discount</span>
+                          <span>-{formatGhs(salesPreview.discount_applied)}</span>
+                        </p>
+                      )}
+                      <p className="flex justify-between gap-3 text-sm font-bold text-slate-900 border-t border-slate-200 pt-1.5">
+                        <span>Total</span>
+                        <span>{formatGhs(salesPreview.total_amount)}</span>
+                      </p>
+                    </div>
+
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => void printAdminReceipt(salesPreview)}
+                        disabled={printingSalesId === salesPreview.id}
+                        className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+                      >
+                        {printingSalesId === salesPreview.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Printer className="w-4 h-4" />
+                        )}
+                        Print receipt
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSalesPreviewId(null)}
+                        className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700"
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

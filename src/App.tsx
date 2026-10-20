@@ -9,6 +9,7 @@ import PWAInstallBanner from '@/components/PWAInstallBanner';
 import SubscriptionWarningBanner from '@/components/SubscriptionWarningBanner';
 import StoreBrandingBar from '@/components/StoreBrandingBar';
 import { SyncStatusBanner } from '@/components/ui/SyncStatusBanner';
+import { SyncToast } from '@/components/ui/Toast';
 import AppNav from '@/components/AppNav';
 import AddPhonePrompt from '@/components/AddPhonePrompt';
 import SessionTimeoutGuard from '@/components/SessionTimeoutGuard';
@@ -392,6 +393,7 @@ export default function App() {
       <div className={`flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden ${leftHanded ? 'lg:order-1' : ''}`}>
         <PWAInstallBanner />
         <SyncStatusBanner />
+        <SyncToast />
         <SubscriptionWarningBanner
           onOpenPlan={
             currentUser?.role === 'owner' ? () => setCurrentPage('subscription') : undefined
