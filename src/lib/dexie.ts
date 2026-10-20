@@ -2773,12 +2773,22 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
       }
       if (
         table === 'transactions' &&
-        /other_charges/i.test(error.message)
+        /other_charges|updated_at|wallet_amount|credit_paid_amount|credit_balance|sale_mode/i.test(error.message)
       ) {
+        // Older Supabase projects may not have all checkout columns yet. A
+        // missing optional column must not strand an otherwise valid offline sale.
         const stripped = rows.map((row) => {
           const copy = { ...(row as Record<string, unknown>) };
-          delete copy.other_charges_json;
-          delete copy.other_charges_total;
+          const message = error.message.toLowerCase();
+          if (message.includes('other_charges')) {
+            delete copy.other_charges_json;
+            delete copy.other_charges_total;
+          }
+          if (message.includes('updated_at')) delete copy.updated_at;
+          if (message.includes('wallet_amount')) delete copy.wallet_amount;
+          if (message.includes('credit_paid_amount')) delete copy.credit_paid_amount;
+          if (message.includes('credit_balance')) delete copy.credit_balance;
+          if (message.includes('sale_mode')) delete copy.sale_mode;
           return copy;
         });
         const retry = await supabase.from(table).upsert(stripped, {
@@ -2789,6 +2799,8 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
           await markSynced();
           return rows.length;
         }
+        errors.push(formatSyncError('Transactions (retry)', retry.error));
+        return 0;
       }
       if (
         table === 'debt_reminders' &&
@@ -2824,7 +2836,7 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
 }
 
 // Sync to Supabase
-export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ success: boolean; message: string }> {
+export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicalize?: boolean }): Promise<{ success: boolean; message: string }> {
   if (!isSupabaseConfigured()) {
     return { success: false, message: 'Supabase not configured. Add environment variables to enable cloud sync.' };
   }
@@ -2845,11 +2857,13 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
   let syncedCount = 0;
 
   try {
-    try {
-      const { canonicalizeStoreStock } = await import('@/lib/warehouse');
-      await canonicalizeStoreStock(storeId);
-    } catch {
-      // Push remaining UUID-safe rows even if heal fails
+    if (!opts?.skipCanonicalize) {
+      try {
+        const { canonicalizeStoreStock } = await import('@/lib/warehouse');
+        await canonicalizeStoreStock(storeId);
+      } catch {
+        // Push remaining UUID-safe rows even if heal fails
+      }
     }
 
     // Push hard-deletes first so cloud rows (and CASCADE children) are removed
@@ -4578,7 +4592,9 @@ export async function pullStockLedgerFromCloud(storeId?: string): Promise<boolea
 }
 
 export async function syncStockFast(): Promise<{ success: boolean; message: string }> {
-  const push = await syncToSupabase({ skipPing: true });
+  // POS/autosync should push pending sales immediately; the full repair pass
+  // remains available through Full Sync and inventory workflows.
+  const push = await syncToSupabase({ skipPing: true, skipCanonicalize: true });
   const adopted = await refreshStockFromCloud();
   if (adopted.ok) {
     if (!push.success) return { success: false, message: `${adopted.message}. ${push.message}` };
