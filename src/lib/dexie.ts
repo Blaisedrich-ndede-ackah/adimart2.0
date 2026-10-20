@@ -4592,18 +4592,38 @@ export async function pullStockLedgerFromCloud(storeId?: string): Promise<boolea
 }
 
 export async function syncStockFast(): Promise<{ success: boolean; message: string }> {
-  // POS/autosync should push pending sales immediately; the full repair pass
-  // remains available through Full Sync and inventory workflows.
+  // POS/autosync must both push local sales and pull sales created on another
+  // device. Stock-only refreshes leave the phone and machine with different totals.
   const push = await syncToSupabase({ skipPing: true, skipCanonicalize: true });
+  const salesPull = await syncFromSupabase({
+    onlyTables: [
+      'transactions',
+      'transaction_items',
+      'credit_payments',
+      'sales_returns',
+      'customer_wallet_transactions',
+    ],
+    skipCatalogAlign: true,
+  });
   const adopted = await refreshStockFromCloud();
-  if (adopted.ok) {
-    if (!push.success) return { success: false, message: `${adopted.message}. ${push.message}` };
-    return { success: true, message: adopted.message };
+
+  const syncMessages = [
+    push.success ? '' : push.message,
+    salesPull.success ? '' : salesPull.message,
+    adopted.ok ? '' : adopted.message,
+  ].filter(Boolean);
+
+  if (syncMessages.length > 0) {
+    return {
+      success: false,
+      message: syncMessages.join(' '),
+    };
   }
-  if (push.success) {
-    return { success: false, message: `Pushed local sales. Pull issue: ${adopted.message}` };
-  }
-  return { success: false, message: adopted.message || push.message };
+
+  return {
+    success: true,
+    message: `${adopted.message} Sales reconciled (${salesPull.pulledCount} cloud rows checked).`,
+  };
 }
 
 export async function syncBidirectional(): Promise<{ success: boolean; message: string }> {
