@@ -4,7 +4,10 @@ import "./index.css";
 import App from "./App";
 
 // Register Service Worker for PWA
-if ('serviceWorker' in navigator) {
+if (
+  'serviceWorker' in navigator &&
+  (window.isSecureContext || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js')
       .then((registration) => {
