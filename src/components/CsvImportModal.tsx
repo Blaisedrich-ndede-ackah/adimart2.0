@@ -33,13 +33,18 @@ export default function CsvImportModal({ isOpen, onClose, onImported }: CsvImpor
     setStatus('');
   };
 
-  const handleImport = async () => {
+    const handleImport = async () => {
     if (parsedRows.length === 0) return;
     setIsImporting(true);
     try {
-      const result = await importProductsFromRows(parsedRows);
-      setStatus(`Imported ${result.imported} products${result.skipped ? `, skipped ${result.skipped}` : ''}.`);
-      onImported();
+      const result: any = await importProductsFromRows(parsedRows);
+      setConflicts(result.conflicts || []);
+      const parts: string[] = [];
+      if (result.imported) parts.push('Imported ' + result.imported + ' products');
+      if (result.updated) parts.push('Updated ' + result.updated + ' products');
+      if (result.conflicts && result.conflicts.length) parts.push(result.conflicts.length + ' conflicts');
+      setStatus(parts.length ? parts.join(', ') : 'Done.');
+      if (!(result.conflicts && result.conflicts.length)) onImported();
     } catch (err) {
       setStatus(err instanceof Error ? err.message : 'Import failed');
     }
@@ -107,6 +112,24 @@ export default function CsvImportModal({ isOpen, onClose, onImported }: CsvImpor
             </div>
           )}
 
+
+          {conflicts.length > 0 && (
+            <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-orange-600" />
+                <p className="text-sm font-medium text-orange-800">{conflicts.length} conflict(s) found</p>
+              </div>
+              <p className="text-xs text-orange-700">Conflicting products exist with different details. Please resolve them before proceeding.</p>
+              <div className="max-h-40 overflow-auto space-y-2">
+                {conflicts.slice(0, 10).map((c: any, idx: number) => (
+                  <div key={idx} className="text-xs bg-white/60 rounded-lg p-2">
+                    <p className="font-medium text-orange-900">{c.existing?.name}</p>
+                    <p className="text-orange-700">Differs in name/category/price/barcode/sku</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {parseErrors.length > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
               <div className="flex items-center gap-2 mb-1">
@@ -125,11 +148,11 @@ export default function CsvImportModal({ isOpen, onClose, onImported }: CsvImpor
 
           <button
             onClick={handleImport}
-            disabled={parsedRows.length === 0 || isImporting}
+            disabled={parsedRows.length === 0 || isImporting || conflicts.length > 0}
             className="w-full py-3 bg-primary text-white rounded-xl font-bold disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {isImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-            Import {previewCount || 0} Products
+            {conflicts.length > 0 ? 'Resolve Conflicts to Import' : Import  Products}
           </button>
         </div>
       </div>
