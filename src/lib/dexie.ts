@@ -2641,6 +2641,7 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
       table === 'transaction_items' ||
       table === 'credit_payments' ||
       table === 'customer_wallet_transactions' ||
+      table === 'bulk_sms_campaigns' ||
       table === 'debt_reminders';
     const { error } = await supabase.from(table).upsert(rows as Record<string, unknown>[], {
       onConflict: 'id',
@@ -2733,6 +2734,19 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
       ) {
         // The cloud project has no debt_reminders table yet. Keep the local
         // audit trail unsynced so it uploads once the migration is applied.
+        return 0;
+      }
+      if (
+        table === 'bulk_sms_campaigns' &&
+        (/row-level security/i.test(error.message || '') ||
+          /42501/.test(error.code || ''))
+      ) {
+        // The cloud still blocks device writes to the campaign log. Keep the
+        // local rows so they upload after the migration is applied, and say
+        // exactly what to run.
+        errors.push(
+          `${label}: the cloud is still blocking this device from saving campaigns. Run supabase-migrate-bulk-sms-device-writes.sql in the Supabase SQL editor.`
+        );
         return 0;
       }
       errors.push(formatSyncError(label, error));

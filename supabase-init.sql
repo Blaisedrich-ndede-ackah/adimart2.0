@@ -852,8 +852,7 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS reorder_level INTEGER NOT NULL DEF
 
 -- ============================================================
 -- DEBT REMINDERS (audit trail of the automatic credit chase)
--- ============================================================
-CREATE TABLE IF NOT EXISTS debt_reminders (
+-- ============================================================CREATE TABLE IF NOT EXISTS debt_reminders (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
   customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
@@ -881,6 +880,39 @@ CREATE POLICY "debt_reminders_delete" ON debt_reminders FOR DELETE USING (false)
 
 GRANT SELECT, INSERT ON TABLE debt_reminders TO anon, authenticated;
 GRANT ALL ON TABLE debt_reminders TO service_role;
+
+-- ============================================================
+-- BULK SMS CAMPAIGNS (audit trail of owner promotional broadcasts)
+-- The device sends the SMS and records the campaign, so the device
+-- key needs INSERT. Rows stay append-only.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS bulk_sms_campaigns (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  message TEXT NOT NULL CHECK (char_length(btrim(message)) BETWEEN 1 AND 460),
+  recipient_count INTEGER NOT NULL DEFAULT 0 CHECK (recipient_count >= 0),
+  sent_count INTEGER NOT NULL DEFAULT 0 CHECK (sent_count >= 0),
+  failed_count INTEGER NOT NULL DEFAULT 0 CHECK (failed_count >= 0),
+  provider VARCHAR(40) NOT NULL DEFAULT 'mnotify',
+  provider_message_id TEXT,
+  status VARCHAR(20) NOT NULL DEFAULT 'sent'
+    CHECK (status IN ('sent', 'failed', 'partial')),
+  error_message TEXT,
+  created_by UUID,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_bulk_sms_campaigns_store_created
+  ON bulk_sms_campaigns(store_id, created_at DESC);
+
+ALTER TABLE bulk_sms_campaigns ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "bulk_sms_campaigns_select" ON bulk_sms_campaigns FOR SELECT USING (true);
+CREATE POLICY "bulk_sms_campaigns_insert" ON bulk_sms_campaigns FOR INSERT WITH CHECK (true);
+CREATE POLICY "bulk_sms_campaigns_update" ON bulk_sms_campaigns FOR UPDATE USING (false) WITH CHECK (false);
+CREATE POLICY "bulk_sms_campaigns_delete" ON bulk_sms_campaigns FOR DELETE USING (false);
+
+GRANT SELECT, INSERT ON TABLE bulk_sms_campaigns TO anon, authenticated;
+GRANT ALL ON TABLE bulk_sms_campaigns TO service_role;
 
 -- ============================================================
 -- STOCK DEDUCTION FUNCTION (called after transaction item insert)

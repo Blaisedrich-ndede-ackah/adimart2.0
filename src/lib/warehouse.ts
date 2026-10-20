@@ -1124,6 +1124,19 @@ export async function allocateFefo(
   return allocations;
 }
 
+/**
+ * Marker used in a stock-movement note so the branch-transfer history can be
+ * told apart from in-store transfers (both use movement_type 'transfer').
+ */
+export const BRANCH_TRANSFER_NOTE_PREFIX = 'Branch transfer:';
+
+export interface BranchTransferResult {
+  sourceProductId: string;
+  destinationProductId: string;
+  quantity: number;
+  createdAt: string;
+}
+
 export async function transferStockBetweenStores(params: {
   sourceStoreId: string;
   destinationStoreId: string;
@@ -1132,7 +1145,9 @@ export async function transferStockBetweenStores(params: {
   quantity: number;
   userId?: string | null;
   note?: string;
-}): Promise<void> {
+  sourceStoreName?: string;
+  destinationStoreName?: string;
+}): Promise<BranchTransferResult> {
   const quantity = Math.floor(Number(params.quantity) || 0);
   if (quantity <= 0) throw new Error('Quantity must be greater than zero');
   if (params.sourceStoreId === params.destinationStoreId) {
@@ -1173,11 +1188,10 @@ export async function transferStockBetweenStores(params: {
   const now = nowIso();
   const sourceMovementId = generateId();
   const destinationMovementId = generateId();
-  
-  // Calculate totals before transaction to avoid nested async calls that access additional stores
-  const sourceBatchesForTotal = await db.stock_batches.where('product_id').equals(params.sourceProductId).toArray();
-  const destinationBatchesForTotal = await db.stock_batches.where('product_id').equals(params.destinationProductId).toArray();
-  
+  const sourceName = params.sourceStoreName || 'source store';
+  const destinationName = params.destinationStoreName || 'destination store';
+  const branchNote = `${BRANCH_TRANSFER_NOTE_PREFIX} ${sourceName} -> ${destinationName}`;
+
   await db.transaction(
     'rw',
     [db.stock_batches, db.stock_movements, db.products],
@@ -1203,7 +1217,9 @@ export async function transferStockBetweenStores(params: {
         });
       }
       const total = allocations.reduce((sum, allocation) => sum + allocation.quantity, 0);
-      const note = params.note || `Branch transfer to ${params.destinationStoreId}`;
+      // The branch marker must always be present so the transfer history can
+      // pick this movement out from the in-store transfers.
+      const note = params.note ? `${params.note} | ${branchNote}` : branchNote;
       await db.stock_movements.bulkAdd([
         {
           id: sourceMovementId,
@@ -1228,29 +1244,29 @@ export async function transferStockBetweenStores(params: {
           to_location_id: destinationLocation.id,
           movement_type: 'receive',
           quantity: total,
-          note: `Branch transfer from ${params.sourceStoreId}`,
+          note: `Branch transfer received: ${sourceName} -> ${destinationName}`,
           user_id: params.userId || null,
           created_at: now,
           synced: 0,
         },
       ]);
-      
-      // Calculate stock totals from batches within the transaction
-      const sourceTotal = sourceBatchesForTotal.reduce((sum, b) => sum + toQty(b.quantity), 0);
-      const destinationTotal = destinationBatchesForTotal.reduce((sum, b) => sum + toQty(b.quantity), 0);
-      
-      await db.products.update(params.sourceProductId, {
-        stock_level: sourceTotal,
-        updated_at: now,
-        synced: 0,
-      });
-      await db.products.update(params.destinationProductId, {
-        stock_level: destinationTotal,
-        updated_at: now,
-        synced: 0,
-      });
     }
   );
+
+  // The batch rows are the quantity authority. Recompute the catalog stock
+  // level for both products from them, exactly like the in-store transfer in
+  // Settings does, so the source really is deducted and the destination
+  // really is credited. This has to happen after the transaction closes
+  // because it reads batches across every location of the store.
+  await syncProductStockLevel(params.sourceProductId);
+  await syncProductStockLevel(params.destinationProductId);
+
+  return {
+    sourceProductId: params.sourceProductId,
+    destinationProductId: params.destinationProductId,
+    quantity,
+    createdAt: now,
+  };
 }
 
 export async function transferStock(params: {

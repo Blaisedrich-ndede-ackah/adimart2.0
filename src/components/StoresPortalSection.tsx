@@ -10,9 +10,10 @@ import {
   History,
   Search,
   Copy,
+  AlertCircle,
 } from 'lucide-react';
-import { db, type LocalProduct, type LocalStockMovement } from '@/lib/dexie';
-import { transferStockBetweenStores } from '@/lib/warehouse';
+import { db, generateId, type LocalProduct, type LocalStockMovement } from '@/lib/dexie';
+import { BRANCH_TRANSFER_NOTE_PREFIX, transferStockBetweenStores } from '@/lib/warehouse';
 import {
   addStoreFromCloud,
   assertCanCreateAdditionalStore,
@@ -57,8 +58,17 @@ export default function StoresPortalSection() {
   const [transferStatus, setTransferStatus] = useState<'idle' | 'validating' | 'moving' | 'complete'>('idle');
   interface TransferHistoryEntry extends LocalStockMovement {
     productName: string;
+    sourceStoreName: string;
+    destinationStoreName: string;
   }
 
+  interface PendingTransfer {
+    resolvedItems: Array<{ sourceProductId: string; destinationProductId: string; quantity: number }>;
+    missingItems: LocalProduct[];
+  }
+
+  const [pendingTransfer, setPendingTransfer] = useState<PendingTransfer | null>(null);
+  const [transferSearch, setTransferSearch] = useState('');
   const [transferHistory, setTransferHistory] = useState<TransferHistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historySearch, setHistorySearch] = useState('');
@@ -76,27 +86,44 @@ export default function StoresPortalSection() {
     void loadTransferHistory();
   }, [currentStore?.support_number, currentUser?.phone, newPhone, refreshStore]);
 
-  interface TransferHistoryEntry extends LocalStockMovement {
-    productName: string;
-  }
-
   const loadTransferHistory = useCallback(async () => {
     setHistoryLoading(true);
     try {
+      const linkedStores = await listLocalStores();
+      const linkedIds = new Set(linkedStores.map((store) => store.id));
       const movements = await db.stock_movements
         .where('movement_type')
         .equals('transfer')
         .toArray();
+      // In-store transfers (Settings → Branch inventory) use the same movement
+      // type, so only the ones carrying the branch marker are shown here.
+      const branchMovements = movements.filter(
+        (movement) =>
+          linkedIds.has(movement.store_id) &&
+          typeof movement.note === 'string' &&
+          movement.note.includes(BRANCH_TRANSFER_NOTE_PREFIX)
+      );
       // Get all product IDs to look up names
-      const productIds = [...new Set(movements.map((m) => m.product_id))];
+      const productIds = [...new Set(branchMovements.map((m) => m.product_id))];
       const productMap = new Map<string, LocalProduct>();
       for (const pid of productIds) {
         const p = await db.products.get(pid);
         if (p) productMap.set(pid, p);
       }
-      const sorted: TransferHistoryEntry[] = movements
+      const sorted: TransferHistoryEntry[] = branchMovements
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-        .map((m) => ({ ...m, productName: productMap.get(m.product_id)?.name || 'Unknown product' }));
+        .map((m) => {
+          // The note carries the route: "Branch transfer: From -> To"
+          const markerIndex = m.note.indexOf(BRANCH_TRANSFER_NOTE_PREFIX);
+          const route = m.note.slice(markerIndex + BRANCH_TRANSFER_NOTE_PREFIX.length).trim();
+          const [sourceStoreName, destinationStoreName] = route.split('->').map((part) => part.trim());
+          return {
+            ...m,
+            productName: productMap.get(m.product_id)?.name || 'Unknown product',
+            sourceStoreName: sourceStoreName || 'Source store',
+            destinationStoreName: destinationStoreName || 'Destination store',
+          };
+        });
       setTransferHistory(sorted);
     } catch {
       setTransferHistory([]);
@@ -211,19 +238,23 @@ export default function StoresPortalSection() {
     setSelectedTransferItems((current) => ({ ...current, [productId]: qty }));
   };
 
-  const findProductAtDestination = async (product: LocalProduct): Promise<string | null> => {
-    const destinationProducts = await db.products
-      .where('store_id')
-      .equals(destinationStoreId)
-      .toArray();
-    const match = destinationProducts.find(
-      (p) => p.name.toLowerCase().trim() === product.name.toLowerCase().trim() && p.is_active === 1
-    );
+  /** Same item at the destination: same name, or same barcode if it was renamed. */
+  const matchDestinationProduct = (
+    destinationProducts: LocalProduct[],
+    product: LocalProduct
+  ): string | null => {
+    const match = destinationProducts.find((candidate) => {
+      if (candidate.is_active !== 1) return false;
+      const sameName = candidate.name.toLowerCase().trim() === product.name.toLowerCase().trim();
+      const sameBarcode = !!product.barcode && candidate.barcode === product.barcode;
+      return sameName || sameBarcode;
+    });
     return match ? match.id : null;
   };
 
   const createProductAtDestination = async (product: LocalProduct): Promise<string> => {
-    const newId = crypto.randomUUID();
+    const newId = generateId();
+    const now = new Date().toISOString();
     await db.products.add({
       id: newId,
       store_id: destinationStoreId,
@@ -244,11 +275,69 @@ export default function StoresPortalSection() {
       wholesale_tiers_json: product.wholesale_tiers_json,
       sell_online: product.sell_online,
       reorder_level: product.reorder_level,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      created_at: now,
+      updated_at: now,
       synced: 0,
     });
     return newId;
+  };
+
+  /** Moves the resolved items, creating any missing destination entries first. */
+  const runBranchTransfer = async (
+    resolvedItems: Array<{ sourceProductId: string; destinationProductId: string; quantity: number }>,
+    productsToCreate: LocalProduct[]
+  ) => {
+    setBusy(true);
+    setTransferStatus('validating');
+    try {
+      await new Promise((resolve) => window.setTimeout(resolve, 350));
+      setTransferStatus('moving');
+
+      // Create missing products at destination
+      const createdProductMap = new Map<string, string>();
+      for (const product of productsToCreate) {
+        const newId = await createProductAtDestination(product);
+        createdProductMap.set(product.id, newId);
+      }
+
+      // Finalize resolved items with created product IDs
+      const finalItems = resolvedItems.map((item) => ({
+        ...item,
+        destinationProductId: createdProductMap.get(item.sourceProductId) || item.destinationProductId,
+      }));
+
+      const sourceName = stores.find((s) => s.id === sourceStoreId)?.name || 'source store';
+      const destinationName = stores.find((s) => s.id === destinationStoreId)?.name || 'destination store';
+
+      // Execute transfers sequentially to maintain atomicity per item
+      for (const item of finalItems) {
+        await transferStockBetweenStores({
+          sourceStoreId,
+          destinationStoreId,
+          sourceProductId: item.sourceProductId,
+          destinationProductId: item.destinationProductId,
+          quantity: item.quantity,
+          userId: currentUser?.id,
+          sourceStoreName: sourceName,
+          destinationStoreName: destinationName,
+        });
+      }
+
+      await refresh();
+      setSelectedTransferItems({});
+      setPendingTransfer(null);
+      setTransferStatus('complete');
+      flash(
+        `Transfer completed: ${finalItems.length} item(s) moved from ${sourceName} to ${destinationName}. Source stock deducted and destination stock merged.`,
+        false
+      );
+      window.setTimeout(() => setTransferStatus('idle'), 2500);
+    } catch (e) {
+      setTransferStatus('idle');
+      flash(e instanceof Error ? e.message : 'Transfer failed', true);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleBulkTransfer = async () => {
@@ -280,67 +369,44 @@ export default function StoresPortalSection() {
       }
     }
 
-    setBusy(true);
-    setTransferStatus('validating');
-    try {
-      await new Promise((resolve) => window.setTimeout(resolve, 350));
-      setTransferStatus('moving');
+    // Resolve destination product IDs — items that do not exist at the
+    // destination are collected so the owner can approve creating them.
+    const resolvedItems: Array<{ sourceProductId: string; destinationProductId: string; quantity: number }> = [];
+    const productsToCreate: LocalProduct[] = [];
 
-      // Resolve destination product IDs — create missing ones first
-      const resolvedItems: Array<{ sourceProductId: string; destinationProductId: string; quantity: number }> = [];
-      const productsToCreate: LocalProduct[] = [];
+    // One read for the whole batch instead of one per item.
+    const destinationProducts = await db.products
+      .where('store_id')
+      .equals(destinationStoreId)
+      .toArray();
 
-      for (const [sourceProductId, quantity] of items) {
-        const sourceProduct = sourceProducts.find((p) => p.id === sourceProductId)!;
-        const destProductId = await findProductAtDestination(sourceProduct);
-        if (destProductId) {
-          resolvedItems.push({ sourceProductId, destinationProductId: destProductId, quantity });
-        } else {
-          productsToCreate.push(sourceProduct);
-          resolvedItems.push({ sourceProductId, destinationProductId: '', quantity }); // placeholder
-        }
+    for (const [sourceProductId, quantity] of items) {
+      const sourceProduct = sourceProducts.find((p) => p.id === sourceProductId)!;
+      const destProductId = matchDestinationProduct(destinationProducts, sourceProduct);
+      if (destProductId) {
+        resolvedItems.push({ sourceProductId, destinationProductId: destProductId, quantity });
+      } else {
+        productsToCreate.push(sourceProduct);
+        resolvedItems.push({ sourceProductId, destinationProductId: '', quantity }); // placeholder
       }
-
-      // Create missing products at destination
-      const createdProductMap = new Map<string, string>();
-      for (const product of productsToCreate) {
-        const newId = await createProductAtDestination(product);
-        createdProductMap.set(product.id, newId);
-      }
-
-      // Finalize resolved items with created product IDs
-      const finalItems = resolvedItems.map((item) => ({
-        ...item,
-        destinationProductId: createdProductMap.get(item.sourceProductId) || item.destinationProductId,
-      }));
-
-      // Execute transfers sequentially to maintain atomicity per item
-      for (const item of finalItems) {
-        await transferStockBetweenStores({
-          sourceStoreId,
-          destinationStoreId,
-          sourceProductId: item.sourceProductId,
-          destinationProductId: item.destinationProductId,
-          quantity: item.quantity,
-          userId: currentUser?.id,
-          note: `Branch inventory transfer from ${sourceStoreId} to ${destinationStoreId}`,
-        });
-      }
-
-      await refresh();
-      setSelectedTransferItems({});
-      setTransferStatus('complete');
-      flash(
-        `Bulk transfer completed: ${items.length} item(s) moved. Source stock deducted and destination stock merged.`,
-        false
-      );
-      window.setTimeout(() => setTransferStatus('idle'), 2500);
-    } catch (e) {
-      setTransferStatus('idle');
-      flash(e instanceof Error ? e.message : 'Bulk transfer failed', true);
-    } finally {
-      setBusy(false);
     }
+
+    if (productsToCreate.length > 0) {
+      setPendingTransfer({ resolvedItems, missingItems: productsToCreate });
+      return;
+    }
+
+    await runBranchTransfer(resolvedItems, []);
+  };
+
+  /** Owner approved creating the missing destination stock entries. */
+  const confirmCreateMissingItems = async () => {
+    if (!pendingTransfer) return;
+    await runBranchTransfer(pendingTransfer.resolvedItems, pendingTransfer.missingItems);
+  };
+
+  const cancelPendingTransfer = () => {
+    setPendingTransfer(null);
   };
 
   const handleAddCloud = async () => {
@@ -432,10 +498,15 @@ export default function StoresPortalSection() {
             </div>
             <button
               type="button"
-              onClick={() => setShowBranchTransfer((value) => !value)}
-              className="shrink-0 rounded-lg bg-emerald-700 px-2.5 py-2 text-[11px] font-bold text-white"
+              onClick={() => {
+                setShowBranchTransfer((value) => !value);
+                setPendingTransfer(null);
+                setTransferStatus('idle');
+              }}
+              className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-2.5 py-2 text-[11px] font-bold text-white"
             >
-              {showBranchTransfer ? 'Close' : 'Transfer'}
+              <ArrowRightLeft className="h-3.5 w-3.5" />
+              {showBranchTransfer ? 'Close' : 'Transfer stock'}
             </button>
           </div>
           {showBranchTransfer && (
@@ -488,6 +559,8 @@ export default function StoresPortalSection() {
                       <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" />
                       <input
                         type="text"
+                        value={transferSearch}
+                        onChange={(e) => setTransferSearch(e.target.value)}
                         placeholder="Search products…"
                         className="w-full rounded-lg pl-8 pr-3 py-1.5 border border-gray-200 bg-gray-50 text-xs focus:ring-1 focus:ring-emerald-400 focus:border-emerald-400 outline-none"
                       />
@@ -506,6 +579,12 @@ export default function StoresPortalSection() {
                       <tbody>
                         {sourceProducts
                           .filter((p) => p.stock_level > 0)
+                          .filter(
+                            (p) =>
+                              !transferSearch.trim() ||
+                              p.name.toLowerCase().includes(transferSearch.trim().toLowerCase()) ||
+                              (p.category || '').toLowerCase().includes(transferSearch.trim().toLowerCase())
+                          )
                           .map((product) => {
                             const isSelected = !!selectedTransferItems[product.id];
                             const qty = selectedTransferItems[product.id] || 0;
@@ -545,6 +624,20 @@ export default function StoresPortalSection() {
                               </tr>
                             );
                           })}
+                        {sourceProducts.filter((p) => p.stock_level > 0).filter(
+                          (p) =>
+                            !transferSearch.trim() ||
+                            p.name.toLowerCase().includes(transferSearch.trim().toLowerCase()) ||
+                            (p.category || '').toLowerCase().includes(transferSearch.trim().toLowerCase())
+                        ).length === 0 && (
+                          <tr>
+                            <td colSpan={4} className="py-6 text-center text-[11px] text-gray-400">
+                              {transferSearch.trim()
+                                ? 'No product matches that search.'
+                                : 'This store has no stock available to transfer.'}
+                            </td>
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -587,10 +680,65 @@ export default function StoresPortalSection() {
                 </div>
               )}
 
+              {/* Stock that does not exist at the destination yet — ask before creating it */}
+              {pendingTransfer && pendingTransfer.missingItems.length > 0 && (
+                <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-3">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-amber-900">
+                        {pendingTransfer.missingItems.length} item(s) do not exist at{' '}
+                        {stores.find((s) => s.id === destinationStoreId)?.name || 'the destination store'} yet
+                      </p>
+                      <p className="mt-1 text-[11px] leading-relaxed text-amber-800">
+                        Create them as new stock entries there, then merge the incoming quantity into them?
+                      </p>
+                    </div>
+                  </div>
+                  <ul className="space-y-1">
+                    {pendingTransfer.missingItems.map((product) => (
+                      <li
+                        key={product.id}
+                        className="flex items-center justify-between rounded-lg border border-amber-100 bg-white px-2.5 py-1.5"
+                      >
+                        <span className="truncate text-xs text-gray-900">{product.name}</span>
+                        <span className="text-[10px] font-semibold text-amber-700">
+                          × {selectedTransferItems[product.id] || 0}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void confirmCreateMissingItems()}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-2 text-[11px] font-bold text-white disabled:opacity-50"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Create and transfer
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={cancelPendingTransfer}
+                      className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-[11px] font-bold text-amber-800 disabled:opacity-50"
+                    >
+                      Cancel transfer
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Confirm transfer button */}
               <button
                 type="button"
-                disabled={busy || Object.keys(selectedTransferItems).length === 0 || !destinationStoreId}
+                disabled={
+                  busy ||
+                  pendingTransfer !== null ||
+                  Object.keys(selectedTransferItems).length === 0 ||
+                  !destinationStoreId
+                }
                 onClick={() => void handleBulkTransfer()}
                 className={`w-full rounded-xl py-2.5 text-sm font-bold text-white shadow-sm transition-all disabled:opacity-50 ${
                   Object.keys(selectedTransferItems).length > 0 && destinationStoreId
@@ -603,7 +751,7 @@ export default function StoresPortalSection() {
                 ) : (
                   <span className="inline-flex items-center justify-center">
                     <Copy className="h-4 w-4 mr-2" />
-                    Bulk transfer stock
+                    Transfer {Object.keys(selectedTransferItems).length} item(s)
                   </span>
                 )}
               </button>
@@ -652,9 +800,15 @@ export default function StoresPortalSection() {
                         </tr>
                       ) : (
                         transferHistory
-                          .filter((entry) =>
-                            entry.productName.toLowerCase().includes(historySearch.toLowerCase())
-                          )
+                          .filter((entry) => {
+                            const needle = historySearch.toLowerCase();
+                            if (!needle) return true;
+                            return (
+                              entry.productName.toLowerCase().includes(needle) ||
+                              entry.sourceStoreName.toLowerCase().includes(needle) ||
+                              entry.destinationStoreName.toLowerCase().includes(needle)
+                            );
+                          })
                           .map((entry) => (
                             <tr key={entry.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                               <td className="pb-2 pt-2 text-gray-700">
@@ -664,7 +818,11 @@ export default function StoresPortalSection() {
                               <td className="pb-2 pt-2">
                                 <span className="font-bold text-amber-700">{entry.quantity}</span>
                               </td>
-                              <td className="pb-2 pt-2 text-gray-600">{entry.from_location_id ? 'Source → Destination' : 'N/A'}</td>
+                              <td className="pb-2 pt-2 text-gray-600">
+                                <span className="font-medium text-gray-800">{entry.sourceStoreName}</span>
+                                <span className="mx-1 text-gray-400">→</span>
+                                <span className="font-medium text-gray-800">{entry.destinationStoreName}</span>
+                              </td>
                               <td className="pb-2 pt-2">
                                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
                                   <CheckCircle2 className="h-3 w-3" /> Completed

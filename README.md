@@ -201,6 +201,7 @@ For manually recorded MoMo, bank transfer, and card-terminal sales, run `supabas
 For credit sales, owner-managed product categories, and Cash/Bank cash-book entries, run `supabase-migrate-credit-sales-bank-categories.sql` before syncing.
 For the Customers book and registered-customer credit checkout, run `supabase-migrate-customers-book.sql` after the credit-sales migration and before syncing. It also links existing credit sales to registered customer records.
 For automated debt reminders, the live owner dashboard and the multi-store consolidated view, run `supabase-migrate-debt-reminders-dashboard.sql`. It adds the reminder rules and sales targets to `stores`, the per-customer opt-out to `customers`, the `debt_reminders` audit table, and publishes `transactions` to the realtime channel so the dashboard live feed works.
+For owner bulk SMS campaigns, run `supabase-migrate-bulk-sms.sql`. If you already ran it, run `supabase-migrate-bulk-sms-device-writes.sql` as well — it lets the device save its own campaign log, which is what stops the sync failing with "new row violates row-level security policy for table bulk_sms_campaigns".
 
 ### Multi-store on one device
 
@@ -211,6 +212,15 @@ Store owners can keep **multiple stores** on the same phone/tablet:
 3. After opening a store, **Inventory** and **Settings → Staff** apply only to that store  
 
 Platform admins can also **Admin → Stores → tap a store** to view that store’s inventory, download an invoice PDF, and manage its staff in the portal.
+
+### Branch inventory transfer (owner)
+
+**Settings → My Stores → Branch inventory → Transfer stock** moves stock between any stores linked to the same owner account:
+
+1. Pick the **From store** and the **To store**.
+2. Tick the products to move and type the **quantity to transfer** for each one. Several products can be moved to the same destination in one go.
+3. Items that already exist at the destination are **merged** into that stock. Items the destination does not stock yet are listed first, and the transfer only continues once the owner chooses **Create and transfer**.
+4. Press **Transfer N item(s)**. The source stock is deducted, the matching quantity is added at the destination, and both are recorded in the **Transfer history** table underneath, showing the product, the quantity, the date and the route from one store to the other.
 
 ### Owner dashboard, debt reminders and all-stores view
 

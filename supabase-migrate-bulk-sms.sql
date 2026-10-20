@@ -27,9 +27,10 @@ ALTER TABLE public.bulk_sms_campaigns ENABLE ROW LEVEL SECURITY;
 
 -- Consistent with the existing customers / subscription_grants pattern:
 -- the store app reads with the anon key and filters rows by store_id
--- locally, so SELECT is permissive. Writes go through the Vercel
--- bulk-SMS route, which uses the service-role key. Direct anon
--- inserts/updates/deletes are denied.
+-- locally, so SELECT is permissive. The campaign row is written by the
+-- device that sent the SMS (the mNotify call happens in the browser, so
+-- there is no server route to write it for us), so the device key needs
+-- INSERT. Rows stay append-only: UPDATE and DELETE are denied.
 REVOKE ALL ON TABLE public.bulk_sms_campaigns FROM PUBLIC;
 
 DROP POLICY IF EXISTS bulk_sms_campaigns_select ON public.bulk_sms_campaigns;
@@ -42,7 +43,7 @@ DROP POLICY IF EXISTS bulk_sms_campaigns_insert ON public.bulk_sms_campaigns;
 CREATE POLICY bulk_sms_campaigns_insert
   ON public.bulk_sms_campaigns
   FOR INSERT
-  WITH CHECK (false);
+  WITH CHECK (true);
 
 DROP POLICY IF EXISTS bulk_sms_campaigns_update ON public.bulk_sms_campaigns;
 CREATE POLICY bulk_sms_campaigns_update
@@ -57,6 +58,7 @@ CREATE POLICY bulk_sms_campaigns_delete
   FOR DELETE
   USING (false);
 
+GRANT SELECT, INSERT ON TABLE public.bulk_sms_campaigns TO anon, authenticated;
 GRANT ALL ON TABLE public.bulk_sms_campaigns TO service_role;
 
 COMMENT ON TABLE public.bulk_sms_campaigns IS
