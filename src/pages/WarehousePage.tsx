@@ -53,6 +53,7 @@ import {
   type LocationReportSummary,
 } from '@/lib/reportAnalytics';
 import FinancialDonutChart from '@/components/FinancialDonutChart';
+import BranchTransferPanel from '@/components/BranchTransferPanel';
 import {
   clearWarehouseUnlock,
   getUnlockedWarehouseLocationId,
@@ -116,6 +117,7 @@ function formatWhen(iso: string): string {
 
 export default function WarehousePage({ onBackToSettings }: WarehousePageProps) {
   const { currentStore, currentUser } = useAuthStore();
+  const isOwner = currentUser?.role === 'owner';
   const warehouseEnabled = (currentStore?.warehouse_enabled ?? 0) === 1;
   const maxShops = currentStore?.max_shops ?? 1;
   const maxWarehouses = currentStore?.max_warehouses ?? 0;
@@ -660,6 +662,15 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
               You can still add extra shop locations here if your admin raised the shop limit.
             </div>
 
+            {/* Store-to-store stock transfer between the branches on this owner account */}
+            {isOwner && (
+              <BranchTransferPanel
+                title="Transfer stock between stores"
+                showHistory
+                onTransferred={() => void loadHub()}
+              />
+            )}
+
             <div className="flex items-center justify-between">
               <p className="text-xs text-gray-500 inline-flex items-center gap-1">
                 <MapPin className="w-3.5 h-3.5" />
@@ -796,6 +807,18 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
           </div>
         ) : (
           <>
+            {/* Store-to-stock transfer stays reachable while a location is open */}
+            {isOwner && (
+              <div className="mb-3 md:max-w-3xl md:mx-auto xl:max-w-none xl:mx-0">
+                <BranchTransferPanel
+                  title="Transfer stock between stores"
+                  showHistory={false}
+                  collapsible
+                  onTransferred={() => void loadWorkspace()}
+                />
+              </div>
+            )}
+
             {tab === 'stock' && (
               <div className="space-y-3 md:max-w-3xl md:mx-auto xl:max-w-none xl:mx-0">
                 <div className="relative">

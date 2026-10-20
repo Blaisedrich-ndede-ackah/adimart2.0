@@ -215,12 +215,12 @@ Platform admins can also **Admin → Stores → tap a store** to view that store
 
 ### Branch inventory transfer (owner)
 
-**Settings → My Stores → Branch inventory → Transfer stock** moves stock between any stores linked to the same owner account:
+Stock can be moved between any stores linked to the same owner account. The feature lives on the **Branch inventory** tab (and stays available from **Settings → My Stores**):
 
 1. Pick the **From store** and the **To store**.
 2. Tick the products to move and type the **quantity to transfer** for each one. Several products can be moved to the same destination in one go.
 3. Items that already exist at the destination are **merged** into that stock. Items the destination does not stock yet are listed first, and the transfer only continues once the owner chooses **Create and transfer**.
-4. Press **Transfer N item(s)**. The source stock is deducted, the matching quantity is added at the destination, and both are recorded in the **Transfer history** table underneath, showing the product, the quantity, the date and the route from one store to the other.
+4. Press **Transfer N item(s)**. The source stock is deducted, the matching quantity is added at the destination, and both are recorded in the **Transfer history** table, showing the product, the quantity, the date and the route from one store to the other.
 
 ### Owner dashboard, debt reminders and all-stores view
 
