@@ -41,7 +41,7 @@ import AdminCreateStoreForm from '@/components/AdminCreateStoreForm';
 import AdminCampaignManager from '@/components/AdminCampaignManager';
 import CopyableStoreId from '@/components/CopyableStoreId';
 
-type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact' | 'campaigns' | 'learn';
+type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact' | 'campaigns' | 'learn' | 'sales';
 
 function defaultReportFromDate(): string {
   const d = new Date();
@@ -374,6 +374,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       ['subscriptions', 'Subs', CalendarClock],
       ['payouts', 'Payouts', Wallet],
       ['products', 'Products', Package],
+      ['sales', 'Sales', CreditCard],
       ['reports', 'Reports', FileBarChart],
       ['contact', 'Contact', Mail],
       ['campaigns', 'Campaigns', Megaphone],
@@ -979,6 +980,21 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {data && tab === 'sales' && (
+          <div className="space-y-2">
+            {data.transactions.slice(0, 100).map((tx) => (
+              <div key={tx.id} className="bg-white rounded-xl border border-slate-200 p-3 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900 font-mono">{tx.receipt_number}</p>
+                  <p className="text-[11px] text-slate-500">{tx.store_id} · {tx.payment_method} · {new Date(tx.created_at).toLocaleString()}</p>
+                </div>
+                <p className="text-sm font-bold text-slate-900">{formatGhs(tx.total_amount)}</p>
+              </div>
+            ))}
+            {data.transactions.length === 0 && <p className="text-sm text-slate-500 text-center py-10">No sales.</p>}
           </div>
         )}
 
