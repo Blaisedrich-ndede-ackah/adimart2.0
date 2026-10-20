@@ -2773,12 +2773,22 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
       }
       if (
         table === 'transactions' &&
-        /other_charges/i.test(error.message)
+        /other_charges|updated_at|wallet_amount|credit_paid_amount|credit_balance|sale_mode/i.test(error.message)
       ) {
+        // Older Supabase projects may not have all checkout columns yet. A
+        // missing optional column must not strand an otherwise valid offline sale.
         const stripped = rows.map((row) => {
           const copy = { ...(row as Record<string, unknown>) };
-          delete copy.other_charges_json;
-          delete copy.other_charges_total;
+          const message = error.message.toLowerCase();
+          if (message.includes('other_charges')) {
+            delete copy.other_charges_json;
+            delete copy.other_charges_total;
+          }
+          if (message.includes('updated_at')) delete copy.updated_at;
+          if (message.includes('wallet_amount')) delete copy.wallet_amount;
+          if (message.includes('credit_paid_amount')) delete copy.credit_paid_amount;
+          if (message.includes('credit_balance')) delete copy.credit_balance;
+          if (message.includes('sale_mode')) delete copy.sale_mode;
           return copy;
         });
         const retry = await supabase.from(table).upsert(stripped, {
@@ -2789,6 +2799,8 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
           await markSynced();
           return rows.length;
         }
+        errors.push(formatSyncError('Transactions (retry)', retry.error));
+        return 0;
       }
       if (
         table === 'debt_reminders' &&
