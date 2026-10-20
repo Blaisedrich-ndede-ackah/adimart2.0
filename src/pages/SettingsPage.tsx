@@ -1081,7 +1081,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         <button
           onClick={handleSave}
           disabled={saving}
-          className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 touch-target mb-6 transition-colors ${
+          className={`sticky bottom-0 z-10 w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 touch-target mb-6 transition-colors shadow-lg ${
             saveSuccess
               ? 'bg-green-500 text-white'
               : 'bg-primary text-white disabled:opacity-50'

@@ -27,6 +27,7 @@ export default function TransactionsPage() {
   const t = useT();
   const isOwner = currentUser?.role === 'owner';
   const [transactions, setTransactions] = useState<LocalTransaction[]>([]);
+  const [search, setSearch] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [itemsByTxn, setItemsByTxn] = useState<Record<string, LocalTransactionItem[]>>({});
   const [creditPaymentsByTxn, setCreditPaymentsByTxn] = useState<Record<string, LocalCreditPayment[]>>({});
@@ -83,6 +84,7 @@ export default function TransactionsPage() {
     setTimeout(() => setStatus(''), 4000);
   };
 
+  const filtered = transactions.filter((t) => t.receipt_number.toLowerCase().includes(search.toLowerCase()));
   return (
     <div className="page-shell">
       <div className="page-header">
@@ -108,6 +110,7 @@ export default function TransactionsPage() {
       </div>
 
       <div className="page-body no-scrollbar">
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search receipt number…" className="w-full px-3 py-2 mb-3 border border-gray-200 rounded-xl text-sm" />
         {!isOwner && (
           <CloudSyncPanel hint={t('sync.cashierHint')} onSynced={() => void load()} />
         )}
@@ -137,7 +140,7 @@ export default function TransactionsPage() {
         )}
 
         <div className="space-y-2">
-          {transactions.map((txn) => {
+          {filtered.map((txn) => {
             const expanded = expandedId === txn.id;
             const items = itemsByTxn[txn.id] || [];
             return (

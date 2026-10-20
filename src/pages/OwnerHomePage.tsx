@@ -76,6 +76,7 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
   const [transactions, setTransactions] = useState<LocalTransaction[]>([]);
   const [monthSales, setMonthSales] = useState(0);
   const [lowStockCount, setLowStockCount] = useState(0);
+  const [outOfStockCount, setOutOfStockCount] = useState(0);
   const [outstandingCredit, setOutstandingCredit] = useState(0);
   const [dailyTarget, setDailyTarget] = useState(0);
   const [monthlyTarget, setMonthlyTarget] = useState(0);
@@ -117,6 +118,7 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
         const level = toNumber(product.reorder_level) > 0 ? toNumber(product.reorder_level) : 5;
         return toQty(product.stock_level) <= level;
       }).length);
+      setOutOfStockCount(products.filter((product: LocalProduct) => toQty(product.stock_level) <= 0).length);
 
       let credit = 0;
       for (const balance of balances.values()) credit += balance.total;
@@ -173,6 +175,7 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
   const actions: QuickAction[] = [
     { label: 'New sale', detail: 'Open the till', page: 'pos', icon: ShoppingCart, className: 'bg-primary text-white' },
     { label: 'Add product', detail: 'Update your catalog', page: 'inventory', quickAdd: true, icon: Package, className: 'bg-white text-primary border border-emerald-100' },
+    { label: 'Restock', detail: 'Replenish low stock', page: 'inventory', icon: Package, className: 'bg-white text-primary border border-amber-100' },
     { label: 'Add expense', detail: 'Record a store cost', page: 'expenses', quickAdd: true, icon: Plus, className: 'bg-white text-primary border border-emerald-100' },
   ];
 
@@ -249,6 +252,13 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
               <span className="text-xs font-medium">Low-stock products</span>
             </span>
             <p className="mt-2 text-lg font-bold text-amber-950">{loading ? '…' : lowStockCount}</p>
+          </button>
+          <button type="button" onClick={() => onNavigate('inventory')} className="rounded-2xl border border-red-100 bg-red-50 p-4 text-left touch-target">
+            <span className="flex items-center gap-2 text-gray-500">
+              <Package className="h-4 w-4 text-red-600" />
+              <span className="text-xs font-medium">Out of stock</span>
+            </span>
+            <p className="mt-2 text-lg font-bold text-red-950">{loading ? '…' : outOfStockCount}</p>
           </button>
         </section>
 

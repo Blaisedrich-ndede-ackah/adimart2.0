@@ -619,7 +619,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
 
           {step === 'method' && (
             <div className="space-y-3">
-              {discountsEnabled && (
+              {discountsEnabled && canApplyDiscount && (
                 <button
                   type="button"
                   disabled={!canApplyDiscount}
@@ -773,22 +773,22 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                 </button>
               )}
 
-              <div className="rounded-xl border border-gray-200 p-4 space-y-2">
-                <label className="text-sm font-medium text-gray-700 block">
-                  Customer email (optional)
-                </label>
-                <input
-                  type="email"
-                  value={customerEmail}
-                  onChange={e => setCustomerEmail(e.target.value)}
-                  placeholder="customer@gmail.com"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary focus:border-primary outline-none"
-                  autoComplete="email"
-                />
-                <p className="text-xs text-gray-500">
-                  Required by Paystack for mobile money and card payments. Leave blank to use a default receipt email.
-                </p>
-              </div>
+              <details className="rounded-xl border border-gray-200 p-4">
+                <summary className="text-sm font-medium text-gray-700 cursor-pointer">Customer email (optional)</summary>
+                <div className="mt-2 space-y-2">
+                  <input
+                    type="email"
+                    value={customerEmail}
+                    onChange={e => setCustomerEmail(e.target.value)}
+                    placeholder="customer@gmail.com"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary focus:border-primary outline-none"
+                    autoComplete="email"
+                  />
+                  <p className="text-xs text-gray-500">
+                    Required by Paystack for mobile money and card payments. Leave blank to use a default receipt email.
+                  </p>
+                </div>
+              </details>
 
               <button
                 onClick={handlePaystackSale}
