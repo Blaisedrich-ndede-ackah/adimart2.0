@@ -92,6 +92,50 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 
+/* Keep utility-heavy legacy screens readable when dark mode is enabled. */
+.dark body,
+.dark .bg-white {
+  background-color: var(--color-surface-card);
+}
+
+.dark .bg-gray-50,
+.dark .bg-slate-50 {
+  background-color: var(--color-surface-muted);
+}
+
+.dark .text-gray-900,
+.dark .text-gray-800,
+.dark .text-slate-900,
+.dark .text-slate-800 {
+  color: var(--color-ink);
+}
+
+.dark .text-gray-600,
+.dark .text-gray-500,
+.dark .text-slate-600,
+.dark .text-slate-500 {
+  color: var(--color-muted);
+}
+
+.dark .border-gray-100,
+.dark .border-gray-200,
+.dark .border-slate-200 {
+  border-color: var(--color-border);
+}
+
+.dark input,
+.dark textarea,
+.dark select {
+  background-color: var(--color-surface-card);
+  border-color: var(--color-border);
+  color: var(--color-ink);
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: var(--color-muted);
+}
+
 @media (min-width: 768px) {
   body {
     background:

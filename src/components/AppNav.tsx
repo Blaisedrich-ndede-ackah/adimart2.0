@@ -376,7 +376,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   type="button"
   onClick={() => setDarkMode((enabled) => !enabled)}
   aria-pressed={darkMode}
-  className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 touch-target"
+  className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 touch-target dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
   >
   {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
   {darkMode ? 'Light mode' : 'Dark mode'}
