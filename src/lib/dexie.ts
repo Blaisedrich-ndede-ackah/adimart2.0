@@ -162,6 +162,164 @@ export interface LocalUser {
   pin_dirty?: number;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Agent Portal local types (offline-first mirror of Supabase tables) */
+/* ------------------------------------------------------------------ */
+
+export type AgentStatus = 'active' | 'suspended' | 'inactive';
+export type ProspectStatus = 'lead' | 'contacted' | 'follow_up' | 'converted' | 'lost';
+export type FollowUpStatus = 'scheduled' | 'completed' | 'missed';
+export type FollowUpChannel = 'call' | 'sms' | 'whatsapp' | 'visit' | 'other';
+export type AgentStoreStatus = 'pending' | 'active' | 'suspended' | 'inactive';
+export type InvoiceStatus = 'issued' | 'paid' | 'partial' | 'overdue' | 'cancelled';
+export type AgentPaymentMethod = 'cash' | 'momo' | 'bank_transfer' | 'paystack';
+export type CommissionStatus = 'accrued' | 'paid' | 'withheld';
+export type WithdrawalStatus = 'pending' | 'approved' | 'rejected' | 'paid';
+
+export interface LocalAgent {
+  id: string;
+  full_name: string;
+  phone: string;
+  email: string;
+  pin_hash: string;
+  momo_number: string;
+  momo_network: string;
+  momo_account_name: string;
+  commission_percentage: number;
+  status: AgentStatus;
+  last_login_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export interface LocalProspect {
+  id: string;
+  agent_id: string;
+  store_name: string;
+  owner_full_name: string;
+  owner_phone: string;
+  owner_email: string;
+  address: string;
+  city: string;
+  business_type: string;
+  subscription_package: string;
+  source: string;
+  status: ProspectStatus;
+  notes: string;
+  last_contacted_at?: string | null;
+  next_follow_up_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export interface LocalFollowUp {
+  id: string;
+  prospect_id: string;
+  agent_id: string;
+  follow_up_at: string;
+  channel: FollowUpChannel;
+  outcome: string;
+  status: FollowUpStatus;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export interface LocalAgentStore {
+  id: string;
+  agent_id: string;
+  prospect_id?: string | null;
+  name: string;
+  owner_phone: string;
+  owner_email: string;
+  address: string;
+  city: string;
+  business_type: string;
+  subscription_package: string;
+  status: AgentStoreStatus;
+  activated_at?: string | null;
+  subscription_expires_at?: string | null;
+  momo_account_name: string;
+  momo_number: string;
+  momo_network: string;
+  access_blocked: number;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export interface LocalAgentInvoice {
+  id: string;
+  invoice_number: string;
+  prospect_id: string;
+  agent_id: string;
+  amount_ghs: number;
+  currency_code: string;
+  due_date?: string | null;
+  status: InvoiceStatus;
+  description: string;
+  paystack_reference: string;
+  pdf_url: string;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export interface LocalAgentPayment {
+  id: string;
+  invoice_id: string;
+  agent_id: string;
+  amount_ghs: number;
+  payment_method: AgentPaymentMethod;
+  reference: string;
+  paid_at: string;
+  notes: string;
+  created_at: string;
+  synced: number;
+}
+
+export interface LocalAgentCommission {
+  id: string;
+  agent_id: string;
+  invoice_id: string;
+  commission_rate_percentage: number;
+  commission_amount_ghs: number;
+  status: CommissionStatus;
+  created_at: string;
+  paid_at?: string | null;
+  synced: number;
+}
+
+export interface LocalAgentWithdrawalRequest {
+  id: string;
+  agent_id: string;
+  amount_ghs: number;
+  fee_ghs: number;
+  net_amount_ghs: number;
+  momo_number: string;
+  momo_network: string;
+  momo_account_name: string;
+  status: WithdrawalStatus;
+  rejection_reason: string;
+  payout_reference: string;
+  requested_at: string;
+  processed_at?: string | null;
+  processed_by?: string | null;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export interface LocalAgentCommissionSetting {
+  id: string;
+  default_commission_percentage: number;
+  min_withdrawal_ghs: number;
+  withdrawal_fee_ghs: number;
+  updated_at: string;
+}
+
 export interface LocalProduct {
   id: string;
   store_id: string; // Links product to a store
@@ -571,6 +729,17 @@ class AdimatDB extends Dexie {
   app_config!: Table<AppConfig, string>;
   campaign_cache!: Table<CachedCampaigns, string>;
 
+  /* Agent Portal tables */
+  agents!: Table<LocalAgent, string>;
+  prospects!: Table<LocalProspect, string>;
+  follow_ups!: Table<LocalFollowUp, string>;
+  agent_stores!: Table<LocalAgentStore, string>;
+  agent_invoices!: Table<LocalAgentInvoice, string>;
+  agent_payments!: Table<LocalAgentPayment, string>;
+  agent_commissions!: Table<LocalAgentCommission, string>;
+  agent_withdrawal_requests!: Table<LocalAgentWithdrawalRequest, string>;
+  agent_commission_settings!: Table<LocalAgentCommissionSetting, string>;
+
   constructor() {
     super('AdimatPOS');
     this.version(2).stores({
@@ -793,6 +962,19 @@ class AdimatDB extends Dexie {
               store.sales_target_monthly = 0;
             }
           });
+      });
+
+      /* Version 21 — Agent Portal tables */
+      this.version(21).stores({
+        agents: 'id, synced',
+        prospects: 'id, agent_id, status, next_follow_up_at, synced',
+        follow_ups: 'id, prospect_id, agent_id, status, follow_up_at, synced',
+        agent_stores: 'id, agent_id, status, prospect_id, synced',
+        agent_invoices: 'id, agent_id, prospect_id, status, due_date, invoice_number, synced',
+        agent_payments: 'id, invoice_id, agent_id, payment_method, created_at, synced',
+        agent_commissions: 'id, agent_id, invoice_id, status, synced',
+        agent_withdrawal_requests: 'id, agent_id, status, requested_at, synced',
+        agent_commission_settings: 'id',
       });
   }
 }
@@ -4794,4 +4976,281 @@ export async function addStoreFromCloud(
 export async function getLastSyncTime(): Promise<string | null> {
   const meta = await db.sync_meta.get('last_sync');
   return meta?.last_synced_at ?? null;
+}
+
+/* ========================================================================
+   Agent Portal CRUD operations (local IndexedDB, queued for Supabase sync)
+   ======================================================================== */
+
+/** ---- Agents ---- */
+
+export async function listLocalAgents(): Promise<LocalAgent[]> {
+  return db.agents.toArray();
+}
+
+export async function getLocalAgent(agentId: string): Promise<LocalAgent | undefined> {
+  return db.agents.get(agentId);
+}
+
+export async function createLocalAgent(agent: Omit<LocalAgent, 'synced'>): Promise<void> {
+  await db.agents.add({ ...agent, synced: 0 });
+}
+
+export async function updateLocalAgent(
+  agentId: string,
+  patch: Partial<LocalAgent>
+): Promise<void> {
+  await db.agents.update(agentId, { ...patch, updated_at: new Date().toISOString(), synced: 0 });
+}
+
+export async function deleteLocalAgent(agentId: string): Promise<void> {
+  await db.agents.delete(agentId);
+}
+
+/** ---- Prospects ---- */
+
+export async function listLocalProspects(agentId?: string): Promise<LocalProspect[]> {
+  if (agentId) {
+    return db.prospects.where('agent_id').equals(agentId).toArray();
+  }
+  return db.prospects.toArray();
+}
+
+export async function getLocalProspect(prospectId: string): Promise<LocalProspect | undefined> {
+  return db.prospects.get(prospectId);
+}
+
+export async function createLocalProspect(
+  prospect: Omit<LocalProspect, 'synced'>
+): Promise<void> {
+  await db.prospects.add({ ...prospect, synced: 0 });
+}
+
+export async function updateLocalProspect(
+  prospectId: string,
+  patch: Partial<LocalProspect>
+): Promise<void> {
+  await db.prospects.update(prospectId, {
+    ...patch,
+    updated_at: new Date().toISOString(),
+    synced: 0,
+  });
+}
+
+export async function deleteLocalProspect(prospectId: string): Promise<void> {
+  await db.prospects.delete(prospectId);
+}
+
+/** ---- Follow-ups ---- */
+
+export async function listLocalFollowUps(
+  filters?: { prospectId?: string; agentId?: string; status?: FollowUpStatus }
+): Promise<LocalFollowUp[]> {
+  let q = db.follow_ups;
+  if (filters?.prospectId) q = q.where('prospect_id').equals(filters.prospectId);
+  if (filters?.agentId) q = q.where('agent_id').equals(filters.agentId);
+  if (filters?.status) q = q.where('status').equals(filters.status);
+  return q.toArray();
+}
+
+export async function getLocalFollowUp(followUpId: string): Promise<LocalFollowUp | undefined> {
+  return db.follow_ups.get(followUpId);
+}
+
+export async function createLocalFollowUp(
+  followUp: Omit<LocalFollowUp, 'synced'>
+): Promise<void> {
+  await db.follow_ups.add({ ...followUp, synced: 0 });
+}
+
+export async function updateLocalFollowUp(
+  followUpId: string,
+  patch: Partial<LocalFollowUp>
+): Promise<void> {
+  await db.follow_ups.update(followUpId, {
+    ...patch,
+    updated_at: new Date().toISOString(),
+    synced: 0,
+  });
+}
+
+export async function deleteLocalFollowUp(followUpId: string): Promise<void> {
+  await db.follow_ups.delete(followUpId);
+}
+
+/** ---- Agent Stores ---- */
+
+export async function listLocalAgentStores(agentId?: string): Promise<LocalAgentStore[]> {
+  if (agentId) {
+    return db.agent_stores.where('agent_id').equals(agentId).toArray();
+  }
+  return db.agent_stores.toArray();
+}
+
+export async function getLocalAgentStore(storeId: string): Promise<LocalAgentStore | undefined> {
+  return db.agent_stores.get(storeId);
+}
+
+export async function createLocalAgentStore(
+  store: Omit<LocalAgentStore, 'synced'>
+): Promise<void> {
+  await db.agent_stores.add({ ...store, synced: 0 });
+}
+
+export async function updateLocalAgentStore(
+  storeId: string,
+  patch: Partial<LocalAgentStore>
+): Promise<void> {
+  await db.agent_stores.update(storeId, {
+    ...patch,
+    updated_at: new Date().toISOString(),
+    synced: 0,
+  });
+}
+
+export async function deleteLocalAgentStore(storeId: string): Promise<void> {
+  await db.agent_stores.delete(storeId);
+}
+
+/** ---- Agent Invoices ---- */
+
+export async function listLocalAgentInvoices(agentId?: string): Promise<LocalAgentInvoice[]> {
+  if (agentId) {
+    return db.agent_invoices.where('agent_id').equals(agentId).toArray();
+  }
+  return db.agent_invoices.toArray();
+}
+
+export async function getLocalAgentInvoice(invoiceId: string): Promise<LocalAgentInvoice | undefined> {
+  return db.agent_invoices.get(invoiceId);
+}
+
+export async function createLocalAgentInvoice(
+  invoice: Omit<LocalAgentInvoice, 'synced'>
+): Promise<void> {
+  await db.agent_invoices.add({ ...invoice, synced: 0 });
+}
+
+export async function updateLocalAgentInvoice(
+  invoiceId: string,
+  patch: Partial<LocalAgentInvoice>
+): Promise<void> {
+  await db.agent_invoices.update(invoiceId, {
+    ...patch,
+    updated_at: new Date().toISOString(),
+    synced: 0,
+  });
+}
+
+export async function deleteLocalAgentInvoice(invoiceId: string): Promise<void> {
+  await db.agent_invoices.delete(invoiceId);
+}
+
+/** ---- Agent Payments ---- */
+
+export async function listLocalAgentPayments(invoiceId?: string): Promise<LocalAgentPayment[]> {
+  if (invoiceId) {
+    return db.agent_payments.where('invoice_id').equals(invoiceId).toArray();
+  }
+  return db.agent_payments.toArray();
+}
+
+export async function createLocalAgentPayment(
+  payment: Omit<LocalAgentPayment, 'synced'>
+): Promise<void> {
+  await db.agent_payments.add({ ...payment, synced: 0 });
+}
+
+export async function updateLocalAgentPayment(
+  paymentId: string,
+  patch: Partial<LocalAgentPayment>
+): Promise<void> {
+  await db.agent_payments.update(paymentId, { ...patch, synced: 0 });
+}
+
+export async function deleteLocalAgentPayment(paymentId: string): Promise<void> {
+  await db.agent_payments.delete(paymentId);
+}
+
+/** ---- Agent Commissions ---- */
+
+export async function listLocalAgentCommissions(agentId?: string): Promise<LocalAgentCommission[]> {
+  if (agentId) {
+    return db.agent_commissions.where('agent_id').equals(agentId).toArray();
+  }
+  return db.agent_commissions.toArray();
+}
+
+export async function createLocalAgentCommission(
+  commission: Omit<LocalAgentCommission, 'synced'>
+): Promise<void> {
+  await db.agent_commissions.add({ ...commission, synced: 0 });
+}
+
+export async function updateLocalAgentCommission(
+  commissionId: string,
+  patch: Partial<LocalAgentCommission>
+): Promise<void> {
+  await db.agent_commissions.update(commissionId, { ...patch, synced: 0 });
+}
+
+/** ---- Agent Withdrawal Requests ---- */
+
+export async function listLocalAgentWithdrawalRequests(
+  agentId?: string
+): Promise<LocalAgentWithdrawalRequest[]> {
+  if (agentId) {
+    return db.agent_withdrawal_requests.where('agent_id').equals(agentId).toArray();
+  }
+  return db.agent_withdrawal_requests.toArray();
+}
+
+export async function getLocalAgentWithdrawalRequest(
+  id: string
+): Promise<LocalAgentWithdrawalRequest | undefined> {
+  return db.agent_withdrawal_requests.get(id);
+}
+
+export async function createLocalAgentWithdrawalRequest(
+  request: Omit<LocalAgentWithdrawalRequest, 'synced'>
+): Promise<void> {
+  await db.agent_withdrawal_requests.add({ ...request, synced: 0 });
+}
+
+export async function updateLocalAgentWithdrawalRequest(
+  id: string,
+  patch: Partial<LocalAgentWithdrawalRequest>
+): Promise<void> {
+  await db.agent_withdrawal_requests.update(id, {
+    ...patch,
+    updated_at: new Date().toISOString(),
+    synced: 0,
+  });
+}
+
+/** ---- Agent Commission Settings ---- */
+
+export async function getLocalCommissionSettings(): Promise<LocalAgentCommissionSetting | undefined> {
+  return db.agent_commission_settings.get('main');
+}
+
+export async function saveLocalCommissionSettings(
+  settings: LocalAgentCommissionSetting
+): Promise<void> {
+  await db.agent_commission_settings.put(settings);
+}
+
+/** ---- Agent PIN verify (local) ---- */
+
+export async function verifyAgentPin(
+  phone: string,
+  pin: string
+): Promise<LocalAgent | null> {
+  const agents = await db.agents.where('phone').equals(phone.trim()).toArray();
+  for (const agent of agents) {
+    if (await verifyUserPin(pin, agent.pin_hash)) {
+      return agent;
+    }
+  }
+  return null;
 }

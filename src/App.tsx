@@ -39,6 +39,12 @@ import TermsPage from '@/pages/TermsPage';
 import NotFoundPage from '@/pages/NotFoundPage';
 import AdminLoginPage from '@/pages/AdminLoginPage';
 import AdminDashboardPage from '@/pages/AdminDashboardPage';
+import AgentLoginPage from '@/pages/AgentLoginPage';
+import AgentDashboardPage from '@/pages/AgentDashboardPage';
+import AgentProspectsPage from '@/pages/AgentProspectsPage';
+import AgentInvoicesPage from '@/pages/AgentInvoicesPage';
+import AgentWalletPage from '@/pages/AgentWalletPage';
+import { useAgentAuthStore } from '@/store/useAgentAuthStore';
 import { isStoreAccessBlocked } from '@/lib/subscription';
 import { checkAndSendSubscriptionExpirySms } from '@/lib/subscriptionReminders';
 import { checkAndSendDebtReminders } from '@/lib/debtReminders';
@@ -47,7 +53,7 @@ import { createAutomaticStoreBackup, recordBackupIssue } from '@/lib/storeBackup
 import { createDueRecurringExpenses } from '@/lib/dexie';
 import { useAccessibilityStore } from '@/lib/accessibility';
 
-type AppMode = 'store' | 'admin-login' | 'admin';
+type AppMode = 'store' | 'admin-login' | 'admin' | 'agent-login' | 'agent';
 
 function readPublicShopSlug(): string | null {
   if (typeof window === 'undefined') return null;

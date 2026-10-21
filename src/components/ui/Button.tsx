@@ -85,4 +85,23 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     );
   }
 );
+;
+
+/** Anchor-styled button for navigation actions. Uses an <a> via asChild for routing. */
+export function LinkButton({
+  className,
+  variant = 'outline',
+  size = 'sm',
+  icon,
+  children,
+  ...props
+}: ButtonProps & { icon?: React.ReactNode; asChild?: boolean; href?: string }) {
+  return (
+    <Button asChild variant={variant as ButtonVariant} size={size as ButtonSize} className={cn('text-center w-auto', className)} {...props}>
+      {icon && <span className="mr-2 flex-shrink-0">{icon}</span>}
+      {children}
+    </Button>
+  );
+}
+
 Button.displayName = 'Button';
