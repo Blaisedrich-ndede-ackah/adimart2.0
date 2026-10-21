@@ -40,7 +40,7 @@
     --color-text: #f1f5f9;
     --color-text-muted: #9aabc0;
     --color-border-subtle: #223149;
-    --color-primary-subtle: #103c36;
+    --color-primary-subtle: #172554;
   }
   html {
     -webkit-text-size-adjust: 100%;
@@ -95,8 +95,8 @@ body {
 /* Keep utility-heavy legacy screens readable when dark mode is enabled. */
 .dark body {
   background:
-    radial-gradient(900px 500px at 0% -10%, rgba(16, 185, 129, 0.12), transparent 58%),
-    radial-gradient(800px 480px at 100% 0%, rgba(30, 64, 175, 0.12), transparent 56%),
+    radial-gradient(900px 500px at 0% -10%, rgba(59, 130, 246, 0.16), transparent 58%),
+    radial-gradient(800px 480px at 100% 0%, rgba(124, 58, 237, 0.14), transparent 56%),
     var(--color-surface);
 }
 
@@ -111,7 +111,14 @@ body {
 
 .dark .bg-emerald-50,
 .dark .bg-green-50 {
-  background-color: #103c36;
+  background-color: #172554;
+}
+
+.dark .bg-emerald-600,
+.dark .bg-emerald-700,
+.dark .bg-green-600,
+.dark .bg-green-700 {
+  background-color: #2563eb;
 }
 
 .dark .bg-amber-50,
@@ -140,7 +147,7 @@ body {
 .dark .text-emerald-700,
 .dark .text-emerald-800,
 .dark .text-green-700 {
-  color: #6ee7b7;
+  color: #93c5fd;
 }
 
 .dark .text-amber-700,
