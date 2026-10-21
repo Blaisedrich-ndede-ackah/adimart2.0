@@ -45,9 +45,10 @@ import {
 import AdminStoreWorkspace from '@/components/AdminStoreWorkspace';
 import AdminCreateStoreForm from '@/components/AdminCreateStoreForm';
 import AdminCampaignManager from '@/components/AdminCampaignManager';
+import AdminBroadcastSms from '@/components/AdminBroadcastSms';
 import CopyableStoreId from '@/components/CopyableStoreId';
 
-type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact' | 'campaigns' | 'learn' | 'sales';
+type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact' | 'campaigns' | 'broadcast' | 'learn' | 'sales';
 
 function defaultReportFromDate(): string {
   const d = new Date();
@@ -464,8 +465,9 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       ['sales', 'Sales', CreditCard],
       ['reports', 'Reports', FileBarChart],
       ['contact', 'Contact', Mail],
-      ['campaigns', 'Campaigns', Megaphone],
-      ['learn', 'Learn', BookOpen],
+['campaigns', 'Campaigns', Megaphone],
+  ['broadcast', 'Broadcast SMS', Megaphone],
+  ['learn', 'Learn', BookOpen],
     ] as const
   );
 
@@ -1560,9 +1562,11 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
           </div>
         )}
 
-        {tab === 'campaigns' && <AdminCampaignManager />}
+{tab === 'campaigns' && <AdminCampaignManager />}
 
-        {data && tab === 'products' && (
+  {data && tab === 'broadcast' && <AdminBroadcastSms stores={data.stores} users={data.users} />}
+
+  {data && tab === 'products' && (
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
             {data.products.length === 0 ? (
               <p className="text-sm text-slate-500 text-center py-10">No products found.</p>
