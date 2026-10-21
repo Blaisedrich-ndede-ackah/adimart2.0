@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Building2, Loader2, Plus, CloudDownload, CheckCircle2, ArrowRightLeft } from 'lucide-react';
 import {
-  restoreStoreFromCloud,
+  addStoreFromCloud,
   assertCanCreateAdditionalStore,
   createStoreWithOwner,
   getAdditionalStoreQuota,
@@ -132,10 +132,10 @@ export default function StoresPortalSection() {
       flash('Enter the Store ID and 4-digit owner PIN. The administrator PIN is also accepted.', true);
       return;
     }
-    if (!confirm('Restore this store from cloud? This replaces the stores currently saved on this device.')) return;
+    if (!confirm('Add this cloud store as a branch on this device? Existing stores will remain available.')) return;
     setBusy(true);
     try {
-      const result = await restoreStoreFromCloud(storeId, cloudPin);
+      const result = await addStoreFromCloud(storeId, cloudPin);
       if (!result.success) {
         flash(result.message, true);
         return;
@@ -222,8 +222,8 @@ export default function StoresPortalSection() {
         {showAddCloud && (
           <div className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
             <p className="text-xs leading-relaxed text-gray-600">
-              Enter the store&apos;s ID and 4-digit owner PIN to restore its cloud data to this device.
-              The administrator PIN can override the owner PIN when authorized.
+              Enter the store&apos;s ID and 4-digit owner PIN to add its cloud data as a branch on this device.
+              Existing stores stay available, and the administrator PIN can override the owner PIN when authorized.
             </p>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               <label className="text-xs font-semibold text-gray-700">
@@ -260,7 +260,7 @@ export default function StoresPortalSection() {
               {busy ? 'Restoring…' : 'Restore from cloud'}
             </button>
             <p className="mt-2 text-[11px] text-amber-700">
-              Restoring replaces the local store data on this device. Use Full Sync for a normal update.
+              This adds or refreshes the selected store as a branch. Other stores on this device are not removed.
             </p>
           </div>
         )}
