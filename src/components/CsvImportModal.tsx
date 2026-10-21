@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
 import { db, getCurrentStoreId } from '@/lib/dexie';
-import { useEffect } from 'react';
 import { X, Upload, FileSpreadsheet, Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { parseProductCsv, CSV_TEMPLATE } from '@/lib/csvImport';
 import { importProductsFromRows } from '@/lib/dexie';
@@ -152,12 +151,10 @@ export default function CsvImportModal({ isOpen, onClose, onImported }: CsvImpor
             className="w-full py-3 bg-primary text-white rounded-xl font-bold disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {isImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-            {conflicts.length > 0 ? 'Resolve Conflicts to Import' : Import  Products}
+            {conflicts.length > 0 ? 'Resolve Conflicts to Import' : 'Import Products'}
           </button>
         </div>
       </div>
     </div>
   );
 }
-
-import { getCurrentStoreId } from '@/lib/dexie';

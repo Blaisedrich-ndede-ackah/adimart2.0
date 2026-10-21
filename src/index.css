@@ -46,6 +46,13 @@ html {
   height: -webkit-fill-available;
 }
 
+/* Fallbacks keep the app usable in browsers without dynamic viewport units. */
+@supports not (height: 100dvh) {
+  .min-h-dvh {
+    min-height: 100vh;
+  }
+}
+
 body {
   height: 100%;
   min-height: 100%;
@@ -93,6 +100,33 @@ input[type="number"] {
   grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
   gap: 0.625rem;
+}
+
+@media (max-width: 767px) {
+  .pos-product-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .pos-product-card {
+    min-height: 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.45rem;
+    padding: 0.625rem;
+    border-radius: 0.875rem;
+  }
+
+  .pos-product-card .product-image {
+    width: 100%;
+    aspect-ratio: 1.45;
+  }
+
+  @supports not (aspect-ratio: 1 / 1) {
+    .pos-product-card .product-image {
+      height: 7rem;
+    }
+  }
 }
 
 @media (min-width: 768px) {
@@ -255,6 +289,18 @@ input[type="number"] {
   scrollbar-width: thin;
   scrollbar-color: rgb(6 95 70 / 30%) transparent;
   padding: 0.75rem 0.85rem 1rem;
+}
+
+@supports not (overscroll-behavior: none) {
+  body {
+    position: static;
+    overflow: auto;
+  }
+
+  #root {
+    min-height: 100vh;
+    overflow: visible;
+  }
 }
 
 @media (min-width: 768px) {
