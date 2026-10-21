@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, House,
-  CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare,
+  CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare, Moon, Sun,
   ShoppingCart, RotateCcw,
   ContactRound, ArrowLeftRight, Building2,
 } from 'lucide-react';
@@ -36,12 +36,23 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const t = useT();
   const [moreOpen, setMoreOpen] = useState(false);
   const [storeCount, setStoreCount] = useState(1);
+  const [darkMode, setDarkMode] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('adimat-theme') === 'dark' ||
+      (!window.localStorage.getItem('adimat-theme') && window.matchMedia?.('(prefers-color-scheme: dark)').matches);
+  });
   const leftHanded = useAccessibilityStore((state) => state.leftHanded);
   const isOwner = currentUser?.role === 'owner';
   const ecommerceEnabled = (currentStore?.ecommerce_enabled ?? 0) === 1;
   const canManageEcommerce =
     isOwner || (currentUser?.can_manage_ecommerce ?? 0) === 1;
   const cashbookOk = canAccessCashbook(currentUser);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', darkMode);
+    document.documentElement.style.colorScheme = darkMode ? 'dark' : 'light';
+    window.localStorage.setItem('adimat-theme', darkMode ? 'dark' : 'light');
+  }, [darkMode]);
 
   useEffect(() => {
     let active = true;
@@ -205,6 +216,15 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
           <LanguageSwitcher variant="onPrimary" compact />
           <button
             type="button"
+            onClick={() => setDarkMode((enabled) => !enabled)}
+            aria-pressed={darkMode}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-emerald-50 hover:bg-white/10 touch-target"
+          >
+            {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            {darkMode ? 'Light mode' : 'Dark mode'}
+          </button>
+          <button
+            type="button"
             onClick={switchUser}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-emerald-50 hover:bg-white/10 touch-target"
           >
@@ -351,10 +371,19 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
 
               <div className="mt-2 border-t border-surface-muted px-3 pt-2 pb-1 space-y-2">
                 <AccessibilityControls variant="menu" />
-                <LanguageSwitcher compact />
-                <button
-                  type="button"
-                  onClick={() => {
+  <LanguageSwitcher compact />
+  <button
+  type="button"
+  onClick={() => setDarkMode((enabled) => !enabled)}
+  aria-pressed={darkMode}
+  className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 touch-target"
+  >
+  {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+  {darkMode ? 'Light mode' : 'Dark mode'}
+  </button>
+  <button
+  type="button"
+  onClick={() => {
                     setMoreOpen(false);
                     switchUser();
                   }}

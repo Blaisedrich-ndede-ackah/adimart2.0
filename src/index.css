@@ -27,6 +27,21 @@
   :root {
     color-scheme: light;
   }
+
+  :root.dark {
+    color-scheme: dark;
+    --color-surface: #0f172a;
+    --color-surface-muted: #172033;
+    --color-surface-card: #182538;
+    --color-border: #334155;
+    --color-ink: #e2e8f0;
+    --color-muted: #94a3b8;
+    --color-bg: #0f172a;
+    --color-text: #e2e8f0;
+    --color-text-muted: #94a3b8;
+    --color-border-subtle: #334155;
+    --color-primary-subtle: #123b34;
+  }
   html {
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
@@ -56,6 +71,7 @@ html {
 body {
   height: 100%;
   min-height: 100%;
+  transition: background-color 180ms ease, color 180ms ease;
   min-height: -webkit-fill-available;
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
