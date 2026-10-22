@@ -3,7 +3,7 @@ import {
   Building2, Users, Package, Wallet, RefreshCcw, LogOut, ChevronLeft, ChevronRight,
   Smartphone, CheckCircle2, AlertCircle, Loader2, Store, CreditCard, CalendarClock, Mail,
   FileBarChart, Download, FileText, Ban, LayoutDashboard, MoreHorizontal, X, Search, Megaphone,
-  BookOpen, Printer,
+  BookOpen, Printer, MessageSquare,
 } from 'lucide-react';
 import {
   AdminDashboardData,
@@ -46,9 +46,10 @@ import AdminStoreWorkspace from '@/components/AdminStoreWorkspace';
 import AdminCreateStoreForm from '@/components/AdminCreateStoreForm';
 import AdminCampaignManager from '@/components/AdminCampaignManager';
 import AdminBroadcastSms from '@/components/AdminBroadcastSms';
+import AdminSupportAgent from '@/components/AdminSupportAgent';
 import CopyableStoreId from '@/components/CopyableStoreId';
 
-type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact' | 'campaigns' | 'broadcast' | 'learn' | 'sales';
+type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact' | 'campaigns' | 'broadcast' | 'support' | 'learn' | 'sales';
 
 function defaultReportFromDate(): string {
   const d = new Date();
@@ -467,6 +468,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       ['contact', 'Contact', Mail],
 ['campaigns', 'Campaigns', Megaphone],
   ['broadcast', 'Broadcast SMS', Megaphone],
+  ['support', 'Support Agent', MessageSquare],
   ['learn', 'Learn', BookOpen],
     ] as const
   );
@@ -1565,6 +1567,8 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
 {tab === 'campaigns' && <AdminCampaignManager />}
 
   {data && tab === 'broadcast' && <AdminBroadcastSms stores={data.stores} users={data.users} />}
+
+  {tab === 'support' && <AdminSupportAgent />}
 
   {data && tab === 'products' && (
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
