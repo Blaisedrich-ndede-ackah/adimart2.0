@@ -79,6 +79,12 @@ function userNeedsPhone(user: { phone?: string | null } | null | undefined): boo
 export default function App() {
   const { isAuthenticated, currentUser, currentStore, isStoreSetup, isLoading, initialize, switchUser } =
     useAuthStore();
+  const {
+    currentAgent,
+    isAuthenticated: isAgentAuthenticated,
+    isLoading: isAgentLoading,
+    loginError: agentLoginError,
+  } = useAgentAuthStore();
   const leftHanded = useAccessibilityStore((state) => state.leftHanded);
   const [currentPage, setCurrentPage] = useState('home');
   const [quickAction, setQuickAction] = useState<'add-product' | 'add-expense' | null>(null);
