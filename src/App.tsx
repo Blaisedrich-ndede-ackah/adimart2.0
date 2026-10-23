@@ -34,6 +34,7 @@ import PurchasingPage from '@/pages/PurchasingPage';
 import OwnerHomePage from '@/pages/OwnerHomePage';
 import MultiStorePage from '@/pages/MultiStorePage';
 import LearnAdimatPage from '@/pages/LearnAdimatPage';
+import CampaignsPage from '@/pages/CampaignsPage';
 import PublicShopPage from '@/pages/PublicShopPage';
 import TermsPage from '@/pages/TermsPage';
 import NotFoundPage from '@/pages/NotFoundPage';
@@ -423,6 +424,8 @@ export default function App() {
         return <DevicesPage />;
       case 'learn':
         return currentUser ? <LearnAdimatPage onNavigate={setCurrentPage} /> : <POSPage />;
+      case 'campaigns':
+        return currentUser ? <CampaignsPage /> : <POSPage />;
       case 'subscription':
         return role === 'owner' ? <SubscriptionPage /> : <POSPage />;
       case 'inventory':
