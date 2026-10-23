@@ -1,0 +1,3 @@
+-- This storefront uses the Adimat database.
+-- Run supabase-init.sql and supabase-migrate-ecommerce.sql in the Adimat project.
+-- Do not create a separate products or orders table for BONDZTECH.
