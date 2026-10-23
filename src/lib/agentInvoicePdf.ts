@@ -112,7 +112,7 @@ export function generateAgentInvoicePdf(data: AgentInvoicePdfData): jsPDF {
   const boxTop = y + 4;
   doc.setFillColor(236, 253, 245);
   doc.setDrawColor(RULE[0], RULE[1], RULE[2]);
-  doc.roundRect(MARGIN_X, boxTop, PAGE_W - MARGIN_X * 2, 22, 3, 3, 'FD');
+  doc.roundedRect(MARGIN_X, boxTop, PAGE_W - MARGIN_X * 2, 22, 3, 3, 'FD');
   doc.setTextColor(INK[0], INK[1], INK[2]);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
@@ -163,6 +163,7 @@ export function generateAgentInvoicePdf(data: AgentInvoicePdfData): jsPDF {
   }
 
   return doc;
+}
 
 export function downloadAgentInvoicePdf(data: AgentInvoicePdfData): void {
   const doc = generateAgentInvoicePdf(data);
@@ -187,5 +188,4 @@ export function shareAgentInvoiceViaWhatsApp(
     ? `https://wa.me/${digits}?text=${message}`
     : `https://wa.me/?text=${message}`;
   window.open(url, '_blank', 'noopener,noreferrer');
-}
 }

@@ -87,7 +87,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
 );
 ;
 
-/** Anchor-styled button for navigation actions. Uses an <a> via asChild for routing. */
+/** Compact button used by the agent portal for row and toolbar actions. */
 export function LinkButton({
   className,
   variant = 'outline',
@@ -95,10 +95,15 @@ export function LinkButton({
   icon,
   children,
   ...props
-}: ButtonProps & { icon?: React.ReactNode; asChild?: boolean; href?: string }) {
+}: ButtonProps & { icon?: React.ReactNode }) {
   return (
-    <Button asChild variant={variant as ButtonVariant} size={size as ButtonSize} className={cn('text-center w-auto', className)} {...props}>
-      {icon && <span className="mr-2 flex-shrink-0">{icon}</span>}
+    <Button
+      variant={variant}
+      size={size}
+      leftIcon={icon}
+      className={cn('w-auto', className)}
+      {...props}
+    >
       {children}
     </Button>
   );
