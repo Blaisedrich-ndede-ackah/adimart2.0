@@ -506,7 +506,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
 
   return (
     <div
-      className="h-full w-full min-w-0 bg-[var(--color-surface)] flex flex-col overflow-hidden"
+      className="ios-canvas h-full w-full min-w-0 flex flex-col overflow-hidden"
       style={{
         paddingTop: 'env(safe-area-inset-top)',
         paddingLeft: 'env(safe-area-inset-left)',
@@ -563,7 +563,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       </header>
 
       {/* Desktop / tablet top tabs */}
-      <nav className="hidden lg:flex flex-shrink-0 gap-1 overflow-x-auto border-b border-black/10 bg-[#F2F2F7] px-2 py-2 no-scrollbar md:px-4 lg:px-8 2xl:px-12">
+      <nav className="ios-pane hidden lg:flex flex-shrink-0 gap-1 overflow-x-auto border-b border-white/50 px-2 py-2 no-scrollbar md:px-4 lg:px-8 2xl:px-12">
         {tabs.map(([id, label]) => (
           <button
             key={id}
@@ -1813,7 +1813,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
             onClick={() => setMoreOpen(false)}
           />
           <div
-            className="relative rounded-t-[20px] bg-[#F2F2F7] shadow-2xl animate-slide-up"
+            className="ios-glass relative rounded-t-[20px] shadow-2xl animate-slide-up"
             style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
           >
             <div className="px-4 pb-2 pt-2">

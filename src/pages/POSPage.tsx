@@ -1016,7 +1016,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
           style={{ order: posLayout.paneOrder.indexOf('cart') }}
           className={`${
             posTab === 'cart' ? 'flex' : 'hidden'
-          } lg:flex flex-col w-full lg:w-[420px] 2xl:w-[460px] flex-shrink-0 min-h-0 bg-[var(--color-surface)] lg:bg-white`}
+          } ios-pane lg:flex flex-col w-full lg:w-[420px] 2xl:w-[460px] flex-shrink-0 min-h-0 border-l border-white/50`}
         >
           <div className="flex items-center justify-between gap-2 px-3 lg:px-4 py-3 border-b border-emerald-100 flex-shrink-0">
             <h3 className="text-sm font-bold text-gray-800">

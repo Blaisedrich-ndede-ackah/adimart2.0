@@ -32,9 +32,15 @@
     --ios-separator: rgba(60, 60, 67, 0.29);
     --ios-fill: rgba(118, 118, 128, 0.12);
     --ios-fill-strong: rgba(118, 118, 128, 0.2);
-    --ios-grouped: #f2f2f7;
-    --ios-bar: rgba(242, 242, 247, 0.84);
+    --ios-grouped: #e8eef6;
+    --ios-bar: rgba(255, 255, 255, 0.62);
     --ios-radius: 14px;
+    --ios-glass: rgba(255, 255, 255, 0.58);
+    --ios-glass-strong: rgba(255, 255, 255, 0.74);
+    --ios-blur: saturate(185%) blur(28px);
+    --ios-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.78), inset 0 -1px 0 rgba(255, 255, 255, 0.22);
+    --ios-depth: 0 12px 32px rgba(36, 54, 78, 0.08);
+    --ios-ease: cubic-bezier(0.22, 1, 0.36, 1);
     accent-color: var(--color-primary);
   }
   html {
@@ -75,7 +81,11 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   color: var(--color-ink);
-  background: var(--color-surface);
+  background:
+    radial-gradient(90% 55% at 8% -12%, rgba(126, 198, 255, 0.55), transparent 58%),
+    radial-gradient(70% 45% at 100% -8%, rgba(86, 214, 168, 0.32), transparent 52%),
+    radial-gradient(55% 40% at 72% 112%, rgba(255, 190, 140, 0.28), transparent 50%),
+    linear-gradient(180deg, #e7eef6 0%, #f4f1f8 100%);
   overscroll-behavior: none;
   position: fixed;
   inset: 0;
@@ -91,10 +101,34 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 
-@media (min-width: 768px) {
-  body {
-    background: var(--ios-grouped);
-  }
+.ios-canvas {
+  background:
+    radial-gradient(90% 55% at 8% -12%, rgba(126, 198, 255, 0.55), transparent 58%),
+    radial-gradient(70% 45% at 100% -8%, rgba(86, 214, 168, 0.32), transparent 52%),
+    radial-gradient(55% 40% at 72% 112%, rgba(255, 190, 140, 0.28), transparent 50%),
+    linear-gradient(180deg, #e7eef6 0%, #f4f1f8 100%);
+}
+
+.ios-glass,
+.ios-pane {
+  background-color: var(--ios-glass);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.28));
+  -webkit-backdrop-filter: var(--ios-blur);
+  backdrop-filter: var(--ios-blur);
+  transition:
+    background-color 320ms var(--ios-ease),
+    box-shadow 320ms var(--ios-ease),
+    transform 320ms var(--ios-ease);
+}
+
+.ios-glass {
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  box-shadow: var(--ios-highlight), 0 0 0 0.5px rgba(60, 60, 67, 0.08), var(--ios-depth);
+}
+
+/* Full-height chrome (sidebar, cart, tab strips) stays translucent without a boxed border. */
+.ios-pane {
+  box-shadow: var(--ios-highlight);
 }
 
 input[type="number"]::-webkit-inner-spin-button,
@@ -155,19 +189,23 @@ input[type="number"] {
   align-items: center;
   gap: 0.75rem;
   padding: 0.75rem;
-  border: 0.5px solid rgba(60, 60, 67, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.66);
   border-radius: 16px;
-  background: var(--color-surface-card);
+  background-color: rgba(255, 255, 255, 0.62);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.34));
+  -webkit-backdrop-filter: saturate(170%) blur(18px);
+  backdrop-filter: saturate(170%) blur(18px);
   color: var(--color-ink);
   text-align: left;
-  box-shadow: none;
+  box-shadow: var(--ios-highlight), 0 10px 28px rgba(36, 54, 78, 0.07);
   cursor: pointer;
-  transition: transform 140ms cubic-bezier(0.32, 0.72, 0, 1), background-color 140ms ease, border-color 140ms ease;
+  transition: transform 320ms var(--ios-ease), background-color 320ms var(--ios-ease), box-shadow 320ms var(--ios-ease);
 }
 
 .pos-product-card:not(:disabled):hover {
-  border-color: rgba(6, 95, 70, 0.35);
-  background: #fff;
+  border-color: rgba(255, 255, 255, 0.9);
+  background-color: rgba(255, 255, 255, 0.78);
+  box-shadow: var(--ios-highlight), 0 16px 36px rgba(36, 54, 78, 0.1);
 }
 
 .pos-product-card:not(:disabled):active {
@@ -256,12 +294,15 @@ input[type="number"] {
   color: white;
 }
 
-/* Surface card — iOS grouped inset */
+/* Surface card — liquid glass inset */
 .surface-card {
-  background: var(--color-surface-card);
-  border: 0.5px solid rgba(60, 60, 67, 0.12);
+  background-color: rgba(255, 255, 255, 0.64);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.36));
+  -webkit-backdrop-filter: saturate(170%) blur(18px);
+  backdrop-filter: saturate(170%) blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.66);
   border-radius: var(--ios-radius);
-  box-shadow: none;
+  box-shadow: var(--ios-highlight), 0 10px 28px rgba(36, 54, 78, 0.07);
 }
 
 /* Page shell — shared layout primitive */
@@ -270,7 +311,7 @@ input[type="number"] {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: var(--color-surface);
+  background: transparent;
 }
 
 /* Shared page chrome — frosted iOS navigation bar */
@@ -280,10 +321,13 @@ input[type="number"] {
   position: relative;
   z-index: 20;
   color: var(--ios-label);
-  background: var(--ios-bar);
-  -webkit-backdrop-filter: saturate(180%) blur(20px);
-  backdrop-filter: saturate(180%) blur(20px);
-  border-bottom: 0.5px solid var(--ios-separator);
+  background-color: rgba(255, 255, 255, 0.55);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.28));
+  -webkit-backdrop-filter: var(--ios-blur);
+  backdrop-filter: var(--ios-blur);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: var(--ios-highlight), 0 8px 24px rgba(36, 54, 78, 0.05);
+  transition: background-color 320ms var(--ios-ease), box-shadow 320ms var(--ios-ease);
 }
 
 .page-header {
@@ -566,10 +610,12 @@ input[type="number"] {
     padding: clamp(1.25rem, 2.4vw, 2.25rem);
     border: 0.5px solid rgba(255, 255, 255, 0.14);
     border-radius: 28px;
-    background: rgba(28, 28, 30, 0.78);
-    -webkit-backdrop-filter: saturate(180%) blur(24px);
-    backdrop-filter: saturate(180%) blur(24px);
-    box-shadow: 0 24px 60px -28px rgba(0, 0, 0, 0.55);
+    background: rgba(22, 24, 28, 0.55);
+    -webkit-backdrop-filter: saturate(180%) blur(36px);
+    backdrop-filter: saturate(180%) blur(36px);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.28),
+      0 24px 60px -28px rgba(0, 0, 0, 0.55);
   }
 }
 
@@ -630,10 +676,14 @@ input[type="number"] {
   max-height: 92dvh;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  background: var(--ios-grouped);
+  background-color: rgba(244, 247, 252, 0.72);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(232, 238, 246, 0.45));
+  -webkit-backdrop-filter: saturate(180%) blur(32px);
+  backdrop-filter: saturate(180%) blur(32px);
+  border: 1px solid rgba(255, 255, 255, 0.55);
   border-radius: 20px 20px 0 0;
   padding-bottom: env(safe-area-inset-bottom);
-  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--ios-highlight), 0 -16px 48px rgba(20, 30, 48, 0.18);
 }
 
 .sheet-panel::before {
@@ -662,10 +712,13 @@ input[type="number"] {
 }
 
 .surface-card {
-  background: var(--color-surface-card);
-  border: 0.5px solid rgba(60, 60, 67, 0.12);
+  background-color: rgba(255, 255, 255, 0.64);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.36));
+  -webkit-backdrop-filter: saturate(170%) blur(18px);
+  backdrop-filter: saturate(170%) blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.66);
   border-radius: var(--ios-radius);
-  box-shadow: none;
+  box-shadow: var(--ios-highlight), 0 10px 28px rgba(36, 54, 78, 0.07);
 }
 
 @keyframes slideUp {
@@ -721,11 +774,12 @@ input[type="number"] {
   justify-content: space-between;
   gap: 1rem;
   padding: 0.65rem 1rem;
-  background: rgba(255, 255, 255, 0.86);
-  -webkit-backdrop-filter: saturate(180%) blur(18px);
-  backdrop-filter: saturate(180%) blur(18px);
-  border-top: 0.5px solid var(--ios-separator);
-  box-shadow: none;
+  background-color: rgba(255, 255, 255, 0.62);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.72));
+  -webkit-backdrop-filter: var(--ios-blur);
+  backdrop-filter: var(--ios-blur);
+  border-top: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: var(--ios-highlight);
   padding-bottom: max(0.65rem, env(safe-area-inset-bottom));
 }
 
@@ -853,11 +907,21 @@ input[type="number"] {
 
 /* iOS tab bar */
 .ios-tabbar {
-  background: rgba(249, 249, 249, 0.86);
-  -webkit-backdrop-filter: saturate(180%) blur(20px);
-  backdrop-filter: saturate(180%) blur(20px);
-  border-top: 0.5px solid var(--ios-separator);
-  box-shadow: none;
+  background-color: rgba(255, 255, 255, 0.5);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0.62));
+  -webkit-backdrop-filter: var(--ios-blur);
+  backdrop-filter: var(--ios-blur);
+  border-top: 1px solid rgba(255, 255, 255, 0.62);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  transition: background-color 320ms var(--ios-ease), box-shadow 320ms var(--ios-ease);
+}
+
+.ios-tab-item {
+  transition: color 280ms var(--ios-ease), transform 280ms var(--ios-ease);
+}
+
+.ios-tab-item:active {
+  transform: scale(0.96);
 }
 
 .ios-tab-item {
@@ -953,7 +1017,36 @@ html[data-high-contrast="true"] .surface-card,
 html[data-high-contrast="true"] .page-header,
 html[data-high-contrast="true"] .ios-bar,
 html[data-high-contrast="true"] .ios-tabbar,
-html[data-high-contrast="true"] .pos-product-card {
+html[data-high-contrast="true"] .pos-product-card,
+html[data-high-contrast="true"] .ios-glass,
+html[data-high-contrast="true"] .ios-pane,
+html[data-high-contrast="true"] .sheet-panel,
+html[data-high-contrast="true"] .sticky-save-bar {
+  border-color: #000;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-image: none;
+  background-color: #fff;
+}
+
+/* Cards and panes over the watery canvas read as frosted glass. Buttons stay solid. */
+.ios-canvas :where(.bg-white):not(button):not(a):not(input):not(select):not(textarea),
+.page-body :where(.bg-white):not(button):not(a):not(input):not(select):not(textarea) {
+  background-color: rgba(255, 255, 255, 0.66);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.4));
+  -webkit-backdrop-filter: saturate(165%) blur(16px);
+  backdrop-filter: saturate(165%) blur(16px);
+  border-color: rgba(255, 255, 255, 0.72);
+  box-shadow: var(--ios-highlight), 0 8px 22px rgba(36, 54, 78, 0.06);
+  transition: background-color 320ms var(--ios-ease), box-shadow 320ms var(--ios-ease), transform 320ms var(--ios-ease);
+}
+
+html[data-high-contrast="true"] .ios-canvas :where(.bg-white),
+html[data-high-contrast="true"] .page-body :where(.bg-white) {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-image: none;
+  background-color: #fff;
   border-color: #000;
 }
 
@@ -961,16 +1054,23 @@ html[data-high-contrast="true"] .pos-product-card {
   .page-header,
   .ios-bar,
   .ios-tabbar,
+  .ios-glass,
+  .ios-pane,
   .sticky-save-bar,
-  .wide-auth-shell .wide-auth-card {
+  .surface-card,
+  .pos-product-card,
+  .sheet-panel,
+  .wide-auth-shell .wide-auth-card,
+  .ios-canvas :where(.bg-white):not(button):not(a):not(input):not(select):not(textarea),
+  .page-body :where(.bg-white):not(button):not(a):not(input):not(select):not(textarea) {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
-    background: #f2f2f7;
+    background-image: none;
+    background-color: #f7f8fa;
   }
 
-  .ios-tabbar,
-  .sticky-save-bar {
-    background: #f9f9f9;
+  .wide-auth-shell .wide-auth-card {
+    background-color: #1c1c1e;
   }
 }
 
@@ -980,6 +1080,20 @@ html[data-high-contrast="true"] .pos-product-card {
   .animate-slide-in-right,
   .pulse-ring {
     animation: none;
+  }
+
+  .ios-glass,
+  .ios-pane,
+  .page-header,
+  .ios-bar,
+  .ios-tabbar,
+  .pos-product-card,
+  .ios-tab-item,
+  .surface-card,
+  .sheet-panel,
+  .ios-canvas :where(.bg-white),
+  button {
+    transition: none;
   }
 }
 

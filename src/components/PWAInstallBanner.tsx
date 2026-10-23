@@ -103,7 +103,7 @@ export default function PWAInstallBanner() {
   return (
     <>
       {/* Main Install Banner */}
-      <div className="relative z-50 animate-fade-in bg-[#F2F2F7] px-3 py-2">
+      <div className="relative z-50 animate-fade-in px-3 py-2">
         <div className="flex items-center justify-between gap-3 rounded-[14px] bg-white px-3 py-2 shadow-[0_0_0_0.5px_rgba(60,60,67,0.12)]">
         <div className="flex items-center gap-2 min-w-0 flex-1">
           <Download className="w-5 h-5 flex-shrink-0 text-primary" />

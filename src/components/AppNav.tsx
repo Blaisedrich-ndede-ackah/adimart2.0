@@ -139,7 +139,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className={`hidden lg:flex w-60 xl:w-72 shrink-0 flex-col self-stretch bg-[#F2F2F7] text-ink border-black/10 ${
+      <aside className={`ios-pane hidden lg:flex w-60 xl:w-72 shrink-0 flex-col self-stretch text-ink border-white/50 ${
         leftHanded ? 'lg:order-2 border-l' : 'border-r'
       }`}>
         <div className="px-4 pt-6 pb-3">
@@ -269,10 +269,10 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
             onClick={() => setMoreOpen(false)}
           />
           <div
-            className="relative max-h-[82vh] max-h-[82dvh] overflow-y-auto rounded-t-[20px] bg-[#F2F2F7] shadow-2xl animate-slide-up"
+            className="ios-glass relative max-h-[82vh] max-h-[82dvh] overflow-y-auto rounded-t-[20px] shadow-2xl animate-slide-up"
             style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
           >
-            <div className="sticky top-0 z-10 bg-[#F2F2F7]/90 px-4 pb-2 pt-2 backdrop-blur-md">
+            <div className="ios-pane sticky top-0 z-10 px-4 pb-2 pt-2">
               <div className="mx-auto mb-2 h-[5px] w-9 rounded-full bg-black/20" />
               <div className="flex items-center justify-between">
                 <div className="min-w-0">

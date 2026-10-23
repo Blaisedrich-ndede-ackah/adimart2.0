@@ -38,7 +38,7 @@ export default function AgentShell({ onLogout }: AgentShellProps) {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#F2F2F7]">
+    <div className="ios-canvas flex h-full min-h-0 flex-col">
       <header className="ios-bar flex items-center justify-between gap-3 px-4 py-3 md:px-6">
         <div className="min-w-0">
           <p className="text-[13px] font-medium text-muted">Adimat agent</p>
@@ -53,7 +53,7 @@ export default function AgentShell({ onLogout }: AgentShellProps) {
           Sign out
         </button>
       </header>
-      <nav className="hidden gap-1 overflow-x-auto border-b border-black/10 bg-[#F2F2F7] px-4 py-2 md:flex md:px-6">
+      <nav className="ios-pane hidden gap-1 overflow-x-auto border-b border-white/50 px-4 py-2 md:flex md:px-6">
         {NAV.map((item) => {
           const Icon = item.icon;
           const active = screen === item.id;
