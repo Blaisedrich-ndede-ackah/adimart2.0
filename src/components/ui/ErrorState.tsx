@@ -17,11 +17,11 @@ export function ErrorState({
 }: ErrorStateProps) {
   return (
     <div className={`flex flex-col items-center justify-center text-center py-12 px-4 ${className}`}>
-      <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-red-100">
-        <AlertTriangle className="h-6 w-6 text-red-600" />
+      <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-white shadow-[0_0_0_0.5px_rgba(60,60,67,0.12)]">
+        <AlertTriangle className="h-7 w-7 text-danger" />
       </div>
-      <p className="text-sm font-bold text-ink">{title}</p>
-      <p className="mt-1 text-xs text-muted max-w-sm">{message}</p>
+      <p className="text-[17px] font-semibold tracking-tight text-ink">{title}</p>
+      <p className="mt-1 text-[13px] leading-relaxed text-muted max-w-sm">{message}</p>
       {onRetry && (
         <Button variant="outline" size="sm" onClick={onRetry} className="mt-4">
           Try again

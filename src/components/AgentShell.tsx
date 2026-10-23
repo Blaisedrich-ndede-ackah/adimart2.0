@@ -38,32 +38,22 @@ export default function AgentShell({ onLogout }: AgentShellProps) {
   };
 
   return (
-    <div className="h-full flex flex-col bg-slate-50">
-      <header className="bg-emerald-700 text-white px-4 py-3 flex items-center justify-between gap-3">
+    <div className="ios-canvas flex h-full min-h-0 flex-col">
+      <header className="ios-bar flex items-center justify-between gap-3 px-4 py-3 md:px-6">
         <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-wide text-emerald-100">Adimat agent</p>
-          <h1 className="text-base font-bold truncate">{agent?.full_name || 'Agent portal'}</h1>
+          <p className="text-[13px] font-medium text-muted">Adimat agent</p>
+          <h1 className="truncate text-[22px] font-bold tracking-tight text-ink md:text-[28px]">{agent?.full_name || 'Agent portal'}</h1>
         </div>
         <button
           type="button"
           onClick={leave}
-          className="inline-flex items-center gap-1 rounded-xl bg-white/10 px-3 py-2 text-xs font-semibold"
+          className="inline-flex min-h-11 items-center gap-1 rounded-full bg-black/[0.05] px-3 py-2 text-[13px] font-semibold text-primary"
         >
           <LogOut className="w-3.5 h-3.5" />
           Sign out
         </button>
       </header>
-      {syncNote && (
-        <p className="px-4 py-2 text-xs text-emerald-900 bg-emerald-50 border-b border-emerald-100">{syncNote}</p>
-      )}
-      <div className="flex-1 min-h-0 overflow-y-auto pb-24">
-        {screen === 'home' && <AgentDashboardPage onNavigate={setScreen} />}
-        {screen === 'prospects' && <AgentProspectsPage onCreateInvoice={() => setScreen('invoices')} />}
-        {screen === 'followups' && <AgentFollowUpsPage />}
-        {screen === 'invoices' && <AgentInvoicesPage />}
-        {screen === 'wallet' && <AgentWalletPage />}
-      </div>
-      <nav className="fixed bottom-0 inset-x-0 z-30 border-t border-emerald-100 bg-white grid grid-cols-5">
+      <nav className="ios-pane hidden gap-1 overflow-x-auto border-b border-white/50 px-4 py-2 md:flex md:px-6">
         {NAV.map((item) => {
           const Icon = item.icon;
           const active = screen === item.id;
@@ -72,11 +62,46 @@ export default function AgentShell({ onLogout }: AgentShellProps) {
               key={item.id}
               type="button"
               onClick={() => setScreen(item.id)}
-              className={`flex flex-col items-center gap-1 py-2 text-[11px] font-semibold ${
-                active ? 'text-emerald-700' : 'text-slate-500'
+              className={`inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full px-3 text-[15px] font-medium ${
+                active ? 'bg-white text-primary shadow-[0_0_0_0.5px_rgba(60,60,67,0.12)]' : 'text-muted'
               }`}
             >
-              <Icon className="w-4 h-4" />
+              <Icon className="h-4 w-4" />
+              {item.label}
+            </button>
+          );
+        })}
+      </nav>
+      {syncNote && (
+        <p className="border-b border-black/5 bg-white px-4 py-2 text-[13px] text-ink md:px-6">{syncNote}</p>
+      )}
+      <div className="min-h-0 flex-1 overflow-y-auto pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-6">
+        {screen === 'home' && <AgentDashboardPage onNavigate={setScreen} />}
+        {screen === 'prospects' && <AgentProspectsPage onCreateInvoice={() => setScreen('invoices')} />}
+        {screen === 'followups' && <AgentFollowUpsPage />}
+        {screen === 'invoices' && <AgentInvoicesPage />}
+        {screen === 'wallet' && <AgentWalletPage />}
+      </div>
+      <nav
+        className="ios-tabbar fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 md:hidden"
+        style={{
+          left: 'env(safe-area-inset-left)',
+          right: 'env(safe-area-inset-right)',
+          paddingBottom: 'env(safe-area-inset-bottom)',
+        }}
+      >
+        {NAV.map((item) => {
+          const Icon = item.icon;
+          const active = screen === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setScreen(item.id)}
+              data-active={active}
+              className="ios-tab-item flex flex-col items-center gap-0.5 px-1 py-1.5 text-[10px] font-medium"
+            >
+              <Icon className="h-[22px] w-[22px]" strokeWidth={active ? 2.4 : 1.8} />
               {item.label}
             </button>
           );

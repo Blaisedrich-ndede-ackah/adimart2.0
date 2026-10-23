@@ -461,7 +461,7 @@ export default function App() {
 
   return authenticatedChrome(
     <div
-      className="h-full w-full min-w-0 flex flex-col lg:flex-row overflow-hidden bg-[var(--color-surface)]"
+      className="ios-canvas h-full w-full min-w-0 flex flex-col lg:flex-row overflow-hidden"
       style={{
         paddingTop: 'env(safe-area-inset-top)',
         paddingLeft: 'env(safe-area-inset-left)',

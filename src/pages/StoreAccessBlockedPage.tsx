@@ -70,7 +70,7 @@ export default function StoreAccessBlockedPage() {
   );
 
   return (
-    <div className="min-h-full min-h-dvh bg-[var(--color-surface)] flex flex-col">
+    <div className="ios-canvas min-h-full min-h-dvh flex flex-col">
       <header className="bg-primary text-white px-4 py-5 flex-shrink-0">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">

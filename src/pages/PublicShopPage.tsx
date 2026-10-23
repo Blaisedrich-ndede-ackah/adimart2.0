@@ -145,7 +145,7 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
 
   if (loading) {
     return (
-      <div className="h-full min-h-0 bg-[var(--color-surface)] flex items-center justify-center">
+      <div className="ios-canvas h-full min-h-0 flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
       </div>
     );
@@ -153,7 +153,7 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
 
   if (!catalog) {
     return (
-      <div className="h-full min-h-0 bg-[var(--color-surface)] flex flex-col items-center justify-center p-6 text-center">
+      <div className="ios-canvas h-full min-h-0 flex flex-col items-center justify-center p-6 text-center">
         <Package className="w-12 h-12 text-gray-300 mb-3" />
         <h1 className="text-xl font-bold text-gray-900 mb-2">Shop unavailable</h1>
         <p className="text-sm text-gray-500 max-w-sm">{error || 'This storefront was not found.'}</p>
