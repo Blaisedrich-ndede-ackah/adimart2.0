@@ -5,7 +5,7 @@
 **Document type:** System architecture, data models, sync, security, integrations, and operations  
 **Audience:** Developers, product owners, platform operators, technical stakeholders  
 **Currency / locale:** Ghana Cedi (GHS / GH₵), dates styled for `en-GH`, Ghana phone numbers (e.g. `024XXXXXXX`)  
-**Status:** Future development — specification only, no implementation yet  
+**Status:** Implemented in the Adimat app. Open `#/agent` or tap Agent portal on the store login screen. Platform admins register agents from Admin → Agents. Apply `supabase-migrate-agent-portal.sql` before cloud sync.  
 **Parent system:** Adimat POS (React 19 + Vite + Tailwind + TypeScript, Supabase + Dexie, Zustand, `swr`, `jspdf`, Paystack)
 
 ---
@@ -552,16 +552,12 @@ All data access goes through the Supabase client (anon key + RLS). Recommended R
 
 ---
 
-## 12. Known Gaps (to address during implementation)
+## 12. Known Gaps
 
-1. No agent-portal tables exist yet — create the migration SQL listed in §5.1.
-2. No agent PIN login flow exists yet — extend the existing PIN auth pattern (admin-issued, PIN-only).
-3. No invoice PDF template or `#INV-...` numbering exists yet — reuse `src/lib/receiptGenerator.ts` patterns.
-4. No commission accrual trigger, store activation RPC, or withdrawal approval RPCs exist yet — add server-side validation.
-5. No automated tests or CI workflows in-repo (existing gap).
-6. Open RLS policies are unsuitable for untrusted multi-tenant production without hardening (existing gap #9).
-7. Paystack webhook/verification for automatic store activation must be implemented against the existing Paystack integration.
-8. Withdrawal disbursement to MoMo requires integration with a Mobile Money disbursement provider or manual payout reference recording — define provider before build.
+1. Row Level Security stays open (`USING (true)`), matching the rest of this prototype. Agents do not use Supabase Auth, so `auth.uid()` policies would lock the anon client out. Harden before exposing untrusted agents.
+2. Paystack success is the inline checkout callback, the same trust model as POS sales. A secret-key webhook is still required before treating payment as authoritative.
+3. Withdrawal payout is recorded by an administrator with a Mobile Money reference. There is no automatic disbursement to MTN, Telecel, or AirtelTigo.
+4. No automated tests or CI workflows in-repo (existing gap).
 
 ---
 

@@ -976,6 +976,10 @@ class AdimatDB extends Dexie {
         agent_withdrawal_requests: 'id, agent_id, status, requested_at, synced',
         agent_commission_settings: 'id',
       });
+      /* Version 22 — look agents up by phone at login */
+      this.version(22).stores({
+        agents: 'id, phone, status, synced',
+      });
   }
 }
 
@@ -1229,6 +1233,8 @@ export async function createStoreWithOwner(
     ownerPhone?: string;
     currencyCode?: string;
     preferredLanguage?: string;
+    /** Agent onboarding must not steal the device's current store. */
+    setAsCurrent?: boolean;
   }
 ): Promise<{ store: LocalStore; owner: LocalUser }> {
   const storeId = generateId();
@@ -1290,7 +1296,9 @@ export async function createStoreWithOwner(
 
   await db.stores.add(store);
   await db.users.add(owner);
-  await setCurrentStoreId(storeId);
+  if (profile?.setAsCurrent !== false) {
+    await setCurrentStoreId(storeId);
+  }
 
   return { store, owner };
 }
@@ -5082,11 +5090,15 @@ export async function deleteLocalProspect(prospectId: string): Promise<void> {
 export async function listLocalFollowUps(
   filters?: { prospectId?: string; agentId?: string; status?: FollowUpStatus }
 ): Promise<LocalFollowUp[]> {
-  let q = db.follow_ups;
-  if (filters?.prospectId) q = q.where('prospect_id').equals(filters.prospectId);
-  if (filters?.agentId) q = q.where('agent_id').equals(filters.agentId);
-  if (filters?.status) q = q.where('status').equals(filters.status);
-  return q.toArray();
+  const rows = await db.follow_ups.toArray();
+  return rows
+    .filter((row) => {
+      if (filters?.prospectId && row.prospect_id !== filters.prospectId) return false;
+      if (filters?.agentId && row.agent_id !== filters.agentId) return false;
+      if (filters?.status && row.status !== filters.status) return false;
+      return true;
+    })
+    .sort((a, b) => a.follow_up_at.localeCompare(b.follow_up_at));
 }
 
 export async function getLocalFollowUp(followUpId: string): Promise<LocalFollowUp | undefined> {
@@ -5282,8 +5294,12 @@ export async function verifyAgentPin(
   phone: string,
   pin: string
 ): Promise<LocalAgent | null> {
-  const agents = await db.agents.where('phone').equals(phone.trim()).toArray();
+  const { normalizeGhanaPhone } = await import('./platformSettings');
+  const target = normalizeGhanaPhone(phone);
+  if (!target) return null;
+  const agents = await db.agents.toArray();
   for (const agent of agents) {
+    if (normalizeGhanaPhone(agent.phone) !== target) continue;
     if (await verifyUserPin(pin, agent.pin_hash)) {
       return agent;
     }

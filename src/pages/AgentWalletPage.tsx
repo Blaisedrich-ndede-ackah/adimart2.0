@@ -1,290 +1,241 @@
 import { useCallback, useEffect, useState } from 'react';
-import {
-  Wallet, Plus, Send, RefreshCcw, Clock, ChevronRight,
-  AlertCircle, CheckCircle2, Search, Filter,
-} from 'lucide-react';
+import { Fingerprint } from 'lucide-react';
 import { useAgentAuthStore } from '@/store/useAgentAuthStore';
 import {
-  listLocalAgentCommissions,
-  listLocalAgentWithdrawalRequests,
   createLocalAgentWithdrawalRequest,
-  updateLocalAgentWithdrawalRequest,
-  getLocalCommissionSettings,
-  saveLocalCommissionSettings,
-  type LocalAgentCommission,
+  generateId,
+  listLocalAgentWithdrawalRequests,
+  updateLocalAgent,
   type LocalAgentWithdrawalRequest,
 } from '@/lib/dexie';
+import {
+  getAgentBalance,
+  isAgentBiometricReady,
+  registerAgentBiometric,
+  syncAgentPortal,
+  type AgentBalance,
+} from '@/lib/agentPortal';
+import { isValidGhanaPhone } from '@/lib/platformSettings';
 import { formatOfficialMoney } from '@/lib/currency';
-import { LinkButton } from '@/components/ui/button';
+import { Button } from '@/components/ui/Button';
 
-type WithdrawalStatusFilter = 'all' | 'pending' | 'approved' | 'rejected' | 'paid';
-
-const STATUS_LABELS: Record<string, string> = {
-  pending: 'Pending',
-  approved: 'Approved',
-  rejected: 'Rejected',
-  paid: 'Paid',
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  pending: 'bg-amber-50 text-amber-700 border-amber-100',
-  approved: 'bg-emerald-50 text-emerald-700 border-emerald-100',
-  rejected: 'bg-red-50 text-red-700 border-red-100',
-  paid: 'bg-indigo-50 text-indigo-700 border-indigo-100',
-};
+const NETWORKS = ['MTN', 'Telecel', 'AirtelTigo'];
 
 export default function AgentWalletPage() {
-  const { currentAgent } = useAgentAuthStore();
-  const [commissions, setCommissions] = useState<LocalAgentCommission[]>([]);
+  const agent = useAgentAuthStore((state) => state.currentAgent);
+  const refreshAgent = useAgentAuthStore((state) => state.refreshAgent);
+  const [balance, setBalance] = useState<AgentBalance | null>(null);
   const [withdrawals, setWithdrawals] = useState<LocalAgentWithdrawalRequest[]>([]);
-  const [settings, setSettings] = useState<any>(null);
+  const [amount, setAmount] = useState('');
+  const [error, setError] = useState('');
+  const [momoNumber, setMomoNumber] = useState(agent?.momo_number || '');
+  const [momoNetwork, setMomoNetwork] = useState(agent?.momo_network || 'MTN');
+  const [momoName, setMomoName] = useState(agent?.momo_account_name || '');
+  const [biometricOn, setBiometricOn] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [openRequest, setOpenRequest] = useState(false);
-  const [form, setForm] = useState({
-    amount_ghs: '',
-  });
-  const [requestError, setRequestError] = useState('');
 
   const load = useCallback(async () => {
+    if (!agent) return;
     setLoading(true);
-    try {
-      const [commData, wdData, settingsData] = await Promise.all([
-        listLocalAgentCommissions(currentAgent?.id),
-        listLocalAgentWithdrawalRequests(currentAgent?.id),
-        getLocalCommissionSettings(),
-      ]);
-      setCommissions(commData);
-      setWithdrawals(wdData);
-      setSettings(settingsData);
-    } finally {
-      setLoading(false);
-    }
-  }, [currentAgent?.id]);
+    const [nextBalance, rows, bio] = await Promise.all([
+      getAgentBalance(agent.id),
+      listLocalAgentWithdrawalRequests(agent.id),
+      isAgentBiometricReady(),
+    ]);
+    setBalance(nextBalance);
+    setWithdrawals(rows.sort((a, b) => b.requested_at.localeCompare(a.requested_at)));
+    setBiometricOn(bio);
+    setLoading(false);
+  }, [agent]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  });
+  const saveMomo = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!agent) return;
+    setError('');
+    if (!isValidGhanaPhone(momoNumber) || !momoNetwork || !momoName.trim()) {
+      setError('Enter a Ghana MoMo number, network, and account name.');
+      return;
+    }
+    await updateLocalAgent(agent.id, {
+      momo_number: momoNumber.replace(/\D/g, ''),
+      momo_network: momoNetwork,
+      momo_account_name: momoName.trim(),
+    });
+    await refreshAgent();
+    await syncAgentPortal();
+  };
 
-  const accrued = commissions.filter(c => c.status === 'accrued').reduce((s, c) => s + c.commission_amount_ghs, 0);
-  const paidOut = commissions.filter(c => c.status === 'paid').reduce((s, c) => s + c.commission_amount_ghs, 0);
-  const payable = accrued - paidOut;
+  const requestWithdrawal = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!agent || !balance) return;
+    setError('');
+    const value = Math.round(Number(amount) * 100) / 100;
+    if (!Number.isFinite(value) || value <= 0) {
+      setError('Enter a withdrawal amount.');
+      return;
+    }
+    if (value < balance.minWithdrawal) {
+      setError(`Minimum withdrawal is ${formatOfficialMoney(balance.minWithdrawal, 'GHS')}.`);
+      return;
+    }
+    if (value > balance.payable) {
+      setError(`Amount is above your payable balance of ${formatOfficialMoney(balance.payable, 'GHS')}.`);
+      return;
+    }
+    if (!agent.momo_number || !agent.momo_network || !agent.momo_account_name) {
+      setError('Save a Mobile Money payout number before requesting a withdrawal.');
+      return;
+    }
+    const fee = Math.round(balance.withdrawalFee * 100) / 100;
+    if (value <= fee) {
+      setError('Amount must be greater than the withdrawal fee.');
+      return;
+    }
+    const now = new Date().toISOString();
+    await createLocalAgentWithdrawalRequest({
+      id: generateId(),
+      agent_id: agent.id,
+      amount_ghs: value,
+      fee_ghs: fee,
+      net_amount_ghs: Math.round((value - fee) * 100) / 100,
+      momo_number: agent.momo_number,
+      momo_network: agent.momo_network,
+      momo_account_name: agent.momo_account_name,
+      status: 'pending',
+      rejection_reason: '',
+      payout_reference: '',
+      requested_at: now,
+      processed_at: null,
+      processed_by: null,
+      created_at: now,
+      updated_at: now,
+    });
+    setAmount('');
+    await syncAgentPortal();
+    await load();
+  };
 
-  const minWithdrawal = settings?.min_withdrawal_ghs ?? 0;
-  const withdrawalFee = settings?.withdrawal_fee_ghs ?? 0;
-
-  const handleRequest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setRequestError('');
-    const amount = Number(form.amount_ghs);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setRequestError('Enter a valid amount.');
-      return;
-    }
-    if (amount < minWithdrawal) {
-      setRequestError(`Minimum withdrawal amount is ${formatOfficialMoney(minWithdrawal, 'GHS')}.`);
-      return;
-    }
-    if (amount > payable) {
-      setRequestError(`Amount exceeds your payable balance of ${formatOfficialMoney(payable, 'GHS')}.`);
-      return;
-    }
-    if (!currentAgent?.momo_number) {
-      setRequestError('No Mobile Money number registered. Please update your profile first.');
-      return;
-    }
+  const enableBiometric = async () => {
+    if (!agent) return;
+    setError('');
     try {
-      const fee = amount * (withdrawalFee / 100);
-      const netAmount = amount - fee;
-      await createLocalAgentWithdrawalRequest({
-        id: 'wd_' + Math.random().toString(36).substring(2, 15),
-        agent_id: currentAgent.id,
-        amount_ghs: amount,
-        fee_ghs: fee,
-        net_amount_ghs: netAmount,
-        momo_number: currentAgent.momo_number,
-        momo_network: currentAgent.momo_network,
-        momo_account_name: currentAgent.momo_account_name,
-        status: 'pending',
-        rejection_reason: '',
-        payout_reference: '',
-        requested_at: new Date().toISOString(),
-        processed_at: null,
-        processed_by: null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      } as LocalAgentWithdrawalRequest);
-      setOpenRequest(false);
-      setForm({ amount_ghs: '' });
-      void load();
-    } catch (err: any) {
-      setRequestError(err instanceof Error ? err.message : 'Failed to request withdrawal.');
+      await registerAgentBiometric(agent.id, agent.full_name);
+      setBiometricOn(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Biometric setup failed.');
     }
   };
 
-  if (loading) {
-    return (
-      <div className="page-shell flex items-center justify-center min-h-[400px]">
-        <RefreshCcw className="w-8 h-8 animate-spin text-emerald-600" />
-      </div>
-    );
-  }
+  if (loading || !balance) return <p className="p-6 text-sm text-gray-500">Loading wallet…</p>;
 
   return (
-    <div className="page-shell p-4 md:p-6 space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">Wallet</h1>
-          <p className="text-sm text-gray-500">Commission balance and MoMo withdrawals.</p>
-        </div>
-        <LinkButton
-          onClick={() => setOpenRequest(true)}
-          variant="primary"
-          size="sm"
-          icon={<Send className="w-4 h-4" />}
+    <div className="p-4 md:p-6 space-y-5">
+      <div>
+        <h2 className="text-xl font-bold text-gray-900">Wallet</h2>
+        <p className="text-sm text-gray-500">Commission balance and Mobile Money withdrawals.</p>
+      </div>
+      {error && <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg p-3">{error}</p>}
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Metric label="Earned" value={formatOfficialMoney(balance.earned, 'GHS')} />
+        <Metric label="Reserved" value={formatOfficialMoney(balance.reserved, 'GHS')} />
+        <Metric label="Paid out" value={formatOfficialMoney(balance.paidOut, 'GHS')} />
+        <Metric label="Payable" value={formatOfficialMoney(balance.payable, 'GHS')} />
+      </div>
+
+      <form onSubmit={saveMomo} className="rounded-xl bg-white border border-gray-100 p-4 grid gap-3">
+        <p className="text-sm font-semibold text-gray-900">Payout Mobile Money</p>
+        <input
+          value={momoNumber}
+          onChange={(event) => setMomoNumber(event.target.value.replace(/\D/g, ''))}
+          placeholder="024XXXXXXX"
+          className="rounded-xl border border-gray-200 px-3 py-2 text-sm"
+          aria-label="MoMo number"
+        />
+        <select
+          value={momoNetwork}
+          onChange={(event) => setMomoNetwork(event.target.value)}
+          className="rounded-xl border border-gray-200 px-3 py-2 text-sm"
+          aria-label="MoMo network"
         >
-          Request Withdrawal
-        </LinkButton>
+          {NETWORKS.map((network) => (
+            <option key={network} value={network}>{network}</option>
+          ))}
+        </select>
+        <input
+          value={momoName}
+          onChange={(event) => setMomoName(event.target.value)}
+          placeholder="Account name"
+          className="rounded-xl border border-gray-200 px-3 py-2 text-sm"
+          aria-label="MoMo account name"
+        />
+        <Button type="submit" variant="outline" size="sm">Save payout number</Button>
+      </form>
+
+      <form onSubmit={requestWithdrawal} className="rounded-xl bg-white border border-gray-100 p-4 space-y-3">
+        <p className="text-sm font-semibold text-gray-900">Request withdrawal</p>
+        <p className="text-xs text-gray-500">
+          Payable {formatOfficialMoney(balance.payable, 'GHS')} · minimum {formatOfficialMoney(balance.minWithdrawal, 'GHS')} · fee {formatOfficialMoney(balance.withdrawalFee, 'GHS')} flat
+        </p>
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={amount}
+          onChange={(event) => setAmount(event.target.value)}
+          placeholder="Amount in GHS"
+          className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+        />
+        <Button type="submit" variant="primary" size="sm">Submit request</Button>
+      </form>
+
+      <div className="rounded-xl bg-white border border-gray-100 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-gray-900">Biometric unlock</p>
+            <p className="text-xs text-gray-500">Use this device’s biometrics after your first PIN sign-in.</p>
+          </div>
+          <Button
+            size="sm"
+            variant={biometricOn ? 'outline' : 'primary'}
+            leftIcon={<Fingerprint className="w-4 h-4" />}
+            onClick={() => void enableBiometric()}
+          >
+            {biometricOn ? 'Update' : 'Enable'}
+          </Button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="rounded-xl bg-white border border-gray-100 p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs text-gray-500 uppercase font-semibold">Accrued Commission</p>
-              <p className="text-2xl font-bold text-gray-900">{formatOfficialMoney(accrued, 'GHS')}</p>
+      <section className="space-y-2">
+        <h3 className="text-sm font-bold text-gray-900">Withdrawal history</h3>
+        {withdrawals.length === 0 && <p className="text-sm text-gray-500">No requests yet.</p>}
+        {withdrawals.map((row) => (
+          <article key={row.id} className="rounded-xl bg-white border border-gray-100 p-3 text-sm">
+            <div className="flex justify-between">
+              <span className="font-semibold">{formatOfficialMoney(row.amount_ghs, 'GHS')}</span>
+              <span className="uppercase text-xs text-emerald-700">{row.status}</span>
             </div>
-            <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600">
-              <Wallet className="w-5 h-5" />
-            </div>
-          </div>
-        </div>
-        <div className="rounded-xl bg-white border border-gray-100 p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs text-gray-500 uppercase font-semibold">Paid Out</p>
-              <p className="text-2xl font-bold text-gray-900">{formatOfficialMoney(paidOut, 'GHS')}</p>
-            </div>
-            <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600">
-              <CheckCircle2 className="w-5 h-5" />
-            </div>
-          </div>
-        </div>
-        <div className="rounded-xl bg-white border border-gray-100 p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs text-gray-500 uppercase font-semibold">Payable Balance</p>
-              <p className="text-2xl font-bold text-gray-900">{formatOfficialMoney(payable, 'GHS')}</p>
-            </div>
-            <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600">
-              <Send className="w-5 h-5" />
-            </div>
-          </div>
-        </div>
-        <div className="rounded-xl bg-white border border-gray-100 p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs text-gray-500 uppercase font-semibold">Min. Withdrawal</p>
-              <p className="text-2xl font-bold text-gray-900">{formatOfficialMoney(minWithdrawal, 'GHS')}</p>
-            </div>
-            <div className="p-2 rounded-lg bg-amber-50 text-amber-600">
-              <Clock className="w-5 h-5" />
-            </div>
-          </div>
-        </div>
-      </div>
-      {/* Request withdrawal form */}
-      {openRequest && (
-        <div className="rounded-xl bg-white border border-gray-100 shadow-lg p-5">
-          <h2 className="text-sm font-bold text-gray-900 mb-4">Request Withdrawal</h2>
-          <p className="text-sm text-gray-500 mb-4">
-            Payout will be sent to your registered MoMo number: <span className="font-medium">{currentAgent?.momo_number}</span> ({currentAgent?.momo_network})
-          </p>
-          <form onSubmit={handleRequest} className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-gray-500 uppercase">Amount (GHS)</label>
-              <input
-                type="number"
-                step="0.01"
-                value={form.amount_ghs}
-                onChange={(e) => setForm({ ...form, amount_ghs: e.target.value })}
-                placeholder={`Max ${formatOfficialMoney(payable, 'GHS')}`}
-                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-              <p className="text-xs text-gray-400">
-                Payable balance: {formatOfficialMoney(payable, 'GHS')} • Min: {formatOfficialMoney(minWithdrawal, 'GHS')} • Fee: {withdrawalFee}%
-              </p>
-            </div>
-            {requestError && (
-              <div className="rounded-lg bg-red-50 border border-red-100 p-3">
-                <p className="text-sm text-red-700">{requestError}</p>
-              </div>
-            )}
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setOpenRequest(false)}
-                className="px-4 py-2 rounded-xl border border-gray-200 text-gray-700 text-sm hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm hover:bg-emerald-700 shadow-sm shadow-emerald-100">
-                Request Withdrawal
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+            <p className="text-xs text-gray-500 mt-1">
+              {row.momo_number} · {row.momo_network} · fee {formatOfficialMoney(row.fee_ghs, 'GHS')} · net {formatOfficialMoney(row.net_amount_ghs, 'GHS')}
+            </p>
+            {row.payout_reference && <p className="text-xs text-gray-500">Payout ref {row.payout_reference}</p>}
+            {row.rejection_reason && <p className="text-xs text-red-700">{row.rejection_reason}</p>}
+          </article>
+        ))}
+      </section>
+    </div>
+  );
+}
 
-      {/* Withdrawal history */}
-      <div className="rounded-xl bg-white border border-gray-100 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-bold text-gray-900">Withdrawal History</h2>
-          <LinkButton variant="outline" size="sm" icon={<RefreshCcw className="w-3 h-3" />}>
-            Refresh
-          </LinkButton>
-        </div>
-        {withdrawals.length === 0 ? (
-          <div className="text-center py-8 text-gray-400">
-            <Wallet className="w-8 h-8 mx-auto mb-2 opacity-50" />
-            <p className="text-sm">No withdrawal requests yet.</p>
-          </div>
-        ) : (
-          <div className="divide-y divide-gray-50">
-            {withdrawals.map((wd) => (
-              <div key={wd.id} className="p-4">
-                <div className="flex items-center justify-between mb-1">
-                  <div className="font-medium text-gray-900">{formatOfficialMoney(wd.amount_ghs, 'GHS')}</div>
-                  <span className={`px-2 py-0.5 rounded text-xs font-medium border ${STATUS_COLORS[wd.status]}`}>
-                    {STATUS_LABELS[wd.status]}
-                  </span>
-                </div>
-                <div className="text-xs text-gray-500 space-y-1">
-                  <div>
-                    <span className="font-medium">To: </span>{wd.momo_number} ({wd.momo_network})
-                  </div>
-                  <div>
-                    <span className="font-medium">Account: </span>{wd.momo_account_name}
-                  </div>
-                  <div>
-                    <span className="font-medium">Fee: </span>{formatOfficialMoney(wd.fee_ghs, 'GHS')} •
-                    <span className="font-medium">Net: </span>{formatOfficialMoney(wd.net_amount_ghs, 'GHS')}
-                  </div>
-                  <div>
-                    <span className="font-medium">Requested: </span>{new Date(wd.requested_at).toLocaleDateString()}
-                  </div>
-                  {wd.payout_reference && (
-                    <div>
-                      <span className="font-medium">Payout Ref: </span>{wd.payout_reference}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl bg-white border border-gray-100 p-4">
+      <p className="text-lg font-bold text-gray-900">{value}</p>
+      <p className="text-[11px] uppercase tracking-wide text-gray-500">{label}</p>
     </div>
   );
 }

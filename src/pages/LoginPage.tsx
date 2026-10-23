@@ -21,11 +21,12 @@ import { consumeIdleLock, touchLastActivity } from '@/lib/sessionTimeout';
 
 interface LoginPageProps {
   onOpenAdmin?: () => void;
+  onOpenAgent?: () => void;
   /** Called after a successful warehouse PIN login so the app can open the warehouse page. */
   onWarehouseLoginSuccess?: () => void;
 }
 
-export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: LoginPageProps) {
+export default function LoginPage({ onOpenAdmin, onOpenAgent, onWarehouseLoginSuccess }: LoginPageProps) {
   const [pin, setPin] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [shake, setShake] = useState(false);
@@ -417,6 +418,16 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
           <FileText className="w-3.5 h-3.5" />
           Terms &amp; Conditions
         </a>
+
+        {onOpenAgent && (
+          <button
+            onClick={onOpenAgent}
+            className="mt-4 lg:mt-3 flex items-center gap-2 text-emerald-100/80 text-xs font-medium touch-target"
+          >
+            <Store className="w-3.5 h-3.5" />
+            Agent portal
+          </button>
+        )}
 
         {onOpenAdmin && (
           <button
