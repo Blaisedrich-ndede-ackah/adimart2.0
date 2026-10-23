@@ -30,6 +30,9 @@ import {
 import { triggerAutoSync } from '@/lib/sync';
 import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
+import { scoreSmartSearch } from '@/lib/adimatAi/search';
+import { useAlsoBuy } from '@/lib/adimatAi/useAdimatAi';
+import AlsoBuySuggestions from '@/components/AlsoBuySuggestions';
 import {
   loadOwnerPosLayout,
   saveOwnerPosLayout,
@@ -52,51 +55,6 @@ type SpeechWindow = Window & {
   SpeechRecognition?: new () => SpeechRecognitionLike;
   webkitSpeechRecognition?: new () => SpeechRecognitionLike;
 };
-
-function editDistance(left: string, right: string): number {
-  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
-  for (let i = 1; i <= left.length; i++) {
-    let diagonal = previous[0];
-    previous[0] = i;
-    for (let j = 1; j <= right.length; j++) {
-      const above = previous[j];
-      previous[j] = Math.min(previous[j] + 1, previous[j - 1] + 1, diagonal + (left[i - 1] === right[j - 1] ? 0 : 1));
-      diagonal = above;
-    }
-  }
-  return previous[right.length];
-}
-
-function productMatchScore(product: LocalProduct, query: string): number {
-  const name = product.name.toLocaleLowerCase();
-  const barcode = product.barcode.toLocaleLowerCase();
-  const category = product.category.toLocaleLowerCase();
-  if (barcode === query) return 1000;
-  if (barcode.includes(query)) return 900;
-  if (query.length >= 3 && query.includes(barcode) && barcode.length >= 3) return 850;
-  if (name === query) return 800;
-  if (name.startsWith(query)) return 750;
-  if (name.includes(query) || name.replace(/\s+/g, '').includes(query.replace(/\s+/g, ''))) return 700;
-  if (category.includes(query)) return 500;
-
-  const queryParts = query.split(/\s+/).filter(Boolean);
-  const words = `${name} ${category}`.split(/[\s/-]+/).filter(Boolean);
-  let score = 0;
-  for (const part of queryParts) {
-    let best = 0;
-    for (const word of words) {
-      if (word.startsWith(part)) best = Math.max(best, 400);
-      else if (part.length >= 3) {
-        const distance = editDistance(part, word);
-        const maxDistance = part.length < 5 ? 1 : Math.min(3, Math.floor(part.length * 0.25));
-        if (distance <= maxDistance) best = Math.max(best, 350 - distance * 20);
-      }
-    }
-    if (best === 0) return 0;
-    score += best;
-  }
-  return score;
-}
 
 function moveBefore<T>(order: readonly T[], source: T, target: T): T[] {
   const next = [...order];
@@ -121,6 +79,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   const cart = useCartStore();
   const setSaleContext = useCartStore((s) => s.setSaleContext);
   const { currentUser, currentStore } = useAuthStore();
+  const alsoBuy = useAlsoBuy(currentStore?.id, cart.items.map((item) => item.product_id));
   const money = useFormatMoney();
   const t = useT();
   const [posTab, setPosTab] = useState<PosTab>('products');
@@ -359,7 +318,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
       .filter((product) => selectedCategory === 'All' || product.category === selectedCategory)
       .map((product) => ({
         product,
-        relevance: q ? productMatchScore(product, q) : 0,
+        relevance: q ? scoreSmartSearch(product, q) : 0,
         rank: salesRank[product.id],
       }))
       .filter(({ relevance }) => !q || relevance > 0)
@@ -1198,6 +1157,13 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                     </div>
                   </div>
                 ))}
+                <AlsoBuySuggestions
+                  suggestions={alsoBuy}
+                  onAdd={(productId) => {
+                    const product = products.find((item) => item.id === productId);
+                    if (product) void cart.addItem(product);
+                  }}
+                />
               </div>
             )}
           </div>

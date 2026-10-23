@@ -11,7 +11,9 @@ import {
   type PublicShopProduct,
 } from '@/lib/ecommerce';
 import { formatStoreMoney } from '@/lib/currency';
-import { useI18nStore } from '@/lib/i18n';
+import { useI18nStore, useT } from '@/lib/i18n';
+import { readPairCache } from '@/lib/adimatAi/pairCache';
+import { suggestBoughtTogether } from '@/lib/adimatAi/boughtTogether';
 
 interface PublicShopPageProps {
   slug: string;
@@ -21,6 +23,7 @@ type View = 'catalog' | 'cart' | 'checkout' | 'success';
 
 export default function PublicShopPage({ slug }: PublicShopPageProps) {
   const language = useI18nStore((s) => s.language);
+  const t = useT();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [catalog, setCatalog] = useState<PublicShopCatalog | null>(null);
@@ -290,6 +293,21 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
                       <p className="text-primary font-bold mt-1">
                         {money(product.selling_price)}
                       </p>
+                      {(() => {
+                        const cache = readPairCache(catalog.store.id);
+                        const suggestion = suggestBoughtTogether(cache?.pairs || [], cache?.names || {}, [product.id], 1)[0];
+                        const match = suggestion ? catalog.products.find((item) => item.id === suggestion.productId && item.in_stock) : null;
+                        if (!match) return null;
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => addToCart(match)}
+                            className="mt-1 text-left text-[11px] font-semibold text-emerald-800"
+                          >
+                            {t('ai.alsoBuy')}: {match.name}
+                          </button>
+                        );
+                      })()}
                       <p className="text-[10px] text-gray-500 mt-0.5 mb-2">
                         {product.in_stock ? 'In stock' : 'Out of stock'}
                       </p>

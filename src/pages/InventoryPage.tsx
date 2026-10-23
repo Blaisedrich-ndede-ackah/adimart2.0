@@ -15,6 +15,7 @@ import {
 } from '@/lib/dexie';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { alignProductsWithBatchStock, toMoney, toQty } from '@/lib/warehouse';
+import { scoreSmartSearch } from '@/lib/adimatAi/search';
 import { subscribeStockChanges } from '@/lib/stockEvents';
 import AddProduct from '@/components/AddProduct';
 import StockAdjustment from '@/components/StockAdjustment';
@@ -219,16 +220,14 @@ export default function InventoryPage({
       result = result.filter((p) => (p.category || 'Other') === selectedCategory);
     }
 
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase().trim();
-      result = result.filter(
-        (p) =>
-          (p.name || '').toLowerCase().includes(q) ||
-          (p.barcode || '').toLowerCase().includes(q)
-      );
-    }
-
-    switch (sortMode) {
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim();
+      result = result
+        .map((product) => ({ product, score: scoreSmartSearch(product, q) }))
+        .filter((row) => row.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .map((row) => row.product);
+    } else switch (sortMode) {
       case 'recent':
         result.sort(
           (a, b) =>
