@@ -55,25 +55,52 @@ const SERVICE_ROLE_MESSAGE =
   'Campaign changes need SUPABASE_SERVICE_ROLE_KEY on the server. Set that private key in the Vercel project environment. Do not prefix it with VITE_.';
 const LOCK_MESSAGE = 'Too many sign-in attempts. Try again in 15 minutes.';
 
-function serviceDatabase(): SupabaseClient {
-  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url) {
-    throw new Error('Campaign changes need VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the server.');
+function cleanEnv(value: string | undefined): string {
+  return (value || '').trim().replace(/^["']+|["']+$/g, '');
+}
+
+function projectUrl(): string {
+  const raw = cleanEnv(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL);
+  if (!raw) return '';
+  if (/^postgres(ql)?:\/\//i.test(raw)) {
+    throw new Error('Use the Supabase project URL (https://<project-ref>.supabase.co) for VITE_SUPABASE_URL. The database connection string cannot load campaigns.');
   }
-  if (!key) throw new Error(SERVICE_ROLE_MESSAGE);
-  return createClient(url, key, {
+  const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  let parsed: URL;
+  try {
+    parsed = new URL(withProtocol);
+  } catch {
+    throw new Error('VITE_SUPABASE_URL is not a valid project URL. Use https://<project-ref>.supabase.co.');
+  }
+  const path = parsed.pathname
+    .replace(/\/(rest|auth|storage|realtime|functions)\/v1(\/.*)?$/i, '')
+    .replace(/\/+$/, '');
+  return `${parsed.origin}${path}`;
+}
+
+function serviceRoleKey(): string {
+  return cleanEnv(process.env.SUPABASE_SERVICE_ROLE_KEY);
+}
+
+function serviceClient(): SupabaseClient {
+  return createClient(projectUrl(), serviceRoleKey(), {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
 
+function serviceDatabase(): SupabaseClient {
+  const url = projectUrl();
+  const key = serviceRoleKey();
+  if (!url) {
+    throw new Error('Campaign changes need VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the server.');
+  }
+  if (!key) throw new Error(SERVICE_ROLE_MESSAGE);
+  return serviceClient();
+}
+
 function tryServiceDatabase(): SupabaseClient | null {
-  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return null;
-  return createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  if (!projectUrl() || !serviceRoleKey()) return null;
+  return serviceClient();
 }
 
 function hash(value: string): string {
@@ -121,8 +148,11 @@ function isMissingRelation(error: unknown): boolean {
 }
 
 function apiErrorMessage(error: unknown): string {
-  const { message } = errorText(error);
+  const { code, message } = errorText(error);
   if (isMissingRelation(error) || /bucket not found/i.test(message)) return MIGRATION_MESSAGE;
+  if (code === 'PGRST125' || /invalid path specified in request url/i.test(message)) {
+    return 'Supabase rejected the campaign request URL. Set VITE_SUPABASE_URL to the project URL, https://<project-ref>.supabase.co, with no /rest/v1 on the end.';
+  }
   return message || 'Campaign request failed.';
 }
 
