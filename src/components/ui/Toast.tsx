@@ -63,28 +63,25 @@ export function SyncToast() {
   }, []);
 
   return (
-    <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+    <div
+      className="pointer-events-none fixed inset-x-0 z-50 flex flex-col items-center gap-2 px-4 sm:items-end sm:px-5"
+      style={{ top: 'max(0.75rem, env(safe-area-inset-top))' }}
+    >
       {toasts.map((toast) => (
         <div
           key={toast.id}
-          className={`pointer-events-auto flex w-full max-w-xs items-start gap-2 rounded-xl border p-3 shadow-lg animate-fade-in ${
-            toast.type === 'success'
-              ? 'bg-green-50 border-green-200 text-green-800'
-              : toast.type === 'error'
-                ? 'bg-red-50 border-red-200 text-red-800'
-                : 'bg-blue-50 border-blue-200 text-blue-800'
-          }`}
+          className="pointer-events-auto flex w-full max-w-sm items-start gap-2.5 rounded-2xl border border-black/5 bg-white/90 p-3 text-ink shadow-[0_12px_32px_rgba(0,0,0,0.12)] backdrop-blur-xl animate-fade-in"
         >
           {toast.type === 'success' ? (
-            <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+            <CheckCircle2 className="w-5 h-5 flex-shrink-0 text-success" />
           ) : toast.type === 'error' ? (
-            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <AlertCircle className="w-5 h-5 flex-shrink-0 text-danger" />
           ) : (
-            <Loader2 className="w-4 h-4 animate-spin flex-shrink-0" />
+            <Loader2 className="w-5 h-5 animate-spin flex-shrink-0 text-primary" />
           )}
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold">{toast.title}</p>
-            <p className="text-xs mt-0.5 leading-relaxed">{toast.message}</p>
+            <p className="text-[15px] font-semibold tracking-tight">{toast.title}</p>
+            <p className="text-[13px] mt-0.5 leading-relaxed text-muted">{toast.message}</p>
           </div>
           <button
             type="button"
