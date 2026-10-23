@@ -4,7 +4,12 @@ import { useAgentAuthStore } from '@/store/useAgentAuthStore';
 import { isValidGhanaPhone } from '@/lib/platformSettings';
 import { generateId } from '@/lib/dexie';
 
-export default function AgentLoginPage() {
+interface AgentLoginPageProps {
+  onOpenStore?: () => void;
+  onAgentLogin?: () => void;
+}
+
+export default function AgentLoginPage({ onOpenStore, onAgentLogin }: AgentLoginPageProps) {
   const [phone, setPhone] = useState('');
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
@@ -28,7 +33,11 @@ export default function AgentLoginPage() {
     setBusy(true);
     try {
       const ok = await login(phone, pin);
-      if (!ok) setBusy(false);
+      if (ok) {
+        onAgentLogin?.();
+      } else {
+        setBusy(false);
+      }
     } catch {
       setBusy(false);
     }
@@ -121,9 +130,8 @@ export default function AgentLoginPage() {
               Don't have an agent account? Contact the platform administrator to be registered.
             </p>
             <button
-              onClick={() => {}}
-              className="text-sm text-gray-500 hover:text-gray-700 underline"
-              disabled
+              onClick={() => onOpenStore?.()}
+              className="text-sm text-emerald-600 hover:text-emerald-700 underline"
             >
               I am a store owner — go to POS login
             </button>

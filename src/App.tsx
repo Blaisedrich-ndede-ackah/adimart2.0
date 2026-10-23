@@ -263,6 +263,31 @@ export default function App() {
     );
   }
 
+  if (appMode === 'agent-login') {
+    return (
+      <div className="h-full flex flex-col">
+        <PWAInstallBanner />
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <AgentLoginPage
+            onOpenStore={() => setAppMode('store')}
+            onAgentLogin={() => setAppMode('agent')}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (appMode === 'agent') {
+    return (
+      <div className="h-full flex flex-col">
+        <PWAInstallBanner />
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <AgentDashboardPage />
+        </div>
+      </div>
+    );
+  }
+
   if (isLoading) {
     return (
       <div className="h-full bg-primary flex items-center justify-center">
