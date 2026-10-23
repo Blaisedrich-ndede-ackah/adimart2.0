@@ -216,7 +216,7 @@ export default function EcommercePage() {
               </p>
               <h1 className="mt-1 text-2xl font-bold text-gray-900">{currentStore.name}</h1>
               <p className="mt-1 text-sm text-gray-600">
-                Share your catalog link. The BONDZTECH storefront uses this same slug and sends
+                Share your catalog link. The separate Ghana shop uses this same slug and sends
                 orders here. Mark products Sell online, then fulfill them in this list.
               </p>
             </div>

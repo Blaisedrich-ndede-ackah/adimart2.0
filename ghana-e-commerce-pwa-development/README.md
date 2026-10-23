@@ -1,13 +1,17 @@
-# BONDZTECH storefront for Adimat
+# Ghana e-commerce PWA
 
-This is the custom Ghana storefront. It keeps the BONDZTECH design and reads one Adimat store: products marked **Sell online**, the store name, logo, phone, and address. Checkout writes `online_orders` and `online_order_items` in the same Supabase project, so the order shows up in Adimat under **Online shop**.
+This is its own project inside the Adimart repository. Adimat POS stays at the repository root. This folder has its own `package.json`, dev server, and deployment, and it keeps the BONDZTECH design.
+
+It reads one Adimat store: products marked **Sell online**, plus the store name, logo, phone, and address. Checkout writes `online_orders` and `online_order_items` in the same Supabase project, so the order shows up in Adimat under **Online shop**.
 
 Catalog and stock stay in Adimat. This app does not keep a second product database.
+
+The GitHub project `ghana-e-commerce-pwa-development` could not be cloned from here (GitHub returned repository not found). This folder is that shop, placed beside Adimat instead of replacing Adimat's root app.
 
 ## Run
 
 ```bash
-cd storefront
+cd ghana-e-commerce-pwa-development
 npm install
 cp .env.example .env.local
 npm run dev
