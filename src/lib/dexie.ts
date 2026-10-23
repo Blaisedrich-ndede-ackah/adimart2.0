@@ -475,7 +475,7 @@ export interface LocalCustomerWalletTransaction {
   id: string;
   store_id: string;
   customer_id: string;
-  type: 'return_credit' | 'sale_debit';
+  type: 'return_credit' | 'sale_debit' | 'topup' | 'purchase' | 'refund' | 'adjustment';
   amount: number;
   balance_after: number;
   return_id?: string | null;
@@ -4322,7 +4322,9 @@ export async function syncFromSupabase(opts?: {
           id: String(row.id),
           store_id: String(row.store_id),
           customer_id: String(row.customer_id),
-          type: row.type === 'sale_debit' ? 'sale_debit' : 'return_credit',
+          type: row.type === 'sale_debit' || row.type === 'topup' || row.type === 'purchase' || row.type === 'refund' || row.type === 'adjustment'
+            ? row.type
+            : 'return_credit',
           amount: Number(row.amount) || 0,
           balance_after: Number(row.balance_after) || 0,
           return_id: String(row.return_id || '') || null,

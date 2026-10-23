@@ -893,6 +893,11 @@ input[type="number"] {
   color: var(--ios-label);
 }
 
+.page-header :where(button.bg-primary, a.bg-primary),
+.ios-bar :where(button.bg-primary, a.bg-primary) {
+  color: #fff;
+}
+
 .page-header :where(.bg-white.text-primary, button.bg-white, a.bg-white),
 .ios-bar :where(.bg-white.text-primary, button.bg-white, a.bg-white) {
   background-color: #fff;
