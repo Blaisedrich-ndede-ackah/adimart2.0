@@ -11,7 +11,7 @@ import {
   type ProspectStatus,
 } from '@/lib/dexie';
 import { isValidGhanaPhone } from '@/lib/platformSettings';
-import { LinkButton } from '@/components/ui/button';
+import { LinkButton } from '@/components/ui/Button';
 
 type StatusFilter = 'all' | 'lead' | 'contacted' | 'follow_up' | 'converted' | 'lost';
 
@@ -38,6 +38,7 @@ export default function AgentProspectsPage() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [openAdd, setOpenAdd] = useState(false);
+  const [addError, setAddError] = useState('');
   const [addForm, setAddForm] = useState({
     store_name: '',
     owner_full_name: '',
@@ -119,6 +120,7 @@ export default function AgentProspectsPage() {
     );
   }
 
+  return (
     <div className="page-shell p-4 md:p-6 space-y-6">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
@@ -226,8 +228,6 @@ export default function AgentProspectsPage() {
                 className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
-          </form>
-        </div>
             <div className="md:col-span-2 space-y-2">
               <label className="text-xs font-medium text-gray-500 uppercase">Subscription Package</label>
               <input
@@ -266,7 +266,6 @@ export default function AgentProspectsPage() {
             </div>
           </form>
         </div>
-      )}
       )}
 
       <div className="rounded-xl bg-white border border-gray-100 shadow-sm">

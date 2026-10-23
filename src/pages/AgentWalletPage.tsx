@@ -15,7 +15,7 @@ import {
   type LocalAgentWithdrawalRequest,
 } from '@/lib/dexie';
 import { formatOfficialMoney } from '@/lib/currency';
-import { LinkButton } from '@/components/ui/button';
+import { LinkButton } from '@/components/ui/Button';
 
 type WithdrawalStatusFilter = 'all' | 'pending' | 'approved' | 'rejected' | 'paid';
 
@@ -64,8 +64,6 @@ export default function AgentWalletPage() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  });
 
   const accrued = commissions.filter(c => c.status === 'accrued').reduce((s, c) => s + c.commission_amount_ghs, 0);
   const paidOut = commissions.filter(c => c.status === 'paid').reduce((s, c) => s + c.commission_amount_ghs, 0);

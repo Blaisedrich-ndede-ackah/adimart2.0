@@ -15,7 +15,7 @@ import {
 } from '@/lib/dexie';
 import { generateAgentInvoicePdf, downloadAgentInvoicePdf, shareAgentInvoiceViaWhatsApp } from '@/lib/agentInvoicePdf';
 import { isValidGhanaPhone } from '@/lib/platformSettings';
-import { LinkButton } from '@/components/ui/button';
+import { LinkButton } from '@/components/ui/Button';
 import { formatOfficialMoney } from '@/lib/currency';
 import { initializePaystack, isPaystackConfigured, generatePaystackReference } from '@/lib/paystack';
 

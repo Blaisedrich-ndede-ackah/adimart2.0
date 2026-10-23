@@ -18,7 +18,7 @@ import {
 } from '@/lib/dexie';
 import { useFormatMoney } from '@/lib/currency';
 import { formatOfficialDate } from '@/lib/formalPdf';
-import { LinkButton } from '@/components/ui/button';
+import { LinkButton } from '@/components/ui/Button';
 
 export default function AgentDashboardPage() {
   const { currentAgent, refreshAgent, listAgents } = useAgentAuthStore();
@@ -75,6 +75,7 @@ export default function AgentDashboardPage() {
         <RefreshCcw className="w-8 h-8 animate-spin text-emerald-600" />
       </div>
     );
+  }
   return (
     <div className="page-shell p-4 md:p-6 space-y-6">
       {/* Header */}
@@ -91,7 +92,7 @@ export default function AgentDashboardPage() {
           </LinkButton>
           <LinkButton
             onClick={() => {}}
-            variant="default"
+            variant="primary"
             icon={<Plus className="w-4 h-4" />}
           >
             Register Store
@@ -153,10 +154,10 @@ export default function AgentDashboardPage() {
           <Send className="w-4 h-4 text-gray-500" /> Quick Actions
         </h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <LinkButton variant="default" onClick={() => {}} icon={<Plus className="w-4 h-4" />}>
+          <LinkButton variant="primary" onClick={() => {}} icon={<Plus className="w-4 h-4" />}>
             Register Store
           </LinkButton>
-          <LinkButton variant="default" onClick={() => {}} icon={<FileText className="w-4 h-4" />}>
+          <LinkButton variant="primary" onClick={() => {}} icon={<FileText className="w-4 h-4" />}>
             Create Invoice
           </LinkButton>
           <LinkButton variant="outline" onClick={() => {}} icon={<Wallet className="w-4 h-4" />}>
@@ -215,7 +216,7 @@ export default function AgentDashboardPage() {
               {followUps.length} follow-up(s) scheduled. Stay on top of your leads.
             </p>
           </div>
-          <LinkButton variant="default" size="sm" className="ml-auto">
+          <LinkButton variant="primary" size="sm" className="ml-auto">
             View Follow-ups
           </LinkButton>
         </div>
@@ -223,5 +224,3 @@ export default function AgentDashboardPage() {
     </div>
   );
 }
-      </div>
-  }
