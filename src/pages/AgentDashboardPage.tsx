@@ -1,226 +1,153 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Plus, Users, FileText, Wallet, Clock, Send, RefreshCcw,
-  AlertCircle, CheckCircle2, ChevronRight, ArrowRight,
-} from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { Clock, FileText, Plus, RefreshCcw, Users, Wallet } from 'lucide-react';
 import { useAgentAuthStore } from '@/store/useAgentAuthStore';
 import {
-  listLocalProspects,
-  listLocalFollowUps,
   listLocalAgentInvoices,
-  listLocalAgentCommissions,
-  listLocalAgentWithdrawalRequests,
-  getLocalCommissionSettings,
-  type LocalProspect,
+  listLocalFollowUps,
+  listLocalProspects,
   type LocalFollowUp,
-  type LocalAgentInvoice,
-  type LocalAgentCommission,
+  type LocalProspect,
 } from '@/lib/dexie';
-import { useFormatMoney } from '@/lib/currency';
-import { formatOfficialDate } from '@/lib/formalPdf';
-import { LinkButton } from '@/components/ui/Button';
+import { getAgentBalance, refreshOverdueInvoices, syncAgentPortal } from '@/lib/agentPortal';
+import { formatOfficialMoney } from '@/lib/currency';
+import { Button } from '@/components/ui/Button';
+import type { AgentScreen } from '@/components/AgentShell';
 
-export default function AgentDashboardPage() {
-  const { currentAgent, refreshAgent, listAgents } = useAgentAuthStore();
+interface AgentDashboardPageProps {
+  onNavigate: (screen: AgentScreen) => void;
+}
+
+export default function AgentDashboardPage({ onNavigate }: AgentDashboardPageProps) {
+  const agent = useAgentAuthStore((state) => state.currentAgent);
   const [prospects, setProspects] = useState<LocalProspect[]>([]);
   const [followUps, setFollowUps] = useState<LocalFollowUp[]>([]);
-  const [invoices, setInvoices] = useState<LocalAgentInvoice[]>([]);
-  const [commissions, setCommissions] = useState<LocalAgentCommission[]>([]);
-  const [withdrawals, setWithdrawals] = useState<any[]>([]);
-  const [settings, setSettings] = useState<any>(null);
+  const [invoiceCount, setInvoiceCount] = useState(0);
+  const [payable, setPayable] = useState(0);
   const [loading, setLoading] = useState(true);
-  const formatMoney = useFormatMoney();
 
-  const loadData = useCallback(async () => {
+  const load = useCallback(async () => {
+    if (!agent) return;
     setLoading(true);
-    try {
-      const [prospectsData, followUpsData, invoicesData, commissionsData, settingsData] =
-        await Promise.all([
-          listLocalProspects(currentAgent?.id),
-          listLocalFollowUps({ agentId: currentAgent?.id, status: 'scheduled' }),
-          listLocalAgentInvoices(currentAgent?.id),
-          listLocalAgentCommissions(currentAgent?.id),
-          getLocalCommissionSettings(),
-        ]);
-      setProspects(prospectsData);
-      setFollowUps(followUpsData);
-      setInvoices(invoicesData);
-      setCommissions(commissionsData);
-      setSettings(settingsData);
-      setWithdrawals([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [currentAgent?.id]);
+    await refreshOverdueInvoices(agent.id);
+    const [prospectRows, followRows, invoices, balance] = await Promise.all([
+      listLocalProspects(agent.id),
+      listLocalFollowUps({ agentId: agent.id, status: 'scheduled' }),
+      listLocalAgentInvoices(agent.id),
+      getAgentBalance(agent.id),
+    ]);
+    setProspects(prospectRows.sort((a, b) => b.created_at.localeCompare(a.created_at)));
+    setFollowUps(followRows);
+    setInvoiceCount(invoices.length);
+    setPayable(balance.payable);
+    setLoading(false);
+  }, [agent]);
 
   useEffect(() => {
-    void loadData();
-  }, [loadData]);
+    void load();
+  }, [load]);
 
-  const accrued = useMemo(() => commissions.filter(c => c.status === 'accrued').reduce((s, c) => s + c.commission_amount_ghs, 0), [commissions]);
-  const paid = useMemo(() => commissions.filter(c => c.status === 'paid').reduce((s, c) => s + c.commission_amount_ghs, 0), [commissions]);
-  const payable = accrued - paid;
-
-  const statusLabels: Record<string, string> = {
-    lead: 'Lead',
-    contacted: 'Contacted',
-    follow_up: 'Follow Up',
-    converted: 'Converted',
-    lost: 'Lost',
-  };
+  const overdue = followUps.filter((row) => new Date(row.follow_up_at).getTime() < Date.now()).length;
 
   if (loading) {
     return (
-      <div className="page-shell flex items-center justify-center min-h-[400px]">
-        <RefreshCcw className="w-8 h-8 animate-spin text-emerald-600" />
+      <div className="flex items-center justify-center min-h-[240px]">
+        <RefreshCcw className="w-6 h-6 animate-spin text-emerald-600" />
       </div>
     );
   }
+
   return (
-    <div className="page-shell p-4 md:p-6 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <div className="p-4 md:p-6 space-y-5">
+      <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Agent Dashboard</h1>
+          <h2 className="text-xl font-bold text-gray-900">Dashboard</h2>
           <p className="text-sm text-gray-500">
-            Welcome back, {currentAgent?.full_name} ({currentAgent?.phone})
+            {agent?.full_name} · {agent?.phone} · {agent?.commission_percentage}% commission
           </p>
         </div>
-        <div className="flex gap-2">
-          <LinkButton onClick={() => void loadData()} variant="outline" size="sm" icon={<RefreshCcw className="w-4 h-4" />}>
-            Refresh
-          </LinkButton>
-          <LinkButton
-            onClick={() => {}}
-            variant="primary"
-            icon={<Plus className="w-4 h-4" />}
-          >
-            Register Store
-          </LinkButton>
-        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          leftIcon={<RefreshCcw className="w-4 h-4" />}
+          onClick={() => void syncAgentPortal().then(() => load())}
+        >
+          Sync
+        </Button>
       </div>
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="rounded-xl bg-white border border-gray-100 p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs text-gray-500 uppercase font-semibold">Total Prospects</p>
-              <p className="text-2xl font-bold text-gray-900">{prospects.length}</p>
-            </div>
-            <div className="p-2 rounded-lg bg-blue-50 text-blue-600">
-              <Users className="w-5 h-5" />
-            </div>
-          </div>
-        </div>
-        <div className="rounded-xl bg-white border border-gray-100 p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs text-gray-500 uppercase font-semibold">Pending Follow-ups</p>
-              <p className="text-2xl font-bold text-gray-900">{followUps.length}</p>
-            </div>
-            <div className="p-2 rounded-lg bg-amber-50 text-amber-600">
-              <Clock className="w-5 h-5" />
-            </div>
-          </div>
-        </div>
-        <div className="rounded-xl bg-white border border-gray-100 p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs text-gray-500 uppercase font-semibold">Invoices Issued</p>
-              <p className="text-2xl font-bold text-gray-900">{invoices.length}</p>
-            </div>
-            <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600">
-              <FileText className="w-5 h-5" />
-            </div>
-          </div>
-        </div>
-        <div className="rounded-xl bg-white border border-gray-100 p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs text-gray-500 uppercase font-semibold">Payable Balance</p>
-              <p className="text-2xl font-bold text-gray-900">{formatMoney(payable)}</p>
-            </div>
-            <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600">
-              <Wallet className="w-5 h-5" />
-            </div>
-          </div>
-        </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Stat label="Prospects" value={String(prospects.length)} icon={<Users className="w-4 h-4" />} />
+        <Stat label="Follow-ups due" value={String(followUps.length)} icon={<Clock className="w-4 h-4" />} />
+        <Stat label="Invoices" value={String(invoiceCount)} icon={<FileText className="w-4 h-4" />} />
+        <Stat label="Payable" value={formatOfficialMoney(payable, 'GHS')} icon={<Wallet className="w-4 h-4" />} />
       </div>
 
-      {/* Quick actions */}
-      <div className="rounded-xl bg-white border border-gray-100 p-5 shadow-sm">
-        <h2 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2">
-          <Send className="w-4 h-4 text-gray-500" /> Quick Actions
-        </h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <LinkButton variant="primary" onClick={() => {}} icon={<Plus className="w-4 h-4" />}>
-            Register Store
-          </LinkButton>
-          <LinkButton variant="primary" onClick={() => {}} icon={<FileText className="w-4 h-4" />}>
-            Create Invoice
-          </LinkButton>
-          <LinkButton variant="outline" onClick={() => {}} icon={<Wallet className="w-4 h-4" />}>
-            Request Withdrawal
-          </LinkButton>
-          <LinkButton variant="outline" onClick={() => {}} icon={<Clock className="w-4 h-4" />}>
-            Follow-ups
-          </LinkButton>
-        </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <Button variant="primary" leftIcon={<Plus className="w-4 h-4" />} onClick={() => onNavigate('prospects')}>
+          Register store
+        </Button>
+        <Button variant="primary" leftIcon={<FileText className="w-4 h-4" />} onClick={() => onNavigate('invoices')}>
+          Create invoice
+        </Button>
+        <Button variant="outline" leftIcon={<Wallet className="w-4 h-4" />} onClick={() => onNavigate('wallet')}>
+          Withdraw
+        </Button>
+        <Button variant="outline" leftIcon={<Clock className="w-4 h-4" />} onClick={() => onNavigate('followups')}>
+          Follow-ups
+        </Button>
       </div>
 
-      {/* Recent prospects */}
-      <div className="rounded-xl bg-white border border-gray-100 p-5 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-bold text-gray-900">Recent Prospects</h2>
-          <LinkButton variant="outline" size="sm" icon={<ChevronRight className="w-3 h-3" />}>
+      {overdue > 0 && (
+        <button
+          type="button"
+          onClick={() => onNavigate('followups')}
+          className="w-full text-left rounded-xl bg-amber-50 border border-amber-100 p-4"
+        >
+          <p className="text-sm font-bold text-amber-900">{overdue} overdue follow-up{overdue === 1 ? '' : 's'}</p>
+          <p className="text-xs text-amber-800 mt-1">Open follow-ups to log the call, visit, or WhatsApp.</p>
+        </button>
+      )}
+
+      <section className="rounded-xl bg-white border border-gray-100 p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-bold text-gray-900">Recent prospects</h3>
+          <button type="button" className="text-xs font-semibold text-emerald-700" onClick={() => onNavigate('prospects')}>
             View all
-          </LinkButton>
+          </button>
         </div>
         {prospects.length === 0 ? (
-          <div className="text-center py-8 text-gray-400">
-            <Users className="w-8 h-8 mx-auto mb-2 opacity-50" />
-            <p className="text-sm">No prospects yet. Register your first store.</p>
-          </div>
+          <p className="text-sm text-gray-500 py-6 text-center">No prospects yet. Register the first store.</p>
         ) : (
-          <div className="space-y-3">
-            {prospects.slice(0, 5).map((p) => (
-              <div key={p.id} className="flex items-center justify-between p-3 rounded-lg border border-gray-100 bg-gray-50/50">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-gray-900 truncate">{p.store_name}</p>
-                  <p className="text-xs text-gray-500 truncate">{p.owner_full_name} • {p.owner_phone}</p>
-                </div>
-                <span className={`px-2 py-1 rounded text-xs font-medium ${
-                  p.status === 'lead' ? 'bg-blue-50 text-blue-700' :
-                  p.status === 'contacted' ? 'bg-indigo-50 text-indigo-700' :
-                  p.status === 'follow_up' ? 'bg-amber-50 text-amber-700' :
-                  p.status === 'converted' ? 'bg-emerald-50 text-emerald-700' :
-                  'bg-gray-50 text-gray-700'
-                }`}>
-                  {statusLabels[p.status]}
+          <div className="space-y-2">
+            {prospects.slice(0, 5).map((prospect) => (
+              <button
+                key={prospect.id}
+                type="button"
+                onClick={() => onNavigate('prospects')}
+                className="w-full flex items-center justify-between gap-3 rounded-lg border border-gray-100 px-3 py-2 text-left"
+              >
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-gray-900 truncate">{prospect.store_name}</span>
+                  <span className="block text-xs text-gray-500 truncate">
+                    {prospect.owner_full_name} · {prospect.owner_phone}
+                  </span>
                 </span>
-                <ArrowRight className="w-3 h-3 text-gray-300" />
-              </div>
+                <span className="text-xs font-semibold uppercase text-emerald-700">{prospect.status.replace('_', ' ')}</span>
+              </button>
             ))}
           </div>
         )}
-      </div>
+      </section>
+    </div>
+  );
+}
 
-      {/* Follow-ups due alert */}
-      <div className="rounded-xl bg-amber-50 border border-amber-100 p-4 shadow-sm">
-        <div className="flex items-center gap-3">
-          <AlertCircle className="w-5 h-5 text-amber-600" />
-          <div>
-            <h3 className="text-sm font-bold text-amber-800">Follow-ups Due</h3>
-            <p className="text-xs text-amber-700 mt-1">
-              {followUps.length} follow-up(s) scheduled. Stay on top of your leads.
-            </p>
-          </div>
-          <LinkButton variant="primary" size="sm" className="ml-auto">
-            View Follow-ups
-          </LinkButton>
-        </div>
-      </div>
+function Stat({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
+  return (
+    <div className="rounded-xl bg-white border border-gray-100 p-4">
+      <div className="flex items-center justify-between text-gray-400">{icon}</div>
+      <p className="mt-2 text-lg font-bold text-gray-900">{value}</p>
+      <p className="text-[11px] uppercase tracking-wide text-gray-500">{label}</p>
     </div>
   );
 }

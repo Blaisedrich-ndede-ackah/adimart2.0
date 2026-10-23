@@ -1,334 +1,332 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Plus, Search, Users, Filter, ChevronRight, Phone, MapPin } from 'lucide-react';
 import { useAgentAuthStore } from '@/store/useAgentAuthStore';
 import {
   createLocalProspect,
-  deleteLocalProspect,
-  getLocalProspect,
+  generateId,
+  listLocalFollowUps,
   listLocalProspects,
   updateLocalProspect,
+  type FollowUpChannel,
+  type LocalFollowUp,
   type LocalProspect,
   type ProspectStatus,
 } from '@/lib/dexie';
 import { isValidGhanaPhone } from '@/lib/platformSettings';
-import { LinkButton } from '@/components/ui/Button';
+import { scheduleFollowUp, syncAgentPortal } from '@/lib/agentPortal';
+import { SUBSCRIPTION_PACKAGES } from '@/lib/subscriptionPricing';
+import { Button } from '@/components/ui/Button';
 
-type StatusFilter = 'all' | 'lead' | 'contacted' | 'follow_up' | 'converted' | 'lost';
+const STATUSES: ProspectStatus[] = ['lead', 'contacted', 'follow_up', 'converted', 'lost'];
+const CHANNELS: FollowUpChannel[] = ['call', 'sms', 'whatsapp', 'visit', 'other'];
 
-const STATUS_LABELS: Record<ProspectStatus, string> = {
-  lead: 'Lead',
-  contacted: 'Contacted',
-  follow_up: 'Follow Up',
-  converted: 'Converted',
-  lost: 'Lost',
+const EMPTY_FORM = {
+  store_name: '',
+  owner_full_name: '',
+  owner_phone: '',
+  owner_email: '',
+  address: '',
+  city: '',
+  business_type: '',
+  subscription_package: '1m',
+  source: 'walk-in',
+  notes: '',
 };
 
-const STATUS_COLORS: Record<ProspectStatus, string> = {
-  lead: 'bg-blue-50 text-blue-700 border-blue-100',
-  contacted: 'bg-indigo-50 text-indigo-700 border-indigo-100',
-  follow_up: 'bg-amber-50 text-amber-700 border-amber-100',
-  converted: 'bg-emerald-50 text-emerald-700 border-emerald-100',
-  lost: 'bg-gray-50 text-gray-700 border-gray-100',
-};
+interface AgentProspectsPageProps {
+  onCreateInvoice?: () => void;
+}
 
-export default function AgentProspectsPage() {
-  const { currentAgent } = useAgentAuthStore();
+export default function AgentProspectsPage({ onCreateInvoice }: AgentProspectsPageProps) {
+  const agent = useAgentAuthStore((state) => state.currentAgent);
   const [prospects, setProspects] = useState<LocalProspect[]>([]);
-  const [filter, setFilter] = useState<StatusFilter>('all');
+  const [filter, setFilter] = useState<'all' | ProspectStatus>('all');
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
   const [openAdd, setOpenAdd] = useState(false);
-  const [addError, setAddError] = useState('');
-  const [addForm, setAddForm] = useState({
-    store_name: '',
-    owner_full_name: '',
-    owner_phone: '',
-    owner_email: '',
-    address: '',
-    city: '',
-    business_type: '',
-    subscription_package: '',
-    source: 'walk-in',
-    status: 'lead' as ProspectStatus,
-    notes: '',
-  });
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [error, setError] = useState('');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [followUps, setFollowUps] = useState<LocalFollowUp[]>([]);
+  const [followAt, setFollowAt] = useState('');
+  const [channel, setChannel] = useState<FollowUpChannel>('call');
+  const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
+    if (!agent) return;
     setLoading(true);
-    try {
-      const data = await listLocalProspects(currentAgent?.id);
-      setProspects(data);
-    } finally {
-      setLoading(false);
-    }
-  }, [currentAgent?.id]);
+    setProspects(await listLocalProspects(agent.id));
+    setLoading(false);
+  }, [agent]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const filtered = prospects.filter((p) => {
-    const matchFilter = filter === 'all' || p.status === filter;
-    const term = search.toLowerCase();
-    const matchSearch =
-      p.store_name.toLowerCase().includes(term) ||
-      p.owner_full_name.toLowerCase().includes(term) ||
-      p.owner_phone.includes(term);
-    return matchFilter && matchSearch;
+  useEffect(() => {
+    if (!selectedId) {
+      setFollowUps([]);
+      return;
+    }
+    void listLocalFollowUps({ prospectId: selectedId }).then(setFollowUps);
+  }, [selectedId, prospects]);
+
+  const selected = prospects.find((row) => row.id === selectedId) || null;
+  const filtered = prospects.filter((row) => {
+    const matchesStatus = filter === 'all' || row.status === filter;
+    const term = search.trim().toLowerCase();
+    const matchesSearch =
+      !term ||
+      row.store_name.toLowerCase().includes(term) ||
+      row.owner_full_name.toLowerCase().includes(term) ||
+      row.owner_phone.includes(term);
+    return matchesStatus && matchesSearch;
   });
 
-  const handleAdd = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAddError('');
-    if (!addForm.store_name || !addForm.owner_full_name || !addForm.owner_phone) {
-      setAddError('Store name, owner name, and phone are required.');
+  const saveProspect = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError('');
+    if (!agent) return;
+    if (!form.store_name.trim() || !form.owner_full_name.trim() || !form.owner_phone.trim()) {
+      setError('Store name, owner name, and phone are required.');
       return;
     }
-    if (addForm.owner_phone && !isValidGhanaPhone(addForm.owner_phone)) {
-      setAddError('Enter a valid Ghana phone number (e.g. 024XXXXXXX).');
+    if (!isValidGhanaPhone(form.owner_phone)) {
+      setError('Enter a valid Ghana phone number.');
       return;
     }
+    const now = new Date().toISOString();
+    await createLocalProspect({
+      id: generateId(),
+      agent_id: agent.id,
+      store_name: form.store_name.trim(),
+      owner_full_name: form.owner_full_name.trim(),
+      owner_phone: form.owner_phone.replace(/\D/g, ''),
+      owner_email: form.owner_email.trim(),
+      address: form.address.trim(),
+      city: form.city.trim(),
+      business_type: form.business_type.trim(),
+      subscription_package: form.subscription_package,
+      source: form.source,
+      status: 'lead',
+      notes: form.notes.trim(),
+      last_contacted_at: null,
+      next_follow_up_at: null,
+      created_at: now,
+      updated_at: now,
+    });
+    setForm(EMPTY_FORM);
+    setOpenAdd(false);
+    await syncAgentPortal();
+    await load();
+  };
+
+  const changeStatus = async (status: ProspectStatus) => {
+    if (!selected) return;
+    await updateLocalProspect(selected.id, { status });
+    await syncAgentPortal();
+    await load();
+  };
+
+  const addFollowUp = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selected) return;
+    setError('');
     try {
-      await createLocalProspect({
-        ...addForm,
-        agent_id: currentAgent!.id,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      } as LocalProspect);
-      setOpenAdd(false);
-      setAddForm({
-        store_name: '', owner_full_name: '', owner_phone: '', owner_email: '',
-        address: '', city: '', business_type: '', subscription_package: '',
-        source: 'walk-in', status: 'lead', notes: '',
-      });
-      void load();
-    } catch (err: any) {
-      setAddError(err instanceof Error ? err.message : 'Failed to create prospect.');
+      await scheduleFollowUp({ prospect: selected, followUpAt: followAt, channel });
+      setFollowAt('');
+      await syncAgentPortal();
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not schedule the follow-up.');
     }
   };
 
-  const handleStatusChange = async (id: string, status: ProspectStatus) => {
-    await updateLocalProspect(id, { status });
-    void load();
-  };
-
-  if (loading) {
-    return (
-      <div className="page-shell flex items-center justify-center min-h-[400px]">
-        <div className="w-8 h-8 animate-spin rounded-full border-2 border-t-transparent border-emerald-600" />
-      </div>
-    );
-  }
+  if (loading) return <p className="p-6 text-sm text-gray-500">Loading prospects…</p>;
 
   return (
-    <div className="page-shell p-4 md:p-6 space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <div className="p-4 md:p-6 space-y-4">
+      <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Prospects</h1>
-          <p className="text-sm text-gray-500">Store leads recorded for follow-up and onboarding.</p>
+          <h2 className="text-xl font-bold text-gray-900">Prospects</h2>
+          <p className="text-sm text-gray-500">{filtered.length} store lead{filtered.length === 1 ? '' : 's'}</p>
         </div>
-        <LinkButton
-          onClick={() => setOpenAdd(true)}
-          variant="primary"
-          size="sm"
-          icon={<Plus className="w-4 h-4" />}
-        >
-          Register Store
-        </LinkButton>
+        <Button variant="primary" size="sm" onClick={() => setOpenAdd((open) => !open)}>
+          {openAdd ? 'Close' : 'Register store'}
+        </Button>
       </div>
 
-      <div className="rounded-xl bg-white border border-gray-100 p-4 shadow-sm">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-          <div className="relative">
-            <Search className="w-4 h-4 absolute left-3 top-3 text-gray-400" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search store or owner…"
-              className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-10 pr-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
-          </div>
-          <select
-            value={filter}
-            onChange={(e) => setFilter(e.target.value as StatusFilter)}
-            className="rounded-xl border border-gray-200 bg-gray-50 pl-3 pr-4 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          >
-            <option value="all">All Status</option>
-            <option value="lead">Lead</option>
-            <option value="contacted">Contacted</option>
-            <option value="follow_up">Follow Up</option>
-            <option value="converted">Converted</option>
-            <option value="lost">Lost</option>
-          </select>
-          <div className="col-span-1 md:col-span-2 lg:col-span-2"></div>
-        </div>
-      </div>
+      {error && <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg p-3">{error}</p>}
 
       {openAdd && (
-        <div className="rounded-xl bg-white border border-gray-100 shadow-lg p-5">
-          <h2 className="text-sm font-bold text-gray-900 mb-4">Register New Store Prospect</h2>
-          <form onSubmit={handleAdd} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-gray-500 uppercase">Store Name</label>
-              <input
-                value={addForm.store_name}
-                onChange={(e) => setAddForm({ ...addForm, store_name: e.target.value })}
-                placeholder="e.g. Kings Supermarket"
-                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-gray-500 uppercase">Owner Full Name</label>
-              <input
-                value={addForm.owner_full_name}
-                onChange={(e) => setAddForm({ ...addForm, owner_full_name: e.target.value })}
-                placeholder="e.g. Ama Mensah"
-                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-gray-500 uppercase">Owner Phone</label>
-              <input
-                type="tel"
-                value={addForm.owner_phone}
-                onChange={(e) => setAddForm({ ...addForm, owner_phone: e.target.value.replace(/\D/g, '') })}
-                placeholder="024XXXXXXX"
-                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-              {!isValidGhanaPhone(addForm.owner_phone) && addForm.owner_phone && (
-                <p className="text-xs text-red-500">Invalid Ghana phone</p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-gray-500 uppercase">Owner Email</label>
-              <input
-                type="email"
-                value={addForm.owner_email}
-                onChange={(e) => setAddForm({ ...addForm, owner_email: e.target.value })}
-                placeholder="ama@example.com"
-                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-gray-500 uppercase">Business Type</label>
-              <input
-                value={addForm.business_type}
-                onChange={(e) => setAddForm({ ...addForm, business_type: e.target.value })}
-                placeholder="e.g. Grocery"
-                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-gray-500 uppercase">City</label>
-              <input
-                value={addForm.city}
-                onChange={(e) => setAddForm({ ...addForm, city: e.target.value })}
-                placeholder="e.g. Accra"
-                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-            </div>
-            <div className="md:col-span-2 space-y-2">
-              <label className="text-xs font-medium text-gray-500 uppercase">Subscription Package</label>
-              <input
-                value={addForm.subscription_package}
-                onChange={(e) => setAddForm({ ...addForm, subscription_package: e.target.value })}
-                placeholder="e.g. Silver Monthly"
-                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-            </div>
-            <div className="md:col-span-2 space-y-2">
-              <label className="text-xs font-medium text-gray-500 uppercase">Notes</label>
-              <textarea
-                value={addForm.notes}
-                onChange={(e) => setAddForm({ ...addForm, notes: e.target.value })}
-                rows={2}
-                placeholder="How did you hear about us? Any special notes?"
-                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-            </div>
-            {addError && (
-              <div className="md:col-span-2 rounded-lg bg-red-50 border border-red-100 p-3">
-                <p className="text-sm text-red-700">{addError}</p>
-              </div>
-            )}
-            <div className="md:col-span-2 flex gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setOpenAdd(false)}
-                className="px-4 py-2 rounded-xl border border-gray-200 text-gray-700 text-sm hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm hover:bg-emerald-700 shadow-sm shadow-emerald-100">
-                Save Prospect
-              </button>
-            </div>
-          </form>
-        </div>
+        <form onSubmit={saveProspect} className="rounded-xl bg-white border border-gray-100 p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <Field label="Store name" value={form.store_name} onChange={(value) => setForm({ ...form, store_name: value })} />
+          <Field label="Owner name" value={form.owner_full_name} onChange={(value) => setForm({ ...form, owner_full_name: value })} />
+          <Field label="Owner phone" value={form.owner_phone} onChange={(value) => setForm({ ...form, owner_phone: value.replace(/\D/g, '') })} />
+          <Field label="Owner email" value={form.owner_email} onChange={(value) => setForm({ ...form, owner_email: value })} />
+          <Field label="Address" value={form.address} onChange={(value) => setForm({ ...form, address: value })} />
+          <Field label="City" value={form.city} onChange={(value) => setForm({ ...form, city: value })} />
+          <Field label="Business type" value={form.business_type} onChange={(value) => setForm({ ...form, business_type: value })} />
+          <label className="text-xs font-medium text-gray-500">
+            Package
+            <select
+              value={form.subscription_package}
+              onChange={(event) => setForm({ ...form, subscription_package: event.target.value })}
+              className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900"
+            >
+              {SUBSCRIPTION_PACKAGES.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label} · GHS {item.baseGhs}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs font-medium text-gray-500">
+            Source
+            <select
+              value={form.source}
+              onChange={(event) => setForm({ ...form, source: event.target.value })}
+              className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900"
+            >
+              <option value="walk-in">Walk-in</option>
+              <option value="referral">Referral</option>
+              <option value="social">Social media</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label className="text-xs font-medium text-gray-500 md:col-span-2">
+            Notes
+            <textarea
+              value={form.notes}
+              onChange={(event) => setForm({ ...form, notes: event.target.value })}
+              rows={2}
+              className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+            />
+          </label>
+          <div className="md:col-span-2">
+            <Button type="submit" variant="primary">Save prospect</Button>
+          </div>
+        </form>
       )}
 
-      <div className="rounded-xl bg-white border border-gray-100 shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
-            <thead>
-              <tr className="border-b border-gray-100">
-                <th className="pb-3 text-xs font-semibold text-gray-500 uppercase">Store</th>
-                <th className="pb-3 text-xs font-semibold text-gray-500 uppercase">Owner</th>
-                <th className="pb-3 text-xs font-semibold text-gray-500 uppercase">Phone</th>
-                <th className="pb-3 text-xs font-semibold text-gray-500 uppercase">Package</th>
-                <th className="pb-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
-                <th className="pb-3 text-xs font-semibold text-gray-500 uppercase text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-8 text-center text-gray-400">
-                    No prospects match your filters.
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((p) => (
-                  <tr key={p.id} className="hover:bg-gray-50/50 transition-colors">
-                    <td className="py-4">
-                      <div className="font-medium text-gray-900">{p.store_name}</div>
-                      <div className="text-xs text-gray-500">{p.address || p.city || '—'}</div>
-                    </td>
-                    <td className="py-4 text-gray-900">{p.owner_full_name}</td>
-                    <td className="py-4">
-                      <div className="flex items-center gap-1 text-sm text-gray-700">
-                        <Phone className="w-3 h-3" />
-                        {p.owner_phone}
-                      </div>
-                    </td>
-                    <td className="py-4 text-gray-700">{p.subscription_package || '—'}</td>
-                    <td className="py-4">
-                      <span className={`px-2 py-1 rounded text-xs font-medium border ${STATUS_COLORS[p.status]}`}>
-                        {STATUS_LABELS[p.status]}
-                      </span>
-                    </td>
-                    <td className="py-4 text-right">
-                      <LinkButton
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {}}
-                        icon={<ChevronRight className="w-3 h-3" />}
-                      >
-                        View
-                      </LinkButton>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        <input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search store or owner"
+          className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
+        />
+        <select
+          value={filter}
+          onChange={(event) => setFilter(event.target.value as 'all' | ProspectStatus)}
+          className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
+        >
+          <option value="all">All statuses</option>
+          {STATUSES.map((status) => (
+            <option key={status} value={status}>{status.replace('_', ' ')}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="rounded-xl bg-white border border-gray-100 divide-y divide-gray-50">
+          {filtered.length === 0 && <p className="p-6 text-sm text-gray-500 text-center">No prospects match.</p>}
+          {filtered.map((prospect) => (
+            <button
+              key={prospect.id}
+              type="button"
+              onClick={() => setSelectedId(prospect.id)}
+              className={`w-full text-left px-4 py-3 ${selectedId === prospect.id ? 'bg-emerald-50' : ''}`}
+            >
+              <span className="block text-sm font-semibold text-gray-900">{prospect.store_name}</span>
+              <span className="block text-xs text-gray-500">
+                {prospect.owner_full_name} · {prospect.owner_phone} · {prospect.status.replace('_', ' ')}
+              </span>
+            </button>
+          ))}
         </div>
-        <div className="border-t border-gray-50 p-3 flex items-center justify-between text-xs text-gray-500">
-          <span>{filtered.length} prospect(s)</span>
-          <span>{currentAgent?.commission_percentage}% commission rate</span>
-        </div>
+
+        {selected && (
+          <section className="rounded-xl bg-white border border-gray-100 p-4 space-y-3">
+            <h3 className="font-bold text-gray-900">{selected.store_name}</h3>
+            <p className="text-sm text-gray-600">
+              {selected.owner_full_name} · {selected.owner_phone}
+              {selected.owner_email ? ` · ${selected.owner_email}` : ''}
+            </p>
+            <p className="text-sm text-gray-600">
+              {[selected.address, selected.city].filter(Boolean).join(', ') || 'No address yet'} · {selected.business_type || 'Business type not set'}
+            </p>
+            <p className="text-sm text-gray-600">
+              Package {selected.subscription_package || '—'} · Source {selected.source || '—'}
+            </p>
+            {selected.notes && <p className="text-sm text-gray-700">{selected.notes}</p>}
+            <label className="block text-xs font-medium text-gray-500">
+              Status
+              <select
+                value={selected.status}
+                onChange={(event) => void changeStatus(event.target.value as ProspectStatus)}
+                className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+              >
+                {STATUSES.map((status) => (
+                  <option key={status} value={status}>{status.replace('_', ' ')}</option>
+                ))}
+              </select>
+            </label>
+            <Button variant="outline" size="sm" onClick={() => onCreateInvoice?.()}>
+              Create invoice
+            </Button>
+
+            <form onSubmit={addFollowUp} className="space-y-2 border-t border-gray-100 pt-3">
+              <p className="text-sm font-semibold text-gray-900">Schedule follow-up</p>
+              <input
+                type="datetime-local"
+                value={followAt}
+                onChange={(event) => setFollowAt(event.target.value)}
+                className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+              />
+              <select
+                value={channel}
+                onChange={(event) => setChannel(event.target.value as FollowUpChannel)}
+                className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+              >
+                {CHANNELS.map((item) => (
+                  <option key={item} value={item}>{item}</option>
+                ))}
+              </select>
+              <Button type="submit" size="sm" variant="primary">Save follow-up</Button>
+            </form>
+
+            <div className="space-y-1">
+              {followUps.length === 0 && <p className="text-xs text-gray-500">No follow-ups logged.</p>}
+              {followUps.map((row) => (
+                <p key={row.id} className="text-xs text-gray-600">
+                  {new Date(row.follow_up_at).toLocaleString('en-GH')} · {row.channel} · {row.status}
+                  {row.outcome ? ` · ${row.outcome}` : ''}
+                </p>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
     </div>
+  );
+}
+
+function Field({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="text-xs font-medium text-gray-500">
+      {label}
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900"
+      />
+    </label>
   );
 }

@@ -1,14 +1,16 @@
 -- ============================================================
--- ADIMAT AGENT PORTAL - Migration
--- Adds agent onboarding, prospect management, subscription invoicing,
--- commission balance, and MoMo withdrawal tables.
+-- ADIMAT AGENT PORTAL
+-- Agents, store prospects, follow-ups, subscription invoices,
+-- commissions, and Mobile Money withdrawal requests.
+-- Safe to re-run. Agents sign in with a PIN, not Supabase Auth,
+-- so policies match the rest of this prototype (anon read/write).
 -- Run this in the Supabase SQL Editor.
 -- ============================================================
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ============================================================
--- AGENTS (registered by admin; PIN-only login into agent portal)
+-- AGENTS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS agents (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -26,6 +28,9 @@ CREATE TABLE IF NOT EXISTS agents (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE agents ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "agents_select" ON agents;
+DROP POLICY IF EXISTS "agents_insert" ON agents;
+DROP POLICY IF EXISTS "agents_update" ON agents;
 CREATE POLICY "agents_select" ON agents FOR SELECT USING (true);
 CREATE POLICY "agents_insert" ON agents FOR INSERT WITH CHECK (true);
 CREATE POLICY "agents_update" ON agents FOR UPDATE USING (true);
@@ -33,7 +38,7 @@ CREATE INDEX IF NOT EXISTS idx_agents_phone ON agents(phone);
 CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
 
 -- ============================================================
--- PROSPECTS (store leads recorded by agents for follow-up)
+-- PROSPECTS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS prospects (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -55,14 +60,18 @@ CREATE TABLE IF NOT EXISTS prospects (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE prospects ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "prospects_select" ON prospects;
+DROP POLICY IF EXISTS "prospects_insert" ON prospects;
+DROP POLICY IF EXISTS "prospects_update" ON prospects;
 CREATE POLICY "prospects_select" ON prospects FOR SELECT USING (true);
 CREATE POLICY "prospects_insert" ON prospects FOR INSERT WITH CHECK (true);
 CREATE POLICY "prospects_update" ON prospects FOR UPDATE USING (true);
 CREATE INDEX IF NOT EXISTS idx_prospects_agent ON prospects(agent_id);
 CREATE INDEX IF NOT EXISTS idx_prospects_status ON prospects(status);
+CREATE INDEX IF NOT EXISTS idx_prospects_next_follow_up ON prospects(next_follow_up_at);
 
 -- ============================================================
--- FOLLOW_UPS (scheduled store follow-up activities)
+-- FOLLOW UPS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS follow_ups (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -76,6 +85,9 @@ CREATE TABLE IF NOT EXISTS follow_ups (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE follow_ups ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "follow_ups_select" ON follow_ups;
+DROP POLICY IF EXISTS "follow_ups_insert" ON follow_ups;
+DROP POLICY IF EXISTS "follow_ups_update" ON follow_ups;
 CREATE POLICY "follow_ups_select" ON follow_ups FOR SELECT USING (true);
 CREATE POLICY "follow_ups_insert" ON follow_ups FOR INSERT WITH CHECK (true);
 CREATE POLICY "follow_ups_update" ON follow_ups FOR UPDATE USING (true);
@@ -83,7 +95,8 @@ CREATE INDEX IF NOT EXISTS idx_follow_ups_prospect ON follow_ups(prospect_id);
 CREATE INDEX IF NOT EXISTS idx_follow_ups_agent_due ON follow_ups(agent_id, follow_up_at);
 
 -- ============================================================
--- STORES (activated store accounts after subscription payment)
+-- AGENT STORES (link from a paid prospect to the opened POS store)
+-- The row id is the real Adimat stores.id created for the owner.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS agent_stores (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -102,9 +115,23 @@ CREATE TABLE IF NOT EXISTS agent_stores (
   momo_account_name VARCHAR(255) DEFAULT '',
   momo_number VARCHAR(50) DEFAULT '',
   momo_network VARCHAR(50) DEFAULT '',
+  access_blocked BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE agent_stores ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "agent_stores_select" ON agent_stores;
+DROP POLICY IF EXISTS "agent_stores_insert" ON agent_stores;
+DROP POLICY IF EXISTS "agent_stores_update" ON agent_stores;
+CREATE POLICY "agent_stores_select" ON agent_stores FOR SELECT USING (true);
+CREATE POLICY "agent_stores_insert" ON agent_stores FOR INSERT WITH CHECK (true);
+CREATE POLICY "agent_stores_update" ON agent_stores FOR UPDATE USING (true);
+CREATE INDEX IF NOT EXISTS idx_agent_stores_agent ON agent_stores(agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_stores_status ON agent_stores(status);
+CREATE INDEX IF NOT EXISTS idx_agent_stores_prospect ON agent_stores(prospect_id);
 
 -- ============================================================
--- INVOICES (subscription invoices issued to prospects/stores)
+-- INVOICES
 -- ============================================================
 CREATE TABLE IF NOT EXISTS agent_invoices (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -122,6 +149,9 @@ CREATE TABLE IF NOT EXISTS agent_invoices (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE agent_invoices ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "agent_invoices_select" ON agent_invoices;
+DROP POLICY IF EXISTS "agent_invoices_insert" ON agent_invoices;
+DROP POLICY IF EXISTS "agent_invoices_update" ON agent_invoices;
 CREATE POLICY "agent_invoices_select" ON agent_invoices FOR SELECT USING (true);
 CREATE POLICY "agent_invoices_insert" ON agent_invoices FOR INSERT WITH CHECK (true);
 CREATE POLICY "agent_invoices_update" ON agent_invoices FOR UPDATE USING (true);
@@ -131,7 +161,7 @@ CREATE INDEX IF NOT EXISTS idx_agent_invoices_status ON agent_invoices(status);
 CREATE INDEX IF NOT EXISTS idx_agent_invoices_due_date ON agent_invoices(due_date);
 
 -- ============================================================
--- PAYMENTS (subscription payments recorded against invoices)
+-- PAYMENTS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS agent_payments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -145,26 +175,17 @@ CREATE TABLE IF NOT EXISTS agent_payments (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE agent_payments ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "agent_payments_select" ON agent_payments;
+DROP POLICY IF EXISTS "agent_payments_insert" ON agent_payments;
+DROP POLICY IF EXISTS "agent_payments_update" ON agent_payments;
 CREATE POLICY "agent_payments_select" ON agent_payments FOR SELECT USING (true);
 CREATE POLICY "agent_payments_insert" ON agent_payments FOR INSERT WITH CHECK (true);
 CREATE POLICY "agent_payments_update" ON agent_payments FOR UPDATE USING (true);
 CREATE INDEX IF NOT EXISTS idx_agent_payments_invoice ON agent_payments(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_agent_payments_agent ON agent_payments(agent_id);
-  access_blocked BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-ALTER TABLE agent_stores ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "agent_stores_select" ON agent_stores FOR SELECT USING (true);
-CREATE POLICY "agent_stores_insert" ON agent_stores FOR INSERT WITH CHECK (true);
-CREATE POLICY "agent_stores_update" ON agent_stores FOR UPDATE USING (true);
-CREATE INDEX IF NOT EXISTS idx_agent_stores_agent ON agent_stores(agent_id);
-CREATE INDEX IF NOT EXISTS idx_agent_stores_status ON agent_stores(status);
-CREATE INDEX IF NOT EXISTS idx_agent_stores_prospect ON agent_stores(prospect_id);
-CREATE INDEX IF NOT EXISTS idx_prospects_next_follow_up ON prospects(next_follow_up_at);
 
 -- ============================================================
--- COMMISSIONS (accrued earnings per paid subscription invoice)
+-- COMMISSIONS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS agent_commissions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -177,14 +198,18 @@ CREATE TABLE IF NOT EXISTS agent_commissions (
   paid_at TIMESTAMPTZ
 );
 ALTER TABLE agent_commissions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "agent_commissions_select" ON agent_commissions;
+DROP POLICY IF EXISTS "agent_commissions_insert" ON agent_commissions;
+DROP POLICY IF EXISTS "agent_commissions_update" ON agent_commissions;
 CREATE POLICY "agent_commissions_select" ON agent_commissions FOR SELECT USING (true);
 CREATE POLICY "agent_commissions_insert" ON agent_commissions FOR INSERT WITH CHECK (true);
 CREATE POLICY "agent_commissions_update" ON agent_commissions FOR UPDATE USING (true);
 CREATE INDEX IF NOT EXISTS idx_agent_commissions_agent ON agent_commissions(agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_commissions_status ON agent_commissions(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_commissions_invoice ON agent_commissions(invoice_id);
 
 -- ============================================================
--- WITHDRAWAL_REQUESTS (agent payout requests to MoMo)
+-- WITHDRAWAL REQUESTS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS agent_withdrawal_requests (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -200,11 +225,14 @@ CREATE TABLE IF NOT EXISTS agent_withdrawal_requests (
   payout_reference VARCHAR(120) DEFAULT '',
   requested_at TIMESTAMPTZ DEFAULT NOW(),
   processed_at TIMESTAMPTZ,
-  processed_by UUID REFERENCES agents(id),
+  processed_by UUID,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE agent_withdrawal_requests ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "agent_withdrawal_requests_select" ON agent_withdrawal_requests;
+DROP POLICY IF EXISTS "agent_withdrawal_requests_insert" ON agent_withdrawal_requests;
+DROP POLICY IF EXISTS "agent_withdrawal_requests_update" ON agent_withdrawal_requests;
 CREATE POLICY "agent_withdrawal_requests_select" ON agent_withdrawal_requests FOR SELECT USING (true);
 CREATE POLICY "agent_withdrawal_requests_insert" ON agent_withdrawal_requests FOR INSERT WITH CHECK (true);
 CREATE POLICY "agent_withdrawal_requests_update" ON agent_withdrawal_requests FOR UPDATE USING (true);
@@ -212,7 +240,7 @@ CREATE INDEX IF NOT EXISTS idx_agent_withdrawal_requests_agent ON agent_withdraw
 CREATE INDEX IF NOT EXISTS idx_agent_withdrawal_requests_status ON agent_withdrawal_requests(status);
 
 -- ============================================================
--- COMMISSION SETTINGS (platform-wide defaults)
+-- COMMISSION SETTINGS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS agent_commission_settings (
   id TEXT PRIMARY KEY DEFAULT 'main',
@@ -222,6 +250,9 @@ CREATE TABLE IF NOT EXISTS agent_commission_settings (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE agent_commission_settings ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "agent_commission_settings_select" ON agent_commission_settings;
+DROP POLICY IF EXISTS "agent_commission_settings_insert" ON agent_commission_settings;
+DROP POLICY IF EXISTS "agent_commission_settings_update" ON agent_commission_settings;
 CREATE POLICY "agent_commission_settings_select" ON agent_commission_settings FOR SELECT USING (true);
 CREATE POLICY "agent_commission_settings_insert" ON agent_commission_settings FOR INSERT WITH CHECK (true);
 CREATE POLICY "agent_commission_settings_update" ON agent_commission_settings FOR UPDATE USING (true);
