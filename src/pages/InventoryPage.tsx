@@ -15,12 +15,14 @@ import {
 } from '@/lib/dexie';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { alignProductsWithBatchStock, toMoney, toQty } from '@/lib/warehouse';
+import { scoreSmartSearch } from '@/lib/adimatAi/search';
 import { subscribeStockChanges } from '@/lib/stockEvents';
 import AddProduct from '@/components/AddProduct';
 import StockAdjustment from '@/components/StockAdjustment';
 import CsvImportModal from '@/components/CsvImportModal';
 import { downloadBarcodeLabel, printBarcodeLabel } from '@/lib/barcodeLabels';
 import { useAuthStore } from '@/store/useAuthStore';
+import { cashierCanSeeStockQuantity } from '@/lib/staffAccess';
 import { useFormatMoney } from '@/lib/currency';
 import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 import { playScanBeep } from '@/lib/scanBeep';
@@ -39,6 +41,7 @@ export default function InventoryPage({
   onQuickActionHandled?: () => void;
 }) {
   const { currentStore, currentUser } = useAuthStore();
+  const showStockQty = cashierCanSeeStockQuantity(currentUser, currentStore);
   const money = useFormatMoney();
   const [products, setProducts] = useState<LocalProduct[]>([]);
   const [productsLoaded, setProductsLoaded] = useState(false);
@@ -219,16 +222,14 @@ export default function InventoryPage({
       result = result.filter((p) => (p.category || 'Other') === selectedCategory);
     }
 
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase().trim();
-      result = result.filter(
-        (p) =>
-          (p.name || '').toLowerCase().includes(q) ||
-          (p.barcode || '').toLowerCase().includes(q)
-      );
-    }
-
-    switch (sortMode) {
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim();
+      result = result
+        .map((product) => ({ product, score: scoreSmartSearch(product, q) }))
+        .filter((row) => row.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .map((row) => row.product);
+    } else switch (sortMode) {
       case 'recent':
         result.sort(
           (a, b) =>
@@ -628,17 +629,19 @@ export default function InventoryPage({
                             Cost: {money(toMoney(product.cost_price))}
                           </p>
                         </div>
-                        <p
-                          className={`text-xs font-semibold ${
-                            toQty(product.stock_level) === 0
-                              ? 'text-red-500'
-                              : toQty(product.stock_level) <= (Number(product.reorder_level) > 0 ? Number(product.reorder_level) : 5)
-                                ? 'text-amber-500'
-                                : 'text-gray-700'
-                          }`}
-                        >
-                          Stock: {formatStockQty(product.stock_level)}
-                        </p>
+                        {showStockQty && (
+                          <p
+                            className={`text-xs font-semibold ${
+                              toQty(product.stock_level) === 0
+                                ? 'text-red-500'
+                                : toQty(product.stock_level) <= (Number(product.reorder_level) > 0 ? Number(product.reorder_level) : 5)
+                                  ? 'text-amber-500'
+                                  : 'text-gray-700'
+                            }`}
+                          >
+                            Stock: {formatStockQty(product.stock_level)}
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>

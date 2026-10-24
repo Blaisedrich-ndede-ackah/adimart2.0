@@ -1,0 +1,172 @@
+import { db, type LocalStore, type LocalTransaction } from '@/lib/dexie';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { lastWriteWins } from '@/lib/syncConflict';
+import type { LocalCannedReply, LocalSupportMessage, LocalSupportTicket } from './types';
+import { notifyLocal } from './repository';
+
+function ticketFromCloud(row: Record<string, unknown>): LocalSupportTicket {
+  return {
+    id: String(row.id),
+    store_id: String(row.store_id),
+    reference: String(row.reference || ''),
+    source: (row.source as LocalSupportTicket['source']) || 'owner',
+    customer_name: String(row.customer_name || ''),
+    customer_phone: String(row.customer_phone || ''),
+    customer_email: String(row.customer_email || ''),
+    category: (row.category as LocalSupportTicket['category']) || 'other',
+    priority: (row.priority as LocalSupportTicket['priority']) || 'normal',
+    status: (row.status as LocalSupportTicket['status']) || 'open',
+    assignee_name: String(row.assignee_name || ''),
+    subject: String(row.subject || ''),
+    opened_by_name: String(row.opened_by_name || ''),
+    sla_first_response_due: String(row.sla_first_response_due || row.created_at || ''),
+    sla_resolution_due: String(row.sla_resolution_due || row.created_at || ''),
+    first_response_at: row.first_response_at ? String(row.first_response_at) : null,
+    resolved_at: row.resolved_at ? String(row.resolved_at) : null,
+    version: Number(row.version) || 1,
+    created_at: String(row.created_at || ''),
+    updated_at: String(row.updated_at || row.created_at || ''),
+    synced: 1,
+  };
+}
+
+function messageFromCloud(row: Record<string, unknown>): LocalSupportMessage {
+  return {
+    id: String(row.id),
+    ticket_id: String(row.ticket_id),
+    store_id: String(row.store_id),
+    author_role: (row.author_role as LocalSupportMessage['author_role']) || 'customer',
+    author_name: String(row.author_name || ''),
+    body: String(row.body || ''),
+    visibility: row.visibility === 'internal' ? 'internal' : 'public',
+    attachment_name: String(row.attachment_name || ''),
+    attachment_data_url: String(row.attachment_data_url || ''),
+    created_at: String(row.created_at || ''),
+    synced: 1,
+  };
+}
+
+function toCloudTicket(ticket: LocalSupportTicket): Record<string, unknown> {
+  const { synced: _synced, ...rest } = ticket;
+  return rest;
+}
+
+export async function pushSupportChanges(storeId: string): Promise<{ pushed: number; error?: string }> {
+  if (!isSupabaseConfigured()) return { pushed: 0 };
+  const tickets = await db.support_tickets.where('store_id').equals(storeId).and((row) => row.synced === 0).toArray();
+  const messages = await db.support_messages.where('store_id').equals(storeId).and((row) => row.synced === 0).toArray();
+  const replies = await db.support_canned_replies.filter((row) => row.synced === 0).toArray();
+  let pushed = 0;
+  if (tickets.length > 0) {
+    const { error } = await supabase.from('support_tickets').upsert(
+      tickets.map((ticket) => toCloudTicket(ticket)),
+      { onConflict: 'id' }
+    );
+    if (error) {
+      if (/does not exist|schema cache|PGRST205/i.test(error.message)) return { pushed: 0 };
+      return { pushed: 0, error: `Customer care: ${error.message}` };
+    }
+    await Promise.all(tickets.map((ticket) => db.support_tickets.update(ticket.id, { synced: 1 })));
+    pushed += tickets.length;
+  }
+  if (messages.length > 0) {
+    const { error } = await supabase.from('support_messages').upsert(messages, { onConflict: 'id' });
+    if (error) return { pushed, error: `Customer care messages: ${error.message}` };
+    await Promise.all(messages.map((message) => db.support_messages.update(message.id, { synced: 1 })));
+    pushed += messages.length;
+  }
+  if (replies.length > 0) {
+    const { error } = await supabase.from('support_canned_replies').upsert(
+      replies.map((reply) => ({ id: reply.id, title: reply.title, body: reply.body, updated_at: reply.updated_at })),
+      { onConflict: 'id' }
+    );
+    if (!error) {
+      await Promise.all(replies.map((reply) => db.support_canned_replies.update(reply.id, { synced: 1 })));
+      pushed += replies.length;
+    }
+  }
+  return { pushed };
+}
+
+async function mergeTicket(remote: LocalSupportTicket): Promise<void> {
+  const local = await db.support_tickets.get(remote.id);
+  if (!local) {
+    await db.support_tickets.put(remote);
+    return;
+  }
+  if (local.synced === 0) {
+    const winner = lastWriteWins(local, remote);
+    await db.support_tickets.put({ ...winner, synced: winner === local ? 0 : 1 });
+    return;
+  }
+  await db.support_tickets.put(remote);
+}
+
+export async function pullSupportChanges(storeId: string | null): Promise<string | null> {
+  if (!isSupabaseConfigured()) return null;
+  let ticketQuery = supabase.from('support_tickets').select('*');
+  if (storeId) ticketQuery = ticketQuery.eq('store_id', storeId);
+  const tickets = await ticketQuery;
+  if (tickets.error) {
+    if (/does not exist|schema cache|PGRST205|row-level security|42501/i.test(tickets.error.message)) return null;
+    return tickets.error.message;
+  }
+  const remoteTickets = ((tickets.data || []) as Record<string, unknown>[]).map(ticketFromCloud);
+  for (const ticket of remoteTickets) {
+    const before = await db.support_tickets.get(ticket.id);
+    await mergeTicket(ticket);
+    if (!before) {
+      await notifyLocal({
+        storeId: ticket.store_id,
+        ticketId: ticket.id,
+        title: `Ticket ${ticket.reference}`,
+        body: ticket.subject,
+      });
+    }
+  }
+  const ids = remoteTickets.map((ticket) => ticket.id);
+  if (ids.length === 0) return null;
+  const messages = await supabase.from('support_messages').select('*').in('ticket_id', ids);
+  if (messages.error || !messages.data) return null;
+  for (const row of messages.data as Record<string, unknown>[]) {
+    const message = messageFromCloud(row);
+    const existing = await db.support_messages.get(message.id);
+    if (!existing) {
+      await db.support_messages.put(message);
+      if (message.author_role === 'admin' && message.visibility === 'public') {
+        await notifyLocal({
+          storeId: message.store_id,
+          ticketId: message.ticket_id,
+          title: 'Customer care replied',
+          body: message.body.slice(0, 140),
+        });
+      }
+    }
+  }
+  const canned = await supabase.from('support_canned_replies').select('*');
+  if (!canned.error && canned.data) {
+    for (const row of canned.data as Record<string, unknown>[]) {
+      const reply: LocalCannedReply = {
+        id: String(row.id),
+        title: String(row.title || ''),
+        body: String(row.body || ''),
+        updated_at: String(row.updated_at || ''),
+        synced: 1,
+      };
+      const local = await db.support_canned_replies.get(reply.id);
+      if (!local || local.synced !== 0) await db.support_canned_replies.put(reply);
+    }
+  }
+  return null;
+}
+
+export async function storeProfile(storeId: string): Promise<{
+  store: LocalStore | null;
+  recent: LocalTransaction[];
+}> {
+  const store = (await db.stores.get(storeId)) || null;
+  const recent = (await db.transactions.where('store_id').equals(storeId).toArray())
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .slice(0, 5);
+  return { store, recent };
+}

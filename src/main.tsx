@@ -12,6 +12,12 @@ if (
     navigator.serviceWorker.register('/sw.js')
       .then((registration) => {
         console.log('SW registered:', registration.scope);
+        const syncRegistration = registration as ServiceWorkerRegistration & { sync?: { register: (tag: string) => Promise<void> } };
+        if (syncRegistration.sync) {
+          void syncRegistration.sync.register('adimat-sync').catch(() => {
+            // Background Sync is missing on iOS Safari and some WebViews.
+          });
+        }
         
         // Check for updates
         registration.addEventListener('updatefound', () => {
@@ -29,6 +35,12 @@ if (
       .catch((error) => {
         console.log('SW registration failed:', error);
       });
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      const data = event.data as { type?: string } | undefined;
+      if (data?.type === 'adimat-background-sync') {
+        window.dispatchEvent(new Event('adimat-background-sync'));
+      }
+    });
   });
 }
 

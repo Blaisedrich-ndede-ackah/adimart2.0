@@ -1,18 +1,56 @@
 import { isSupabaseConfigured, supabase } from './supabase';
-import { syncStockFast, syncToSupabase } from './dexie';
+import { syncBidirectional, syncFromSupabase, syncStockFast, syncToSupabase, refreshStockFromCloud, getCurrentStoreId } from './dexie';
+import { pullSupportChanges } from './support/cloud';
+import {
+  bumpOutboxFailures,
+  completeOutboxForSyncedRows,
+  countPendingChanges,
+  installLocalWriteHooks,
+  installSyncBroadcast,
+  markFullPullDone,
+  needsFullPull,
+  outboxReady,
+  publishSync,
+  registerBackgroundSync,
+  scheduleDebouncedPush,
+} from './syncEngine';
 
 const AUTO_SYNC_KEY = 'adimat_auto_sync';
 const LAST_SYNC_ERROR_KEY = 'adimat_last_sync_error';
-const AUTO_SYNC_INTERVAL_MS = 45 * 1000;
-const LIVE_DEBOUNCE_MS = 1500;
-const MIN_ONLINE_GAP_MS = 30_000;
+const LIVE_DEBOUNCE_MS = 1000;
+const PUSH_DEBOUNCE_MS = 1000;
+
+const LIVE_TABLES = [
+  'products',
+  'stock_batches',
+  'stock_movements',
+  'transactions',
+  'transaction_items',
+  'customers',
+  'expenses',
+  'sales_returns',
+  'customer_wallet_transactions',
+  'credit_payments',
+  'purchase_orders',
+  'suppliers',
+  'online_orders',
+  'online_order_items',
+  'locations',
+  'cash_book_entries',
+  'support_tickets',
+  'support_messages',
+  'customer_account_receipts',
+  'customer_opening_payments',
+  'bulk_sms_campaigns',
+  'debt_reminders',
+] as const;
 
 let syncInProgress = false;
 let syncQueued = false;
-let syncTimer: ReturnType<typeof setInterval> | null = null;
-let lastAutoSyncAt = 0;
+let queuedReason = 'queued';
 let liveChannel: ReturnType<typeof supabase.channel> | null = null;
-let lastOnlineSyncAt = 0;
+let liveDebounce: ReturnType<typeof setTimeout> | null = null;
+let hooksReady = false;
 
 export function isAutoSyncEnabled(): boolean {
   return localStorage.getItem(AUTO_SYNC_KEY) !== 'false';
@@ -20,105 +58,32 @@ export function isAutoSyncEnabled(): boolean {
 
 export function setAutoSyncEnabled(enabled: boolean): void {
   localStorage.setItem(AUTO_SYNC_KEY, enabled ? 'true' : 'false');
-  if (enabled) {
-    startAutoSync();
-  } else {
-    stopAutoSync();
-  }
+  if (enabled) startAutoSync();
+  else stopAutoSync();
 }
 
-let liveDebounce: ReturnType<typeof setTimeout> | null = null;
-
 function dispatchSyncEvent(phase: 'start' | 'complete' | 'error', detail: Record<string, unknown>): void {
+  const payload = { phase, ...detail };
   try {
-    window.dispatchEvent(new CustomEvent('adimat-sync', { detail: { phase, ...detail } }));
+    window.dispatchEvent(new CustomEvent('adimat-sync', { detail: payload }));
   } catch {
-    // Swallow dispatch errors so sync never fails because of event delivery.
+    // Event delivery must not fail the sync itself.
   }
+  publishSync(payload);
 }
 
 function isOnline(): boolean {
   return typeof navigator === 'undefined' || navigator.onLine !== false;
 }
 
-export async function triggerAutoSync(reason = 'auto'): Promise<void> {
-  if (!isAutoSyncEnabled() || !isSupabaseConfigured()) return;
-  if ((reason === 'online' || reason === 'focus' || reason === 'visible') && !isOnline()) return;
-  if (syncInProgress) {
-    syncQueued = true;
-    return;
-  }
-
-  const now = Date.now();
-  if ((reason === 'auto' || reason === 'interval' || reason === 'live') && now - lastAutoSyncAt < 8_000) {
-    return;
-  }
-
-  if (reason === 'online') {
-    if (now - lastOnlineSyncAt < MIN_ONLINE_GAP_MS) return;
-    lastOnlineSyncAt = now;
-  }
-
-  syncInProgress = true;
-  dispatchSyncEvent('start', { reason });
+async function publishPending(): Promise<void> {
   try {
-    const result = await syncStockFast();
-    recordSyncOutcome(result);
-    lastAutoSyncAt = Date.now();
-    dispatchSyncEvent('complete', {
-      success: result.success,
-      message: result.message,
-      reason,
-    });
-  } catch (error) {
-    recordSyncOutcome({ success: false, message: error instanceof Error ? error.message : String(error) });
-    dispatchSyncEvent('error', {
-      success: false,
-      message: error instanceof Error ? error.message : String(error),
-      reason,
-    });
-  } finally {
-    syncInProgress = false;
-    if (syncQueued) {
-      syncQueued = false;
-      void triggerAutoSync('queued');
-    }
-  }
-}
-
-/** Push local changes only — much faster after checkout / order fulfill. */
-export async function triggerPushSync(reason = 'push'): Promise<void> {
-  if (!isAutoSyncEnabled() || !isSupabaseConfigured()) return;
-  if (!isOnline()) return;
-  if (syncInProgress) {
-    syncQueued = true;
-    return;
-  }
-
-  syncInProgress = true;
-  dispatchSyncEvent('start', { reason });
-  try {
-    const result = await syncToSupabase();
-    recordSyncOutcome(result);
-    lastAutoSyncAt = Date.now();
-    dispatchSyncEvent('complete', {
-      success: result.success,
-      message: result.message,
-      reason,
-    });
-  } catch (error) {
-    recordSyncOutcome({ success: false, message: error instanceof Error ? error.message : String(error) });
-    dispatchSyncEvent('error', {
-      success: false,
-      message: error instanceof Error ? error.message : String(error),
-      reason,
-    });
-  } finally {
-    syncInProgress = false;
-    if (syncQueued) {
-      syncQueued = false;
-      void triggerAutoSync('queued');
-    }
+    const storeId = await getCurrentStoreId();
+    const count = await countPendingChanges(storeId);
+    window.dispatchEvent(new CustomEvent('adimat-sync-pending', { detail: { count } }));
+    publishSync({ phase: 'pending', count });
+  } catch {
+    // Pending count is a status hint only.
   }
 }
 
@@ -131,36 +96,111 @@ export function recordSyncOutcome(result: { success: boolean; message: string })
   }
 }
 
+async function runSync(reason: string, work: () => Promise<{ success: boolean; message: string }>): Promise<void> {
+  if (!isAutoSyncEnabled() || !isSupabaseConfigured()) {
+    await publishPending();
+    return;
+  }
+  if (!isOnline()) {
+    await publishPending();
+    return;
+  }
+  if (reason !== 'manual' && reason !== 'online' && reason !== 'first-login' && !(await outboxReady())) {
+    await publishPending();
+    return;
+  }
+  if (syncInProgress) {
+    syncQueued = true;
+    queuedReason = reason;
+    return;
+  }
+  syncInProgress = true;
+  dispatchSyncEvent('start', { reason });
+  try {
+    const result = await work();
+    recordSyncOutcome(result);
+    if (result.success) await completeOutboxForSyncedRows();
+    else await bumpOutboxFailures(result.message);
+    dispatchSyncEvent(result.success ? 'complete' : 'error', {
+      success: result.success,
+      message: result.message,
+      reason,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    recordSyncOutcome({ success: false, message });
+    await bumpOutboxFailures(message);
+    dispatchSyncEvent('error', { success: false, message, reason });
+  } finally {
+    syncInProgress = false;
+    await publishPending();
+    if (syncQueued) {
+      syncQueued = false;
+      const next = queuedReason;
+      queuedReason = 'queued';
+      void runSync(next, () => syncBidirectional());
+    }
+  }
+}
+
+export async function triggerAutoSync(reason = 'auto'): Promise<void> {
+  await runSync(reason, async () => {
+    const result = await syncStockFast();
+    const storeId = await getCurrentStoreId();
+    if (storeId) await pullSupportChanges(storeId);
+    return result;
+  });
+}
+
+/** Push local changes. Calls from the app are coalesced to about one second. */
+export function triggerPushSync(reason = 'push'): Promise<void> {
+  return new Promise((resolve) => {
+    scheduleDebouncedPush(() => {
+      void runSync(reason, () => syncToSupabase({ skipPing: true, skipCanonicalize: true })).then(resolve);
+    }, PUSH_DEBOUNCE_MS);
+  });
+}
+
+export async function triggerReconnectSync(reason = 'online'): Promise<void> {
+  await runSync(reason, () => syncBidirectional());
+}
+
+export async function triggerPullSync(reason = 'live'): Promise<void> {
+  await runSync(reason, async () => {
+    const pull = await syncFromSupabase({ skipCatalogAlign: true });
+    const stock = await refreshStockFromCloud();
+    const storeId = await getCurrentStoreId();
+    if (storeId) await pullSupportChanges(storeId);
+    if (!pull.success) return { success: false, message: pull.message };
+    if (!stock.ok) return { success: false, message: stock.message || pull.message };
+    return { success: true, message: pull.message };
+  });
+}
+
+export async function syncNow(): Promise<void> {
+  await triggerReconnectSync('manual');
+}
+
+function scheduleLivePull(): void {
+  if (liveDebounce) clearTimeout(liveDebounce);
+  liveDebounce = setTimeout(() => {
+    liveDebounce = null;
+    void triggerPullSync('live');
+  }, LIVE_DEBOUNCE_MS);
+}
+
 export function startLiveStockSync(storeId: string): () => void {
   stopLiveStockSync();
   if (!isSupabaseConfigured() || !storeId) return () => undefined;
-
-  liveChannel = supabase
-    .channel(`adimat-stock-${storeId}`)
-    .on(
+  let channel = supabase.channel(`adimat-live-${storeId}`);
+  for (const table of LIVE_TABLES) {
+    channel = channel.on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'stock_batches', filter: `store_id=eq.${storeId}` },
-      () => {
-        if (liveDebounce) clearTimeout(liveDebounce);
-        liveDebounce = setTimeout(() => {
-          liveDebounce = null;
-          void triggerAutoSync('live');
-        }, LIVE_DEBOUNCE_MS);
-      }
-    )
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'products', filter: `store_id=eq.${storeId}` },
-      () => {
-        if (liveDebounce) clearTimeout(liveDebounce);
-        liveDebounce = setTimeout(() => {
-          liveDebounce = null;
-          void triggerAutoSync('live');
-        }, LIVE_DEBOUNCE_MS);
-      }
-    )
-    .subscribe();
-
+      { event: '*', schema: 'public', table, filter: `store_id=eq.${storeId}` },
+      () => scheduleLivePull()
+    );
+  }
+  liveChannel = channel.subscribe();
   return stopLiveStockSync;
 }
 
@@ -174,43 +214,64 @@ export function stopLiveStockSync(): void {
 export function startAutoSync(): void {
   stopAutoSync();
   if (!isAutoSyncEnabled() || !isSupabaseConfigured()) return;
-
-  syncTimer = setInterval(() => {
-    void triggerAutoSync('interval');
-  }, AUTO_SYNC_INTERVAL_MS);
-
   window.addEventListener('online', handleOnline);
-  window.addEventListener('focus', handleFocus);
+  window.addEventListener('focus', handleVisible);
   document.addEventListener('visibilitychange', handleVisible);
+  window.addEventListener('adimat-background-sync', handleOnline);
 }
 
 export function stopAutoSync(): void {
-  if (syncTimer) {
-    clearInterval(syncTimer);
-    syncTimer = null;
-  }
   window.removeEventListener('online', handleOnline);
-  window.removeEventListener('focus', handleFocus);
+  window.removeEventListener('focus', handleVisible);
   document.removeEventListener('visibilitychange', handleVisible);
+  window.removeEventListener('adimat-background-sync', handleOnline);
   stopLiveStockSync();
 }
 
 function handleOnline(): void {
-  void triggerAutoSync('online');
-}
-
-function handleFocus(): void {
-  void triggerAutoSync('focus');
+  void triggerReconnectSync('online');
 }
 
 function handleVisible(): void {
-  if (document.visibilityState === 'visible') {
-    void triggerAutoSync('visible');
-  }
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+  if (!isOnline()) return;
+  void triggerReconnectSync('visible');
 }
 
 export function initAutoSync(): void {
+  if (!hooksReady) {
+    hooksReady = true;
+    installLocalWriteHooks(() => {
+      void publishPending();
+      void triggerPushSync('write');
+    });
+    installSyncBroadcast((data) => {
+      const detail = data as { phase?: string; count?: number };
+      if (!detail?.phase || detail.phase === 'pending') {
+        if (typeof detail?.count === 'number') {
+          window.dispatchEvent(new CustomEvent('adimat-sync-pending', { detail: { count: detail.count } }));
+        }
+        return;
+      }
+      window.dispatchEvent(new CustomEvent('adimat-sync', { detail }));
+    });
+    void registerBackgroundSync();
+    navigator.serviceWorker?.addEventListener('message', (event) => {
+      const data = event.data as { type?: string } | undefined;
+      if (data?.type === 'adimat-background-sync') {
+        window.dispatchEvent(new Event('adimat-background-sync'));
+      }
+    });
+  }
+  void publishPending();
   if (!isAutoSyncEnabled() || !isSupabaseConfigured()) return;
   startAutoSync();
-  void triggerAutoSync('startup');
+  void triggerReconnectSync('startup');
+}
+
+export async function ensureFirstFullPull(storeId: string): Promise<void> {
+  if (!storeId || !needsFullPull(storeId)) return;
+  if (!isOnline() || !isSupabaseConfigured()) return;
+  await triggerReconnectSync('first-login');
+  markFullPullDone(storeId);
 }

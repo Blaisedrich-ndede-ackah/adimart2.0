@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { BrowserMultiFormatReader, NotFoundException } from '@zxing/library';
 import { Camera, CameraOff, Keyboard, RefreshCw } from 'lucide-react';
+import { cameraAvailable } from '@/lib/browserCompat';
 
 interface BarcodeScannerProps {
   onScan: (barcode: string) => void;
@@ -33,6 +34,11 @@ export default function BarcodeScanner({ onScan, active }: BarcodeScannerProps) 
     setIsScanning(false);
 
     try {
+      if (!cameraAvailable()) {
+        setCameraError('This browser has no camera. Type the barcode instead.');
+        setShowManualInput(true);
+        return;
+      }
       const reader = new BrowserMultiFormatReader();
       readerRef.current = reader;
 

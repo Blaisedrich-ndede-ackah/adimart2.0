@@ -1260,10 +1260,11 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                 <p className="text-2xl font-bold text-gray-900 mt-1">{money(cart.total)}</p>
               </div>
               <div>
-                <label className="text-sm font-medium text-gray-700 mb-2 block">
+                <label htmlFor="cash-received" className="text-sm font-medium text-gray-700 mb-2 block">
                   Cash received ({currencySymbol})
                 </label>
                 <input
+                  id="cash-received"
                   type="number"
                   inputMode="decimal"
                   value={cashAmount}

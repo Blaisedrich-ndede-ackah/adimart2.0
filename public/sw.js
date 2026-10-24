@@ -1,4 +1,4 @@
-const CACHE_NAME = 'adimat-v12';
+const CACHE_NAME = 'adimat-v13';
 const CAMPAIGN_MEDIA_CACHE = 'adimat-campaign-media-v1';
 const OFFLINE_URL = '/';
 
@@ -45,9 +45,12 @@ self.addEventListener('fetch', (event) => {
         // Never cache HTML documents — Opera/Chrome must not keep different app versions.
         if (response.status === 200 && !isNavigate) {
           const responseToCache = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
-          });
+          const length = Number(response.headers.get('content-length') || 0);
+          if (!length || length < 2_000_000) {
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseToCache)).catch(() => {
+              // iOS Safari limits the service worker cache. A failed write must not break the page.
+            });
+          }
         }
         return response;
       })
@@ -72,4 +75,13 @@ self.addEventListener('message', (event) => {
   if (event.data === 'skipWaiting') {
     self.skipWaiting();
   }
+});
+
+self.addEventListener('sync', (event) => {
+  if (event.tag !== 'adimat-sync') return;
+  event.waitUntil(
+    self.clients.matchAll({ includeUncontrolled: true, type: 'window' }).then((clients) => {
+      clients.forEach((client) => client.postMessage({ type: 'adimat-background-sync' }));
+    })
+  );
 });

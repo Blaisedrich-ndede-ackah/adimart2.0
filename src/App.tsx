@@ -1,6 +1,7 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
-import { initAutoSync, startLiveStockSync, stopAutoSync, triggerPushSync } from '@/lib/sync';
+import { ensureFirstFullPull, initAutoSync, startLiveStockSync, stopAutoSync, triggerPushSync } from '@/lib/sync';
+import { detectPrivateIndexedDb } from '@/lib/browserCompat';
 import { autoReconnectPeripherals } from '@/lib/bluetoothPeripherals';
 import { clearAdminSession, restoreAdminSession } from '@/lib/adminAuth';
 import { isValidGhanaPhone } from '@/lib/platformSettings';
@@ -32,9 +33,11 @@ import WarehousePage from '@/pages/WarehousePage';
 import EcommercePage from '@/pages/EcommercePage';
 import PurchasingPage from '@/pages/PurchasingPage';
 import OwnerHomePage from '@/pages/OwnerHomePage';
+import AdimatAiPage from '@/pages/AdimatAiPage';
 import MultiStorePage from '@/pages/MultiStorePage';
 import LearnAdimatPage from '@/pages/LearnAdimatPage';
 import CampaignsPage from '@/pages/CampaignsPage';
+import HelpSupportPage from '@/pages/HelpSupportPage';
 import PublicShopPage from '@/pages/PublicShopPage';
 import TermsPage from '@/pages/TermsPage';
 import NotFoundPage from '@/pages/NotFoundPage';
@@ -103,6 +106,7 @@ export default function App() {
   const [adminSessionResolved, setAdminSessionResolved] = useState(false);
   const [publicShopSlug, setPublicShopSlug] = useState<string | null>(() => readPublicShopSlug());
   const [publicUtilityRoute, setPublicUtilityRoute] = useState<'terms' | '404' | null>(() => readPublicUtilityRoute());
+  const [privateStorage, setPrivateStorage] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -136,6 +140,7 @@ export default function App() {
     initialize();
     void initializeAgent();
     initAutoSync();
+    void detectPrivateIndexedDb().then(setPrivateStorage);
     void autoReconnectPeripherals();
     return () => stopAutoSync();
   }, [initialize, initializeAgent]);
@@ -152,6 +157,7 @@ export default function App() {
 
   useEffect(() => {
     if (!isAuthenticated || !currentStore?.id) return;
+    void ensureFirstFullPull(currentStore.id);
     return startLiveStockSync(currentStore.id);
   }, [isAuthenticated, currentStore?.id]);
 
@@ -410,6 +416,8 @@ export default function App() {
           setQuickAction(quickAdd && page === 'inventory' ? 'add-product' : quickAdd && page === 'expenses' ? 'add-expense' : null);
           setCurrentPage(page);
         }} /> : <POSPage />;
+      case 'adimat-ai':
+        return <AdimatAiPage onNavigate={setCurrentPage} />;
       case 'pos':
         return <POSPage onNavigate={setCurrentPage} />;
       case 'transactions':
@@ -448,6 +456,8 @@ export default function App() {
         return <ExpensesPage openAddOnLoad={quickAction === 'add-expense'} onQuickActionHandled={() => setQuickAction(null)} />;
       case 'cashbook':
         return canAccessCashbook(currentUser) ? <CashBookPage /> : <POSPage />;
+      case 'support':
+        return <HelpSupportPage />;
       case 'settings':
         return role === 'owner' ? (
           <SettingsPage onNavigate={setCurrentPage} />
@@ -471,6 +481,11 @@ export default function App() {
       <AppNav currentPage={currentPage} onNavigate={setCurrentPage} />
       <div className={`flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden ${leftHanded ? 'lg:order-1' : ''}`}>
         <PWAInstallBanner />
+        {privateStorage && (
+          <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+            This browser is blocking saved data (private mode). Sales and tickets stay only until you close the tab. Open Adimat in a normal window to keep them.
+          </div>
+        )}
         <SyncStatusBanner />
         <SyncToast />
         <SubscriptionWarningBanner

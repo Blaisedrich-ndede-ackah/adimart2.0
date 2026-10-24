@@ -5,6 +5,8 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { useFormatMoney } from '@/lib/currency';
 import { ensureStoreLocations } from '@/lib/warehouse';
 import { addSupplier, cancelPurchaseOrder, createPurchaseOrder, parsePurchaseOrderLines, receivePurchaseOrder } from '@/lib/purchasing';
+import { takeDraftPurchaseOrder } from '@/lib/adimatAi/draftPo';
+import { useT } from '@/lib/i18n';
 import { triggerPushSync } from '@/lib/sync';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { syncBidirectional } from '@/lib/dexie';
@@ -14,6 +16,7 @@ type OrderLineDraft = { productId: string; quantity: string; unitCost: string };
 export default function PurchasingPage() {
   const { currentStore, currentUser } = useAuthStore();
   const money = useFormatMoney();
+  const t = useT();
   const [suppliers, setSuppliers] = useState<LocalSupplier[]>([]);
   const [orders, setOrders] = useState<LocalPurchaseOrder[]>([]);
   const [products, setProducts] = useState<LocalProduct[]>([]);
@@ -29,6 +32,7 @@ export default function PurchasingPage() {
   const [receivingId, setReceivingId] = useState<string | null>(null);
   const [receiptQuantities, setReceiptQuantities] = useState<Record<string, string>>({});
   const [message, setMessage] = useState('');
+  const [draftNote, setDraftNote] = useState('');
 
   const load = useCallback(async (sync = false) => {
     if (!currentStore?.id) return;
@@ -55,9 +59,27 @@ export default function PurchasingPage() {
   }, [currentStore?.id]);
 
   useEffect(() => {
-    void load(true).catch((error: unknown) => {
-      setMessage(error instanceof Error ? error.message : 'Could not load purchasing data.');
-    });
+    const draft = takeDraftPurchaseOrder();
+    void load(true)
+      .then(() => {
+        if (!draft) return;
+        setSupplierId(draft.supplierId);
+        setNotes(draft.notes);
+        setLines(
+          draft.lines.length > 0
+            ? draft.lines.map((line) => ({
+                productId: line.productId,
+                quantity: String(line.quantity),
+                unitCost: String(line.unitCost),
+              }))
+            : [{ productId: '', quantity: '1', unitCost: '' }]
+        );
+        setOrderForm(true);
+        setDraftNote(draft.notes);
+      })
+      .catch((error: unknown) => {
+        setMessage(error instanceof Error ? error.message : 'Could not load purchasing data.');
+      });
   }, [load]);
 
   const saveSupplier = async () => {
@@ -217,6 +239,9 @@ export default function PurchasingPage() {
           </div>
           {orderForm && (
             <div className="mb-4 space-y-3 rounded-xl bg-slate-50 p-3">
+              {draftNote && (
+                <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">{draftNote || t('ai.restock.draftNote')}</p>
+              )}
               <select aria-label="Supplier" value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
                 <option value="">Choose supplier</option>
                 {suppliers.filter((supplier) => supplier.is_active === 1).map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
