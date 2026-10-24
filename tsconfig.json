@@ -27,5 +27,5 @@
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "vite.config.ts", "api/manage-promotional-campaigns.ts"]
+  "include": ["src", "vite.config.ts", "api/manage-promotional-campaigns.ts", "api/customer-care.ts"]
 }

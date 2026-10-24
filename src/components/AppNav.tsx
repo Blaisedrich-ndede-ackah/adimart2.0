@@ -3,7 +3,7 @@ import {
   ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, House,
   CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare,
   ShoppingCart, RotateCcw,
-  ContactRound, ArrowLeftRight, Building2, Megaphone,
+  ContactRound, ArrowLeftRight, Building2, Megaphone, LifeBuoy,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -84,6 +84,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
           show: ecommerceEnabled && canManageEcommerce,
         },
         { id: 'reports', label: t('nav.reports'), icon: BarChart3, show: isOwner },
+        { id: 'support', label: t('nav.support'), icon: LifeBuoy, show: true },
         { id: 'settings', label: t('nav.settings'), icon: Settings, show: isOwner },
         {
           id: 'community',
@@ -113,7 +114,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
     { label: t('nav.main'), ids: ['home', 'pos', 'transactions'] },
     { label: 'Shop', ids: ['inventory', 'purchasing', 'warehouse', 'ecommerce', 'multistore'] },
     { label: 'Operations', ids: ['reports', 'expenses', 'cashbook', 'devices', 'subscription', 'returns', 'customers'] },
-    { label: 'Help', ids: ['learn', 'campaigns', 'community', 'settings'] },
+    { label: 'Help', ids: ['support', 'learn', 'campaigns', 'community', 'settings'] },
   ];
   const groupedMoreItems = navGroups
     .map((group) => ({

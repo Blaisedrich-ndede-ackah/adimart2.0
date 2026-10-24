@@ -11,6 +11,7 @@ import {
   type PublicShopProduct,
 } from '@/lib/ecommerce';
 import { formatStoreMoney } from '@/lib/currency';
+import StorefrontSupport from '@/components/StorefrontSupport';
 import { useI18nStore } from '@/lib/i18n';
 
 interface PublicShopPageProps {
@@ -208,6 +209,7 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
             <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-600">
               {catalog.store.address ? <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5 text-primary" />{catalog.store.address}</span> : null}
               {catalog.store.support_number ? <a href={`tel:${catalog.store.support_number}`} className="inline-flex items-center gap-1 text-primary"><Phone className="h-3.5 w-3.5" />{catalog.store.support_number}</a> : null}
+              <StorefrontSupport slug={slug} storeName={catalog.store.name} />
             </div>
             {catalog.store.links.length > 0 ? (
               <div className="mt-4 flex flex-wrap gap-2 border-t border-gray-100 pt-3">

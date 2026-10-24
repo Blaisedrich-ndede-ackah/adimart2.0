@@ -8,6 +8,7 @@ import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 import { playScanBeep } from '@/lib/scanBeep';
 import { getBluetoothHardwareStatus } from '@/lib/bluetoothPeripherals';
 import { fileToProductImageDataUrl } from '@/lib/productImage';
+import { cameraAvailable } from '@/lib/browserCompat';
 import ProductImage from '@/components/ProductImage';
 import {
   parseTiers,
@@ -175,6 +176,10 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
     setScannerReady(false);
 
     try {
+      if (!cameraAvailable()) {
+        setShowCameraScanner(false);
+        return;
+      }
       const reader = new BrowserMultiFormatReader();
       readerRef.current = reader;
 

@@ -140,6 +140,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       touchLastActivity(storeId);
       const store = (await pullAdminStoreLimits(storeId)) || (await getCurrentStore());
       void refreshStockFromCloud();
+      void import('@/lib/support/access').then(({ issueOwnerSupportToken }) =>
+        issueOwnerSupportToken(user.store_id, user.id, pin)
+      );
       set({ 
         currentUser: user, 
         currentStore: store,

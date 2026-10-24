@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "test": "vitest run && playwright test",
+    "test:unit": "vitest run",
     "docs:pdf": "node scripts/generate-user-guide.mjs"
   },
   "dependencies": {
@@ -29,6 +31,16 @@
     "uuid": "^14.0.0",
     "zustand": "^5.0.14"
   },
+  "browserslist": [
+    "chrome >= 94",
+    "edge >= 94",
+    "firefox >= 93",
+    "safari >= 16",
+    "ios_saf >= 16",
+    "samsung >= 17",
+    "opera >= 80",
+    "android >= 94"
+  ],
   "devDependencies": {
     "@tailwindcss/vite": "4.1.17",
     "@types/node": "22.19.17",
@@ -38,6 +50,8 @@
     "tailwindcss": "4.1.17",
     "typescript": "5.9.3",
     "vite": "7.3.2",
-    "vite-plugin-singlefile": "2.3.0"
+    "vite-plugin-singlefile": "2.3.0",
+    "vitest": "^3.2.7",
+    "@playwright/test": "^1.56.1"
   }
 }
