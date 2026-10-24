@@ -40,7 +40,7 @@ export async function seedAdimatAiPreview(storeId: string): Promise<void> {
   const products = await db.products.where('store_id').equals(storeId).toArray();
   const oldProducts = products.filter((product) => (product.barcode || '').startsWith(BARCODE));
   const transactions = await db.transactions.where('store_id').equals(storeId).toArray();
-  const oldSales = transactions.filter((sale) => sale.receipt_number.startsWith(RECEIPT));
+  const oldSales = transactions.filter((sale) => (sale.receipt_number || '').startsWith(RECEIPT));
   const oldSaleIds = new Set(oldSales.map((sale) => sale.id));
   const items = await db.transaction_items.where('store_id').equals(storeId).toArray();
   const batches = await db.stock_batches.where('store_id').equals(storeId).toArray();
@@ -55,13 +55,13 @@ export async function seedAdimatAiPreview(storeId: string): Promise<void> {
   await db.products.bulkDelete(oldProducts.map((product) => product.id));
   await db.transactions.bulkDelete(oldSales.map((sale) => sale.id));
   await db.transaction_items.bulkDelete(items.filter((item) => oldSaleIds.has(item.transaction_id)).map((item) => item.id));
-  await db.stock_batches.bulkDelete(batches.filter((batch) => batch.batch_code.startsWith(RECEIPT)).map((batch) => batch.id));
+  await db.stock_batches.bulkDelete(batches.filter((batch) => (batch.batch_code || '').startsWith(RECEIPT)).map((batch) => batch.id));
   await db.stock_movements.bulkDelete(movements.filter((row) => row.note === 'ADIM AI sample').map((row) => row.id));
   await db.sales_returns.bulkDelete(returns.filter((row) => row.reason === 'ADIM AI sample').map((row) => row.id));
-  await db.customers.bulkDelete(customers.filter((row) => row.phone.startsWith('02441111')).map((row) => row.id));
-  await db.credit_payments.bulkDelete(payments.filter((row) => row.customer_id && customers.some((customer) => customer.phone.startsWith('02441111') && customer.id === row.customer_id)).map((row) => row.id));
+  await db.customers.bulkDelete(customers.filter((row) => (row.phone || '').startsWith('02441111')).map((row) => row.id));
+  await db.credit_payments.bulkDelete(payments.filter((row) => row.customer_id && customers.some((customer) => (customer.phone || '').startsWith('02441111') && customer.id === row.customer_id)).map((row) => row.id));
   await db.suppliers.bulkDelete(suppliers.filter((row) => row.name === 'Sample Wholesale').map((row) => row.id));
-  await db.purchase_orders.bulkDelete(orders.filter((row) => row.notes.includes('ADIM AI sample')).map((row) => row.id));
+  await db.purchase_orders.bulkDelete(orders.filter((row) => (row.notes || '').includes('ADIM AI sample')).map((row) => row.id));
 
   const now = new Date().toISOString();
   let main = locations.find((location) => location.is_default === 1 && location.is_active === 1)

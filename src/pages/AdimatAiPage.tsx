@@ -35,6 +35,7 @@ export default function AdimatAiPage({ onNavigate }: AdimatAiPageProps) {
   const report = ai.report;
   const [messages, setMessages] = useState<Record<string, string>>({});
   const [sendNote, setSendNote] = useState('');
+  const [seedError, setSeedError] = useState('');
   const [seeding, setSeeding] = useState(false);
 
   useEffect(() => {
@@ -97,10 +98,13 @@ export default function AdimatAiPage({ onNavigate }: AdimatAiPageProps) {
   const loadSample = async () => {
     if (!currentStore?.id || !import.meta.env.DEV) return;
     setSeeding(true);
+    setSeedError('');
     try {
       const seed = await import('@/lib/adimatAi/previewSeed');
       await seed.seedAdimatAiPreview(currentStore.id);
       ai.refresh();
+    } catch (error) {
+      setSeedError(error instanceof Error ? error.message : 'Sample data could not be loaded.');
     } finally {
       setSeeding(false);
     }
@@ -352,6 +356,7 @@ export default function AdimatAiPage({ onNavigate }: AdimatAiPageProps) {
               {seeding ? t('common.loading') : t('ai.seed')}
             </button>
           )}
+          {seedError && <p className="mt-2 text-xs text-red-700">{seedError}</p>}
         </Section>
         <div className="flex items-center gap-2 text-xs text-gray-500">
           <Sparkles className="h-3.5 w-3.5" />
