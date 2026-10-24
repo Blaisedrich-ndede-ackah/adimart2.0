@@ -22,6 +22,7 @@ import StockAdjustment from '@/components/StockAdjustment';
 import CsvImportModal from '@/components/CsvImportModal';
 import { downloadBarcodeLabel, printBarcodeLabel } from '@/lib/barcodeLabels';
 import { useAuthStore } from '@/store/useAuthStore';
+import { cashierCanSeeStockQuantity } from '@/lib/staffAccess';
 import { useFormatMoney } from '@/lib/currency';
 import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 import { playScanBeep } from '@/lib/scanBeep';
@@ -40,6 +41,7 @@ export default function InventoryPage({
   onQuickActionHandled?: () => void;
 }) {
   const { currentStore, currentUser } = useAuthStore();
+  const showStockQty = cashierCanSeeStockQuantity(currentUser, currentStore);
   const money = useFormatMoney();
   const [products, setProducts] = useState<LocalProduct[]>([]);
   const [productsLoaded, setProductsLoaded] = useState(false);
@@ -627,17 +629,19 @@ export default function InventoryPage({
                             Cost: {money(toMoney(product.cost_price))}
                           </p>
                         </div>
-                        <p
-                          className={`text-xs font-semibold ${
-                            toQty(product.stock_level) === 0
-                              ? 'text-red-500'
-                              : toQty(product.stock_level) <= (Number(product.reorder_level) > 0 ? Number(product.reorder_level) : 5)
-                                ? 'text-amber-500'
-                                : 'text-gray-700'
-                          }`}
-                        >
-                          Stock: {formatStockQty(product.stock_level)}
-                        </p>
+                        {showStockQty && (
+                          <p
+                            className={`text-xs font-semibold ${
+                              toQty(product.stock_level) === 0
+                                ? 'text-red-500'
+                                : toQty(product.stock_level) <= (Number(product.reorder_level) > 0 ? Number(product.reorder_level) : 5)
+                                  ? 'text-amber-500'
+                                  : 'text-gray-700'
+                            }`}
+                          >
+                            Stock: {formatStockQty(product.stock_level)}
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>

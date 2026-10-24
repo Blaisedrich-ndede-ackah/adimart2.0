@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Building2, Loader2, Plus, CloudDownload, CheckCircle2, ArrowRightLeft } from 'lucide-react';
+import { Building2, Loader2, CloudDownload, ArrowRightLeft, CheckCircle2 } from 'lucide-react';
 import {
   addStoreFromCloud,
   assertCanCreateAdditionalStore,
@@ -9,7 +9,6 @@ import {
   type LocalStore,
 } from '@/lib/dexie';
 import { isValidGhanaPhone } from '@/lib/platformSettings';
-import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAuthStore } from '@/store/useAuthStore';
 import BranchTransferPanel from '@/components/BranchTransferPanel';
 
@@ -57,14 +56,11 @@ export default function StoresPortalSection() {
     if (isError) {
       setError(text);
       setMsg('');
-    } else {
-      setMsg(text);
-      setError('');
+      return;
     }
-    setTimeout(() => {
-      setMsg('');
-      setError('');
-    }, 4000);
+    setMsg(text);
+    setError('');
+    setTimeout(() => setMsg(''), 4000);
   };
 
   const handleOpenStore = async (storeId: string) => {
@@ -125,24 +121,31 @@ export default function StoresPortalSection() {
     }
   };
 
-  const handleAddCloud = async () => {
+  const handleRestoreCloud = async () => {
     setError('');
-    if (!cloudStoreId.trim() || cloudPin.length !== 4) {
-      flash('Enter Store ID and owner PIN.', true);
+    const storeId = cloudStoreId.trim();
+    if (!storeId || cloudPin.length !== 4) {
+      flash('Enter the Store ID and 4-digit owner PIN. The administrator PIN is also accepted.', true);
       return;
     }
+    if (!confirm('Add this cloud store as a branch on this device? Existing stores will remain available.')) return;
     setBusy(true);
-    const result = await addStoreFromCloud(cloudStoreId.trim(), cloudPin);
-    if (!result.success) {
-      flash(result.message, true);
+    try {
+      const result = await addStoreFromCloud(storeId, cloudPin);
+      if (!result.success) {
+        flash(result.message, true);
+        return;
+      }
+      setShowAddCloud(false);
+      setCloudStoreId('');
+      setCloudPin('');
+      flash(result.message);
+      await refresh();
+    } catch (restoreError) {
+      flash(restoreError instanceof Error ? restoreError.message : 'Could not restore store from cloud.', true);
+    } finally {
       setBusy(false);
-      return;
     }
-    await switchStore(cloudStoreId.trim());
-    setShowAddCloud(false);
-    setCloudStoreId('');
-    setCloudPin('');
-    // switchStore clears auth — component may unmount via App
   };
 
   return (
@@ -201,6 +204,66 @@ export default function StoresPortalSection() {
         )}
       </div>
 
+      <div className="mt-4 border-t border-gray-100 pt-4">
+        <button
+          type="button"
+          onClick={() => setShowAddCloud((visible) => !visible)}
+          disabled={busy}
+          className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 touch-target"
+        >
+          <CloudDownload className="h-4 w-4" />
+          Restore store from cloud
+        </button>
+
+        {showAddCloud && (
+          <div className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
+            <p className="text-xs leading-relaxed text-gray-600">
+              Enter the store&apos;s ID and 4-digit owner PIN to pull its cloud data onto this device.
+              Existing stores stay available, and the administrator PIN can override the owner PIN when authorized.
+            </p>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <label className="text-xs font-semibold text-gray-700">
+                Store ID
+                <input
+                  value={cloudStoreId}
+                  onChange={(event) => setCloudStoreId(event.target.value)}
+                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm font-mono outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+                  placeholder="Enter Store ID"
+                  autoComplete="off"
+                  aria-label="Cloud store ID"
+                />
+              </label>
+              <label className="text-xs font-semibold text-gray-700">
+                Owner or admin PIN
+                <input
+                  value={cloudPin}
+                  onChange={(event) => setCloudPin(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={4}
+                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-center text-lg tracking-[0.45em] outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+                  placeholder="••••"
+                  autoComplete="off"
+                  aria-label="Owner or admin PIN"
+                />
+              </label>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleRestoreCloud()}
+              disabled={busy}
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50 touch-target"
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
+              {busy ? 'Restoring…' : 'Restore from cloud'}
+            </button>
+            <p className="mt-2 text-[11px] text-amber-700">
+              This adds or refreshes the selected store as a branch. Other stores on this device are not removed.
+            </p>
+          </div>
+        )}
+      </div>
+
       {stores.length > 1 && (
         <BranchTransferPanel
           title="Branch inventory"
@@ -208,6 +271,18 @@ export default function StoresPortalSection() {
           collapsible
           onTransferred={() => void refresh()}
         />
+      )}
+
+      {msg && (
+        <p role="status" className="mt-3 flex items-center gap-1 text-xs text-emerald-700">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          {msg}
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="mt-3 text-xs text-red-600">
+          {error}
+        </p>
       )}
     </div>
   );

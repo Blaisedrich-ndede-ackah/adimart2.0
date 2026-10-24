@@ -36,6 +36,8 @@ export interface LocalStore {
   discount_allow_fixed?: number;
   /** Allow cashiers to apply discounts (0/1); owners always can */
   cashier_can_discount?: number;
+  /** Allow cashiers to see on-hand quantities (0/1). Default hidden. */
+  cashier_can_see_stock?: number;
   /** Idle minutes before staff return to the PIN screen. 0 = never. Default 5. */
   session_timeout_minutes?: number;
   /** Preferred Mobile Money account name for Paystack payouts */
@@ -1274,6 +1276,7 @@ export async function createStoreWithOwner(
     discount_allow_percentage: 1,
     discount_allow_fixed: 1,
     cashier_can_discount: 1,
+    cashier_can_see_stock: 0,
     session_timeout_minutes: 5,
     momo_account_name: '',
     momo_number: '',
@@ -2944,7 +2947,7 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
       }
       if (
         table === 'stores' &&
-        /debt_reminder|sales_target/i.test(error.message)
+        /debt_reminder|sales_target|cashier_can_see_stock/i.test(error.message)
       ) {
         // Cloud project predates the debt-reminder / sales-target columns.
         // Push the store without them so the rest of the profile still syncs.
@@ -2956,6 +2959,7 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
           delete copy.debt_reminder_message;
           delete copy.sales_target_daily;
           delete copy.sales_target_monthly;
+          delete copy.cashier_can_see_stock;
           return copy;
         });
         const retry = await supabase.from(table).upsert(stripped, {
@@ -3122,6 +3126,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
           discount_allow_percentage: (store.discount_allow_percentage ?? 1) === 1,
           discount_allow_fixed: (store.discount_allow_fixed ?? 1) === 1,
           cashier_can_discount: (store.cashier_can_discount ?? 1) === 1,
+          cashier_can_see_stock: (store.cashier_can_see_stock ?? 0) === 1,
           session_timeout_minutes: normalizeSessionTimeoutMinutes(store.session_timeout_minutes),
           momo_account_name: store.momo_account_name || '',
           momo_number: store.momo_number || '',
@@ -3959,6 +3964,12 @@ export async function syncFromSupabase(opts?: {
         discount_allow_percentage: remoteStore.discount_allow_percentage === false ? 0 : 1,
         discount_allow_fixed: remoteStore.discount_allow_fixed === false ? 0 : 1,
         cashier_can_discount: remoteStore.cashier_can_discount === false ? 0 : 1,
+        cashier_can_see_stock:
+          remoteStore.cashier_can_see_stock === undefined
+            ? (localStore?.cashier_can_see_stock ?? 0)
+            : remoteStore.cashier_can_see_stock
+              ? 1
+              : 0,
         session_timeout_minutes:
           remoteStore.session_timeout_minutes == null
             ? (localStore?.session_timeout_minutes ?? 5)
