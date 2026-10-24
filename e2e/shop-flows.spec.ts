@@ -135,6 +135,31 @@ test('POS sale completes checkout', async ({ page }) => {
   await expect(page.getByText(/#ADM-/).first()).toBeVisible({ timeout: 15_000 });
 });
 
+test('ADIMAT AI opens from the sidebar', async ({ page }) => {
+  await login(page);
+  const sidebar = page.locator('aside');
+  await expect(sidebar.getByRole('button', { name: 'ADIMAT AI', exact: true })).toBeVisible();
+  await expect(sidebar.getByRole('button', { name: 'Help & Support', exact: true })).toBeVisible();
+  await sidebar.getByRole('button', { name: 'ADIMAT AI', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'ADIMAT AI', exact: true })).toBeVisible();
+  await expect(page.getByText('ADIMAT AI runs on this device')).toBeVisible();
+  await expect(page.getByText('Ready offline')).toBeVisible();
+});
+
+test.describe('phone width', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('ADIMAT AI opens from the More sheet', async ({ page }) => {
+    await login(page);
+    await expect(page.getByRole('region', { name: 'Daily Shop Brief' }).getByRole('button', { name: 'ADIMAT AI', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'More menu' }).click();
+    const sheet = page.locator('div.fixed.z-50');
+    await sheet.getByRole('button', { name: 'ADIMAT AI', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'ADIMAT AI', exact: true })).toBeVisible();
+    await expect(page.getByText('Ready offline')).toBeVisible();
+  });
+});
+
 test('offline sale waits to sync and reconnects', async ({ page, context }) => {
   await login(page);
   await context.setOffline(true);
