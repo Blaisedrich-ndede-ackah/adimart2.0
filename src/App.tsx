@@ -32,6 +32,7 @@ import WarehousePage from '@/pages/WarehousePage';
 import EcommercePage from '@/pages/EcommercePage';
 import PurchasingPage from '@/pages/PurchasingPage';
 import OwnerHomePage from '@/pages/OwnerHomePage';
+import AdimatAiPage from '@/pages/AdimatAiPage';
 import MultiStorePage from '@/pages/MultiStorePage';
 import LearnAdimatPage from '@/pages/LearnAdimatPage';
 import CampaignsPage from '@/pages/CampaignsPage';
@@ -410,6 +411,8 @@ export default function App() {
           setQuickAction(quickAdd && page === 'inventory' ? 'add-product' : quickAdd && page === 'expenses' ? 'add-expense' : null);
           setCurrentPage(page);
         }} /> : <POSPage />;
+      case 'adimat-ai':
+        return <AdimatAiPage onNavigate={setCurrentPage} />;
       case 'pos':
         return <POSPage onNavigate={setCurrentPage} />;
       case 'transactions':
