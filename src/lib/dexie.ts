@@ -3311,8 +3311,46 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
 
     const unsyncedMovements = await db.stock_movements.where('store_id').equals(storeId).and(m => m.synced === 0).toArray();
     const movementsToPush: LocalStockMovement[] = [];
-    for (const movement of unsyncedMovements) {
-      if (!isUuid(movement.id) || !isUuid(movement.store_id) || !isUuid(movement.product_id)) {
+    if (unsyncedMovements.length > 0) {
+      // Ensure products referenced by movements exist in cloud before pushing movements.
+      // Products are pushed earlier in this sync; re-upserting referenced products guards
+      // against rows marked synced locally yet missing from cloud (FK violation 23503).
+      const referencedProductIds = [...new Set(unsyncedMovements.map(m => m.product_id).filter((id): id is string => typeof id === 'string' && id.length > 0))];
+      const referencedProducts = await db.products.where('id').anyOf(referencedProductIds).toArray();
+      const localProductIds = new Set(referencedProducts.filter(p => p.store_id === storeId).map(p => p.id));
+      if (referencedProducts.length > 0) {
+        await upsertToSupabase(
+          'Products (movement references)',
+          'products',
+          referencedProducts.filter(p => p.store_id === storeId).map(p => ({
+            id: p.id,
+            store_id: p.store_id,
+            name: p.name,
+            category: p.category,
+            sku_type: p.sku_type,
+            barcode: p.barcode,
+            cost_price: p.cost_price,
+            selling_price: p.selling_price,
+            stock_level: p.stock_level,
+            is_active: p.is_active === 1,
+            image_url: p.image_url || '',
+            pack_size: p.pack_size ?? 1,
+            track_expiry: (p.track_expiry ?? 0) === 1,
+            wholesale_mode: p.wholesale_mode || 'none',
+            wholesale_pack_price: p.wholesale_pack_price ?? 0,
+            wholesale_unit_price: p.wholesale_unit_price ?? 0,
+            wholesale_tiers_json: p.wholesale_tiers_json || '[]',
+            sell_online: (p.sell_online ?? 0) === 1,
+            reorder_level: Number(p.reorder_level) || 0,
+            created_at: p.created_at,
+            updated_at: p.updated_at,
+          })),
+          async () => {},
+          errors
+        );
+      }
+      for (const movement of unsyncedMovements) {
+        if (!isUuid(movement.id) || !isUuid(movement.store_id) || !isUuid(movement.product_id)) {
         await db.stock_movements.delete(movement.id);
         continue;
       }
@@ -3337,6 +3375,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
       async () => { await Promise.all(movementsToPush.map(m => db.stock_movements.update(m.id, { synced: 1 }))); },
       errors
     );
+    }
 
     const unsyncedCustomers = await db.customers
       .where('store_id')
