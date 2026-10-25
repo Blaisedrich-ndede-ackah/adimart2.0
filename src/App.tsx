@@ -57,7 +57,9 @@ function readPublicShopSlug(): string | null {
   if (typeof window === 'undefined') return null;
   const hash = window.location.hash.replace(/^#/, '');
   const match = hash.match(/^\/?shop\/([^/?#]+)/i);
-  return match?.[1] ? decodeURIComponent(match[1]).trim().toLowerCase() : null;
+  if (match?.[1]) return decodeURIComponent(match[1]).trim().toLowerCase();
+  const recovery = new URLSearchParams(window.location.search).get('shop_recovery');
+  return recovery ? decodeURIComponent(recovery).trim().toLowerCase() : null;
 }
 
 function readAgentHash(): boolean {
@@ -461,7 +463,7 @@ export default function App() {
 
   return authenticatedChrome(
     <div
-      className="h-full w-full min-w-0 flex flex-col lg:flex-row overflow-hidden bg-[var(--color-surface)]"
+      className="ios-canvas h-full w-full min-w-0 flex flex-col lg:flex-row overflow-hidden"
       style={{
         paddingTop: 'env(safe-area-inset-top)',
         paddingLeft: 'env(safe-area-inset-left)',

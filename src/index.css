@@ -5,27 +5,43 @@
   --color-primary-light: #059669;
   --color-primary-dark: #064e3b;
   --color-primary-subtle: #ecfdf5;
-  --color-accent: #d97706;
-  --color-accent-light: #f59e0b;
-  --color-danger: #dc2626;
-  --color-success: #16a34a;
-  --color-surface: #f8fafc;
-  --color-surface-muted: #f1f5f4;
+  --color-accent: #ff9f0a;
+  --color-accent-light: #ffb340;
+  --color-danger: #ff3b30;
+  --color-success: #34c759;
+  --color-surface: #f2f2f7;
+  --color-surface-muted: #e5e5ea;
   --color-surface-card: #ffffff;
-  --color-border: #dbe4e1;
-  --color-ink: #0f172a;
-  --color-muted: #64748b;
-  --font-sans: "DM Sans", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --color-border: #d1d1d6;
+  --color-ink: #1c1c1e;
+  --color-muted: #636366;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
   /* Semantic aliases used by the shared UI kit */
-  --color-bg: #f8fafc;
-  --color-text: #0f172a;
-  --color-text-muted: #64748b;
-  --color-border-subtle: #e2e8f0;
+  --color-bg: #f2f2f7;
+  --color-text: #1c1c1e;
+  --color-text-muted: #636366;
+  --color-border-subtle: rgba(60, 60, 67, 0.16);
 }
 
 @layer base {
   :root {
     color-scheme: light;
+    --ios-label: #1c1c1e;
+    --ios-secondary-label: #636366;
+    --ios-tertiary-label: #8e8e93;
+    --ios-separator: rgba(60, 60, 67, 0.29);
+    --ios-fill: rgba(118, 118, 128, 0.12);
+    --ios-fill-strong: rgba(118, 118, 128, 0.2);
+    --ios-grouped: #e8eef6;
+    --ios-bar: rgba(255, 255, 255, 0.62);
+    --ios-radius: 14px;
+    --ios-glass: rgba(255, 255, 255, 0.46);
+    --ios-glass-strong: rgba(255, 255, 255, 0.68);
+    --ios-blur: saturate(185%) blur(28px);
+    --ios-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.78), inset 0 -1px 0 rgba(255, 255, 255, 0.22);
+    --ios-depth: 0 12px 32px rgba(36, 54, 78, 0.08);
+    --ios-ease: cubic-bezier(0.22, 1, 0.36, 1);
+    accent-color: var(--color-primary);
   }
 
   :root.dark {
@@ -47,7 +63,12 @@
     text-size-adjust: 100%;
   }
   body {
-    @apply bg-surface text-ink;
+    @apply bg-surface text-ink antialiased;
+  }
+  button,
+  a,
+  [role="button"] {
+    touch-action: manipulation;
   }
 }
 
@@ -76,7 +97,12 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   color: var(--color-ink);
-  background: var(--color-surface);
+  background:
+    radial-gradient(78% 62% at 12% 8%, rgba(64, 164, 255, 0.62), transparent 68%),
+    radial-gradient(58% 48% at 96% 0%, rgba(36, 196, 148, 0.48), transparent 64%),
+    radial-gradient(70% 58% at 84% 100%, rgba(255, 148, 96, 0.46), transparent 66%),
+    radial-gradient(46% 40% at 36% 78%, rgba(168, 140, 255, 0.28), transparent 70%),
+    linear-gradient(165deg, #d4e7f8 0%, #e5f3ee 46%, #fbe8dc 100%);
   overscroll-behavior: none;
   position: fixed;
   inset: 0;
@@ -251,23 +277,27 @@ input[type="number"] {
   align-items: center;
   gap: 0.75rem;
   padding: 0.75rem;
-  border: 1px solid var(--color-border);
-  border-radius: 1rem;
-  background: var(--color-surface-card);
+  border: 1px solid rgba(255, 255, 255, 0.66);
+  border-radius: 16px;
+  background-color: rgba(255, 255, 255, 0.5);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.22));
+  -webkit-backdrop-filter: saturate(170%) blur(18px);
+  backdrop-filter: saturate(170%) blur(18px);
   color: var(--color-ink);
   text-align: left;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 5%);
+  box-shadow: var(--ios-highlight), 0 10px 28px rgba(36, 54, 78, 0.07);
   cursor: pointer;
-  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+  transition: transform 320ms var(--ios-ease), background-color 320ms var(--ios-ease), box-shadow 320ms var(--ios-ease);
 }
 
 .pos-product-card:not(:disabled):hover {
-  border-color: rgb(6 95 70 / 35%);
-  box-shadow: 0 8px 20px rgb(15 23 42 / 8%);
+  border-color: rgba(255, 255, 255, 0.9);
+  background-color: rgba(255, 255, 255, 0.78);
+  box-shadow: var(--ios-highlight), 0 16px 36px rgba(36, 54, 78, 0.1);
 }
 
 .pos-product-card:not(:disabled):active {
-  transform: scale(0.99);
+  transform: scale(0.98);
 }
 
 .pos-product-card:focus-visible {
@@ -321,13 +351,17 @@ input[type="number"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 0.5rem;
-  color: var(--color-muted);
-  transition: background-color 150ms ease, color 150ms ease;
+  border-radius: 12px;
+  color: var(--color-primary);
+  transition: background-color 140ms ease, transform 140ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 .icon-btn:hover {
-  background: var(--color-surface-muted);
-  color: var(--color-ink);
+  background: var(--ios-fill);
+  color: var(--color-primary-dark);
+}
+.icon-btn:active {
+  transform: scale(0.96);
+  background: var(--ios-fill-strong);
 }
 .icon-btn-primary {
   min-height: 44px;
@@ -335,22 +369,28 @@ input[type="number"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 0.5rem;
+  border-radius: 12px;
   background: var(--color-primary-subtle);
   color: var(--color-primary);
-  transition: background-color 150ms ease, color 150ms ease;
+  transition: background-color 140ms ease, transform 140ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.icon-btn-primary:active {
+  transform: scale(0.96);
 }
 .icon-btn-primary:hover {
   background: var(--color-primary);
   color: white;
 }
 
-/* Surface card — shared across pages */
+/* Surface card — liquid glass inset */
 .surface-card {
-  background: var(--color-surface-card);
-  border: 1px solid var(--color-border);
-  border-radius: 1rem;
-  box-shadow: 0 1px 2px rgba(15 23 42 / 0.04);
+  background-color: rgba(255, 255, 255, 0.52);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.64), rgba(255, 255, 255, 0.24));
+  -webkit-backdrop-filter: saturate(170%) blur(18px);
+  backdrop-filter: saturate(170%) blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.66);
+  border-radius: var(--ios-radius);
+  box-shadow: var(--ios-highlight), 0 10px 28px rgba(36, 54, 78, 0.07);
 }
 
 /* Page shell — shared layout primitive */
@@ -359,32 +399,56 @@ input[type="number"] {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: var(--color-surface);
+  background: transparent;
 }
 
-/* Shared page chrome */
-.page-header {
+/* Shared page chrome — frosted iOS navigation bar */
+.page-header,
+.ios-bar {
   flex-shrink: 0;
-  background: var(--color-primary);
-  color: white;
-  padding: 0.85rem 1rem;
+  position: relative;
+  z-index: 20;
+  color: var(--ios-label);
+  background-color: rgba(255, 255, 255, 0.42);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.58), rgba(255, 255, 255, 0.16));
+  -webkit-backdrop-filter: var(--ios-blur);
+  backdrop-filter: var(--ios-blur);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: var(--ios-highlight), 0 8px 24px rgba(36, 54, 78, 0.05);
+  transition: background-color 320ms var(--ios-ease), box-shadow 320ms var(--ios-ease);
+}
+
+.page-header {
+  padding: 0.7rem 1rem 0.8rem;
 }
 
 @media (min-width: 768px) {
   .page-header {
-    padding: 1.1rem 1.5rem;
+    padding: 0.9rem 1.5rem 1rem;
   }
 }
 
-.page-header h1 {
+.page-header h1,
+.ios-bar h1 {
   font-weight: 700;
-  font-size: 1.125rem;
-  line-height: 1.3;
+  font-size: 1.375rem;
+  line-height: 1.15;
+  letter-spacing: -0.024em;
+  color: var(--ios-label);
 }
 
 @media (min-width: 768px) {
-  .page-header h1 {
-    font-size: 1.35rem;
+  .page-header h1,
+  .ios-bar h1 {
+    font-size: 1.75rem;
+    letter-spacing: -0.032em;
+  }
+}
+
+@media (max-width: 359px) {
+  .page-header h1,
+  .ios-bar h1 {
+    font-size: 1.2rem;
   }
 }
 
@@ -395,8 +459,8 @@ input[type="number"] {
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
-  scrollbar-color: rgb(6 95 70 / 30%) transparent;
-  padding: 0.75rem 0.85rem 1rem;
+  scrollbar-color: rgba(60, 60, 67, 0.28) transparent;
+  padding: 0.85rem 1rem 1.15rem;
 }
 
 @supports not (overscroll-behavior: none) {
@@ -447,8 +511,9 @@ input[type="number"] {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   background:
-    radial-gradient(900px 500px at 15% 0%, rgba(5, 150, 105, 0.35), transparent 55%),
-    linear-gradient(180deg, var(--color-primary-dark), var(--color-primary));
+    radial-gradient(720px 420px at 50% -10%, rgba(52, 199, 89, 0.22), transparent 58%),
+    radial-gradient(640px 380px at 100% 110%, rgba(6, 95, 70, 0.45), transparent 52%),
+    #0c0c0e;
 }
 
 @media (min-width: 640px) and (min-height: 720px) {
@@ -631,10 +696,14 @@ input[type="number"] {
     align-self: stretch;
     justify-content: center;
     padding: clamp(1.25rem, 2.4vw, 2.25rem);
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    border-radius: 2rem;
-    background: linear-gradient(150deg, var(--color-primary-dark), var(--color-primary));
-    box-shadow: 0 28px 64px -38px rgba(6, 78, 59, 0.5);
+    border: 0.5px solid rgba(255, 255, 255, 0.14);
+    border-radius: 28px;
+    background: rgba(22, 24, 28, 0.55);
+    -webkit-backdrop-filter: saturate(180%) blur(36px);
+    backdrop-filter: saturate(180%) blur(36px);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.28),
+      0 24px 60px -28px rgba(0, 0, 0, 0.55);
   }
 }
 
@@ -685,17 +754,35 @@ input[type="number"] {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  background: rgba(15, 23, 42, 0.55);
+  background: rgba(0, 0, 0, 0.4);
 }
 
 .sheet-panel {
   width: 100%;
   max-width: 32rem;
   max-height: 92vh;
+  max-height: 92dvh;
   overflow-y: auto;
-  background: #fff;
-  border-radius: 1.5rem 1.5rem 0 0;
+  -webkit-overflow-scrolling: touch;
+  background-color: rgba(244, 247, 252, 0.55);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.62), rgba(232, 238, 246, 0.28));
+  -webkit-backdrop-filter: saturate(180%) blur(32px);
+  backdrop-filter: saturate(180%) blur(32px);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 20px 20px 0 0;
   padding-bottom: env(safe-area-inset-bottom);
+  box-shadow: var(--ios-highlight), 0 -16px 48px rgba(20, 30, 48, 0.18);
+}
+
+.sheet-panel::before {
+  content: "";
+  display: block;
+  width: 36px;
+  height: 5px;
+  margin: 8px auto 4px;
+  border-radius: 999px;
+  background: rgba(60, 60, 67, 0.3);
+  flex-shrink: 0;
 }
 
 @media (min-width: 768px) {
@@ -705,21 +792,25 @@ input[type="number"] {
   }
 
   .sheet-panel {
-    border-radius: 1.25rem;
+    border-radius: 20px;
     max-height: min(88vh, 720px);
-    box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.35);
+    max-height: min(88dvh, 720px);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.22);
   }
 }
 
 .surface-card {
-  background: var(--color-surface-card);
-  border: 1px solid var(--color-border);
-  border-radius: 1rem;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  background-color: rgba(255, 255, 255, 0.52);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.64), rgba(255, 255, 255, 0.24));
+  -webkit-backdrop-filter: saturate(170%) blur(18px);
+  backdrop-filter: saturate(170%) blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.66);
+  border-radius: var(--ios-radius);
+  box-shadow: var(--ios-highlight), 0 10px 28px rgba(36, 54, 78, 0.07);
 }
 
 @keyframes slideUp {
-  from { transform: translateY(100%); }
+  from { transform: translateY(110%); }
   to { transform: translateY(0); }
 }
 
@@ -746,15 +837,15 @@ input[type="number"] {
 }
 
 .animate-slide-up {
-  animation: slideUp 0.3s ease-out;
+  animation: slideUp 0.42s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .animate-fade-in {
-  animation: fadeIn 0.2s ease-out;
+  animation: fadeIn 0.22s ease-out;
 }
 
 .animate-slide-in-right {
-  animation: slideInRight 0.25s ease-out;
+  animation: slideInRight 0.32s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .pulse-ring {
@@ -771,9 +862,12 @@ input[type="number"] {
   justify-content: space-between;
   gap: 1rem;
   padding: 0.65rem 1rem;
-  background: var(--color-surface-card);
-  border-top: 1px solid var(--color-border);
-  box-shadow: 0 -4px 12px -4px rgba(15, 23, 42, 0.12);
+  background-color: rgba(255, 255, 255, 0.62);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.72));
+  -webkit-backdrop-filter: var(--ios-blur);
+  backdrop-filter: var(--ios-blur);
+  border-top: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: var(--ios-highlight);
   padding-bottom: max(0.65rem, env(safe-area-inset-bottom));
 }
 
@@ -824,14 +918,284 @@ input[type="number"] {
 .page-body::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: 999px;
-  background: rgb(6 95 70 / 30%);
+  background: rgba(60, 60, 67, 0.28);
   background-clip: content-box;
 }
 .page-body.no-scrollbar {
   -ms-overflow-style: auto;
   scrollbar-width: thin;
-  scrollbar-color: rgb(6 95 70 / 30%) transparent;
+  scrollbar-color: rgba(60, 60, 67, 0.28) transparent;
 }
 .page-body.no-scrollbar::-webkit-scrollbar {
   display: block;
+}
+
+/* Legacy headers were painted for a solid green bar. Remap those utilities
+   so existing pages read correctly on the frosted navigation bar. */
+.page-header :where(.text-white, .text-emerald-50),
+.ios-bar :where(.text-white, .text-emerald-50) {
+  color: var(--ios-label);
+}
+
+.page-header :where(
+  .text-emerald-100,
+  .text-emerald-200,
+  .text-emerald-100\/80,
+  .text-emerald-100\/90,
+  .text-emerald-100\/85,
+  .text-emerald-200\/80,
+  .text-emerald-200\/60,
+  .text-white\/80,
+  .text-white\/85
+),
+.ios-bar :where(
+  .text-emerald-100,
+  .text-emerald-200,
+  .text-emerald-100\/80,
+  .text-emerald-100\/90,
+  .text-emerald-100\/85,
+  .text-emerald-200\/80,
+  .text-emerald-200\/60,
+  .text-white\/80,
+  .text-white\/85
+) {
+  color: var(--ios-secondary-label);
+}
+
+.page-header :where(.text-amber-100, .text-amber-200),
+.ios-bar :where(.text-amber-100, .text-amber-200) {
+  color: #c2410c;
+}
+
+.page-header :where(.bg-emerald-400\/20),
+.ios-bar :where(.bg-emerald-400\/20) {
+  background-color: var(--color-primary-subtle);
+  color: var(--color-primary-dark);
+}
+
+.page-header :where(.bg-white\/10, .bg-white\/15, .bg-white\/20),
+.ios-bar :where(.bg-white\/10, .bg-white\/15, .bg-white\/20) {
+  background-color: var(--ios-fill);
+  color: var(--ios-label);
+}
+
+.page-header :where(button.bg-primary, a.bg-primary),
+.ios-bar :where(button.bg-primary, a.bg-primary) {
+  color: #fff;
+}
+
+.page-header :where(.bg-white.text-primary, button.bg-white, a.bg-white),
+.ios-bar :where(.bg-white.text-primary, button.bg-white, a.bg-white) {
+  background-color: #fff;
+  color: var(--color-primary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 0 0 0.5px rgba(60, 60, 67, 0.16);
+}
+
+.page-header :where(button.w-full.bg-white),
+.ios-bar :where(button.w-full.bg-white) {
+  background-color: var(--color-primary);
+  color: #fff;
+  box-shadow: none;
+}
+
+/* iOS tab bar */
+.ios-tabbar {
+  background-color: rgba(255, 255, 255, 0.38);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.5));
+  -webkit-backdrop-filter: var(--ios-blur);
+  backdrop-filter: var(--ios-blur);
+  border-top: 1px solid rgba(255, 255, 255, 0.62);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  transition: background-color 320ms var(--ios-ease), box-shadow 320ms var(--ios-ease);
+}
+
+.ios-tab-item {
+  transition: color 280ms var(--ios-ease), transform 280ms var(--ios-ease);
+}
+
+.ios-tab-item:active {
+  transform: scale(0.96);
+}
+
+.ios-tab-item {
+  min-width: 0;
+  color: var(--ios-tertiary-label);
+}
+
+.ios-tab-item span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ios-tab-item[data-active="true"] {
+  color: var(--color-primary);
+}
+
+/* iOS passcode keypad */
+.ios-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.95rem 1.15rem;
+  width: min(100%, 19.5rem);
+}
+
+.ios-key {
+  aspect-ratio: 1;
+  width: min(100%, 4.85rem);
+  margin-inline: auto;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: 1.85rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 80ms ease, transform 80ms ease;
+}
+
+.ios-key:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.38);
+  transform: scale(0.96);
+}
+
+.ios-key:disabled {
+  opacity: 0.38;
+}
+
+.ios-key-ghost {
+  background: transparent;
+}
+
+.ios-key-ghost:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+dialog.accessibility-dialog {
+  border: none;
+  border-radius: 20px;
+  padding: 0;
+  max-width: min(92vw, 28rem);
+  background: #fff;
+  color: var(--ios-label);
+}
+
+dialog.accessibility-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+html[data-font-size="large"] {
+  font-size: 17.5px;
+}
+
+html[data-font-size="larger"] {
+  font-size: 19px;
+}
+
+html[data-high-contrast="true"] {
+  --ios-label: #000;
+  --ios-secondary-label: #1c1c1e;
+  --ios-separator: #000;
+  --color-ink: #000;
+  --color-muted: #1c1c1e;
+  --color-text: #000;
+  --color-text-muted: #1c1c1e;
+  --color-border: #000;
+}
+
+html[data-high-contrast="true"] .surface-card,
+html[data-high-contrast="true"] .page-header,
+html[data-high-contrast="true"] .ios-bar,
+html[data-high-contrast="true"] .ios-tabbar,
+html[data-high-contrast="true"] .pos-product-card,
+html[data-high-contrast="true"] .ios-glass,
+html[data-high-contrast="true"] .ios-pane,
+html[data-high-contrast="true"] .sheet-panel,
+html[data-high-contrast="true"] .sticky-save-bar {
+  border-color: #000;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-image: none;
+  background-color: #fff;
+}
+
+/* Cards and panes over the watery canvas read as frosted glass. Buttons stay solid. */
+.ios-canvas :where(.bg-white):not(button):not(a):not(input):not(select):not(textarea),
+.page-body :where(.bg-white):not(button):not(a):not(input):not(select):not(textarea) {
+  background-color: rgba(255, 255, 255, 0.52);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.66), rgba(255, 255, 255, 0.28));
+  -webkit-backdrop-filter: saturate(165%) blur(16px);
+  backdrop-filter: saturate(165%) blur(16px);
+  border-color: rgba(255, 255, 255, 0.72);
+  box-shadow: var(--ios-highlight), 0 8px 22px rgba(36, 54, 78, 0.06);
+  transition: background-color 320ms var(--ios-ease), box-shadow 320ms var(--ios-ease), transform 320ms var(--ios-ease);
+}
+
+html[data-high-contrast="true"] .ios-canvas :where(.bg-white),
+html[data-high-contrast="true"] .page-body :where(.bg-white) {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-image: none;
+  background-color: #fff;
+  border-color: #000;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .page-header,
+  .ios-bar,
+  .ios-tabbar,
+  .ios-glass,
+  .ios-pane,
+  .sticky-save-bar,
+  .surface-card,
+  .pos-product-card,
+  .sheet-panel,
+  .wide-auth-shell .wide-auth-card,
+  .ios-canvas :where(.bg-white):not(button):not(a):not(input):not(select):not(textarea),
+  .page-body :where(.bg-white):not(button):not(a):not(input):not(select):not(textarea) {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background-image: none;
+    background-color: #f7f8fa;
+  }
+
+  .wide-auth-shell .wide-auth-card {
+    background-color: #1c1c1e;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-slide-up,
+  .animate-fade-in,
+  .animate-slide-in-right,
+  .pulse-ring {
+    animation: none;
+  }
+
+  .ios-glass,
+  .ios-pane,
+  .page-header,
+  .ios-bar,
+  .ios-tabbar,
+  .pos-product-card,
+  .ios-tab-item,
+  .surface-card,
+  .sheet-panel,
+  .ios-canvas :where(.bg-white),
+  button {
+    transition: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .page-shell,
+  .page-header,
+  .page-body,
+  .ios-bar {
+    min-width: 0;
+    max-width: 100%;
+  }
 }

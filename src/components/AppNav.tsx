@@ -150,32 +150,32 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className={`hidden lg:flex w-56 xl:w-64 shrink-0 flex-col self-stretch bg-primary text-white border-primary-dark ${
-        leftHanded ? 'lg:order-2 border-l border-r-0' : 'border-r'
+      <aside className={`ios-pane hidden lg:flex w-60 xl:w-72 shrink-0 flex-col self-stretch text-ink border-white/50 ${
+        leftHanded ? 'lg:order-2 border-l' : 'border-r'
       }`}>
-        <div className="px-4 py-5 border-b border-white/10">
-          <p className="text-emerald-200 text-[10px] font-semibold uppercase tracking-[0.14em]">Adimat</p>
-          <p className="font-bold text-xl tracking-tight truncate mt-1">{currentStore?.name || 'Store'}</p>
-          <p className="text-emerald-100/80 text-xs mt-1 truncate capitalize">
+        <div className="px-4 pt-6 pb-3">
+          <p className="text-[13px] font-semibold text-muted">Adimat</p>
+          <p className="font-bold text-[22px] tracking-tight truncate leading-tight mt-0.5">{currentStore?.name || 'Store'}</p>
+          <p className="text-muted text-[13px] mt-1 truncate capitalize">
             {currentUser?.name} · {currentUser?.role === 'owner' ? t('role.owner') : t('role.cashier')}
           </p>
         </div>
-        <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-1">
+        <nav className="flex-1 overflow-y-auto py-1 px-2 space-y-1">
           {navGroups.map((group) => {
             const groupItems = navItems.filter((item) => group.ids.includes(item.id));
             if (groupItems.length === 0) return null;
             return (
               <div key={group.label} className="pt-1">
-                <p className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-300/70">
+                <p className="px-3 pb-1 pt-3 text-[13px] font-semibold text-muted">
                   {group.label}
                 </p>
                 {groupItems.map((item) => {
                   const Icon = item.icon;
                   const isActive = !item.href && currentPage === item.id;
-                  const className = `w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors touch-target ${
+                  const className = `w-full flex items-center gap-3 px-3 py-2.5 rounded-[12px] text-[15px] font-medium transition-colors touch-target ${
                     isActive
-                      ? 'bg-white text-primary shadow-sm'
-                      : 'text-emerald-50 hover:bg-white/10'
+                      ? 'bg-white text-primary shadow-[0_1px_2px_rgba(0,0,0,0.05),0_0_0_0.5px_rgba(60,60,67,0.12)]'
+                      : 'text-ink hover:bg-black/[0.04] active:bg-black/[0.06]'
                   }`;
                   const content = (
                     <>
@@ -212,9 +212,9 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
             );
           })}
         </nav>
-        <div className="p-2 border-t border-white/10 space-y-2">
+        <div className="p-2 border-t border-black/10 space-y-1">
           <AccessibilityControls variant="sidebar" />
-          <LanguageSwitcher variant="onPrimary" compact />
+          <LanguageSwitcher variant="light" compact />
           <button
             type="button"
             onClick={() => setDarkMode((enabled) => !enabled)}
@@ -227,7 +227,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
           <button
             type="button"
             onClick={switchUser}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-emerald-50 hover:bg-white/10 touch-target"
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-[12px] text-[15px] font-medium text-ink hover:bg-black/[0.04] touch-target"
           >
             <LogOut className="w-5 h-5" />
             {t('nav.switchUser')}
@@ -237,14 +237,14 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
 
       {/* Mobile bottom nav — primary destinations only */}
       <nav
-        className="lg:hidden fixed bottom-0 z-40 border-t border-emerald-100 bg-white/95 backdrop-blur-md shadow-[0_-8px_24px_rgba(15,23,42,0.06)]"
+        className="ios-tabbar lg:hidden fixed bottom-0 z-40"
         style={{
           left: 'env(safe-area-inset-left)',
           right: 'env(safe-area-inset-right)',
           paddingBottom: 'env(safe-area-inset-bottom)',
         }}
       >
-        <div className="mx-auto flex w-full max-w-3xl items-stretch justify-between gap-1 px-2 py-1.5">
+        <div className="mx-auto flex w-full max-w-lg items-stretch justify-around px-1 pt-1.5 pb-1">
           {primaryItems.map((item) => {
             const Icon = item.icon;
             const isActive = currentPage === item.id && !moreOpen;
@@ -253,14 +253,11 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
                 key={item.id}
                 type="button"
                 onClick={() => go(item.id)}
-                className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-2xl px-2 py-2.5 touch-target transition-colors ${
-                  isActive
-                    ? 'bg-emerald-50 text-primary'
-                    : 'text-slate-500 active:bg-slate-50'
-                }`}
+                data-active={isActive}
+                className="ios-tab-item flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-1 touch-target"
               >
-                <Icon className={`h-5 w-5 ${isActive ? 'stroke-[2.5]' : ''}`} />
-                <span className={`text-[11px] leading-none whitespace-nowrap ${isActive ? 'font-bold' : 'font-medium'}`}>
+                <Icon className="h-[22px] w-[22px]" strokeWidth={isActive ? 2.4 : 1.8} />
+                <span className={`max-w-full truncate text-[10px] leading-none tracking-tight ${isActive ? 'font-semibold' : 'font-medium'}`}>
                   {item.shortLabel || item.label}
                 </span>
               </button>
@@ -269,16 +266,13 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
           <button
             type="button"
             onClick={() => setMoreOpen((v) => !v)}
-            className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-2xl px-2 py-2.5 touch-target transition-colors ${
-              moreOpen || moreActive
-                ? 'bg-emerald-50 text-primary'
-                : 'text-slate-500 active:bg-slate-50'
-            }`}
+            data-active={moreOpen || moreActive}
+            className="ios-tab-item flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-1 touch-target"
             aria-expanded={moreOpen}
             aria-label={t('nav.moreMenu')}
           >
-            <MoreHorizontal className={`h-5 w-5 ${moreOpen || moreActive ? 'stroke-[2.5]' : ''}`} />
-            <span className={`text-[11px] leading-none ${moreOpen || moreActive ? 'font-bold' : 'font-medium'}`}>
+            <MoreHorizontal className="h-[22px] w-[22px]" strokeWidth={moreOpen || moreActive ? 2.4 : 1.8} />
+            <span className={`text-[10px] leading-none tracking-tight ${moreOpen || moreActive ? 'font-semibold' : 'font-medium'}`}>
               {t('common.more')}
             </span>
           </button>
@@ -290,52 +284,53 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         <div className="lg:hidden fixed inset-0 z-50 flex flex-col justify-end">
           <button
             type="button"
-            className="absolute inset-0 bg-slate-900/40"
+            className="absolute inset-0 bg-black/40"
             aria-label={t('common.close')}
             onClick={() => setMoreOpen(false)}
           />
           <div
-            className="relative max-h-[82vh] overflow-y-auto rounded-t-3xl bg-surface-card shadow-2xl animate-slide-up"
-            style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+            className="ios-glass relative max-h-[82vh] max-h-[82dvh] overflow-y-auto rounded-t-[20px] shadow-2xl animate-slide-up"
+            style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
           >
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-surface-muted bg-surface-card px-4 py-3 rounded-t-3xl">
-              <div className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-primary">
-                  {t('common.menu')}
-                </p>
-                <p className="truncate text-sm font-bold text-ink">
-                  {currentStore?.name || t('common.store')}
-                </p>
+            <div className="ios-pane sticky top-0 z-10 px-4 pb-2 pt-2">
+              <div className="mx-auto mb-2 h-[5px] w-9 rounded-full bg-black/20" />
+              <div className="flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-[13px] font-semibold text-muted">
+                    {t('common.menu')}
+                  </p>
+                  <p className="truncate text-[17px] font-bold tracking-tight text-ink">
+                    {currentStore?.name || t('common.store')}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMoreOpen(false)}
+                  className="icon-btn"
+                  aria-label="Close"
+                >
+                  <X className="h-5 w-5" />
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setMoreOpen(false)}
-                className="icon-btn"
-                aria-label="Close"
-              >
-                <X className="h-5 w-5" />
-              </button>
             </div>
 
-            <div className="px-2 py-2">
+            <div className="space-y-4 px-4 py-2">
               {groupedMoreItems.map(({ group, items }) => (
-                <div key={group.label} className="py-1">
-                  <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">
+                <div key={group.label}>
+                  <div className="px-3 pb-1.5 text-[13px] font-semibold text-muted">
                     {group.label}
                   </div>
-                  <div className="space-y-0.5">
+                  <div className="overflow-hidden rounded-[14px] bg-white shadow-[0_0_0_0.5px_rgba(60,60,67,0.12)]">
                     {items.map((item) => {
                       const Icon = item.icon;
                       const isActive = !item.href && currentPage === item.id;
-                      const className = `flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left touch-target transition-colors ${
-                        isActive
-                          ? 'bg-primary-subtle text-primary'
-                          : 'text-ink hover:bg-surface-muted'
+                      const className = `flex w-full items-center gap-3 border-b border-black/[0.06] px-3 py-2.5 text-left touch-target last:border-b-0 ${
+                        isActive ? 'text-primary' : 'text-ink active:bg-black/[0.04]'
                       }`;
                       const content = (
                         <>
-                          <Icon className={`h-5 w-5 flex-shrink-0 ${isActive ? 'stroke-[2.5]' : ''}`} />
-                          <span className={`text-sm ${isActive ? 'font-bold' : 'font-medium'}`}>
+                          <Icon className="h-5 w-5 flex-shrink-0" strokeWidth={isActive ? 2.4 : 1.8} />
+                          <span className={`text-[17px] tracking-tight ${isActive ? 'font-semibold' : 'font-normal'}`}>
                             {item.label}
                           </span>
                         </>
@@ -370,7 +365,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
                 </div>
               ))}
 
-              <div className="mt-2 border-t border-surface-muted px-3 pt-2 pb-1 space-y-2">
+              <div className="space-y-2 pt-1">
                 <AccessibilityControls variant="menu" />
   <LanguageSwitcher compact />
   <button
@@ -388,7 +383,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
                     setMoreOpen(false);
                     switchUser();
                   }}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 touch-target"
+                  className="flex w-full items-center justify-center gap-2 rounded-[14px] bg-white px-4 py-3 text-[17px] font-normal text-[#FF3B30] touch-target shadow-[0_0_0_0.5px_rgba(60,60,67,0.12)]"
                 >
                   <LogOut className="h-4 w-4" />
                   {t('nav.switchUser')}

@@ -21,7 +21,7 @@ export function Card({ children, className, padding = 'md', hover = false }: Car
       className={cn(
         'surface-card',
         paddingClasses[padding],
-        hover && 'transition-shadow hover:shadow-md',
+        hover && 'transition-transform hover:-translate-y-px',
         className
       )}
     >
@@ -44,8 +44,8 @@ export function CardHeader({ title, description, action, icon, className }: Card
       <div className="flex items-center gap-2 min-w-0">
         {icon && <span className="flex-shrink-0 text-primary">{icon}</span>}
         <div className="min-w-0">
-          <h3 className="text-sm font-bold text-ink truncate">{title}</h3>
-          {description && <p className="text-xs text-muted mt-0.5">{description}</p>}
+          <h3 className="text-[17px] font-semibold tracking-tight text-ink truncate">{title}</h3>
+          {description && <p className="text-[13px] text-muted mt-0.5">{description}</p>}
         </div>
       </div>
       {action && <div className="flex-shrink-0">{action}</div>}
