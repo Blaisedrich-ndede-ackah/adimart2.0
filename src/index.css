@@ -27,6 +27,21 @@
   :root {
     color-scheme: light;
   }
+
+  :root.dark {
+    color-scheme: dark;
+    --color-surface: #0b1220;
+    --color-surface-muted: #111b2d;
+    --color-surface-card: #162238;
+    --color-border: #2a3a53;
+    --color-ink: #f1f5f9;
+    --color-muted: #9aabc0;
+    --color-bg: #0b1220;
+    --color-text: #f1f5f9;
+    --color-text-muted: #9aabc0;
+    --color-border-subtle: #223149;
+    --color-primary-subtle: #172554;
+  }
   html {
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
@@ -56,6 +71,7 @@ html {
 body {
   height: 100%;
   min-height: 100%;
+  transition: background-color 180ms ease, color 180ms ease;
   min-height: -webkit-fill-available;
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
@@ -74,6 +90,98 @@ body {
   width: 100%;
   overflow: hidden;
   -webkit-overflow-scrolling: touch;
+}
+
+/* Keep utility-heavy legacy screens readable when dark mode is enabled. */
+.dark body {
+  background:
+    radial-gradient(900px 500px at 0% -10%, rgba(59, 130, 246, 0.16), transparent 58%),
+    radial-gradient(800px 480px at 100% 0%, rgba(124, 58, 237, 0.14), transparent 56%),
+    var(--color-surface);
+}
+
+.dark .bg-white {
+  background-color: var(--color-surface-card);
+}
+
+.dark .bg-gray-50,
+.dark .bg-slate-50 {
+  background-color: var(--color-surface-muted);
+}
+
+.dark .bg-emerald-50,
+.dark .bg-green-50 {
+  background-color: #172554;
+}
+
+.dark .bg-emerald-600,
+.dark .bg-emerald-700,
+.dark .bg-green-600,
+.dark .bg-green-700 {
+  background-color: #2563eb;
+}
+
+.dark .bg-amber-50,
+.dark .bg-orange-50 {
+  background-color: #3a2b15;
+}
+
+.dark .bg-red-50 {
+  background-color: #3b1d27;
+}
+
+.dark .text-gray-900,
+.dark .text-gray-800,
+.dark .text-slate-900,
+.dark .text-slate-800 {
+  color: var(--color-ink);
+}
+
+.dark .text-gray-600,
+.dark .text-gray-500,
+.dark .text-slate-600,
+.dark .text-slate-500 {
+  color: var(--color-muted);
+}
+
+.dark .text-emerald-700,
+.dark .text-emerald-800,
+.dark .text-green-700 {
+  color: #93c5fd;
+}
+
+.dark .text-amber-700,
+.dark .text-orange-700 {
+  color: #fbbf74;
+}
+
+.dark .text-red-700,
+.dark .text-red-800 {
+  color: #fda4af;
+}
+
+.dark .border-gray-100,
+.dark .border-gray-200,
+.dark .border-slate-200 {
+  border-color: var(--color-border);
+}
+
+.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--color-border);
+}
+
+.dark input,
+.dark textarea,
+.dark select {
+  background-color: var(--color-surface-card);
+  border-color: var(--color-border);
+  color: var(--color-ink);
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: var(--color-muted);
 }
 
 @media (min-width: 768px) {

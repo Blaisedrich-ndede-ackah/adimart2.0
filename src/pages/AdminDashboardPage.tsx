@@ -45,6 +45,8 @@ import {
 import AdminStoreWorkspace from '@/components/AdminStoreWorkspace';
 import AdminCreateStoreForm from '@/components/AdminCreateStoreForm';
 import AdminCampaignManager from '@/components/AdminCampaignManager';
+import AdminBroadcastSms from '@/components/AdminBroadcastSms';
+import AdminSupportAgent from '@/components/AdminSupportAgent';
 import CopyableStoreId from '@/components/CopyableStoreId';
 import AdminAgentsPanel from '@/components/AdminAgentsPanel';
 
@@ -1562,7 +1564,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
           </div>
         )}
 
-        {tab === 'campaigns' && <AdminCampaignManager />}
+{tab === 'campaigns' && <AdminCampaignManager />}
 
         {tab === 'agents' && <AdminAgentsPanel />}
 
