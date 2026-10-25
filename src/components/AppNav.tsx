@@ -3,7 +3,7 @@ import {
   ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, House,
   CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare, Moon, Sun,
   ShoppingCart, RotateCcw,
-  ContactRound, ArrowLeftRight, Building2,
+  ContactRound, ArrowLeftRight, Building2, Megaphone,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -82,6 +82,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         { id: 'cashbook', label: t('nav.cashbook'), icon: BookOpen, show: cashbookOk },
         { id: 'devices', label: t('nav.devices'), icon: Bluetooth, show: true },
         { id: 'learn', label: 'Learn Adimat', icon: BookOpen, show: true },
+        { id: 'campaigns', label: 'Promotions', icon: Megaphone, show: true },
         { id: 'subscription', label: t('nav.plan'), icon: CalendarClock, show: isOwner },
         { id: 'inventory', label: t('nav.inventory'), icon: Package, show: isOwner },
         { id: 'warehouse', label: 'Branch inventory', icon: ArrowLeftRight, show: isOwner },
@@ -123,7 +124,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
     { label: t('nav.main'), ids: ['home', 'pos', 'transactions'] },
     { label: 'Shop', ids: ['inventory', 'purchasing', 'warehouse', 'ecommerce', 'multistore'] },
     { label: 'Operations', ids: ['reports', 'expenses', 'cashbook', 'devices', 'subscription', 'returns', 'customers'] },
-    { label: 'Help', ids: ['learn', 'community', 'settings'] },
+    { label: 'Help', ids: ['learn', 'campaigns', 'community', 'settings'] },
   ];
   const groupedMoreItems = navGroups
     .map((group) => ({

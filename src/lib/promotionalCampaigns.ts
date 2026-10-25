@@ -280,8 +280,9 @@ export function isCampaignMigrationMissing(error: unknown): boolean {
   return (
     code === '42P01' ||
     code === 'PGRST205' ||
-    normalized.includes('promotional_campaigns') &&
-      (normalized.includes('does not exist') || normalized.includes('schema cache'))
+    normalized.includes('supabase-migrate-promotional-campaigns.sql') ||
+    (normalized.includes('promotional_campaign') &&
+      (normalized.includes('does not exist') || normalized.includes('schema cache') || normalized.includes('could not find the table')))
   );
 }
 

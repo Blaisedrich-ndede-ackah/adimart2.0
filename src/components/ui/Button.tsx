@@ -85,4 +85,28 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     );
   }
 );
+;
+
+/** Compact button used by the agent portal for row and toolbar actions. */
+export function LinkButton({
+  className,
+  variant = 'outline',
+  size = 'sm',
+  icon,
+  children,
+  ...props
+}: ButtonProps & { icon?: React.ReactNode }) {
+  return (
+    <Button
+      variant={variant}
+      size={size}
+      leftIcon={icon}
+      className={cn('w-auto', className)}
+      {...props}
+    >
+      {children}
+    </Button>
+  );
+}
+
 Button.displayName = 'Button';

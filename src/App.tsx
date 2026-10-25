@@ -34,11 +34,15 @@ import PurchasingPage from '@/pages/PurchasingPage';
 import OwnerHomePage from '@/pages/OwnerHomePage';
 import MultiStorePage from '@/pages/MultiStorePage';
 import LearnAdimatPage from '@/pages/LearnAdimatPage';
+import CampaignsPage from '@/pages/CampaignsPage';
 import PublicShopPage from '@/pages/PublicShopPage';
 import TermsPage from '@/pages/TermsPage';
 import NotFoundPage from '@/pages/NotFoundPage';
 import AdminLoginPage from '@/pages/AdminLoginPage';
 import AdminDashboardPage from '@/pages/AdminDashboardPage';
+import AgentLoginPage from '@/pages/AgentLoginPage';
+import AgentShell from '@/components/AgentShell';
+import { useAgentAuthStore } from '@/store/useAgentAuthStore';
 import { isStoreAccessBlocked } from '@/lib/subscription';
 import { checkAndSendSubscriptionExpirySms } from '@/lib/subscriptionReminders';
 import { checkAndSendDebtReminders } from '@/lib/debtReminders';
@@ -47,7 +51,7 @@ import { createAutomaticStoreBackup, recordBackupIssue } from '@/lib/storeBackup
 import { createDueRecurringExpenses } from '@/lib/dexie';
 import { useAccessibilityStore } from '@/lib/accessibility';
 
-type AppMode = 'store' | 'admin-login' | 'admin';
+type AppMode = 'store' | 'admin-login' | 'admin' | 'agent-login' | 'agent';
 
 function readPublicShopSlug(): string | null {
   if (typeof window === 'undefined') return null;
@@ -56,13 +60,31 @@ function readPublicShopSlug(): string | null {
   return match?.[1] ? decodeURIComponent(match[1]).trim().toLowerCase() : null;
 }
 
+function readAgentHash(): boolean {
+  if (typeof window === 'undefined') return false;
+  const hash = window.location.hash.replace(/^#/, '').replace(/^\//, '').replace(/\/$/, '');
+  return hash.toLowerCase() === 'agent';
+}
+
 function readPublicUtilityRoute(): 'terms' | '404' | null {
   if (typeof window === 'undefined') return null;
   const hash = window.location.hash.replace(/^#/, '').replace(/^\//, '').replace(/\/$/, '');
   if (!hash) return null;
   if (hash.toLowerCase() === 'terms') return 'terms';
+  if (hash.toLowerCase() === 'agent') return null;
   if (/^shop\//i.test(hash)) return null;
   return '404';
+}
+
+function openAgentHash(): void {
+  if (readAgentHash()) return;
+  window.location.hash = '#/agent';
+}
+
+function clearAgentHash(): void {
+  if (!readAgentHash()) return;
+  const next = `${window.location.pathname}${window.location.search}`;
+  window.history.replaceState(null, '', next);
 }
 
 function userNeedsPhone(user: { phone?: string | null } | null | undefined): boolean {
@@ -73,10 +95,11 @@ function userNeedsPhone(user: { phone?: string | null } | null | undefined): boo
 export default function App() {
   const { isAuthenticated, currentUser, currentStore, isStoreSetup, isLoading, initialize, switchUser } =
     useAuthStore();
+  const initializeAgent = useAgentAuthStore((state) => state.initialize);
   const leftHanded = useAccessibilityStore((state) => state.leftHanded);
   const [currentPage, setCurrentPage] = useState('home');
   const [quickAction, setQuickAction] = useState<'add-product' | 'add-expense' | null>(null);
-  const [appMode, setAppMode] = useState<AppMode>('store');
+  const [appMode, setAppMode] = useState<AppMode>(() => (readAgentHash() ? 'agent-login' : 'store'));
   const [adminSessionResolved, setAdminSessionResolved] = useState(false);
   const [publicShopSlug, setPublicShopSlug] = useState<string | null>(() => readPublicShopSlug());
   const [publicUtilityRoute, setPublicUtilityRoute] = useState<'terms' | '404' | null>(() => readPublicUtilityRoute());
@@ -85,7 +108,7 @@ export default function App() {
     let active = true;
     void restoreAdminSession()
       .then((isActive) => {
-        if (active && isActive) setAppMode('admin');
+        if (active && isActive && !readAgentHash()) setAppMode('admin');
       })
       .catch((error) => {
         console.error('Could not restore administrator session', error);
@@ -111,10 +134,21 @@ export default function App() {
 
   useEffect(() => {
     initialize();
+    void initializeAgent();
     initAutoSync();
     void autoReconnectPeripherals();
     return () => stopAutoSync();
-  }, [initialize]);
+  }, [initialize, initializeAgent]);
+
+  useEffect(() => {
+    const onAgentHash = () => {
+      if (!readAgentHash()) return;
+      setPublicUtilityRoute(null);
+      setAppMode((mode) => (mode === 'agent' ? mode : 'agent-login'));
+    };
+    window.addEventListener('hashchange', onAgentHash);
+    return () => window.removeEventListener('hashchange', onAgentHash);
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated || !currentStore?.id) return;
@@ -251,6 +285,39 @@ export default function App() {
     );
   }
 
+  if (appMode === 'agent-login') {
+    return (
+      <div className="h-full flex flex-col">
+        <PWAInstallBanner />
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <AgentLoginPage
+            onOpenStore={() => {
+              clearAgentHash();
+              setAppMode('store');
+            }}
+            onAgentLogin={() => setAppMode('agent')}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (appMode === 'agent') {
+    return (
+      <div className="h-full flex flex-col">
+        <PWAInstallBanner />
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <AgentShell
+            onLogout={() => {
+              clearAgentHash();
+              setAppMode('agent-login');
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   if (isLoading) {
     return (
       <div className="h-full bg-primary flex items-center justify-center">
@@ -269,7 +336,13 @@ export default function App() {
       <div className="h-full flex flex-col">
         <PWAInstallBanner />
         <div className="flex-1 min-h-0 overflow-y-auto">
-          <StoreSetupPage onOpenAdmin={() => setAppMode('admin-login')} />
+          <StoreSetupPage
+            onOpenAdmin={() => setAppMode('admin-login')}
+            onOpenAgent={() => {
+              openAgentHash();
+              setAppMode('agent-login');
+            }}
+          />
         </div>
       </div>
     );
@@ -282,6 +355,10 @@ export default function App() {
         <div className="flex-1 min-h-0 overflow-y-auto">
           <LoginPage
             onOpenAdmin={() => setAppMode('admin-login')}
+            onOpenAgent={() => {
+              openAgentHash();
+              setAppMode('agent-login');
+            }}
             onWarehouseLoginSuccess={() => setCurrentPage('warehouse')}
           />
         </div>
@@ -347,6 +424,8 @@ export default function App() {
         return <DevicesPage />;
       case 'learn':
         return currentUser ? <LearnAdimatPage onNavigate={setCurrentPage} /> : <POSPage />;
+      case 'campaigns':
+        return currentUser ? <CampaignsPage /> : <POSPage />;
       case 'subscription':
         return role === 'owner' ? <SubscriptionPage /> : <POSPage />;
       case 'inventory':

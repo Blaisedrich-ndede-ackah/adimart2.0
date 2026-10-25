@@ -9,9 +9,10 @@ import { useT } from '@/lib/i18n';
 
 interface StoreSetupPageProps {
   onOpenAdmin?: () => void;
+  onOpenAgent?: () => void;
 }
 
-export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
+export default function StoreSetupPage({ onOpenAdmin, onOpenAgent }: StoreSetupPageProps) {
   const [restoreStoreId, setRestoreStoreId] = useState('');
   const [restorePin, setRestorePin] = useState('');
   const [error, setError] = useState('');
@@ -108,6 +109,14 @@ export default function StoreSetupPage({ onOpenAdmin }: StoreSetupPageProps) {
             {isRestoring ? <Loader2 className="w-4 h-4 animate-spin" /> : <CloudDownload className="w-5 h-5" />}
             {t('setup.openStore')}
           </button>
+          {onOpenAgent && (
+            <button
+              onClick={onOpenAgent}
+              className="w-full py-3 text-primary text-sm font-semibold flex items-center justify-center gap-2 touch-target"
+            >
+              Agent portal
+            </button>
+          )}
           {onOpenAdmin && (
             <button
               onClick={onOpenAdmin}
