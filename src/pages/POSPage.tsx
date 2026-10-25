@@ -30,7 +30,6 @@ import {
 import { triggerAutoSync } from '@/lib/sync';
 import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
-import { cashierCanSeeStockQuantity } from '@/lib/staffAccess';
 import { scoreSmartSearch } from '@/lib/adimatAi/search';
 import { useAlsoBuy } from '@/lib/adimatAi/useAdimatAi';
 import AlsoBuySuggestions from '@/components/AlsoBuySuggestions';

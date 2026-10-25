@@ -7,8 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run && playwright test",
-    "test:unit": "vitest run",
+    "test": "vitest run",
     "docs:pdf": "node scripts/generate-user-guide.mjs"
   },
   "dependencies": {
@@ -51,7 +50,6 @@
     "typescript": "5.9.3",
     "vite": "7.3.2",
     "vite-plugin-singlefile": "2.3.0",
-    "vitest": "^3.2.7",
-    "@playwright/test": "^1.56.1"
+    "vitest": "^3.2.7"
   }
 }
