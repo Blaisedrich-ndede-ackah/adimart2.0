@@ -22,23 +22,23 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary:
-    'bg-primary text-white border-transparent hover:bg-primary-dark focus-visible:ring-primary/40 active:bg-primary-dark',
+    'bg-primary text-white border-transparent hover:bg-primary-dark focus-visible:ring-primary/35 active:bg-primary-dark',
   secondary:
-    'bg-surface-card text-ink border-border hover:bg-surface-muted focus-visible:ring-primary/40',
+    'bg-white text-ink border-transparent shadow-[0_0_0_0.5px_rgba(60,60,67,0.16)] hover:bg-[#f2f2f7] focus-visible:ring-primary/35',
   outline:
-    'bg-transparent text-ink border-border hover:bg-surface-muted focus-visible:ring-primary/40',
+    'bg-transparent text-primary border-transparent hover:bg-primary/10 focus-visible:ring-primary/35',
   ghost:
-    'bg-transparent text-muted hover:bg-surface-muted focus-visible:ring-primary/40',
+    'bg-transparent text-muted hover:bg-black/[0.04] focus-visible:ring-primary/35',
   danger:
-    'bg-danger text-white border-transparent hover:bg-red-700 focus-visible:ring-danger/40',
+    'bg-danger text-white border-transparent hover:bg-red-600 focus-visible:ring-danger/35',
   success:
-    'bg-success text-white border-transparent hover:bg-emerald-700 focus-visible:ring-success/40',
+    'bg-success text-white border-transparent hover:bg-emerald-600 focus-visible:ring-success/35',
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
-  sm: 'px-2.5 py-1.5 text-xs',
-  md: 'px-4 py-2.5 text-sm',
-  lg: 'px-5 py-3.5 text-base',
+  sm: 'min-h-8 px-3 py-1 text-[13px] rounded-full',
+  md: 'min-h-11 px-4 py-2 text-[15px] rounded-[12px]',
+  lg: 'min-h-12 px-5 py-3 text-[17px] rounded-[14px]',
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
@@ -64,7 +64,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         type={rest.type ?? 'button'}
         disabled={isDisabled}
         className={cn(
-          'inline-flex items-center justify-center gap-2 rounded-xl border font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+          'inline-flex items-center justify-center gap-2 border font-semibold tracking-tight transition-[transform,background-color,color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100',
           variantClasses[variant],
           sizeClasses[size],
           block ? 'w-full' : '',
@@ -87,7 +87,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
 );
 ;
 
-/** Anchor-styled button for navigation actions. Uses an <a> via asChild for routing. */
+/** Compact button used by the agent portal for row and toolbar actions. */
 export function LinkButton({
   className,
   variant = 'outline',
@@ -95,10 +95,15 @@ export function LinkButton({
   icon,
   children,
   ...props
-}: ButtonProps & { icon?: React.ReactNode; asChild?: boolean; href?: string }) {
+}: ButtonProps & { icon?: React.ReactNode }) {
   return (
-    <Button asChild variant={variant as ButtonVariant} size={size as ButtonSize} className={cn('text-center w-auto', className)} {...props}>
-      {icon && <span className="mr-2 flex-shrink-0">{icon}</span>}
+    <Button
+      variant={variant}
+      size={size}
+      leftIcon={icon}
+      className={cn('w-auto', className)}
+      {...props}
+    >
       {children}
     </Button>
   );

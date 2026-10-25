@@ -17,6 +17,7 @@ interface AgentAuthState {
 
   initialize: () => Promise<void>;
   login: (phone: string, pin: string) => Promise<boolean>;
+  resume: (agentId: string) => Promise<boolean>;
   logout: () => void;
   listAgents: () => Promise<LocalAgent[]>;
   createAgent: (agent: Omit<LocalAgent, 'synced'>) => Promise<void>;
@@ -32,11 +33,13 @@ export const useAgentAuthStore = create<AgentAuthState>((set, get) => ({
   loginError: '',
 
   initialize: async () => {
-    set({ isLoading: true });
-    const agents = await listLocalAgents();
-    // No auto-persist for agents; agent must log in with PIN each session.
-    // Keep the last agent as a candidate for rehydration if desired.
-    set({ isLoading: false, isAuthenticated: false, currentAgent: null });
+    // PIN is required for each visit. Clear the loading flag so the sign-in
+    // button can be used; do not restore a previous agent session.
+    set((state) => ({
+      isLoading: false,
+      isAuthenticated: state.isAuthenticated,
+      currentAgent: state.currentAgent,
+    }));
   },
 
   login: async (phone: string, pin: string) => {
@@ -65,6 +68,28 @@ export const useAgentAuthStore = create<AgentAuthState>((set, get) => ({
       set({ loginError: error instanceof Error ? error.message : 'Login failed.', isLoading: false, isAuthenticated: false });
       return false;
     }
+  },
+
+  resume: async (agentId: string) => {
+    const agent = await getLocalAgent(agentId);
+    if (!agent || agent.status !== 'active') {
+      set({
+        loginError: 'Biometric unlock did not match an active agent account.',
+        isLoading: false,
+        isAuthenticated: false,
+        currentAgent: null,
+      });
+      return false;
+    }
+    await updateLocalAgent(agent.id, { last_login_at: new Date().toISOString() });
+    const refreshed = await getLocalAgent(agent.id);
+    set({
+      currentAgent: refreshed ?? agent,
+      isAuthenticated: true,
+      isLoading: false,
+      loginError: '',
+    });
+    return true;
   },
 
   logout: () => {

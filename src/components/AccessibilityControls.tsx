@@ -33,7 +33,7 @@ export default function AccessibilityControls({
         aria-label={t('accessibility.open')}
         className={
           variant === 'sidebar'
-            ? 'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-emerald-50 hover:bg-white/10 touch-target'
+            ? 'flex w-full items-center gap-3 rounded-[12px] px-3 py-2.5 text-[15px] font-medium text-ink hover:bg-black/[0.04] touch-target'
             : 'flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 touch-target'
         }
       >

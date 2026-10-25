@@ -385,7 +385,7 @@ export default function ReportsPage() {
               type="button"
               onClick={applyCustomRange}
               disabled={loadingReport}
-              className="w-full rounded-lg bg-white text-primary py-2 text-sm font-semibold disabled:opacity-60"
+              className="w-full rounded-full bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-60"
             >
               {loadingReport ? 'Generating…' : 'Generate report'}
             </button>

@@ -3,7 +3,7 @@ import {
   Building2, Users, Package, Wallet, RefreshCcw, LogOut, ChevronLeft, ChevronRight,
   Smartphone, CheckCircle2, AlertCircle, Loader2, Store, CreditCard, CalendarClock, Mail,
   FileBarChart, Download, FileText, Ban, LayoutDashboard, MoreHorizontal, X, Search, Megaphone,
-  BookOpen, Printer,
+  BookOpen, Printer, UserPlus,
 } from 'lucide-react';
 import {
   AdminDashboardData,
@@ -45,9 +45,12 @@ import {
 import AdminStoreWorkspace from '@/components/AdminStoreWorkspace';
 import AdminCreateStoreForm from '@/components/AdminCreateStoreForm';
 import AdminCampaignManager from '@/components/AdminCampaignManager';
+import AdminBroadcastSms from '@/components/AdminBroadcastSms';
+import AdminSupportAgent from '@/components/AdminSupportAgent';
 import CopyableStoreId from '@/components/CopyableStoreId';
+import AdminAgentsPanel from '@/components/AdminAgentsPanel';
 
-type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact' | 'campaigns' | 'learn' | 'sales';
+type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact' | 'campaigns' | 'learn' | 'sales' | 'agents';
 
 function defaultReportFromDate(): string {
   const d = new Date();
@@ -465,6 +468,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       ['reports', 'Reports', FileBarChart],
       ['contact', 'Contact', Mail],
       ['campaigns', 'Campaigns', Megaphone],
+      ['agents', 'Agents', UserPlus],
       ['learn', 'Learn', BookOpen],
     ] as const
   );
@@ -504,32 +508,32 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
 
   return (
     <div
-      className="h-full w-full min-w-0 bg-[var(--color-surface)] flex flex-col overflow-hidden"
+      className="ios-canvas h-full w-full min-w-0 flex flex-col overflow-hidden"
       style={{
         paddingTop: 'env(safe-area-inset-top)',
         paddingLeft: 'env(safe-area-inset-left)',
         paddingRight: 'env(safe-area-inset-right)',
       }}
     >
-      <header className="bg-primary text-white px-3 sm:px-4 md:px-6 lg:px-8 2xl:px-12 py-3 lg:py-4 2xl:py-5 flex-shrink-0">
+      <header className="ios-bar px-3 sm:px-4 md:px-6 lg:px-8 2xl:px-12 py-3 lg:py-4 2xl:py-5">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <p className="text-emerald-200 text-[10px] font-semibold uppercase tracking-wide">Adimat Admin</p>
-            <h1 className="text-base sm:text-lg md:text-xl font-bold truncate">
+            <p className="text-[13px] font-medium text-muted">Adimat Admin</p>
+            <h1 className="truncate text-[22px] font-bold tracking-tight md:text-[28px]">
               {tabs.find(([id]) => id === tab)?.[1] || 'Admin'}
             </h1>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <button
               onClick={() => void refresh()}
-              className="p-2.5 rounded-xl bg-white/10 touch-target"
+              className="touch-target rounded-full bg-black/[0.05] p-2.5 text-ink"
               title="Refresh"
             >
               <RefreshCcw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
             <button
               onClick={handleLogout}
-              className="p-2.5 rounded-xl bg-white/10 touch-target"
+              className="touch-target rounded-full bg-black/[0.05] p-2.5 text-ink"
               title="Log out"
             >
               <LogOut className="w-4 h-4" />
@@ -538,7 +542,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         </div>
 
         {(tab === 'overview' || tab === 'payouts') && (
-          <div className="mt-3 flex items-center justify-between bg-white/10 rounded-xl px-1.5 py-1.5">
+          <div className="mt-3 flex items-center justify-between rounded-[14px] bg-black/[0.05] px-1.5 py-1.5 text-ink">
             <button
               onClick={() => setWeekStart((w) => shiftWeek(w, -1))}
               className="p-2.5 touch-target"
@@ -546,8 +550,8 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
               <ChevronLeft className="w-4 h-4" />
             </button>
             <div className="text-center min-w-0 px-1">
-              <p className="text-[10px] text-emerald-100/80 uppercase">Payout week</p>
-              <p className="text-xs sm:text-sm font-semibold truncate">{weekStart} → {weekEnd}</p>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Payout week</p>
+              <p className="truncate text-xs font-semibold sm:text-sm">{weekStart} → {weekEnd}</p>
             </div>
             <button
               onClick={() => setWeekStart((w) => shiftWeek(w, 1))}
@@ -561,13 +565,13 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       </header>
 
       {/* Desktop / tablet top tabs */}
-      <nav className="hidden lg:flex bg-white border-b border-emerald-100 px-2 md:px-4 lg:px-8 2xl:px-12 py-2 gap-1 overflow-x-auto no-scrollbar flex-shrink-0">
+      <nav className="ios-pane hidden lg:flex flex-shrink-0 gap-1 overflow-x-auto border-b border-white/50 px-2 py-2 no-scrollbar md:px-4 lg:px-8 2xl:px-12">
         {tabs.map(([id, label]) => (
           <button
             key={id}
             onClick={() => goTab(id)}
-            className={`px-3 py-2.5 rounded-xl text-xs font-semibold whitespace-nowrap touch-target ${
-              tab === id ? 'bg-primary text-white' : 'text-slate-600 bg-emerald-50/70'
+            className={`touch-target whitespace-nowrap rounded-full px-3 py-2 text-[13px] font-semibold ${
+              tab === id ? 'bg-white text-primary shadow-[0_0_0_0.5px_rgba(60,60,67,0.12)]' : 'text-muted'
             }`}
           >
             {label}
@@ -579,7 +583,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 md:px-6 lg:px-8 2xl:px-12 py-3 md:py-5 lg:py-6 2xl:py-8 pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-8"
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
-        {loading && !data && tab !== 'contact' && tab !== 'reports' && tab !== 'learn' && (
+        {loading && !data && tab !== 'contact' && tab !== 'reports' && tab !== 'learn' && tab !== 'agents' && (
           <div className="flex flex-col items-center justify-center py-20 text-slate-500">
             <Loader2 className="w-8 h-8 animate-spin mb-3" />
             <p className="text-sm">Loading cloud data…</p>
@@ -1560,7 +1564,9 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
           </div>
         )}
 
-        {tab === 'campaigns' && <AdminCampaignManager />}
+{tab === 'campaigns' && <AdminCampaignManager />}
+
+        {tab === 'agents' && <AdminAgentsPanel />}
 
         {data && tab === 'products' && (
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
@@ -1759,7 +1765,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
 
       {/* Mobile bottom tabs */}
       <nav
-        className="lg:hidden fixed bottom-0 z-40 border-t border-emerald-100 bg-white/95 backdrop-blur-md shadow-[0_-8px_24px_rgba(15,23,42,0.06)]"
+        className="ios-tabbar lg:hidden fixed bottom-0 z-40"
         style={{
           left: 'env(safe-area-inset-left)',
           right: 'env(safe-area-inset-right)',
@@ -1774,12 +1780,11 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                 key={id}
                 type="button"
                 onClick={() => goTab(id)}
-                className={`flex flex-col items-center justify-center gap-0.5 rounded-2xl px-1 py-2 touch-target ${
-                  active ? 'bg-emerald-50 text-primary' : 'text-slate-500'
-                }`}
+                data-active={active}
+                className="ios-tab-item flex touch-target flex-col items-center justify-center gap-0.5 px-1 py-1.5"
               >
-                <Icon className={`h-5 w-5 ${active ? 'stroke-[2.5]' : ''}`} />
-                <span className={`text-[10px] leading-none ${active ? 'font-bold' : 'font-medium'}`}>
+                <Icon className="h-[22px] w-[22px]" strokeWidth={active ? 2.4 : 1.8} />
+                <span className={`text-[10px] leading-none ${active ? 'font-semibold' : 'font-medium'}`}>
                   {label}
                 </span>
               </button>
@@ -1788,14 +1793,13 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
           <button
             type="button"
             onClick={() => setMoreOpen((v) => !v)}
-            className={`flex flex-col items-center justify-center gap-0.5 rounded-2xl px-1 py-2 touch-target ${
-              moreOpen || moreActive ? 'bg-emerald-50 text-primary' : 'text-slate-500'
-            }`}
+            data-active={moreOpen || moreActive}
+            className="ios-tab-item flex touch-target flex-col items-center justify-center gap-0.5 px-1 py-1.5"
             aria-expanded={moreOpen}
             aria-label="More admin tools"
           >
-            <MoreHorizontal className={`h-5 w-5 ${moreOpen || moreActive ? 'stroke-[2.5]' : ''}`} />
-            <span className={`text-[10px] leading-none ${moreOpen || moreActive ? 'font-bold' : 'font-medium'}`}>
+            <MoreHorizontal className="h-[22px] w-[22px]" strokeWidth={moreOpen || moreActive ? 2.4 : 1.8} />
+            <span className={`text-[10px] leading-none ${moreOpen || moreActive ? 'font-semibold' : 'font-medium'}`}>
               More
             </span>
           </button>
@@ -1806,16 +1810,18 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         <div className="lg:hidden fixed inset-0 z-50 flex flex-col justify-end">
           <button
             type="button"
-            className="absolute inset-0 bg-slate-900/40"
+            className="absolute inset-0 bg-black/40"
             aria-label="Close menu"
             onClick={() => setMoreOpen(false)}
           />
           <div
-            className="relative rounded-t-3xl bg-white shadow-2xl animate-slide-up"
+            className="ios-glass relative rounded-t-[20px] shadow-2xl animate-slide-up"
             style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
           >
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-              <p className="text-sm font-bold text-slate-900">More</p>
+            <div className="px-4 pb-2 pt-2">
+              <div className="mx-auto mb-2 h-[5px] w-9 rounded-full bg-black/20" />
+              <div className="flex items-center justify-between">
+              <p className="text-[17px] font-semibold tracking-tight text-ink">More</p>
               <button
                 type="button"
                 onClick={() => setMoreOpen(false)}
@@ -1824,8 +1830,9 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
               >
                 <X className="h-5 w-5" />
               </button>
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-2 p-4">
+            <div className="grid grid-cols-2 gap-2 px-4 pb-4">
               {moreTabs.map(([id, label, Icon]) => {
                 const active = tab === id;
                 return (
@@ -1833,10 +1840,8 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                     key={id}
                     type="button"
                     onClick={() => goTab(id)}
-                    className={`flex items-center gap-3 rounded-2xl border px-3 py-4 text-left touch-target ${
-                      active
-                        ? 'border-emerald-200 bg-emerald-50 text-primary'
-                        : 'border-slate-100 bg-slate-50 text-slate-800'
+                    className={`flex items-center gap-3 rounded-[14px] bg-white px-3 py-3 text-left touch-target shadow-[0_0_0_0.5px_rgba(60,60,67,0.12)] ${
+                      active ? 'text-primary' : 'text-ink'
                     }`}
                   >
                     <span className={`flex h-10 w-10 items-center justify-center rounded-2xl ${

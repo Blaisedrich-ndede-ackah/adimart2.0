@@ -247,7 +247,7 @@ export default function ExpensesPage({
                 setError('');
                 setShowAdd(true);
               }}
-              className="flex items-center gap-1 bg-white text-primary px-3 py-2 rounded-xl text-xs font-semibold touch-target"
+              className="flex items-center gap-1 rounded-full bg-primary px-3 py-2 text-xs font-semibold text-white touch-target"
             >
               <Plus className="w-3.5 h-3.5" />
               Add
