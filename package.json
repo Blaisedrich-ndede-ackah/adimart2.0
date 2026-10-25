@@ -30,6 +30,16 @@
     "uuid": "^14.0.0",
     "zustand": "^5.0.14"
   },
+  "browserslist": [
+    "chrome >= 94",
+    "edge >= 94",
+    "firefox >= 93",
+    "safari >= 16",
+    "ios_saf >= 16",
+    "samsung >= 17",
+    "opera >= 80",
+    "android >= 94"
+  ],
   "devDependencies": {
     "@tailwindcss/vite": "4.1.17",
     "@types/node": "22.19.17",

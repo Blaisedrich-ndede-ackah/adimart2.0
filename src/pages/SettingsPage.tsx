@@ -68,6 +68,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [allowPercentage, setAllowPercentage] = useState(true);
   const [allowFixed, setAllowFixed] = useState(true);
   const [cashierCanDiscount, setCashierCanDiscount] = useState(true);
+  const [cashierCanSeeStock, setCashierCanSeeStock] = useState(false);
   const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState(DEFAULT_SESSION_TIMEOUT_MINUTES);
   const [momoAccountName, setMomoAccountName] = useState('');
   const [momoNumber, setMomoNumber] = useState('');
@@ -113,6 +114,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
       setAllowPercentage((currentStore.discount_allow_percentage ?? 1) === 1);
       setAllowFixed((currentStore.discount_allow_fixed ?? 1) === 1);
       setCashierCanDiscount((currentStore.cashier_can_discount ?? 1) === 1);
+      setCashierCanSeeStock((currentStore.cashier_can_see_stock ?? 0) === 1);
       setSessionTimeoutMinutes(normalizeSessionTimeoutMinutes(currentStore.session_timeout_minutes));
       setMomoAccountName(currentStore.momo_account_name || '');
       setMomoNumber(currentStore.momo_number || '');
@@ -196,6 +198,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         discount_allow_percentage: allowPercentage ? 1 : 0,
         discount_allow_fixed: allowFixed ? 1 : 0,
         cashier_can_discount: cashierCanDiscount ? 1 : 0,
+        cashier_can_see_stock: cashierCanSeeStock ? 1 : 0,
         session_timeout_minutes: normalizeSessionTimeoutMinutes(sessionTimeoutMinutes),
         momo_account_name: momoAccountName.trim(),
         momo_number: momoNumber.trim(),
@@ -548,6 +551,24 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
                 onClick={() => setCashierCanDiscount(!cashierCanDiscount)}
                 className={`w-12 h-7 rounded-full transition-colors flex items-center px-0.5 touch-target ${
                   cashierCanDiscount ? 'bg-primary justify-end' : 'bg-gray-300 justify-start'
+                }`}
+              >
+                <div className="w-6 h-6 bg-white rounded-full shadow" />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-700">Cashiers can see stock quantities</p>
+                <p className="text-xs text-gray-500">Off hides on-hand counts in POS and inventory. Owners always see them.</p>
+              </div>
+              <button
+                type="button"
+                aria-pressed={cashierCanSeeStock}
+                aria-label="Cashiers can see stock quantities"
+                onClick={() => setCashierCanSeeStock(!cashierCanSeeStock)}
+                className={`w-12 h-7 rounded-full transition-colors flex items-center px-0.5 touch-target ${
+                  cashierCanSeeStock ? 'bg-primary justify-end' : 'bg-gray-300 justify-start'
                 }`}
               >
                 <div className="w-6 h-6 bg-white rounded-full shadow" />

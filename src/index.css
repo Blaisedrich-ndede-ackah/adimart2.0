@@ -1199,3 +1199,28 @@ html[data-high-contrast="true"] .page-body :where(.bg-white) {
     max-width: 100%;
   }
 }
+
+html, body, #root {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  input, select, textarea {
+    font-size: 16px;
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .ios-glass,
+  .ios-pane,
+  .ios-bar,
+  .ios-tabbar,
+  .sheet-panel,
+  .ios-canvas :where(.bg-white),
+  .page-body :where(.bg-white) {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background-color: rgba(255, 255, 255, 0.94);
+  }
+}

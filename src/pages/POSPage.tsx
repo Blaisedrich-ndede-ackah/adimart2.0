@@ -111,6 +111,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
 
   const canWholesale = canUserSellWholesale(currentUser);
   const isStoreOwner = currentUser?.role === 'owner';
+  const showStockQty = cashierCanSeeStockQuantity(currentUser, currentStore);
 
   useEffect(() => {
     let active = true;
@@ -932,9 +933,11 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                       aria-label={
                         outOfStock
                           ? `${product.name}, out of stock`
+                          : !showStockQty
+                          ? `Add ${product.name} to cart for ${money(toMoney(pricePreview.unitPrice))} per ${unitLabel}`
                           : lowStock
                           ? `${product.name}, low stock — ${stockHere} left`
-                          : `Add ${product.name} to cart for ${money(toMoney(pricePreview.unitPrice))} per ${unitLabel}`
+                          : `Add ${product.name} to cart for ${money(toMoney(pricePreview.unitPrice))} per ${unitLabel}, ${stockHere} available`
                       }
                       className="pos-product-card"
                     >
@@ -954,9 +957,17 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                             {isWholesalePrice ? 'Wholesale price' : ''}
                           </span>
                         )}
-                        <span className={`mt-1 block text-[10px] font-semibold ${outOfStock ? 'text-danger' : lowStock ? 'text-accent' : 'text-gray-500'}`}>
-                          {outOfStock ? 'Out of stock' : lowStock ? `Low stock · ${stockHere} left` : `${stockHere} available`}
-                        </span>
+                        {(outOfStock || showStockQty || lowStock) && (
+                          <span className={`mt-1 block text-[10px] font-semibold ${outOfStock ? 'text-danger' : lowStock ? 'text-accent' : 'text-gray-500'}`}>
+                            {outOfStock
+                              ? 'Out of stock'
+                              : !showStockQty
+                                ? 'Low stock'
+                                : lowStock
+                                  ? `Low stock · ${stockHere} left`
+                                  : `${stockHere} available`}
+                          </span>
+                        )}
                       </span>
                       <span className="pos-product-add" aria-hidden="true">
                         <Plus className="h-4 w-4" strokeWidth={2.5} />

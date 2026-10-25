@@ -13,6 +13,14 @@ import {
   normalizeDebtReminderMinBalance,
 } from './debtReminderConfig';
 import type { PaymentMethod } from './paymentMethods';
+import type {
+  LocalCannedReply,
+  LocalSupportMessage,
+  LocalSupportNotification,
+  LocalSupportTicket,
+} from './support/types';
+import type { LocalSyncOutbox } from './syncTypes';
+import { lastWriteWins, mergeBalanceDeltas } from './syncConflict';
 
 // Store represents a business/shop
 export interface LocalStore {
@@ -28,6 +36,8 @@ export interface LocalStore {
   discount_allow_fixed?: number;
   /** Allow cashiers to apply discounts (0/1); owners always can */
   cashier_can_discount?: number;
+  /** Allow cashiers to see on-hand quantities (0/1). Default hidden. */
+  cashier_can_see_stock?: number;
   /** Idle minutes before staff return to the PIN screen. 0 = never. Default 5. */
   session_timeout_minutes?: number;
   /** Preferred Mobile Money account name for Paystack payouts */
@@ -104,6 +114,8 @@ export interface LocalCustomer {
   created_at: string;
   updated_at: string;
   synced: number;
+  /** Balance last confirmed by the cloud. Local payments store a delta against this. */
+  balance_synced?: number;
 }
 
 export interface LocalCustomerOpeningPayment {
@@ -739,6 +751,11 @@ class AdimatDB extends Dexie {
   agent_commissions!: Table<LocalAgentCommission, string>;
   agent_withdrawal_requests!: Table<LocalAgentWithdrawalRequest, string>;
   agent_commission_settings!: Table<LocalAgentCommissionSetting, string>;
+  support_tickets!: Table<LocalSupportTicket, string>;
+  support_messages!: Table<LocalSupportMessage, string>;
+  support_canned_replies!: Table<LocalCannedReply, string>;
+  support_notifications!: Table<LocalSupportNotification, string>;
+  sync_outbox!: Table<LocalSyncOutbox, string>;
 
   constructor() {
     super('AdimatPOS');
@@ -979,6 +996,13 @@ class AdimatDB extends Dexie {
       /* Version 22 — look agents up by phone at login */
       this.version(22).stores({
         agents: 'id, phone, status, synced',
+      });
+      this.version(23).stores({
+        support_tickets: 'id, store_id, status, priority, category, reference, updated_at, synced',
+        support_messages: 'id, ticket_id, store_id, created_at, synced',
+        support_canned_replies: 'id, title, synced',
+        support_notifications: 'id, store_id, ticket_id, created_at, read',
+        sync_outbox: 'id, store_id, status, table_name, record_id, next_attempt_at',
       });
   }
 }
@@ -1252,6 +1276,7 @@ export async function createStoreWithOwner(
     discount_allow_percentage: 1,
     discount_allow_fixed: 1,
     cashier_can_discount: 1,
+    cashier_can_see_stock: 0,
     session_timeout_minutes: 5,
     momo_account_name: '',
     momo_number: '',
@@ -1977,10 +2002,12 @@ export async function recordCustomerAccountPayment(
               created_at: now,
               synced: 0,
             });
+            const currentCustomer = await db.customers.get(customer.id);
             await db.customers.update(customer.id, {
               opening_balance_remaining: toMoneyAmount(
-                (await db.customers.get(customer.id))!.opening_balance_remaining - allocated
+                (currentCustomer?.opening_balance_remaining || 0) - allocated
               ),
+              balance_synced: currentCustomer?.balance_synced ?? currentCustomer?.opening_balance_remaining,
               updated_at: now,
               synced: 0,
             });
@@ -2920,7 +2947,7 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
       }
       if (
         table === 'stores' &&
-        /debt_reminder|sales_target/i.test(error.message)
+        /debt_reminder|sales_target|cashier_can_see_stock/i.test(error.message)
       ) {
         // Cloud project predates the debt-reminder / sales-target columns.
         // Push the store without them so the rest of the profile still syncs.
@@ -2932,6 +2959,7 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
           delete copy.debt_reminder_message;
           delete copy.sales_target_daily;
           delete copy.sales_target_monthly;
+          delete copy.cashier_can_see_stock;
           return copy;
         });
         const retry = await supabase.from(table).upsert(stripped, {
@@ -3098,6 +3126,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
           discount_allow_percentage: (store.discount_allow_percentage ?? 1) === 1,
           discount_allow_fixed: (store.discount_allow_fixed ?? 1) === 1,
           cashier_can_discount: (store.cashier_can_discount ?? 1) === 1,
+          cashier_can_see_stock: (store.cashier_can_see_stock ?? 0) === 1,
           session_timeout_minutes: normalizeSessionTimeoutMinutes(store.session_timeout_minutes),
           momo_account_name: store.momo_account_name || '',
           momo_number: store.momo_number || '',
@@ -3262,7 +3291,10 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
     );
 
     // Products and locations must exist before batches; batches must exist before movements.
-    const unsyncedBatches = await db.stock_batches.where('store_id').equals(storeId).and(b => b.synced === 0).toArray();
+    const { pushUnsyncedStockDeltas } = await import('./syncDeltas');
+    const deltaApplied = await pushUnsyncedStockDeltas(storeId);
+    const unsyncedBatches = (await db.stock_batches.where('store_id').equals(storeId).and(b => b.synced === 0).toArray())
+      .filter((batch) => !deltaApplied.has(batch.id));
     const batchesToPush: LocalStockBatch[] = [];
     const openingUnsynced = unsyncedBatches.filter(
       (b) => (b.batch_code || '').trim().toUpperCase() === 'OPENING'
@@ -3837,6 +3869,15 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
       errors
     );
 
+    try {
+      const { pushSupportChanges } = await import('./support/cloud');
+      const supportPush = await pushSupportChanges(storeId);
+      syncedCount += supportPush.pushed;
+      if (supportPush.error) errors.push(supportPush.error);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+
     if (errors.length > 0) {
       return { success: false, message: `Partial sync. Errors: ${errors.join('; ')}` };
     }
@@ -3923,6 +3964,12 @@ export async function syncFromSupabase(opts?: {
         discount_allow_percentage: remoteStore.discount_allow_percentage === false ? 0 : 1,
         discount_allow_fixed: remoteStore.discount_allow_fixed === false ? 0 : 1,
         cashier_can_discount: remoteStore.cashier_can_discount === false ? 0 : 1,
+        cashier_can_see_stock:
+          remoteStore.cashier_can_see_stock === undefined
+            ? (localStore?.cashier_can_see_stock ?? 0)
+            : remoteStore.cashier_can_see_stock
+              ? 1
+              : 0,
         session_timeout_minutes:
           remoteStore.session_timeout_minutes == null
             ? (localStore?.session_timeout_minutes ?? 5)
@@ -4089,8 +4136,19 @@ export async function syncFromSupabase(opts?: {
         }),
         dbTable: db.customers,
         merge: async (remote: LocalCustomer, local: LocalCustomer | undefined) => {
-          if (!local || local.synced !== 0) return remote;
-          return { ...remote, ...local, synced: 0 };
+          if (!local || local.synced !== 0) {
+            return { ...remote, balance_synced: remote.opening_balance_remaining, synced: 1 };
+          }
+          const base = local.balance_synced;
+          const localDelta = typeof base === 'number' ? local.opening_balance_remaining - base : 0;
+          const remaining = mergeBalanceDeltas(remote.opening_balance_remaining, localDelta);
+          const winner = lastWriteWins(local, remote);
+          return {
+            ...winner,
+            opening_balance_remaining: remaining,
+            balance_synced: remaining,
+            synced: winner === local ? 0 : 1,
+          };
         },
       },
       {
@@ -4125,12 +4183,12 @@ export async function syncFromSupabase(opts?: {
         },
         dbTable: db.products,
         merge: async (remote: LocalProduct, local: LocalProduct | undefined) => {
-          if (!local) return remote;
-          if (local.synced !== 0) return remote;
-          // Keep unsynced name/price edits, but stock always follows cloud then batch align
+          if (!local || local.synced !== 0) return remote;
+          const winner = lastWriteWins(local, remote);
           return {
-            ...local,
+            ...winner,
             stock_level: asQty(remote.stock_level),
+            synced: winner === local ? 0 : 1,
           };
         },
       },

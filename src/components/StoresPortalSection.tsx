@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Building2, Loader2, Plus, CloudDownload, CheckCircle2, ArrowRightLeft } from 'lucide-react';
+import { Building2, Loader2, CloudDownload, ArrowRightLeft, CheckCircle2 } from 'lucide-react';
 import {
   addStoreFromCloud,
   assertCanCreateAdditionalStore,
@@ -9,7 +9,6 @@ import {
   type LocalStore,
 } from '@/lib/dexie';
 import { isValidGhanaPhone } from '@/lib/platformSettings';
-import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAuthStore } from '@/store/useAuthStore';
 import BranchTransferPanel from '@/components/BranchTransferPanel';
 
@@ -57,14 +56,11 @@ export default function StoresPortalSection() {
     if (isError) {
       setError(text);
       setMsg('');
-    } else {
-      setMsg(text);
-      setError('');
+      return;
     }
-    setTimeout(() => {
-      setMsg('');
-      setError('');
-    }, 4000);
+    setMsg(text);
+    setError('');
+    setTimeout(() => setMsg(''), 4000);
   };
 
   const handleOpenStore = async (storeId: string) => {
@@ -273,6 +269,18 @@ export default function StoresPortalSection() {
           collapsible
           onTransferred={() => void refresh()}
         />
+      )}
+
+      {msg && (
+        <p role="status" className="mt-3 flex items-center gap-1 text-xs text-emerald-700">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          {msg}
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="mt-3 text-xs text-red-600">
+          {error}
+        </p>
       )}
     </div>
   );
