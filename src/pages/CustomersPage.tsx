@@ -48,6 +48,7 @@ import {
 } from '@/lib/bulkSms';
 import DebtRemindersPanel from '@/components/DebtRemindersPanel';
 import { setCustomerDebtReminderOptOut } from '@/lib/debtReminders';
+import { shopOwnerLedger, type ShopTransaction } from '@/lib/shopClient';
 
 interface CustomersPageProps {
   onNavigate?: (page: string) => void;
@@ -89,8 +90,26 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
   const [smsNotice, setSmsNotice] = useState('');
   const [smsCampaigns, setSmsCampaigns] = useState<LocalBulkSmsCampaign[]>([]);
   const [recipientCount, setRecipientCount] = useState(0);
+  const [onlineByCustomer, setOnlineByCustomer] = useState<Record<string, ShopTransaction[]>>({});
+  const [onlineBalance, setOnlineBalance] = useState<Record<string, number>>({});
+  const [onlineError, setOnlineError] = useState('');
 
   const t = useT();
+
+  useEffect(() => {
+    if (!expandedCustomerId || currentUser?.role !== 'owner' || !currentStore?.id) return;
+    const customerId = expandedCustomerId;
+    void shopOwnerLedger(currentStore.id, currentUser.id, customerId)
+      .then((result) => {
+        setOnlineByCustomer((prev) => ({ ...prev, [customerId]: result.transactions }));
+        const account = result.accounts[0];
+        if (account) setOnlineBalance((prev) => ({ ...prev, [customerId]: account.balance }));
+        setOnlineError('');
+      })
+      .catch((err: unknown) => {
+        setOnlineError(err instanceof Error ? err.message : 'Online wallet unavailable');
+      });
+  }, [expandedCustomerId, currentUser?.id, currentUser?.role, currentStore?.id]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -862,12 +881,25 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                           </div>
                         </div>
                       ))}
+                      {onlineBalance[customer.id] !== undefined ? (
+                        <p className="text-sm font-semibold text-teal-800">Online shop wallet {money(onlineBalance[customer.id] || 0)}</p>
+                      ) : null}
+                      {onlineError && expanded ? <p className="text-xs text-amber-700">{onlineError}</p> : null}
+                      {(onlineByCustomer[customer.id] || []).map((entry) => (
+                        <div key={entry.id} className="flex items-center justify-between gap-3 text-sm">
+                          <span className="text-gray-700">{entry.description || entry.entry_type}</span>
+                          <span className="text-xs text-gray-400">{new Date(entry.created_at).toLocaleDateString()}</span>
+                          <span className={`font-semibold ${entry.direction === 'debit' ? 'text-teal-700' : 'text-emerald-700'}`}>
+                            {entry.direction === 'debit' ? '−' : '+'}{money(Number(entry.amount) || 0)}
+                          </span>
+                        </div>
+                      ))}
                       {(walletTransactionsByCustomer[customer.id] || []).map((entry) => (
                         <div key={entry.id} className="flex items-center justify-between gap-3 text-sm text-teal-700">
                           <span className="text-gray-700">{entry.description}</span>
                           <span className="text-xs text-gray-400">{new Date(entry.created_at).toLocaleDateString()}</span>
-                          <span className={`font-semibold ${entry.type === 'return_credit' ? 'text-emerald-700' : 'text-teal-700'}`}>
-                            {entry.type === 'return_credit' ? '+' : '−'}{money(entry.amount)}
+                          <span className={`font-semibold ${entry.type === 'return_credit' || entry.type === 'topup' || entry.type === 'refund' ? 'text-emerald-700' : 'text-teal-700'}`}>
+                            {entry.type === 'return_credit' || entry.type === 'topup' || entry.type === 'refund' || (entry.type === 'adjustment' && !entry.description.startsWith('Debit')) ? '+' : '−'}{money(entry.amount)}
                           </span>
                           <span className="text-xs text-gray-400">wallet {money(entry.balance_after)}</span>
                         </div>

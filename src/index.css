@@ -43,6 +43,21 @@
     --ios-ease: cubic-bezier(0.22, 1, 0.36, 1);
     accent-color: var(--color-primary);
   }
+
+  :root.dark {
+    color-scheme: dark;
+    --color-surface: #0b1220;
+    --color-surface-muted: #111b2d;
+    --color-surface-card: #162238;
+    --color-border: #2a3a53;
+    --color-ink: #f1f5f9;
+    --color-muted: #9aabc0;
+    --color-bg: #0b1220;
+    --color-text: #f1f5f9;
+    --color-text-muted: #9aabc0;
+    --color-border-subtle: #223149;
+    --color-primary-subtle: #172554;
+  }
   html {
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
@@ -77,6 +92,7 @@ html {
 body {
   height: 100%;
   min-height: 100%;
+  transition: background-color 180ms ease, color 180ms ease;
   min-height: -webkit-fill-available;
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
@@ -102,35 +118,105 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 
-.ios-canvas {
+/* Keep utility-heavy legacy screens readable when dark mode is enabled. */
+.dark body {
   background:
-    radial-gradient(78% 62% at 12% 8%, rgba(64, 164, 255, 0.62), transparent 68%),
-    radial-gradient(58% 48% at 96% 0%, rgba(36, 196, 148, 0.48), transparent 64%),
-    radial-gradient(70% 58% at 84% 100%, rgba(255, 148, 96, 0.46), transparent 66%),
-    radial-gradient(46% 40% at 36% 78%, rgba(168, 140, 255, 0.28), transparent 70%),
-    linear-gradient(165deg, #d4e7f8 0%, #e5f3ee 46%, #fbe8dc 100%);
+    radial-gradient(900px 500px at 0% -10%, rgba(59, 130, 246, 0.16), transparent 58%),
+    radial-gradient(800px 480px at 100% 0%, rgba(124, 58, 237, 0.14), transparent 56%),
+    var(--color-surface);
 }
 
-.ios-glass,
-.ios-pane {
-  background-color: var(--ios-glass);
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.28));
-  -webkit-backdrop-filter: var(--ios-blur);
-  backdrop-filter: var(--ios-blur);
-  transition:
-    background-color 320ms var(--ios-ease),
-    box-shadow 320ms var(--ios-ease),
-    transform 320ms var(--ios-ease);
+.dark .bg-white {
+  background-color: var(--color-surface-card);
 }
 
-.ios-glass {
-  border: 1px solid rgba(255, 255, 255, 0.62);
-  box-shadow: var(--ios-highlight), 0 0 0 0.5px rgba(60, 60, 67, 0.08), var(--ios-depth);
+.dark .bg-gray-50,
+.dark .bg-slate-50 {
+  background-color: var(--color-surface-muted);
 }
 
-/* Full-height chrome (sidebar, cart, tab strips) stays translucent without a boxed border. */
-.ios-pane {
-  box-shadow: var(--ios-highlight);
+.dark .bg-emerald-50,
+.dark .bg-green-50 {
+  background-color: #172554;
+}
+
+.dark .bg-emerald-600,
+.dark .bg-emerald-700,
+.dark .bg-green-600,
+.dark .bg-green-700 {
+  background-color: #2563eb;
+}
+
+.dark .bg-amber-50,
+.dark .bg-orange-50 {
+  background-color: #3a2b15;
+}
+
+.dark .bg-red-50 {
+  background-color: #3b1d27;
+}
+
+.dark .text-gray-900,
+.dark .text-gray-800,
+.dark .text-slate-900,
+.dark .text-slate-800 {
+  color: var(--color-ink);
+}
+
+.dark .text-gray-600,
+.dark .text-gray-500,
+.dark .text-slate-600,
+.dark .text-slate-500 {
+  color: var(--color-muted);
+}
+
+.dark .text-emerald-700,
+.dark .text-emerald-800,
+.dark .text-green-700 {
+  color: #93c5fd;
+}
+
+.dark .text-amber-700,
+.dark .text-orange-700 {
+  color: #fbbf74;
+}
+
+.dark .text-red-700,
+.dark .text-red-800 {
+  color: #fda4af;
+}
+
+.dark .border-gray-100,
+.dark .border-gray-200,
+.dark .border-slate-200 {
+  border-color: var(--color-border);
+}
+
+.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--color-border);
+}
+
+.dark input,
+.dark textarea,
+.dark select {
+  background-color: var(--color-surface-card);
+  border-color: var(--color-border);
+  color: var(--color-ink);
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: var(--color-muted);
+}
+
+@media (min-width: 768px) {
+  body {
+    background:
+      radial-gradient(1200px 600px at 10% -10%, rgba(5, 150, 105, 0.18), transparent 55%),
+      radial-gradient(900px 500px at 100% 0%, rgba(6, 95, 70, 0.22), transparent 50%),
+      var(--color-primary-subtle);
+  }
 }
 
 input[type="number"]::-webkit-inner-spin-button,
@@ -891,6 +977,11 @@ input[type="number"] {
 .ios-bar :where(.bg-white\/10, .bg-white\/15, .bg-white\/20) {
   background-color: var(--ios-fill);
   color: var(--ios-label);
+}
+
+.page-header :where(button.bg-primary, a.bg-primary),
+.ios-bar :where(button.bg-primary, a.bg-primary) {
+  color: #fff;
 }
 
 .page-header :where(.bg-white.text-primary, button.bg-white, a.bg-white),

@@ -8,6 +8,16 @@ import { viteSingleFile } from "vite-plugin-singlefile";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const devApiModules: Record<string, string> = {
+  "/api/manage-promotional-campaigns": "api/manage-promotional-campaigns.ts",
+  "/api/shop-auth": "api/shop-auth.ts",
+  "/api/shop-wallet": "api/shop-wallet.ts",
+  "/api/shop-checkout": "api/shop-checkout.ts",
+  "/api/shop-owner": "api/shop-owner.ts",
+  "/api/paystack-webhook": "api/paystack-webhook.ts",
+  "/api/paystack-return": "api/paystack-return.ts",
+};
+
 function promotionalCampaignDevApi(): Plugin {
   return {
     name: "adimat-promotional-campaign-api",
@@ -15,15 +25,11 @@ function promotionalCampaignDevApi(): Plugin {
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const url = req.url?.split("?")[0];
-        if (url === "/api/customer-care") {
-          void handleLocalApi(server, req, res, "api/customer-care.ts");
-          return;
-        }
-        if (url !== "/api/manage-promotional-campaigns") {
+        if (!url || !devApiModules[url]) {
           next();
           return;
         }
-        void handleLocalApi(server, req, res, "api/manage-promotional-campaigns.ts");
+        void handleCampaignApi(server, req, res, devApiModules[url]);
       });
     },
   };
@@ -118,8 +124,9 @@ async function handleCampaignApi(
   server: import("vite").ViteDevServer,
   req: import("node:http").IncomingMessage,
   res: import("node:http").ServerResponse,
+  modulePath = "api/manage-promotional-campaigns.ts",
 ): Promise<void> {
-  if (req.method !== "POST") {
+  if (req.method !== "POST" && req.method !== "GET") {
     res.statusCode = 405;
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({ error: "Method not allowed." }));
@@ -146,19 +153,18 @@ async function handleCampaignApi(
     try {
       body = JSON.parse(raw);
     } catch {
-      res.statusCode = 400;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ error: "A JSON object is required." }));
-      return;
+      body = raw;
     }
   }
 
   try {
     const loaded = await server.ssrLoadModule(
-      path.resolve(__dirname, "api/manage-promotional-campaigns.ts"),
+      path.resolve(__dirname, modulePath),
     ) as { default: (request: {
       method?: string;
+      url?: string;
       body?: unknown;
+      rawBody?: string;
       headers: import("node:http").IncomingMessage["headers"];
       socket?: { remoteAddress?: string };
     }, response: {
@@ -170,6 +176,7 @@ async function handleCampaignApi(
     const response = {
       status(status: number) {
         statusCode = status;
+        res.statusCode = status;
         return response;
       },
       setHeader(name: string, value: string) {
@@ -180,9 +187,13 @@ async function handleCampaignApi(
         if (!res.getHeader("Content-Type")) res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify(payload));
       },
+      end(payload?: string) {
+        res.statusCode = statusCode;
+        if (!res.writableEnded) res.end(payload);
+      },
     };
     await loaded.default(
-      { method: req.method, body, headers: req.headers, socket: req.socket },
+      { method: req.method, url: req.url, body, rawBody: raw, headers: req.headers, socket: req.socket },
       response,
     );
     if (!res.writableEnded) {

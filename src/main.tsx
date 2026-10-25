@@ -3,6 +3,14 @@ import { createRoot } from "react-dom/client";
 import "./index.css";
 import App from "./App";
 
+// Apply the saved theme before React paints to avoid a light-mode flash.
+const savedTheme = window.localStorage.getItem('adimat-theme');
+const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
+if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
+  document.documentElement.classList.add('dark');
+  document.documentElement.style.colorScheme = 'dark';
+}
+
 // Register Service Worker for PWA
 if (
   'serviceWorker' in navigator &&
