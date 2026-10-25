@@ -98,6 +98,7 @@ function hashReference(): string {
 export default function PublicShopPage({ slug }: PublicShopPageProps) {
   const preview = import.meta.env.DEV && slug === 'preview';
   const language = useI18nStore((s) => s.language);
+  const t = useT();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');

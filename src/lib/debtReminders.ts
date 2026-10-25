@@ -283,6 +283,54 @@ export async function sendDebtRemindersForStore(
 }
 
 /**
+ * Send one reminder the owner already reviewed. Nothing is sent until this
+ * is called. Uses the same mNotify path as the automatic sweep.
+ */
+export async function sendPreparedDebtReminder(input: {
+  storeId: string;
+  customerId: string;
+  customerName: string;
+  phone: string;
+  balance: number;
+  message: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const message = input.message.replace(/\s+/g, ' ').trim().slice(0, 160);
+  if (!input.storeId || !input.customerId) return { ok: false, error: 'No customer selected.' };
+  if (!message) return { ok: false, error: 'Write a reminder before sending.' };
+  if (!input.phone.trim()) {
+    await recordReminder({
+      store_id: input.storeId,
+      customer_id: input.customerId,
+      customer_name: input.customerName,
+      customer_phone: '',
+      balance: input.balance,
+      message,
+      provider: 'mnotify',
+      provider_message_id: null,
+      status: 'skipped',
+      error_message: 'No phone number on file',
+      sent_at: new Date().toISOString(),
+    });
+    return { ok: false, error: 'No phone number on file.' };
+  }
+  const sendResult = await sendSmsViaMnotify(input.phone, message);
+  await recordReminder({
+    store_id: input.storeId,
+    customer_id: input.customerId,
+    customer_name: input.customerName,
+    customer_phone: input.phone,
+    balance: input.balance,
+    message,
+    provider: 'mnotify',
+    provider_message_id: null,
+    status: sendResult.success ? 'sent' : 'failed',
+    error_message: sendResult.success ? null : sendResult.error || 'Unknown error',
+    sent_at: new Date().toISOString(),
+  });
+  return { ok: sendResult.success, error: sendResult.success ? undefined : sendResult.error || 'Could not send the reminder.' };
+}
+
+/**
  * Background sweep for the signed-in store. Safe to call repeatedly: each
  * customer is only chased again once the configured interval has passed.
  */
