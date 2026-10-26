@@ -14,6 +14,7 @@ import {
   History,
   Clock,
   BellRing,
+  Upload,
 } from 'lucide-react';
 import {
   createCustomer,
@@ -47,6 +48,7 @@ import {
   type LocalBulkSmsCampaign,
 } from '@/lib/bulkSms';
 import DebtRemindersPanel from '@/components/DebtRemindersPanel';
+import CustomerCsvImportModal from '@/components/CustomerCsvImportModal';
 import { setCustomerDebtReminderOptOut } from '@/lib/debtReminders';
 import { shopOwnerLedger, type ShopTransaction } from '@/lib/shopClient';
 
@@ -77,6 +79,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isCustomerImportOpen, setIsCustomerImportOpen] = useState(false);
   const [editing, setEditing] = useState<LocalCustomer | null>(null);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -353,6 +356,12 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
     }
   };
 
+  const handleCustomersImported = (count: number) => {
+    setStatus(`Imported ${count} customer${count === 1 ? '' : 's'} from CSV.`);
+    void load();
+    void triggerPushSync('customer-csv-import');
+  };
+
   const creditByCustomer = new Map<string, LocalTransaction[]>();
   for (const transaction of transactions) {
     const customerTransactions = creditByCustomer.get(transaction.customer_id!) || [];
@@ -371,7 +380,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
   return (
     <div className="page-shell">
       <div className="page-header">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="inline-flex items-center gap-2 rounded-xl bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-700 mb-2">
               <Users className="h-3.5 w-3.5" />
@@ -382,13 +391,23 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
               Registered customers, credit sales, and account balances
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => { resetForm(); setIsFormOpen(true); }}
-            className="inline-flex items-center gap-2 rounded-xl bg-white px-3.5 py-2 text-sm font-semibold text-emerald-800 shadow-sm hover:bg-emerald-50 transition-all"
-          >
-            <Plus className="h-4 w-4" /> Add customer
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsCustomerImportOpen(true)}
+              disabled={loading}
+              className="inline-flex items-center gap-2 rounded-xl border border-white/25 bg-emerald-950/20 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:bg-emerald-950/35 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Upload className="h-4 w-4" /> Import CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => { resetForm(); setIsFormOpen(true); }}
+              className="inline-flex items-center gap-2 rounded-xl bg-white px-3.5 py-2 text-sm font-semibold text-emerald-800 shadow-sm hover:bg-emerald-50 transition-all"
+            >
+              <Plus className="h-4 w-4" /> Add customer
+            </button>
+          </div>
         </div>
       </div>
 
@@ -934,6 +953,12 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
           </div>
         )}
       </div>
+      <CustomerCsvImportModal
+        isOpen={isCustomerImportOpen}
+        customers={customers}
+        onClose={() => setIsCustomerImportOpen(false)}
+        onImported={handleCustomersImported}
+      />
     </div>
   );
 }

@@ -1798,6 +1798,114 @@ export async function createCustomer(
   return customer;
 }
 
+export async function createCustomersBulk(
+  inputs: Array<{ name: string; phone: string; openingBalance: number }>
+): Promise<LocalCustomer[]> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) throw new Error('No store selected');
+  if (inputs.length === 0) return [];
+
+  const now = new Date().toISOString();
+  const seenKeys = new Set<string>();
+  const customerKey = (name: string, phone: string) => `${name.trim().toLowerCase()}\u0000${phone.trim()}`;
+  const customers = inputs.map((input, index): LocalCustomer => {
+    const cleanName = String(input.name ?? '').trim();
+    const cleanPhone = String(input.phone ?? '').trim();
+    const rawBalance = Number(input.openingBalance);
+    if (!cleanName) throw new Error(`Row ${index + 1}: Customer name is required.`);
+    if (cleanName.length > 255 || cleanPhone.length > 30) {
+      throw new Error(`Row ${index + 1}: Customer name or phone is too long.`);
+    }
+    if (!Number.isFinite(rawBalance) || rawBalance < 0) {
+      throw new Error(`Row ${index + 1}: Opening balance must be zero or greater.`);
+    }
+
+    const openingBalance = toMoneyAmount(rawBalance);
+    if (!Number.isFinite(openingBalance) || openingBalance > 9_999_999_999.99) {
+      throw new Error(`Row ${index + 1}: Opening balance is too large.`);
+    }
+
+    const key = customerKey(cleanName, cleanPhone);
+    if (seenKeys.has(key)) {
+      throw new Error(`The import contains a duplicate customer: ${cleanName}.`);
+    }
+    seenKeys.add(key);
+
+    return {
+      id: generateId(),
+      store_id: storeId,
+      name: cleanName,
+      phone: cleanPhone,
+      opening_balance: openingBalance,
+      opening_balance_remaining: openingBalance,
+      is_active: 1,
+      created_at: now,
+      updated_at: now,
+      synced: 0,
+    };
+  });
+
+  const customerByKey = new Map(customers.map((customer) => [
+    customerKey(customer.name, customer.phone),
+    customer,
+  ]));
+
+  await db.transaction('rw', [db.customers, db.customer_opening_payments, db.transactions], async () => {
+    const existing = await db.customers.where('store_id').equals(storeId).toArray();
+    const existingKeys = new Set(
+      existing
+        .filter((customer) => customer.is_active === 1)
+        .map((customer) => customerKey(customer.name, customer.phone))
+    );
+    const conflict = customers.find((customer) => existingKeys.has(customerKey(customer.name, customer.phone)));
+    if (conflict) {
+      throw new Error(`An active customer with this name and phone is already registered: ${conflict.name}.`);
+    }
+
+    await db.customers.bulkAdd(customers);
+
+    const openingPayments: LocalCustomerOpeningPayment[] = customers
+      .filter((customer) => customer.opening_balance > 0)
+      .map((customer) => ({
+        id: generateId(),
+        store_id: storeId,
+        customer_id: customer.id,
+        entry_type: 'opening_balance',
+        amount: customer.opening_balance,
+        created_by: 'Opening balance',
+        created_at: now,
+        synced: 0,
+      }));
+    if (openingPayments.length > 0) {
+      await db.customer_opening_payments.bulkAdd(openingPayments);
+    }
+
+    const legacyCreditSales = await db.transactions
+      .where('store_id')
+      .equals(storeId)
+      .filter((transaction) =>
+        transaction.payment_method === 'credit' &&
+        transaction.status === 'completed' &&
+        !transaction.customer_id &&
+        customerByKey.has(customerKey(transaction.customer_name || '', transaction.customer_phone || ''))
+      )
+      .toArray();
+    await Promise.all(legacyCreditSales.map((transaction) => {
+      const customer = customerByKey.get(
+        customerKey(transaction.customer_name || '', transaction.customer_phone || '')
+      );
+      if (!customer) return Promise.resolve();
+      return db.transactions.update(transaction.id, {
+        customer_id: customer.id,
+        updated_at: now,
+        synced: 0,
+      });
+    }));
+  });
+
+  return customers;
+}
+
 export async function updateCustomer(
   customerId: string,
   name: string,
