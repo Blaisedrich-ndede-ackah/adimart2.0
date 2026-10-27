@@ -10,7 +10,7 @@ import {
   type LocalCustomer,
 } from '@/lib/dexie';
 import { triggerPushSync } from '@/lib/sync';
-import { resolveSalePrice, type SaleMode, type UnitType } from '@/lib/bulkPricing';
+import { getAvailableSaleModes, resolveSalePrice, type SaleMode, type UnitType } from '@/lib/bulkPricing';
 import type { StockChange } from '@/lib/stockEvents';
 import { moneyEquals, roundMoney, toMoneyAmount } from '@/lib/money';
 import { formatStoreMoneyNow } from '@/lib/currency';
@@ -90,7 +90,7 @@ interface CartState {
   updateQuantity: (itemId: string, quantity: number) => Promise<{ success: boolean; error?: string }>;
   incrementItem: (itemId: string) => Promise<{ success: boolean; error?: string }>;
   decrementItem: (itemId: string) => void;
-  setItemSaleMode: (itemId: string, saleMode: SaleMode) => void;
+  setItemSaleMode: (itemId: string, saleMode: SaleMode) => Promise<void>;
   setDiscount: (percent: number) => void;
   setDiscountPercent: (percent: number) => void;
   setDiscountFixed: (amount: number) => void;
@@ -360,23 +360,20 @@ export const useCartStore = create<CartState>((set, get) => ({
     void get().updateQuantity(itemId, item.quantity - 1);
   },
 
-  setItemSaleMode: (itemId, saleMode) => {
+  setItemSaleMode: async (itemId, saleMode) => {
     const state = get();
-    const item = state.items.find((i) => i.id === itemId);
-    if (!item) return;
-    const product = state.items.find((i) => i.id === itemId);
-    if (!product) return;
-    // Rebuild the line with the new sale mode (price recalculated via buildCartLine)
-    // We need the full LocalProduct to reprice; fetch it from the DB.
-    set(async (s) => {
-      const target = s.items.find((i) => i.id === itemId);
-      if (!target) return s;
-      const fullProduct = await db.products.get(target.product_id);
-      if (!fullProduct) return s;
-      const line = buildCartLine(fullProduct, saleMode, target.unit_type, target.quantity, target.id);
-      const items = s.items.map((i) => (i.id === itemId ? line : i));
-      return { ...withDiscount(s, items), items };
-    });
+    const item = state.items.find((currentItem) => currentItem.id === itemId);
+    if (!item || item.sale_mode === saleMode) return;
+
+    const product = await db.products.get(item.product_id);
+    if (!product || !getAvailableSaleModes(product).includes(saleMode)) return;
+
+    const latestState = get();
+    const target = latestState.items.find((currentItem) => currentItem.id === itemId);
+    if (!target) return;
+    const line = buildCartLine(product, saleMode, target.unit_type, target.quantity, target.id);
+    const items = latestState.items.map((currentItem) => (currentItem.id === itemId ? line : currentItem));
+    set({ ...withDiscount(latestState, items), items });
   },
 
   setDiscount: (percent) => {
@@ -753,6 +750,7 @@ export const useCartStore = create<CartState>((set, get) => ({
             unit_type: item.unit_type,
             pack_size: item.pack_size,
             base_quantity: item.base_quantity,
+            sale_mode: item.sale_mode,
             synced: 0,
           }))
         );
