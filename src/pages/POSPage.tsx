@@ -471,14 +471,15 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   // Handheld Bluetooth / HID scanner → cart (active while not in checkout)
   useBluetoothBarcodeInput(handleScan, scannerActive && !showCheckout);
 
-  const handleAddProduct = async (product: LocalProduct) => {
+  const handleAddProduct = async (product: LocalProduct, overrideSaleMode?: SaleMode) => {
     const modes = getAvailableSaleModes(product);
-    const mode = saleMode === 'wholesale' && modes.includes('wholesale') ? 'wholesale' : 'retail';
-    if (mode !== saleMode) cart.setSaleContext(selectedLocationId || null, mode);
+    const defaultMode = saleMode === 'wholesale' && modes.includes('wholesale') ? 'wholesale' : 'retail';
+    const mode = overrideSaleMode ?? defaultMode;
+    cart.setSaleContext(selectedLocationId || null, defaultMode);
 
     const packSize = Math.max(1, Number(product.pack_size) || 1);
     const usePack = unitType === 'pack' && packSize > 1;
-    const result = await cart.addItem(product, { unitType: usePack ? 'pack' : 'base' });
+    const result = await cart.addItem(product, { unitType: usePack ? 'pack' : 'base', saleMode: mode });
 
     if (result.success) {
       flashFeedback({ type: 'success', message: `Added: ${product.name}` }, 2000);
@@ -538,6 +539,13 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
       return;
     }
     void cart.decrementItem(itemId);
+  };
+
+  const toggleItemSaleMode = async (itemId: string) => {
+    const item = cart.items.find((i) => i.id === itemId);
+    if (!item) return;
+    const nextMode: SaleMode = item.sale_mode === 'retail' ? 'wholesale' : 'retail';
+    cart.setItemSaleMode(itemId, nextMode);
   };
 
   const handleUpdateQuantity = async (itemId: string, newQty: number) => {
@@ -751,8 +759,6 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
           <button
             type="button"
             onClick={() => {
-              if (cart.items.length > 0 && saleMode !== 'retail' && !confirm('Switching to retail clears the cart. Continue?')) return;
-              if (saleMode !== 'retail') cart.clearCart();
               setSaleMode('retail');
             }}
             className={`flex-1 md:flex-none md:px-4 py-2 rounded-lg text-xs font-semibold touch-target ${
@@ -766,8 +772,6 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
             disabled={!canWholesale}
             onClick={() => {
               if (!canWholesale) return;
-              if (cart.items.length > 0 && saleMode !== 'wholesale' && !confirm('Switching to wholesale clears the cart. Continue?')) return;
-              if (saleMode !== 'wholesale') cart.clearCart();
               setSaleMode('wholesale');
             }}
             className={`flex-1 md:flex-none md:px-4 py-2 rounded-lg text-xs font-semibold touch-target disabled:opacity-40 ${
@@ -1149,6 +1153,18 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                                   Wholesale
                                 </span>
                               )}
+                              <button
+                                type="button"
+                                onClick={() => void toggleItemSaleMode(item.id)}
+                                title="Toggle sale mode"
+                                className="p-1 rounded hover:bg-gray-50 text-gray-400 hover:text-gray-900"
+                              >
+                                {item.sale_mode === 'retail' ? (
+                                  <span className="text-[10px] font-bold text-blue-600">W</span>
+                                ) : (
+                                  <span className="text-[10px] font-bold text-gray-400">R</span>
+                                )}
+                              </button>
                             </div>
                           </div>
                           <button

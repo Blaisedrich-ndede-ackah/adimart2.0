@@ -84,12 +84,13 @@ interface CartState {
   addItemByBarcode: (barcode: string) => Promise<{ success: boolean; product?: LocalProduct; error?: string }>;
   addItem: (
     product: LocalProduct,
-    opts?: { unitType?: UnitType; quantity?: number }
+    opts?: { unitType?: UnitType; quantity?: number; saleMode?: SaleMode }
   ) => Promise<{ success: boolean; error?: string }>;
   removeItem: (itemId: string) => void;
   updateQuantity: (itemId: string, quantity: number) => Promise<{ success: boolean; error?: string }>;
   incrementItem: (itemId: string) => Promise<{ success: boolean; error?: string }>;
   decrementItem: (itemId: string) => void;
+  setItemSaleMode: (itemId: string, saleMode: SaleMode) => void;
   setDiscount: (percent: number) => void;
   setDiscountPercent: (percent: number) => void;
   setDiscountFixed: (amount: number) => void;
@@ -261,13 +262,14 @@ export const useCartStore = create<CartState>((set, get) => ({
     const unitType: UnitType = opts.unitType || 'base';
     const addQty = Math.max(1, Math.floor(opts.quantity || 1));
     const packSize = Math.max(1, Number(product.pack_size) || 1);
+    const itemSaleMode = opts.saleMode || state.saleMode;
     const available = await stockAtContext(product.id, state.locationId);
 
     const existing = state.items.find(
       (i) =>
         i.product_id === product.id &&
         i.unit_type === unitType &&
-        i.sale_mode === state.saleMode
+        i.sale_mode === itemSaleMode
     );
     const nextQty = (existing?.quantity || 0) + addQty;
     const nextBase =
@@ -288,7 +290,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       if (existing) {
         const line = buildCartLine(
           product,
-          s.saleMode,
+          itemSaleMode,
           unitType,
           nextQty,
           existing.id
@@ -297,7 +299,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       } else {
         items = [
           ...s.items,
-          buildCartLine(product, s.saleMode, unitType, addQty),
+          buildCartLine(product, itemSaleMode, unitType, addQty),
         ];
       }
       return { ...withDiscount(s, items), items };
@@ -356,6 +358,25 @@ export const useCartStore = create<CartState>((set, get) => ({
       return;
     }
     void get().updateQuantity(itemId, item.quantity - 1);
+  },
+
+  setItemSaleMode: (itemId, saleMode) => {
+    const state = get();
+    const item = state.items.find((i) => i.id === itemId);
+    if (!item) return;
+    const product = state.items.find((i) => i.id === itemId);
+    if (!product) return;
+    // Rebuild the line with the new sale mode (price recalculated via buildCartLine)
+    // We need the full LocalProduct to reprice; fetch it from the DB.
+    set(async (s) => {
+      const target = s.items.find((i) => i.id === itemId);
+      if (!target) return s;
+      const fullProduct = await db.products.get(target.product_id);
+      if (!fullProduct) return s;
+      const line = buildCartLine(fullProduct, saleMode, target.unit_type, target.quantity, target.id);
+      const items = s.items.map((i) => (i.id === itemId ? line : i));
+      return { ...withDiscount(s, items), items };
+    });
   },
 
   setDiscount: (percent) => {
@@ -709,7 +730,11 @@ export const useCartStore = create<CartState>((set, get) => ({
           credit_balance: paymentMethod === 'credit' ? priced.total : 0,
           status: 'completed',
           location_id: locationId,
-          sale_mode: state.saleMode,
+          sale_mode:
+            state.items.length > 0 &&
+            state.items.every((i) => i.sale_mode === state.items[0]!.sale_mode)
+              ? state.items[0]!.sale_mode
+              : 'mixed',
           created_at: now,
           updated_at: now,
           synced: 0,

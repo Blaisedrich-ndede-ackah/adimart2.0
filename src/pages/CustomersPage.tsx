@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle,
   Loader2,
+  MapPin,
   Pencil,
   Plus,
+  Search,
   Send,
   Users,
   X,
@@ -34,6 +36,7 @@ import {
   setCustomerActive,
   updateCustomer,
 } from '@/lib/dexie';
+import { listLocations, type LocalLocation } from '@/lib/warehouse';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
@@ -81,7 +84,23 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [openingBalance, setOpeningBalance] = useState('');
+  const [locationId, setLocationId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [locations, setLocations] = useState<LocalLocation[]>([]);
   const [paymentAmounts, setPaymentAmounts] = useState<Record<string, string>>({});
+
+  const filteredCustomers = useMemo(
+    () =>
+      customers.filter((customer) => {
+        const q = searchQuery.toLowerCase().trim();
+        if (!q) return true;
+        return (
+          customer.name.toLowerCase().includes(q) ||
+          customer.phone.toLowerCase().includes(q)
+        );
+      }),
+    [customers, searchQuery]
+  );
   const [repaymentMethods, setRepaymentMethods] = useState<Record<string, 'cash' | 'momo' | 'cheque' | 'split'>>({});
   const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null);
   const [smsMessage, setSmsMessage] = useState('');
@@ -120,6 +139,11 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
         getCurrentStoreBulkSmsCampaigns(),
         countCurrentStoreCustomerRecipients(),
       ]);
+      const storeId = await getCurrentStoreId();
+      if (storeId) {
+        const locs = await listLocations(storeId);
+        setLocations(locs.filter((l) => l.is_active === 1));
+      }
       const activeAndArchived = allCustomers.sort((a, b) =>
         Number(b.is_active) - Number(a.is_active) || a.name.localeCompare(b.name)
       );
@@ -185,6 +209,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
     setName('');
     setPhone('');
     setOpeningBalance('');
+    setLocationId(null);
     setError('');
   };
 
@@ -194,6 +219,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
     setName(customer.name);
     setPhone(customer.phone);
     setOpeningBalance('');
+    setLocationId(customer.location_id ?? null);
     setError('');
   };
 
@@ -203,13 +229,13 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
     setSaving(true);
     try {
       if (editing) {
-        await updateCustomer(editing.id, name, phone);
+        await updateCustomer(editing.id, name, phone, locationId);
       } else {
         const amount = openingBalance.trim() ? Number(openingBalance) : 0;
         if (!Number.isFinite(amount) || amount < 0) {
           throw new Error('Enter a valid opening balance.');
         }
-        await createCustomer(name, phone, amount);
+        await createCustomer(name, phone, amount, locationId);
       }
       resetForm();
       setStatus(editing ? 'Customer details updated.' : 'Customer registered.');
@@ -575,6 +601,27 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                 className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
               />
             </label>
+            {locations.length > 0 && (
+              <label className="block text-sm font-medium text-gray-700">
+                Preferred location
+                <select
+                  value={locationId || ''}
+                  onChange={(event) => setLocationId(event.target.value || null)}
+                  className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
+                >
+                  <option value="">None (default)</option>
+                  {locations.map((loc) => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.name} ({loc.location_type})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">
+                  The shop or warehouse where this customer prefers to collect
+                  or receive deliveries.
+                </p>
+              </label>
+            )}
             {!editing && (
               <>
                 <label className="block text-sm font-medium text-gray-700">
@@ -610,7 +657,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
             <Loader2 className="h-6 w-6 animate-spin text-emerald-600" />
             <p className="text-sm text-gray-500">Loading customers…</p>
           </div>
-        ) : customers.length === 0 ? (
+        ) : filteredCustomers.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-gray-200 bg-white p-8 text-center shadow-sm">
             <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-emerald-50 mb-4">
               <Users className="h-8 w-8 text-emerald-500" />
@@ -629,7 +676,26 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
           </div>
         ) : (
           <div className="space-y-3">
-            {customers.map((customer) => {
+            <div className="relative">
+              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search customers by name or phone…"
+                className="w-full pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+            {filteredCustomers.map((customer) => {
               const customerSales = creditByCustomer.get(customer.id) || [];
               const salesBalance = customerSales.reduce(
                 (balance, transaction) => balance + (Number(transaction.credit_balance) || 0),

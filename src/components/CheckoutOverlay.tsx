@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   X, Banknote, CreditCard, Split, Percent, Shield,
   CheckCircle2, Loader2, Printer, AlertTriangle, Share2, Download,
-  Smartphone, MessageCircle, CirclePlus, Trash2
+  Smartphone, MessageCircle, CirclePlus, Trash2, Search
 } from 'lucide-react';
 import { useCartStore, CartItem } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -71,6 +71,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
   const [walletCustomerId, setWalletCustomerId] = useState('');
   const [walletUseAmount, setWalletUseAmount] = useState('');
   const [creditCustomers, setCreditCustomers] = useState<LocalCustomer[]>([]);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [saleResult, setSaleResult] = useState<SaleResult | null>(null);
   const [error, setError] = useState('');
   const [isPrinting, setIsPrinting] = useState(false);
@@ -1133,6 +1134,13 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                 <label htmlFor="credit-customer" className="text-sm font-medium text-gray-700 mb-2 block">
                   Registered customer *
                 </label>
+                <input
+                  type="text"
+                  value={customerSearchQuery}
+                  onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                  placeholder="Search customers by name or phone…"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none mb-2"
+                />
                 <select
                   id="credit-customer"
                   value={creditCustomerId}
@@ -1141,11 +1149,21 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                   autoFocus
                 >
                   <option value="">Select a customer</option>
-                  {creditCustomers.filter((customer) => customer.is_active === 1).map((customer) => (
-                    <option key={customer.id} value={customer.id}>
-                      {customer.name}{customer.phone ? ` · ${customer.phone}` : ''}
-                    </option>
-                  ))}
+                  {creditCustomers
+                    .filter((customer) => customer.is_active === 1)
+                    .filter((customer) => {
+                      const q = customerSearchQuery.toLowerCase().trim();
+                      if (!q) return true;
+                      return (
+                        customer.name.toLowerCase().includes(q) ||
+                        customer.phone.toLowerCase().includes(q)
+                      );
+                    })
+                    .map((customer) => (
+                      <option key={customer.id} value={customer.id}>
+                        {customer.name}{customer.phone ? ` · ${customer.phone}` : ''}
+                      </option>
+                    ))}
                 </select>
                 {creditCustomers.filter((customer) => customer.is_active === 1).length === 0 && (
                   <p className="mt-2 text-xs text-amber-800">No active customers are registered. Ask the store owner to add the customer in the Customers book before selling on credit.</p>
@@ -1180,6 +1198,13 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
               </div>
               <label className="block text-sm font-medium text-gray-700">
                 Customer wallet *
+                <input
+                  type="text"
+                  value={customerSearchQuery}
+                  onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                  placeholder="Search customers by name or phone…"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none mb-2"
+                />
                 <select
                   value={walletCustomerId}
                   onChange={(event) => {
@@ -1198,6 +1223,14 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                   <option value="">Select customer</option>
                   {creditCustomers
                     .filter((customer) => customer.is_active === 1 && Number(customer.wallet_balance) > 0)
+                    .filter((customer) => {
+                      const q = customerSearchQuery.toLowerCase().trim();
+                      if (!q) return true;
+                      return (
+                        customer.name.toLowerCase().includes(q) ||
+                        customer.phone.toLowerCase().includes(q)
+                      );
+                    })
                     .map((customer) => (
                       <option key={customer.id} value={customer.id}>
                         {customer.name} · wallet {money(customer.wallet_balance || 0)}

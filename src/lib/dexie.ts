@@ -95,6 +95,8 @@ export interface LocalCustomer {
   store_id: string;
   name: string;
   phone: string;
+  /** Preferred drop-off / service location (shop or warehouse) */
+  location_id?: string | null;
   opening_balance: number;
   opening_balance_remaining: number;
   wallet_balance?: number;
@@ -403,7 +405,7 @@ export interface LocalTransaction {
   credit_balance?: number;
   status: 'completed' | 'pending';
   location_id?: string;
-  sale_mode?: 'retail' | 'wholesale';
+  sale_mode?: 'retail' | 'wholesale' | 'mixed';
   created_at: string;
   updated_at?: string;
   synced: number;
@@ -979,6 +981,20 @@ class AdimatDB extends Dexie {
       /* Version 22 — look agents up by phone at login */
       this.version(22).stores({
         agents: 'id, phone, status, synced',
+      });
+      /* Version 23 — customer preferred location for deliveries / service */
+      this.version(23).stores({
+        customers: 'id, store_id, name, phone, location_id, is_active, synced',
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table('customers')
+          .toCollection()
+          .modify((customer: LocalCustomer) => {
+            if (typeof customer.location_id !== 'string') {
+              customer.location_id = null;
+            }
+          });
       });
   }
 }
@@ -1731,7 +1747,8 @@ export async function getCurrentStoreCustomers(): Promise<LocalCustomer[]> {
 export async function createCustomer(
   name: string,
   phone: string,
-  openingBalance: number
+  openingBalance: number,
+  locationId: string | null = null
 ): Promise<LocalCustomer> {
   const storeId = await getCurrentStoreId();
   if (!storeId) throw new Error('No store selected');
@@ -1755,6 +1772,7 @@ export async function createCustomer(
     store_id: storeId,
     name: cleanName,
     phone: cleanPhone,
+    location_id: locationId || null,
     opening_balance: balance,
     opening_balance_remaining: balance,
     is_active: 1,
@@ -1801,7 +1819,8 @@ export async function createCustomer(
 export async function updateCustomer(
   customerId: string,
   name: string,
-  phone: string
+  phone: string,
+  locationId: string | null = null
 ): Promise<void> {
   const storeId = await getCurrentStoreId();
   if (!storeId) throw new Error('No store selected');
@@ -1814,6 +1833,7 @@ export async function updateCustomer(
   await db.customers.update(customerId, {
     name: cleanName,
     phone: cleanPhone,
+    location_id: locationId || null,
     updated_at: new Date().toISOString(),
     synced: 0,
   });

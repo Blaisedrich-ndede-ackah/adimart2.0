@@ -242,6 +242,7 @@ CREATE TABLE IF NOT EXISTS customers (
   store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
   name VARCHAR(255) NOT NULL,
   phone VARCHAR(30) NOT NULL DEFAULT '',
+  location_id UUID REFERENCES locations(id),
   opening_balance DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (opening_balance >= 0),
   opening_balance_remaining DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (opening_balance_remaining >= 0),
   wallet_balance DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (wallet_balance >= 0),
