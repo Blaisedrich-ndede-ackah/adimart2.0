@@ -393,6 +393,41 @@ input[type="number"] {
   box-shadow: var(--ios-highlight), 0 10px 28px rgba(36, 54, 78, 0.07);
 }
 
+.ios-pane,
+.ios-glass {
+  color: var(--color-ink);
+  -webkit-backdrop-filter: var(--ios-blur);
+  backdrop-filter: var(--ios-blur);
+  transition: background-color 320ms var(--ios-ease), box-shadow 320ms var(--ios-ease), border-color 320ms var(--ios-ease);
+}
+
+.ios-pane {
+  background-color: rgba(255, 255, 255, 0.46);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.58), rgba(255, 255, 255, 0.26));
+  box-shadow: var(--ios-highlight), var(--ios-depth);
+}
+
+.ios-glass {
+  background-color: var(--ios-glass);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.28));
+  border: 1px solid rgba(255, 255, 255, 0.66);
+  box-shadow: var(--ios-highlight), var(--ios-depth);
+}
+
+.dark .ios-pane {
+  background-color: rgba(22, 34, 56, 0.82);
+  background-image: linear-gradient(180deg, rgba(36, 50, 72, 0.88), rgba(11, 18, 32, 0.76));
+  border-color: rgba(148, 163, 184, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 12px 32px rgba(0, 0, 0, 0.2);
+}
+
+.dark .ios-glass {
+  background-color: rgba(22, 34, 56, 0.72);
+  background-image: linear-gradient(180deg, rgba(36, 50, 72, 0.82), rgba(11, 18, 32, 0.7));
+  border-color: rgba(148, 163, 184, 0.24);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 12px 32px rgba(0, 0, 0, 0.2);
+}
+
 /* Page shell — shared layout primitive */
 .page-shell {
   display: flex;
