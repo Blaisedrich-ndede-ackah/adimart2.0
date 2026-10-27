@@ -152,6 +152,9 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
 
   const canWholesale = canUserSellWholesale(currentUser);
   const isStoreOwner = currentUser?.role === 'owner';
+  const retailLineCount = cart.items.filter((item) => item.sale_mode === 'retail').length;
+  const wholesaleLineCount = cart.items.filter((item) => item.sale_mode === 'wholesale').length;
+  const isMixedCart = retailLineCount > 0 && wholesaleLineCount > 0;
 
   useEffect(() => {
     let active = true;
@@ -542,10 +545,21 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   };
 
   const toggleItemSaleMode = async (itemId: string) => {
-    const item = cart.items.find((i) => i.id === itemId);
+    const item = cart.items.find((currentItem) => currentItem.id === itemId);
     if (!item) return;
     const nextMode: SaleMode = item.sale_mode === 'retail' ? 'wholesale' : 'retail';
-    cart.setItemSaleMode(itemId, nextMode);
+    if (nextMode === 'wholesale') {
+      if (!canWholesale) {
+        flashFeedback({ type: 'warning', message: 'Wholesale pricing is disabled for this cashier.' });
+        return;
+      }
+      const product = await db.products.get(item.product_id);
+      if (!product || !getAvailableSaleModes(product).includes('wholesale')) {
+        flashFeedback({ type: 'warning', message: `No wholesale pricing is configured for ${item.name}.` });
+        return;
+      }
+    }
+    await cart.setItemSaleMode(itemId, nextMode);
   };
 
   const handleUpdateQuantity = async (itemId: string, newQty: number) => {
@@ -733,7 +747,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
       </div>
 
       {/* Sale context: retail/wholesale + unit. One shop per store — no location picker. */}
-      <div className="bg-white border-b border-emerald-50 px-3 py-2.5 md:px-4 flex-shrink-0 space-y-2 md:space-y-0 md:flex md:items-center md:gap-3">
+      <div className="bg-white border-b border-emerald-50 px-3 py-2.5 md:px-4 flex-shrink-0 space-y-2 md:space-y-0 md:flex md:flex-wrap md:items-center md:gap-3">
         {saleLocations.length > 1 ? (
         <div className="flex items-center gap-2 md:flex-1 md:min-w-0">
           <MapPin className="w-3.5 h-3.5 text-primary flex-shrink-0" />
@@ -758,6 +772,8 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
         <div className="flex gap-2 md:w-auto md:flex-shrink-0">
           <button
             type="button"
+            aria-pressed={saleMode === 'retail'}
+            aria-label="Use retail pricing for newly added items"
             onClick={() => {
               setSaleMode('retail');
             }}
@@ -769,6 +785,8 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
           </button>
           <button
             type="button"
+            aria-pressed={saleMode === 'wholesale'}
+            aria-label="Use wholesale pricing for newly added items"
             disabled={!canWholesale}
             onClick={() => {
               if (!canWholesale) return;
@@ -777,7 +795,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
             className={`flex-1 md:flex-none md:px-4 py-2 rounded-lg text-xs font-semibold touch-target disabled:opacity-40 ${
               saleMode === 'wholesale' ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-600'
             }`}
-            title={canWholesale ? 'Wholesale / bulk pricing' : 'Wholesale disabled for this cashier'}
+            title={canWholesale ? 'Wholesale / bulk pricing for newly added items' : 'Wholesale disabled for this cashier'}
           >
             Wholesale
           </button>
@@ -791,6 +809,9 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
             {unitType === 'pack' ? 'By pack' : 'By unit'}
           </button>
         </div>
+        <p className="text-[10px] leading-snug text-gray-500 md:basis-full">
+          Pricing selection applies to new items; switch each cart line to mix retail and wholesale in one sale.
+        </p>
       </div>
 
       {/* Scan Feedback */}
@@ -1054,6 +1075,12 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
             </div>
           </div>
 
+          {isMixedCart && (
+            <div role="status" aria-live="polite" className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs font-medium text-slate-700">
+              Mixed sale · {retailLineCount} retail line{retailLineCount === 1 ? '' : 's'} · {wholesaleLineCount} wholesale line{wholesaleLineCount === 1 ? '' : 's'}
+            </div>
+          )}
+
           <div className={`flex-1 overflow-y-auto px-3 md:px-4 pt-3 no-scrollbar ${cart.items.length > 0 ? 'pb-28 lg:pb-4' : 'pb-4'}`}>
             {cart.parkedCarts.length > 0 && (
               <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
@@ -1068,7 +1095,11 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                           {parked.items.length} item{parked.items.length === 1 ? '' : 's'} · {money(parked.total)}
                         </p>
                         <p className="text-[10px] text-gray-500">
-                          {parked.saleMode === 'wholesale' ? 'Wholesale' : 'Retail'} · {new Date(parked.parkedAt).toLocaleTimeString()}
+                          {parked.items.some((item) => item.sale_mode === 'retail') && parked.items.some((item) => item.sale_mode === 'wholesale')
+                            ? 'Mixed retail + wholesale'
+                            : parked.items.some((item) => item.sale_mode === 'wholesale')
+                              ? 'Wholesale'
+                              : 'Retail'} · {new Date(parked.parkedAt).toLocaleTimeString()}
                         </p>
                       </div>
                       <button
@@ -1148,22 +1179,24 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                               <p className="text-xs text-gray-500">
                                 {money(item.unit_price)} / {item.unit_type === 'pack' ? 'pack' : 'unit'}
                               </p>
-                              {item.sale_mode === 'wholesale' && (
-                                <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-medium">
-                                  Wholesale
-                                </span>
-                              )}
+                              <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                                item.price_label?.startsWith('Wholesale')
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-blue-100 text-blue-800'
+                              }`}>
+                                {item.price_label || (item.sale_mode === 'wholesale' ? 'Wholesale' : 'Retail')}
+                              </span>
                               <button
                                 type="button"
                                 onClick={() => void toggleItemSaleMode(item.id)}
-                                title="Toggle sale mode"
-                                className="p-1 rounded hover:bg-gray-50 text-gray-400 hover:text-gray-900"
+                                disabled={!canWholesale && item.sale_mode === 'retail'}
+                                aria-label={`Switch ${item.name} to ${item.sale_mode === 'retail' ? 'wholesale' : 'retail'} pricing`}
+                                title={item.sale_mode === 'retail'
+                                  ? canWholesale ? 'Switch this line to wholesale pricing' : 'Wholesale is disabled for this cashier'
+                                  : 'Switch this line to retail pricing'}
+                                className="rounded-lg border border-gray-200 px-2 py-1 text-[10px] font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                               >
-                                {item.sale_mode === 'retail' ? (
-                                  <span className="text-[10px] font-bold text-blue-600">W</span>
-                                ) : (
-                                  <span className="text-[10px] font-bold text-gray-400">R</span>
-                                )}
+                                Use {item.sale_mode === 'retail' ? 'wholesale' : 'retail'}
                               </button>
                             </div>
                           </div>
