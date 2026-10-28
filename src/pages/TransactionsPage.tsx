@@ -366,6 +366,13 @@ export default function TransactionsPage() {
                     <span className="min-w-0">
                       <span className="font-semibold text-gray-900">{item.quantity}×</span>{' '}
                       <span className="break-words">{item.product_name}</span>
+                      {item.sale_mode && (
+                        <span className={`ml-1 inline-flex rounded px-1.5 py-0.5 text-[9px] font-semibold ${
+                          item.sale_mode === 'wholesale' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
+                        }`}>
+                          {item.sale_mode === 'wholesale' ? 'Wholesale' : 'Retail'}
+                        </span>
+                      )}
                       <span className="block text-[10px] text-gray-400">
                         {money(item.unit_price)} each
                       </span>

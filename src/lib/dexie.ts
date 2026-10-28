@@ -97,6 +97,8 @@ export interface LocalCustomer {
   phone: string;
   /** Preferred drop-off / service location (shop or warehouse) */
   location_id?: string | null;
+  /** Freeform customer street, neighborhood, or delivery address */
+  address?: string;
   opening_balance: number;
   opening_balance_remaining: number;
   wallet_balance?: number;
@@ -423,6 +425,7 @@ export interface LocalTransactionItem {
   unit_type?: string;
   pack_size?: number;
   base_quantity?: number;
+  sale_mode?: 'retail' | 'wholesale';
   batch_id?: string;
   synced: number;
 }
@@ -1748,15 +1751,18 @@ export async function createCustomer(
   name: string,
   phone: string,
   openingBalance: number,
-  locationId: string | null = null
+  locationId: string | null = null,
+  address: string = ''
 ): Promise<LocalCustomer> {
   const storeId = await getCurrentStoreId();
   if (!storeId) throw new Error('No store selected');
   const cleanName = name.trim();
   const cleanPhone = phone.trim();
+  const cleanAddress = address.trim();
   const balance = toMoneyAmount(openingBalance);
   if (!cleanName) throw new Error('Customer name is required.');
   if (cleanName.length > 255 || cleanPhone.length > 30) throw new Error('Customer name or phone is too long.');
+  if (cleanAddress.length > 500) throw new Error('Customer address must be 500 characters or fewer.');
   if (!Number.isFinite(balance) || balance < 0) throw new Error('Opening balance must be zero or greater.');
   const existing = await db.customers.where('store_id').equals(storeId).toArray();
   if (existing.some((customer) =>
@@ -1773,6 +1779,7 @@ export async function createCustomer(
     name: cleanName,
     phone: cleanPhone,
     location_id: locationId || null,
+    address: cleanAddress,
     opening_balance: balance,
     opening_balance_remaining: balance,
     is_active: 1,
@@ -1820,7 +1827,8 @@ export async function updateCustomer(
   customerId: string,
   name: string,
   phone: string,
-  locationId: string | null = null
+  locationId: string | null = null,
+  address?: string
 ): Promise<void> {
   const storeId = await getCurrentStoreId();
   if (!storeId) throw new Error('No store selected');
@@ -1828,12 +1836,15 @@ export async function updateCustomer(
   if (!customer || customer.store_id !== storeId) throw new Error('Customer not found.');
   const cleanName = name.trim();
   const cleanPhone = phone.trim();
+  const cleanAddress = address === undefined ? customer.address || '' : address.trim();
   if (!cleanName) throw new Error('Customer name is required.');
   if (cleanName.length > 255 || cleanPhone.length > 30) throw new Error('Customer name or phone is too long.');
+  if (cleanAddress.length > 500) throw new Error('Customer address must be 500 characters or fewer.');
   await db.customers.update(customerId, {
     name: cleanName,
     phone: cleanPhone,
     location_id: locationId || null,
+    address: cleanAddress,
     updated_at: new Date().toISOString(),
     synced: 0,
   });
@@ -3418,6 +3429,8 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
         store_id: customer.store_id,
         name: customer.name,
         phone: customer.phone,
+        location_id: uuidOrNull(customer.location_id),
+        address: customer.address || '',
         opening_balance: customer.opening_balance,
         opening_balance_remaining: customer.opening_balance_remaining,
         wallet_balance: Number(customer.wallet_balance) || 0,
@@ -3615,6 +3628,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
         quantity: i.quantity,
         unit_price: i.unit_price,
         subtotal: i.subtotal,
+        sale_mode: i.sale_mode === 'wholesale' ? 'wholesale' : 'retail',
         unit_type: i.unit_type || 'base',
         pack_size: i.pack_size ?? 1,
         base_quantity: i.base_quantity ?? i.quantity,
@@ -4137,6 +4151,13 @@ export async function syncFromSupabase(opts?: {
           store_id: String(row.store_id),
           name: String(row.name || ''),
           phone: String(row.phone || ''),
+          location_id:
+            typeof row.location_id === 'string'
+              ? row.location_id
+              : row.location_id === null
+                ? null
+                : undefined,
+          address: typeof row.address === 'string' ? row.address : undefined,
           opening_balance: Number(row.opening_balance) || 0,
           opening_balance_remaining: Number(row.opening_balance_remaining) || 0,
           wallet_balance: Number(row.wallet_balance) || 0,
@@ -4148,7 +4169,16 @@ export async function syncFromSupabase(opts?: {
         }),
         dbTable: db.customers,
         merge: async (remote: LocalCustomer, local: LocalCustomer | undefined) => {
-          if (!local || local.synced !== 0) return remote;
+          if (!local || local.synced !== 0) {
+            return {
+              ...remote,
+              location_id:
+                remote.location_id === undefined
+                  ? local?.location_id ?? null
+                  : remote.location_id,
+              address: remote.address === undefined ? local?.address ?? '' : remote.address,
+            };
+          }
           return { ...remote, ...local, synced: 0 };
         },
       },
@@ -4333,6 +4363,12 @@ export async function syncFromSupabase(opts?: {
           quantity: Number(row.quantity) || 0,
           unit_price: Number(row.unit_price) || 0,
           subtotal: Number(row.subtotal) || 0,
+          sale_mode:
+            row.sale_mode === 'wholesale'
+              ? 'wholesale'
+              : row.sale_mode === 'retail'
+                ? 'retail'
+                : undefined,
           unit_type: (row.unit_type as string) || 'base',
           pack_size: Number(row.pack_size) || 1,
           base_quantity: Number(row.base_quantity) || Number(row.quantity) || 0,
