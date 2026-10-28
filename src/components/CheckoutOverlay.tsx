@@ -114,6 +114,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       setPaystackError('');
       setPrintError('');
       setCustomerEmail('');
+      setCustomerSearchQuery('');
       setDiscountMode(allowPercentage ? 'percentage' : 'fixed');
       setPendingDiscountKind('percentage');
       setPendingDiscountValue(0);

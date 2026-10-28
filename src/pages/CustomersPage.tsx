@@ -3,7 +3,6 @@ import {
   AlertCircle,
   CheckCircle,
   Loader2,
-  MapPin,
   Pencil,
   Plus,
   Search,

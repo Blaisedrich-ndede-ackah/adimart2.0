@@ -364,8 +364,6 @@ export const useCartStore = create<CartState>((set, get) => ({
     const state = get();
     const item = state.items.find((i) => i.id === itemId);
     if (!item) return;
-    const product = state.items.find((i) => i.id === itemId);
-    if (!product) return;
     // Rebuild the line with the new sale mode (price recalculated via buildCartLine)
     // We need the full LocalProduct to reprice; fetch it from the DB.
     set(async (s) => {
