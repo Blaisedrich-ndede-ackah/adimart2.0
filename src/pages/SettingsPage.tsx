@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Store, Shield, Percent,
   Save, Loader2, CheckCircle2, UserPlus,
   Trash2, Users, Fingerprint, AlertCircle, Key, Smartphone, Ban, ImagePlus, Timer,
-  BellRing, Target, Eye
+  BellRing, Target
 } from 'lucide-react';
 import ChangePinModal from '@/components/ChangePinModal';
 import ResetUserPinModal from '@/components/ResetUserPinModal';
@@ -33,7 +33,7 @@ import LanguageSwitcher from '@/components/LanguageSwitcher';
 import CurrencySelect from '@/components/CurrencySelect';
 import { useI18nStore, useT } from '@/lib/i18n';
 import { DEFAULT_CURRENCY, normalizeCurrencyCode, getStoreCurrency } from '@/lib/currency';
-import { canAccessCashbook } from '@/lib/staffAccess';
+import { canAccessCashbook, canApplyDiscount, canSeeStockQuantities } from '@/lib/staffAccess';
 import {
   DEFAULT_SESSION_TIMEOUT_MINUTES,
   SESSION_TIMEOUT_OPTIONS,
@@ -68,8 +68,6 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [pinOnDiscount, setPinOnDiscount] = useState(true);
   const [allowPercentage, setAllowPercentage] = useState(true);
   const [allowFixed, setAllowFixed] = useState(true);
-  const [cashierCanDiscount, setCashierCanDiscount] = useState(true);
-  const [cashiersCanViewStock, setCashiersCanViewStock] = useState(true);
   const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState(DEFAULT_SESSION_TIMEOUT_MINUTES);
   const [momoAccountName, setMomoAccountName] = useState('');
   const [momoNumber, setMomoNumber] = useState('');
@@ -114,8 +112,6 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
       setPinOnDiscount(currentStore.pin_on_discount_enabled === 1);
       setAllowPercentage((currentStore.discount_allow_percentage ?? 1) === 1);
       setAllowFixed((currentStore.discount_allow_fixed ?? 1) === 1);
-      setCashierCanDiscount((currentStore.cashier_can_discount ?? 1) === 1);
-      setCashiersCanViewStock((currentStore.cashiers_can_view_stock ?? 1) === 1);
       setSessionTimeoutMinutes(normalizeSessionTimeoutMinutes(currentStore.session_timeout_minutes));
       setMomoAccountName(currentStore.momo_account_name || '');
       setMomoNumber(currentStore.momo_number || '');
@@ -198,8 +194,6 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         pin_on_discount_enabled: pinOnDiscount ? 1 : 0,
         discount_allow_percentage: allowPercentage ? 1 : 0,
         discount_allow_fixed: allowFixed ? 1 : 0,
-        cashier_can_discount: cashierCanDiscount ? 1 : 0,
-        cashiers_can_view_stock: cashiersCanViewStock ? 1 : 0,
         session_timeout_minutes: normalizeSessionTimeoutMinutes(sessionTimeoutMinutes),
         momo_account_name: momoAccountName.trim(),
         momo_number: momoNumber.trim(),
@@ -225,7 +219,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
           role: currentUser.role,
           activityType: 'settings',
           summary: 'Updated store settings',
-          details: cashiersCanViewStock ? 'Cashiers can see stock quantities' : 'Cashiers cannot see stock quantities',
+          details: 'Updated store settings',
         });
       }
       setSaveSuccess(true);
@@ -317,6 +311,8 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         | 'can_sell_from_warehouse'
         | 'can_manage_ecommerce'
         | 'can_access_cashbook'
+        | 'can_view_stock'
+        | 'can_discount'
         | 'phone'
       >
     >
@@ -517,30 +513,6 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">
-          <div className="flex items-center gap-2 mb-4">
-            <Eye className="w-5 h-5 text-primary" />
-            <h3 className="font-bold text-gray-900">Stock quantity visibility</h3>
-          </div>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium text-gray-700">Cashiers can see stock quantities</p>
-              <p className="text-xs text-gray-500">Turn off to hide on-hand quantities from cashier screens. You can still see them.</p>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={cashiersCanViewStock}
-              onClick={() => setCashiersCanViewStock((value) => !value)}
-              className={`w-12 h-7 rounded-full transition-colors flex items-center px-0.5 touch-target shrink-0 ${
-                cashiersCanViewStock ? 'bg-primary justify-end' : 'bg-gray-300 justify-start'
-              }`}
-            >
-              <div className="w-6 h-6 bg-white rounded-full shadow" />
-            </button>
-          </div>
-        </div>
-
         {/* Discount Settings */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">
           <div className="flex items-center gap-2 mb-4">
@@ -573,21 +545,6 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
                 onClick={() => setAllowFixed(!allowFixed)}
                 className={`w-12 h-7 rounded-full transition-colors flex items-center px-0.5 touch-target ${
                   allowFixed ? 'bg-primary justify-end' : 'bg-gray-300 justify-start'
-                }`}
-              >
-                <div className="w-6 h-6 bg-white rounded-full shadow" />
-              </button>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-700">Cashiers can apply discounts</p>
-                <p className="text-xs text-gray-500">Turn off to restrict discounts to owners</p>
-              </div>
-              <button
-                onClick={() => setCashierCanDiscount(!cashierCanDiscount)}
-                className={`w-12 h-7 rounded-full transition-colors flex items-center px-0.5 touch-target ${
-                  cashierCanDiscount ? 'bg-primary justify-end' : 'bg-gray-300 justify-start'
                 }`}
               >
                 <div className="w-6 h-6 bg-white rounded-full shadow" />
@@ -937,6 +894,8 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
                       <p className="text-xs text-gray-500 capitalize">
                         {user.role}
                         {user.phone ? ` · ${user.phone}` : ' · no phone'}
+                        {user.role === 'cashier' && canSeeStockQuantities(user, currentStore) ? ' · stock qty' : ''}
+                        {user.role === 'cashier' && canApplyDiscount(user, currentStore) ? ' · discounts' : ''}
                         {user.role === 'cashier' && (user.can_wholesale === 1 ? ' · wholesale' : '')}
                         {user.role === 'cashier' && (user.can_sell_from_warehouse === 1 ? ' · warehouse sales' : '')}
                         {user.role === 'cashier' && (user.can_manage_ecommerce === 1 ? ' · online shop' : '')}
@@ -1042,6 +1001,32 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
                           ))}
                         </select>
                       </div>
+                      <label className="flex items-center justify-between gap-2 py-1">
+                        <span>
+                          <span className="text-gray-700 font-medium block">Can see stock quantities</span>
+                          <span className="text-[11px] text-gray-500">Turn off to hide on-hand numbers on this cashier’s screens.</span>
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={canSeeStockQuantities(user, currentStore)}
+                          onChange={(e) =>
+                            void updateCashierPerms(user, { can_view_stock: e.target.checked ? 1 : 0 })
+                          }
+                        />
+                      </label>
+                      <label className="flex items-center justify-between gap-2 py-1">
+                        <span>
+                          <span className="text-gray-700 font-medium block">Can apply discounts</span>
+                          <span className="text-[11px] text-gray-500">Turn off to keep discounts for the owner.</span>
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={canApplyDiscount(user, currentStore)}
+                          onChange={(e) =>
+                            void updateCashierPerms(user, { can_discount: e.target.checked ? 1 : 0 })
+                          }
+                        />
+                      </label>
                       <label className="flex items-center justify-between gap-2 py-1">
                         <span className="text-gray-700 font-medium">Can sell wholesale</span>
                         <input

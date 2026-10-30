@@ -71,7 +71,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         { id: 'home', label: t('nav.dashboard'), icon: House, show: isOwner },
         { id: 'pos', label: t('nav.pos'), icon: ScanBarcode, show: true },
         { id: 'search', label: 'Search', icon: Search, show: true },
-        { id: 'adimat-ai', label: t('nav.adimatAi'), shortLabel: 'AI', icon: Sparkles, show: true },
+        { id: 'adimat-ai', label: t('nav.adimatAi'), shortLabel: 'AI', icon: Sparkles, show: isOwner },
         { id: 'stock-approvals', label: 'Stock approvals', shortLabel: 'Approvals', icon: ClipboardCheck, show: true },
         { id: 'support', label: t('nav.support'), shortLabel: 'Help', icon: LifeBuoy, show: true },
         {

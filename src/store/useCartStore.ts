@@ -10,6 +10,7 @@ import {
   type LocalCustomer,
 } from '@/lib/dexie';
 import { triggerPushSync } from '@/lib/sync';
+import { canApplyDiscount } from '@/lib/staffAccess';
 import { getAvailableSaleModes, resolveSalePrice, type SaleMode, type UnitType } from '@/lib/bulkPricing';
 import type { StockChange } from '@/lib/stockEvents';
 import { moneyEquals, roundMoney, toMoneyAmount } from '@/lib/money';
@@ -638,9 +639,9 @@ export const useCartStore = create<CartState>((set, get) => ({
 
     const store = await db.stores.get(storeId);
     const discountCap = store?.discount_cap_percentage ?? 10;
-    const cashierCanDiscount = (store?.cashier_can_discount ?? 1) === 1;
     const cashier = await db.users.get(cashierId);
     const isOwner = cashier?.role === 'owner';
+    const cashierCanDiscount = canApplyDiscount(cashier, store);
 
     // Recompute totals from lines so persisted sale matches cart math
     const priced = recalculate(

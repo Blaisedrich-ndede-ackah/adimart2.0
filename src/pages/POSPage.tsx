@@ -157,7 +157,10 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   const canWholesale = canUserSellWholesale(currentUser);
   const isStoreOwner = currentUser?.role === 'owner';
   const showStockQty = canViewStockQuantities(currentUser, currentStore);
-  const alsoBuy = useAlsoBuy(currentStore?.id, cart.items.map((item) => item.product_id));
+  const alsoBuy = useAlsoBuy(
+    currentUser?.role === 'owner' ? currentStore?.id : undefined,
+    currentUser?.role === 'owner' ? cart.items.map((item) => item.product_id) : []
+  );
   const retailLineCount = cart.items.filter((item) => item.sale_mode === 'retail').length;
   const wholesaleLineCount = cart.items.filter((item) => item.sale_mode === 'wholesale').length;
   const packLineCount = cart.items.filter((item) => item.unit_type === 'pack').length;
@@ -1203,13 +1206,15 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                   </button>
                 </div>
 
-                <AlsoBuySuggestions
-                  suggestions={alsoBuy}
-                  onAdd={(productId) => {
-                    const product = products.find((candidate) => candidate.id === productId);
-                    if (product) void handleAddProduct(product);
-                  }}
-                />
+                {currentUser?.role === 'owner' && (
+                  <AlsoBuySuggestions
+                    suggestions={alsoBuy}
+                    onAdd={(productId) => {
+                      const product = products.find((candidate) => candidate.id === productId);
+                      if (product) void handleAddProduct(product);
+                    }}
+                  />
+                )}
                 {cart.items.map((item) => (
                   <div
                     key={item.id}

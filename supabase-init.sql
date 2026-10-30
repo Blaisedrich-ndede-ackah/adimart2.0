@@ -83,6 +83,8 @@ CREATE TABLE IF NOT EXISTS users (
   can_sell_from_warehouse BOOLEAN DEFAULT FALSE,
   can_manage_ecommerce BOOLEAN DEFAULT FALSE,
   can_access_cashbook BOOLEAN DEFAULT TRUE,
+  can_view_stock BOOLEAN,
+  can_discount BOOLEAN,
   pos_layout_json TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()

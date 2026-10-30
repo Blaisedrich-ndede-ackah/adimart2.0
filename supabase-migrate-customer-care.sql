@@ -141,6 +141,16 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION public.adimat_support_actor() FROM public, anon, authenticated;
+-- RLS policies call this function as anon. SECURITY DEFINER does not
+-- remove the need for EXECUTE, and the revoke above is what produces
+-- "permission denied for function adimat_support_actor".
+GRANT EXECUTE ON FUNCTION public.adimat_support_actor() TO anon, authenticated, service_role;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticator') THEN
+    GRANT EXECUTE ON FUNCTION public.adimat_support_actor() TO authenticator;
+  END IF;
+END $$;
 
 ALTER TABLE support_tickets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE support_messages ENABLE ROW LEVEL SECURITY;

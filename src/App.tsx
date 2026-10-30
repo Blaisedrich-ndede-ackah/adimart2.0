@@ -215,7 +215,7 @@ export default function App() {
   useEffect(() => {
     // Cashiers cannot stay on owner-only pages after switch/login
     if (currentUser?.role !== 'cashier') return;
-    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'customers', 'returns', 'multistore'];
+    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'customers', 'returns', 'multistore', 'adimat-ai'];
     const ecommerceOk = (currentUser.can_manage_ecommerce ?? 0) === 1;
     const cashbookOk = canAccessCashbook(currentUser);
     if (
@@ -443,7 +443,7 @@ export default function App() {
       case 'stock-approvals':
         return <StockApprovalsPage />;
       case 'adimat-ai':
-        return <AdimatAiPage onNavigate={setCurrentPage} />;
+        return role === 'owner' ? <AdimatAiPage onNavigate={setCurrentPage} /> : <POSPage />;
       case 'support':
         return <HelpSupportPage />;
       case 'warehouse':

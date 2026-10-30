@@ -25,6 +25,7 @@ import { useFormatMoney, getStoreCurrency } from '@/lib/currency';
 import { getBluetoothHardwareStatus } from '@/lib/bluetoothPeripherals';
 import { formatCustomerAddress } from '@/lib/customerAddress';
 import { recordActivity } from '@/lib/activityLog';
+import { canApplyDiscount as cashierMayDiscount } from '@/lib/staffAccess';
 
 interface CheckoutOverlayProps {
   isOpen: boolean;
@@ -93,9 +94,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
   const pinOnDiscount = currentStore?.pin_on_discount_enabled === 1;
   const allowPercentage = (currentStore?.discount_allow_percentage ?? 1) === 1;
   const allowFixed = (currentStore?.discount_allow_fixed ?? 1) === 1;
-  const cashierCanDiscount = (currentStore?.cashier_can_discount ?? 1) === 1;
   const isOwner = currentUser?.role === 'owner';
-  const canApplyDiscount = isOwner || cashierCanDiscount;
+  const canApplyDiscount = isOwner || cashierMayDiscount(currentUser, currentStore);
   const discountsEnabled = allowPercentage || allowFixed;
 
   useEffect(() => {

@@ -1,8 +1,9 @@
-/** Owners always see quantities. Cashiers follow the store setting (default on). */
+import { canSeeStockQuantities } from '@/lib/staffAccess';
+
+/** Owners always see quantities. Each cashier follows their Perms setting. */
 export function canViewStockQuantities(
-  user: { role?: string | null } | null | undefined,
+  user: { role?: string | null; can_view_stock?: number | null } | null | undefined,
   store: { cashiers_can_view_stock?: number | null } | null | undefined
 ): boolean {
-  if (user?.role === 'owner') return true;
-  return (store?.cashiers_can_view_stock ?? 1) === 1;
+  return canSeeStockQuantities(user, store);
 }

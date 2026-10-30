@@ -4,7 +4,7 @@ import { isSupabaseConfigured, supabase, testSupabaseConnection } from './supaba
 import { isAdminSuperPin } from './superPin';
 import { toMoneyAmount } from './money';
 import { formatUnknownError, isUuid, uuidOrNull } from './ids';
-import { cashbookAccessFromCloud } from './staffAccess';
+import { cashbookAccessFromCloud, optionalStaffFlag } from './staffAccess';
 import { normalizeSessionTimeoutMinutes } from './sessionTimeout';
 import {
   DEFAULT_DEBT_REMINDER_INTERVAL_DAYS,
@@ -166,6 +166,10 @@ export interface LocalUser {
   can_manage_ecommerce?: number;
   /** Cashiers may open Cash Book when 1. Missing = allowed (legacy). Owners always can. */
   can_access_cashbook?: number;
+  /** Cashiers may see on-hand quantities when 1. Missing follows the store default. */
+  can_view_stock?: number;
+  /** Cashiers may apply discounts when 1. Missing follows the store default. */
+  can_discount?: number;
   /** Owner-configured POS section order, shared across their signed-in devices. */
   pos_layout_json?: string;
   created_at: string;
@@ -1730,6 +1734,7 @@ export async function addUserToStore(
   const storeId = await getCurrentStoreId();
   if (!storeId) throw new Error('No store selected');
   
+  const store = await db.stores.get(storeId);
   const user: LocalUser = {
     id: generateId(),
     store_id: storeId,
@@ -1743,6 +1748,8 @@ export async function addUserToStore(
     can_sell_from_warehouse: role === 'owner' ? 1 : 0,
     can_manage_ecommerce: role === 'owner' ? 1 : 0,
     can_access_cashbook: role === 'owner' ? 1 : 0,
+    can_view_stock: role === 'owner' ? 1 : (store?.cashiers_can_view_stock ?? 1) === 1 ? 1 : 0,
+    can_discount: role === 'owner' ? 1 : (store?.cashier_can_discount ?? 1) === 1 ? 1 : 0,
     created_at: new Date().toISOString(),
     synced: 0,
     pin_dirty: 1,
@@ -3051,6 +3058,25 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
         }
       }
       if (
+        table === 'users' &&
+        /can_view_stock|can_discount/i.test(error.message)
+      ) {
+        const stripped = rows.map((row) => {
+          const copy = { ...(row as Record<string, unknown>) };
+          if (/can_view_stock/i.test(error.message)) delete copy.can_view_stock;
+          if (/can_discount/i.test(error.message)) delete copy.can_discount;
+          return copy;
+        });
+        const retry = await supabase.from(table).upsert(stripped, {
+          onConflict: 'id',
+          ignoreDuplicates: appendOnly,
+        });
+        if (!retry.error) {
+          await markSynced();
+          return rows.length;
+        }
+      }
+      if (
         table === 'stores' &&
         /debt_reminder|sales_target/i.test(error.message)
       ) {
@@ -3273,6 +3299,8 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
         can_sell_from_warehouse: (u.can_sell_from_warehouse ?? 0) === 1,
         can_manage_ecommerce: (u.can_manage_ecommerce ?? (u.role === 'owner' ? 1 : 0)) === 1,
         can_access_cashbook: u.role === 'owner' ? true : (u.can_access_cashbook ?? 1) === 1,
+        ...(u.can_view_stock === 0 || u.can_view_stock === 1 ? { can_view_stock: u.can_view_stock === 1 } : {}),
+        ...(u.can_discount === 0 || u.can_discount === 1 ? { can_discount: u.can_discount === 1 } : {}),
         pos_layout_json: u.role === 'owner' ? u.pos_layout_json || null : null,
         created_at: u.created_at,
       })),
@@ -4203,6 +4231,8 @@ export async function syncFromSupabase(opts?: {
           can_sell_from_warehouse: row.can_sell_from_warehouse ? 1 : 0,
           can_manage_ecommerce: (row.can_manage_ecommerce || row.role === 'owner') ? 1 : 0,
           can_access_cashbook: cashbookAccessFromCloud(row.role, row.can_access_cashbook),
+          can_view_stock: optionalStaffFlag(row.can_view_stock),
+          can_discount: optionalStaffFlag(row.can_discount),
           pos_layout_json: row.role === 'owner' && typeof row.pos_layout_json === 'string'
             ? row.pos_layout_json
             : undefined,
@@ -4232,6 +4262,8 @@ export async function syncFromSupabase(opts?: {
                 local.can_sell_from_warehouse ?? remote.can_sell_from_warehouse,
               can_manage_ecommerce: local.can_manage_ecommerce ?? remote.can_manage_ecommerce,
               can_access_cashbook: local.can_access_cashbook ?? remote.can_access_cashbook,
+              can_view_stock: local.can_view_stock ?? remote.can_view_stock,
+              can_discount: local.can_discount ?? remote.can_discount,
               pos_layout_json: local.pos_layout_json ?? remote.pos_layout_json,
               synced: 0,
             };
