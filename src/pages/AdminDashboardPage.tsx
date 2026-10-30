@@ -476,6 +476,12 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
     ] as const
   );
 
+  const adminGroups = [
+    { label: 'Today', ids: ['overview', 'stores', 'sales'] as const },
+    { label: 'Money', ids: ['subscriptions', 'payouts', 'reports'] as const },
+    { label: 'People', ids: ['users', 'care', 'broadcast', 'contact', 'agents'] as const },
+    { label: 'Catalog', ids: ['products', 'campaigns', 'learn'] as const },
+  ];
   const primaryTabIds = ['overview', 'stores', 'subscriptions', 'payouts'] as const;
   const primaryTabs = tabs.filter((t) => (primaryTabIds as readonly string[]).includes(t[0]));
   const moreTabs = tabs.filter((t) => !(primaryTabIds as readonly string[]).includes(t[0]));
@@ -567,18 +573,29 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         )}
       </header>
 
-      {/* Desktop / tablet top tabs */}
-      <nav className="ios-pane hidden lg:flex flex-shrink-0 gap-1 overflow-x-auto border-b border-white/50 px-2 py-2 no-scrollbar md:px-4 lg:px-8 2xl:px-12">
-        {tabs.map(([id, label]) => (
-          <button
-            key={id}
-            onClick={() => goTab(id)}
-            className={`touch-target whitespace-nowrap rounded-full px-3 py-2 text-[13px] font-semibold ${
-              tab === id ? 'bg-white text-primary shadow-[0_0_0_0.5px_rgba(60,60,67,0.12)]' : 'text-muted'
-            }`}
-          >
-            {label}
-          </button>
+      {/* Desktop tabs, chunked so fourteen tools are not one equal row. */}
+      <nav className="ios-pane hidden lg:flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-white/50 px-2 py-2 md:px-4 lg:px-8 2xl:px-12" aria-label="Admin sections">
+        {adminGroups.map((group) => (
+          <div key={group.label} className="flex items-center gap-1 rounded-full bg-black/[0.04] px-1 py-1">
+            <span className="px-2 text-[11px] font-semibold uppercase tracking-wide text-muted">{group.label}</span>
+            {group.ids.map((id) => {
+              const match = tabs.find((entry) => entry[0] === id);
+              if (!match) return null;
+              const [, label] = match;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => goTab(id)}
+                  className={`touch-target whitespace-nowrap rounded-full px-3 py-2 text-[13px] font-semibold ${
+                    tab === id ? 'bg-white text-primary shadow-[0_0_0_0.5px_rgba(60,60,67,0.12)]' : 'text-muted'
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
         ))}
       </nav>
 
@@ -587,9 +604,16 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
         {loading && !data && tab !== 'contact' && tab !== 'care' && tab !== 'reports' && tab !== 'learn' && tab !== 'agents' && (
-          <div className="flex flex-col items-center justify-center py-20 text-slate-500">
-            <Loader2 className="w-8 h-8 animate-spin mb-3" />
-            <p className="text-sm">Loading cloud data…</p>
+          <div className="py-8 text-slate-500" role="status">
+            <div className="mb-4 space-y-2" aria-hidden="true">
+              <div className="ux-skeleton h-20 w-full" />
+              <div className="ux-skeleton h-20 w-full" />
+              <div className="ux-skeleton h-20 w-full" />
+            </div>
+            <div className="flex items-center justify-center gap-2">
+              <Loader2 className="w-5 h-5 animate-spin" />
+              <p className="text-sm">Loading cloud data…</p>
+            </div>
           </div>
         )}
 
@@ -1845,25 +1869,36 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
               </button>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2 px-4 pb-4">
-              {moreTabs.map(([id, label, Icon]) => {
-                const active = tab === id;
+            <div className="max-h-[70vh] space-y-3 overflow-y-auto px-4 pb-4">
+              {adminGroups.map((group) => {
+                const items = moreTabs.filter(([id]) => (group.ids as readonly string[]).includes(id));
+                if (items.length === 0) return null;
                 return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => goTab(id)}
-                    className={`flex items-center gap-3 rounded-[14px] bg-white px-3 py-3 text-left touch-target shadow-[0_0_0_0.5px_rgba(60,60,67,0.12)] ${
-                      active ? 'text-primary' : 'text-ink'
-                    }`}
-                  >
-                    <span className={`flex h-10 w-10 items-center justify-center rounded-2xl ${
-                      active ? 'bg-primary text-white' : 'bg-white text-primary shadow-sm'
-                    }`}>
-                      <Icon className="h-5 w-5" />
-                    </span>
-                    <span className={`text-sm ${active ? 'font-bold' : 'font-semibold'}`}>{label}</span>
-                  </button>
+                  <div key={group.label}>
+                    <p className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted">{group.label}</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {items.map(([id, label, Icon]) => {
+                        const active = tab === id;
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => goTab(id)}
+                            className={`flex items-center gap-3 rounded-[14px] bg-white px-3 py-3 text-left touch-target shadow-[0_0_0_0.5px_rgba(60,60,67,0.12)] ${
+                              active ? 'text-primary' : 'text-ink'
+                            }`}
+                          >
+                            <span className={`flex h-10 w-10 items-center justify-center rounded-2xl ${
+                              active ? 'bg-primary text-white' : 'bg-white text-primary shadow-sm'
+                            }`}>
+                              <Icon className="h-5 w-5" />
+                            </span>
+                            <span className={`text-sm ${active ? 'font-bold' : 'font-semibold'}`}>{label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 );
               })}
             </div>

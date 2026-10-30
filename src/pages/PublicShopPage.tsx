@@ -13,7 +13,7 @@ import {
   type PublicShopProduct,
 } from '@/lib/ecommerce';
 import { formatStoreMoney } from '@/lib/currency';
-import { useI18nStore } from '@/lib/i18n';
+import { useI18nStore, useT } from '@/lib/i18n';
 import {
   currentShopToken,
   rememberSession,

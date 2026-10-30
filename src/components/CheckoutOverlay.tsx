@@ -530,27 +530,44 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
 
   if (!isOpen) return null;
 
+  const checkoutBeat =
+    step === 'success'
+      ? 3
+      : step === 'method' || step === 'discount' || step === 'charges' || step === 'pin-verify'
+        ? 1
+        : 2;
+
   return (
     <div className="sheet-backdrop animate-fade-in">
       <div className="sheet-panel animate-slide-up">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
-          <h2 className="text-lg font-bold text-gray-900">
-            {step === 'method' && 'Checkout'}
-            {step === 'discount' && 'Apply Discount'}
-            {step === 'charges' && 'Add Other Charges'}
-            {step === 'pin-verify' && 'Owner Authorization'}
-            {step === 'cash-input' && 'Cash Payment'}
-            {step === 'split-input' && 'Split Payment'}
-            {step === 'manual-payment' && 'Record Manual Payment'}
-            {step === 'paystack' && 'Processing Payment...'}
-            {step === 'processing' && 'Processing...'}
-            {step === 'success' && 'Sale Complete!'}
-          </h2>
-          {step !== 'processing' && step !== 'paystack' && (
-            <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100 touch-target">
-              <X className="w-5 h-5" />
-            </button>
-          )}
+        <div className="sticky top-0 z-10 border-b border-gray-100 bg-white px-5 py-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-lg font-bold text-gray-900">
+              {step === 'method' && 'Checkout'}
+              {step === 'discount' && 'Apply Discount'}
+              {step === 'charges' && 'Add Other Charges'}
+              {step === 'pin-verify' && 'Owner Authorization'}
+              {step === 'cash-input' && 'Cash Payment'}
+              {step === 'split-input' && 'Split Payment'}
+              {step === 'manual-payment' && 'Record Manual Payment'}
+              {step === 'credit-input' && 'Credit Sale'}
+              {step === 'wallet-input' && 'Wallet Payment'}
+              {step === 'paystack' && 'Processing Payment...'}
+              {step === 'processing' && 'Processing...'}
+              {step === 'success' && 'Sale Complete!'}
+            </h2>
+            {step !== 'processing' && step !== 'paystack' && (
+              <button type="button" onClick={onClose} aria-label="Close checkout" className="rounded-full p-2 hover:bg-gray-100 touch-target">
+                <X className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+          <div className="ux-progress mt-3" aria-hidden="true">
+            <span data-on={checkoutBeat >= 1 ? 'true' : 'false'} />
+            <span data-on={checkoutBeat >= 2 ? 'true' : 'false'} />
+            <span data-on={checkoutBeat >= 3 ? 'true' : 'false'} />
+          </div>
+          <p className="sr-only">Step {checkoutBeat} of 3. The total stays on this screen until the sale is finished.</p>
         </div>
 
         <div className="p-5">
@@ -1321,10 +1338,10 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
           )}
 
           {step === 'processing' && (
-            <div className="flex flex-col items-center py-10">
+            <div className="flex flex-col items-center py-10" role="status">
               <Loader2 className="w-12 h-12 text-primary animate-spin mb-4" />
-              <p className="text-gray-700 font-medium">Processing sale...</p>
-              <p className="text-gray-500 text-sm">Please wait</p>
+              <p className="text-gray-700 font-medium">Saving this sale on this device…</p>
+              <p className="text-gray-500 text-sm">The receipt number appears next.</p>
             </div>
           )}
 
@@ -1334,6 +1351,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                 <CheckCircle2 className="w-10 h-10 text-green-600" />
               </div>
               <h3 className="text-xl font-bold text-gray-900 mb-1">Sale Complete!</h3>
+              <p className="mb-2 text-center text-sm text-gray-600">The receipt is saved on this device.</p>
               <p className="text-primary font-mono font-bold text-lg mb-1">{saleResult.receiptNumber}</p>
               <p className="text-2xl font-bold text-gray-900 mb-4">{money(saleResult.total)}</p>
               {saleResult.paymentMethod === 'credit' && (

@@ -3,7 +3,7 @@ import {
   ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, House,
   CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare, Moon, Sun,
   ShoppingCart, RotateCcw,
-  ContactRound, ArrowLeftRight, Building2, Megaphone,
+  ContactRound, ArrowLeftRight, Building2, Megaphone, Sparkles, LifeBuoy,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';

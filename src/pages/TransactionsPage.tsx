@@ -181,7 +181,9 @@ export default function TransactionsPage() {
           />
         </div>
 
-        <div className="mb-3 grid grid-cols-2 sm:grid-cols-4 gap-2" role="tablist" aria-label="Sales period">
+        <div className="ux-region mb-3">
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Period</p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2" role="tablist" aria-label="Sales period">
           {PERIODS.map((option) => (
             <button
               key={option}
@@ -207,7 +209,7 @@ export default function TransactionsPage() {
         </div>
 
         {period === 'custom' && (
-          <div className="mb-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
             <label className="rounded-xl bg-white border border-gray-100 shadow-sm px-3 py-2 text-xs text-gray-500">
               {t('sales.from')}
               <input
@@ -235,6 +237,7 @@ export default function TransactionsPage() {
             ) : null}
           </div>
         )}
+        </div>
 
         {!isOwner && (
           <CloudSyncPanel hint={t('sync.cashierHint')} onSynced={() => void load()} />

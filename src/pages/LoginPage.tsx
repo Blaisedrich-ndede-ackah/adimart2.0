@@ -574,7 +574,7 @@ function ForgotPinSection() {
               </button>
             </>
           )}
-          {error && <p className="text-red-200 text-[11px] text-center">{error}</p>}
+          {error && <p role="alert" className="text-center text-sm font-medium text-red-100">{error}</p>}
           {message && <p className="text-emerald-100 text-[11px] text-center">{message}</p>}
         </div>
       )}
