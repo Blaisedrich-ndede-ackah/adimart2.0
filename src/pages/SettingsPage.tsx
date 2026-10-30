@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Store, Shield, Percent,
   Save, Loader2, CheckCircle2, UserPlus,
   Trash2, Users, Fingerprint, AlertCircle, Key, Smartphone, Ban, ImagePlus, Timer,
-  BellRing, Target
+  BellRing, Target, Eye
 } from 'lucide-react';
 import ChangePinModal from '@/components/ChangePinModal';
 import ResetUserPinModal from '@/components/ResetUserPinModal';
@@ -23,6 +23,7 @@ import {
 } from '@/lib/dexie';
 import { ensureStoreLocations, listLocations } from '@/lib/warehouse';
 import { useAuthStore } from '@/store/useAuthStore';
+import { recordActivity } from '@/lib/activityLog';
 import { isBiometricAvailable, registerBiometric, hasBiometricRegistered, clearBiometricRegistration } from '@/lib/biometric';
 import { isValidGhanaPhone } from '@/lib/platformSettings';
 import { fileToStoreLogoDataUrl, hasStoreLogo } from '@/lib/productImage';
@@ -68,6 +69,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [allowPercentage, setAllowPercentage] = useState(true);
   const [allowFixed, setAllowFixed] = useState(true);
   const [cashierCanDiscount, setCashierCanDiscount] = useState(true);
+  const [cashiersCanViewStock, setCashiersCanViewStock] = useState(true);
   const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState(DEFAULT_SESSION_TIMEOUT_MINUTES);
   const [momoAccountName, setMomoAccountName] = useState('');
   const [momoNumber, setMomoNumber] = useState('');
@@ -113,6 +115,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
       setAllowPercentage((currentStore.discount_allow_percentage ?? 1) === 1);
       setAllowFixed((currentStore.discount_allow_fixed ?? 1) === 1);
       setCashierCanDiscount((currentStore.cashier_can_discount ?? 1) === 1);
+      setCashiersCanViewStock((currentStore.cashiers_can_view_stock ?? 1) === 1);
       setSessionTimeoutMinutes(normalizeSessionTimeoutMinutes(currentStore.session_timeout_minutes));
       setMomoAccountName(currentStore.momo_account_name || '');
       setMomoNumber(currentStore.momo_number || '');
@@ -196,6 +199,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         discount_allow_percentage: allowPercentage ? 1 : 0,
         discount_allow_fixed: allowFixed ? 1 : 0,
         cashier_can_discount: cashierCanDiscount ? 1 : 0,
+        cashiers_can_view_stock: cashiersCanViewStock ? 1 : 0,
         session_timeout_minutes: normalizeSessionTimeoutMinutes(sessionTimeoutMinutes),
         momo_account_name: momoAccountName.trim(),
         momo_number: momoNumber.trim(),
@@ -212,6 +216,18 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
       });
       
       await refreshStore();
+      if (currentUser) {
+        recordActivity({
+          storeId,
+          storeName: storeName.trim(),
+          userId: currentUser.id,
+          username: currentUser.name,
+          role: currentUser.role,
+          activityType: 'settings',
+          summary: 'Updated store settings',
+          details: cashiersCanViewStock ? 'Cashiers can see stock quantities' : 'Cashiers cannot see stock quantities',
+        });
+      }
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err: unknown) {
@@ -498,6 +514,30 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
                 <option value="Other">Other</option>
               </select>
             </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">
+          <div className="flex items-center gap-2 mb-4">
+            <Eye className="w-5 h-5 text-primary" />
+            <h3 className="font-bold text-gray-900">Stock quantity visibility</h3>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-gray-700">Cashiers can see stock quantities</p>
+              <p className="text-xs text-gray-500">Turn off to hide on-hand quantities from cashier screens. You can still see them.</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={cashiersCanViewStock}
+              onClick={() => setCashiersCanViewStock((value) => !value)}
+              className={`w-12 h-7 rounded-full transition-colors flex items-center px-0.5 touch-target shrink-0 ${
+                cashiersCanViewStock ? 'bg-primary justify-end' : 'bg-gray-300 justify-start'
+              }`}
+            >
+              <div className="w-6 h-6 bg-white rounded-full shadow" />
+            </button>
           </div>
         </div>
 

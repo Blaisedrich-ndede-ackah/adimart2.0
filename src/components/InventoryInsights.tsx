@@ -96,7 +96,7 @@ export default function InventoryInsights({ storeId, products, onEditProduct }: 
           <PackageSearch className="h-4 w-4" /> Restock suggestions ({restockItems.length})
         </button>
         <button type="button" onClick={() => setTab('audit')} className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold touch-target ${tab === 'audit' ? 'bg-primary text-white' : 'bg-white text-gray-700 border border-gray-200'}`}>
-          <History className="h-4 w-4" /> Stock audit
+          <History className="h-4 w-4" /> Inventory history
         </button>
       </div>
 
@@ -123,8 +123,8 @@ export default function InventoryInsights({ storeId, products, onEditProduct }: 
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3 rounded-xl bg-white p-3">
             <div>
-              <p className="text-sm font-semibold text-gray-900">Stock movement audit</p>
-              <p className="text-xs text-gray-500">Latest {movements.length} shown; CSV includes all recorded stock movements</p>
+              <p className="text-sm font-semibold text-gray-900">Inventory history</p>
+              <p className="text-xs text-gray-500">Latest {movements.length} stock changes; CSV includes every recorded movement</p>
             </div>
             {auditStatus && <p role="status" className="rounded-lg bg-amber-50 p-2 text-xs text-amber-800">{auditStatus}</p>}
             <button type="button" onClick={exportAudit} disabled={movements.length === 0} className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 disabled:opacity-40 touch-target">

@@ -18,6 +18,7 @@ import LoginPage from '@/pages/LoginPage';
 import CashierBlockedPage from '@/pages/CashierBlockedPage';
 import StoreAccessBlockedPage from '@/pages/StoreAccessBlockedPage';
 import POSPage from '@/pages/POSPage';
+import SearchPage from '@/pages/SearchPage';
 import InventoryPage from '@/pages/InventoryPage';
 import ReportsPage from '@/pages/ReportsPage';
 import ExpensesPage from '@/pages/ExpensesPage';
@@ -31,6 +32,7 @@ import SubscriptionPage from '@/pages/SubscriptionPage';
 import WarehousePage from '@/pages/WarehousePage';
 import EcommercePage from '@/pages/EcommercePage';
 import PurchasingPage from '@/pages/PurchasingPage';
+import StockApprovalsPage from '@/pages/StockApprovalsPage';
 import OwnerHomePage from '@/pages/OwnerHomePage';
 import MultiStorePage from '@/pages/MultiStorePage';
 import LearnAdimatPage from '@/pages/LearnAdimatPage';
@@ -414,6 +416,8 @@ export default function App() {
         }} /> : <POSPage />;
       case 'pos':
         return <POSPage onNavigate={setCurrentPage} />;
+      case 'search':
+        return <SearchPage onNavigate={setCurrentPage} />;
       case 'transactions':
         return <TransactionsPage />;
       case 'customers':
@@ -434,6 +438,8 @@ export default function App() {
         return role === 'owner' ? <InventoryPage openAddOnLoad={quickAction === 'add-product'} onQuickActionHandled={() => setQuickAction(null)} /> : <POSPage />;
       case 'purchasing':
         return role === 'owner' ? <PurchasingPage /> : <POSPage />;
+      case 'stock-approvals':
+        return <StockApprovalsPage />;
       case 'warehouse':
         return role === 'owner' ? (
           <WarehousePage onBackToSettings={leaveWarehouse} />

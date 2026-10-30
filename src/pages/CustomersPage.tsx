@@ -53,6 +53,11 @@ import {
 import DebtRemindersPanel from '@/components/DebtRemindersPanel';
 import { setCustomerDebtReminderOptOut } from '@/lib/debtReminders';
 import { shopOwnerLedger, type ShopTransaction } from '@/lib/shopClient';
+import {
+  formatCustomerAddress,
+  joinCustomerAddress,
+  splitCustomerAddress,
+} from '@/lib/customerAddress';
 
 interface CustomersPageProps {
   onNavigate?: (page: string) => void;
@@ -84,7 +89,9 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
   const [editing, setEditing] = useState<LocalCustomer | null>(null);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
-  const [address, setAddress] = useState('');
+  const [street, setStreet] = useState('');
+  const [city, setCity] = useState('');
+  const [region, setRegion] = useState('');
   const [openingBalance, setOpeningBalance] = useState('');
   const [locationId, setLocationId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -102,7 +109,13 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
       const preferredLocation = customer.location_id
         ? locationNameById.get(customer.location_id) || ''
         : '';
-      const searchableText = [customer.name, customer.phone, customer.address || '', preferredLocation]
+      const searchableText = [
+        customer.name,
+        customer.phone,
+        formatCustomerAddress(customer.address),
+        customer.address || '',
+        preferredLocation,
+      ]
         .join(' ')
         .toLocaleLowerCase();
       return searchableText.includes(query);
@@ -214,7 +227,9 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
     setEditing(null);
     setName('');
     setPhone('');
-    setAddress('');
+    setStreet('');
+    setCity('');
+    setRegion('');
     setOpeningBalance('');
     setLocationId(null);
     setError('');
@@ -223,9 +238,12 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
   const startEdit = (customer: LocalCustomer) => {
     setIsFormOpen(true);
     setEditing(customer);
+    const parts = splitCustomerAddress(customer.address);
     setName(customer.name);
     setPhone(customer.phone);
-    setAddress(customer.address || '');
+    setStreet(parts.street);
+    setCity(parts.city);
+    setRegion(parts.region);
     setOpeningBalance('');
     setLocationId(customer.location_id ?? null);
     setError('');
@@ -236,6 +254,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
     setError('');
     setSaving(true);
     try {
+      const address = joinCustomerAddress({ street, city, region });
       if (editing) {
         await updateCustomer(editing.id, name, phone, locationId, address);
       } else {
@@ -609,21 +628,49 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                 className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
               />
             </label>
-            <label className="block text-sm font-medium text-gray-700">
-              Customer address / area <span className="text-gray-400 text-xs">(optional)</span>
-              <textarea
-                rows={2}
-                maxLength={500}
-                autoComplete="street-address"
-                value={address}
-                onChange={(event) => setAddress(event.target.value)}
-                placeholder="House, street, neighborhood, or delivery area"
-                className="mt-1.5 w-full resize-y rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
-              />
-              <span className="mt-1 block text-xs text-gray-400">
-                Used for customer search and delivery reference.
-              </span>
-            </label>
+            <fieldset className="space-y-3 rounded-xl border border-gray-100 p-3">
+              <legend className="px-1 text-sm font-medium text-gray-700">
+                Customer address <span className="text-gray-400 text-xs">(optional)</span>
+              </legend>
+              <label className="block text-sm font-medium text-gray-700">
+                Street, house, or area
+                <input
+                  maxLength={200}
+                  autoComplete="street-address"
+                  value={street}
+                  onChange={(event) => setStreet(event.target.value)}
+                  placeholder="House number, street, or neighborhood"
+                  className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
+                />
+              </label>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  City / town
+                  <input
+                    maxLength={80}
+                    autoComplete="address-level2"
+                    value={city}
+                    onChange={(event) => setCity(event.target.value)}
+                    placeholder="Accra"
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
+                  />
+                </label>
+                <label className="block text-sm font-medium text-gray-700">
+                  Region
+                  <input
+                    maxLength={80}
+                    autoComplete="address-level1"
+                    value={region}
+                    onChange={(event) => setRegion(event.target.value)}
+                    placeholder="Greater Accra"
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
+                  />
+                </label>
+              </div>
+              <p className="text-xs text-gray-400">
+                Saved on the customer record. Search and checkout can find it by street, city, or region.
+              </p>
+            </fieldset>
             {locations.length > 0 && (
               <label className="block text-sm font-medium text-gray-700">
                 Preferred location
@@ -786,7 +833,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                               <span className="mt-0.5 flex items-start gap-1 text-xs text-gray-500">
                                 <MapPin className="mt-0.5 h-3 w-3 shrink-0 text-gray-400" />
                                 <span className="min-w-0 break-words">
-                                  {[customer.address, preferredLocationName].filter(Boolean).join(' · ')}
+                                  {[formatCustomerAddress(customer.address), preferredLocationName].filter(Boolean).join(' · ')}
                                 </span>
                               </span>
                             )}

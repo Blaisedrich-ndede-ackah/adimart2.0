@@ -23,6 +23,8 @@ import {
 } from '@/lib/paymentMethods';
 import { useFormatMoney, getStoreCurrency } from '@/lib/currency';
 import { getBluetoothHardwareStatus } from '@/lib/bluetoothPeripherals';
+import { formatCustomerAddress } from '@/lib/customerAddress';
+import { recordActivity } from '@/lib/activityLog';
 
 interface CheckoutOverlayProps {
   isOpen: boolean;
@@ -324,6 +326,18 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       };
       setSaleResult(completed);
       setStep('success');
+      if (currentStore?.id) {
+        recordActivity({
+          storeId: currentStore.id,
+          storeName: currentStore.name,
+          userId: currentUser.id,
+          username: currentUser.name,
+          role: currentUser.role,
+          activityType: 'sale',
+          summary: `Completed sale ${result.receiptNumber}`,
+          details: method,
+        });
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
@@ -1138,7 +1152,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                   type="text"
                   value={customerSearchQuery}
                   onChange={(e) => setCustomerSearchQuery(e.target.value)}
-                  placeholder="Search customers by name or phone…"
+                  placeholder="Search customers by name, phone, or address…"
                   className="w-full px-4 py-2 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none mb-2"
                 />
                 <select
@@ -1154,14 +1168,17 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                     .filter((customer) => {
                       const q = customerSearchQuery.toLowerCase().trim();
                       if (!q) return true;
+                      const address = formatCustomerAddress(customer.address).toLowerCase();
                       return (
                         customer.name.toLowerCase().includes(q) ||
-                        customer.phone.toLowerCase().includes(q)
+                        customer.phone.toLowerCase().includes(q) ||
+                        address.includes(q)
                       );
                     })
                     .map((customer) => (
                       <option key={customer.id} value={customer.id}>
                         {customer.name}{customer.phone ? ` · ${customer.phone}` : ''}
+                        {customer.address ? ` · ${formatCustomerAddress(customer.address)}` : ''}
                       </option>
                     ))}
                 </select>
@@ -1202,7 +1219,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                   type="text"
                   value={customerSearchQuery}
                   onChange={(e) => setCustomerSearchQuery(e.target.value)}
-                  placeholder="Search customers by name or phone…"
+                  placeholder="Search customers by name, phone, or address…"
                   className="w-full px-4 py-2 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none mb-2"
                 />
                 <select
@@ -1226,14 +1243,17 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                     .filter((customer) => {
                       const q = customerSearchQuery.toLowerCase().trim();
                       if (!q) return true;
+                      const address = formatCustomerAddress(customer.address).toLowerCase();
                       return (
                         customer.name.toLowerCase().includes(q) ||
-                        customer.phone.toLowerCase().includes(q)
+                        customer.phone.toLowerCase().includes(q) ||
+                        address.includes(q)
                       );
                     })
                     .map((customer) => (
                       <option key={customer.id} value={customer.id}>
                         {customer.name} · wallet {money(customer.wallet_balance || 0)}
+                        {customer.address ? ` · ${formatCustomerAddress(customer.address)}` : ''}
                       </option>
                     ))}
                 </select>
