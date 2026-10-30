@@ -11,6 +11,7 @@ import {
 import { useAuthStore } from '@/store/useAuthStore';
 import { formatCustomerAddress } from '@/lib/customerAddress';
 import { useFormatMoney } from '@/lib/currency';
+import { canViewStockQuantities } from '@/lib/stockVisibility';
 
 interface SearchPageProps {
   onNavigate?: (page: string) => void;
@@ -34,6 +35,7 @@ export default function SearchPage({ onNavigate }: SearchPageProps) {
   const { currentUser, currentStore } = useAuthStore();
   const money = useFormatMoney();
   const isOwner = currentUser?.role === 'owner';
+  const showStockQty = canViewStockQuantities(currentUser, currentStore);
   const [query, setQuery] = useState('');
   const [products, setProducts] = useState<LocalProduct[]>([]);
   const [customers, setCustomers] = useState<LocalCustomer[]>([]);
@@ -79,7 +81,12 @@ export default function SearchPage({ onNavigate }: SearchPageProps) {
           id: `product:${product.id}`,
           kind: 'product',
           title: product.name,
-          detail: [product.category, product.barcode, `${product.stock_level} in stock`, money(product.selling_price)]
+          detail: [
+            product.category,
+            product.barcode,
+            showStockQty ? `${product.stock_level} in stock` : '',
+            money(product.selling_price),
+          ]
             .filter(Boolean)
             .join(' · '),
           page: 'inventory',
@@ -140,7 +147,7 @@ export default function SearchPage({ onNavigate }: SearchPageProps) {
       }
     }
     return found.slice(0, 40);
-  }, [customers, money, products, query, suppliers, transactions]);
+  }, [customers, money, products, query, showStockQty, suppliers, transactions]);
 
   const iconFor = (kind: ResultKind) => {
     if (kind === 'product') return Package;

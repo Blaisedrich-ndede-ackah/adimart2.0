@@ -18,6 +18,7 @@ import {
 import { toMoneyAmount } from '@/lib/money';
 import { getStoreCurrency } from '@/lib/currency';
 import { useAuthStore } from '@/store/useAuthStore';
+import { recordActivity } from '@/lib/activityLog';
 
 interface AddProductProps {
   isOpen: boolean;
@@ -38,7 +39,8 @@ const WHOLESALE_MODES: { value: WholesaleMode; label: string }[] = [
 
 export default function AddProduct({ isOpen, onClose, onSaved, editProduct, initialBarcode, categories }: AddProductProps) {
   const currencySymbol = getStoreCurrency(useAuthStore((s) => s.currentStore?.currency_code)).symbol;
-  const currentUserId = useAuthStore((s) => s.currentUser?.id);
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const currentUserId = currentUser?.id;
   const [name, setName] = useState('');
   const [category, setCategory] = useState('Food');
   const [barcode, setBarcode] = useState('');
@@ -356,6 +358,17 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
       }
 
       void triggerPushSync('product-save');
+      if (currentUser) {
+        recordActivity({
+          storeId,
+          storeName: useAuthStore.getState().currentStore?.name,
+          userId: currentUser.id,
+          username: currentUser.name,
+          role: currentUser.role,
+          activityType: 'product',
+          summary: `${editProduct ? 'Updated' : 'Added'} product ${name.trim()}`,
+        });
+      }
       onSaved();
       onClose();
     } catch (err: unknown) {
@@ -632,6 +645,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-sm font-medium text-gray-700 mb-1.5 block">Stock Level *</label>
+              <p className="mb-1.5 text-[11px] text-gray-500">Increases are added only after a cashier confirms the items are physically present.</p>
               <input
                 type="number"
                 value={stockLevel}

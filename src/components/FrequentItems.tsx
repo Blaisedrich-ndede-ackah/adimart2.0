@@ -4,6 +4,8 @@ import { getCurrentStoreId, getCurrentStoreActiveProducts, getTransactionItems, 
 import ProductImage from '@/components/ProductImage';
 import { useFormatMoney } from '@/lib/currency';
 import { toQty } from '@/lib/warehouse';
+import { useAuthStore } from '@/store/useAuthStore';
+import { canViewStockQuantities } from '@/lib/stockVisibility';
 
 interface ProductWithFrequency {
   product: LocalProduct;
@@ -14,6 +16,10 @@ export default function FrequentItems({ onAddProduct }: { onAddProduct?: (produc
   const [frequentItems, setFrequentItems] = useState<ProductWithFrequency[]>([]);
   const [loading, setLoading] = useState(true);
   const money = useFormatMoney();
+  const showStockQty = canViewStockQuantities(
+    useAuthStore((state) => state.currentUser),
+    useAuthStore((state) => state.currentStore)
+  );
 
   useEffect(() => {
     async function loadFrequentItems() {
@@ -107,7 +113,7 @@ export default function FrequentItems({ onAddProduct }: { onAddProduct?: (produc
               <div className="p-1.5 space-y-0.5">
                 <p className="text-[10px] font-semibold text-gray-800 truncate">{product.name}</p>
                 <p className="text-[9px] text-amber-700 font-bold">{money(product.selling_price || 0)}</p>
-                {outOfStock && <p className="text-[8px] text-red-600 font-bold">Out of stock</p>}
+                {outOfStock && showStockQty && <p className="text-[8px] text-red-600 font-bold">Out of stock</p>}
               </div>
             </button>
           );

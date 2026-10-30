@@ -9,6 +9,7 @@ import {
 import { downloadBarcodeLabels, printBarcodeLabel } from '@/lib/barcodeLabels';
 import { useAuthStore } from '@/store/useAuthStore';
 import { triggerPushSync } from '@/lib/sync';
+import { isPendingStockReceipt } from '@/lib/stockApprovals';
 import {
   listLocations,
   receiveStock,
@@ -170,7 +171,7 @@ export default function InventoryTools({
       if (cost !== undefined && (!Number.isFinite(cost) || cost < 0)) {
         throw new Error('Enter a valid cost price.');
       }
-      await receiveStock({
+      const received = await receiveStock({
         storeId: currentStore.id,
         productId: product.id,
         locationId,
@@ -188,7 +189,9 @@ export default function InventoryTools({
       await refreshLocationStock();
       onStockChanged();
       void triggerPushSync('inventory-receive');
-      flash(`Received ${receiveQty} of ${product.name}.`);
+      flash(isPendingStockReceipt(received)
+        ? `${product.name} is waiting for a cashier to confirm the goods are present. Stock was not added.`
+        : `Received ${receiveQty} of ${product.name}.`);
     } catch (receiveError) {
       flash(receiveError instanceof Error ? receiveError.message : 'Could not record the receipt.', true);
     } finally {
@@ -227,7 +230,9 @@ export default function InventoryTools({
       await refreshLocationStock();
       onStockChanged();
       void triggerPushSync('inventory-stock-count');
-      flash(`Stock count saved. ${result.adjusted} adjusted, ${result.unchanged} already matched.`);
+      flash(result.pending > 0
+        ? `Stock count saved. ${result.adjusted} reduced, ${result.pending} increase${result.pending === 1 ? '' : 's'} waiting for cashier approval, ${result.unchanged} already matched.`
+        : `Stock count saved. ${result.adjusted} adjusted, ${result.unchanged} already matched.`);
     } catch (countError) {
       flash(countError instanceof Error ? countError.message : 'Could not save the stock count.', true);
     } finally {

@@ -24,6 +24,7 @@ import {
 import { useFormatMoney, getStoreCurrency } from '@/lib/currency';
 import { getBluetoothHardwareStatus } from '@/lib/bluetoothPeripherals';
 import { formatCustomerAddress } from '@/lib/customerAddress';
+import { recordActivity } from '@/lib/activityLog';
 
 interface CheckoutOverlayProps {
   isOpen: boolean;
@@ -325,6 +326,18 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       };
       setSaleResult(completed);
       setStep('success');
+      if (currentStore?.id) {
+        recordActivity({
+          storeId: currentStore.id,
+          storeName: currentStore.name,
+          userId: currentUser.id,
+          username: currentUser.name,
+          role: currentUser.role,
+          activityType: 'sale',
+          summary: `Completed sale ${result.receiptNumber}`,
+          details: method,
+        });
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);

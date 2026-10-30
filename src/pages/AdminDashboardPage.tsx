@@ -3,7 +3,7 @@ import {
   Building2, Users, Package, Wallet, RefreshCcw, LogOut, ChevronLeft, ChevronRight,
   Smartphone, CheckCircle2, AlertCircle, Loader2, Store, CreditCard, CalendarClock, Mail,
   FileBarChart, Download, FileText, Ban, LayoutDashboard, MoreHorizontal, X, Search, Megaphone,
-  BookOpen, Printer, UserPlus, MessagesSquare,
+  BookOpen, Printer, UserPlus, MessagesSquare, ScrollText,
 } from 'lucide-react';
 import {
   AdminDashboardData,
@@ -47,10 +47,11 @@ import AdminCreateStoreForm from '@/components/AdminCreateStoreForm';
 import AdminCampaignManager from '@/components/AdminCampaignManager';
 import AdminBroadcastSms from '@/components/AdminBroadcastSms';
 import AdminSupportAgent from '@/components/AdminSupportAgent';
+import AdminActivityLog from '@/components/AdminActivityLog';
 import CopyableStoreId from '@/components/CopyableStoreId';
 import AdminAgentsPanel from '@/components/AdminAgentsPanel';
 
-type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact' | 'campaigns' | 'learn' | 'sales' | 'agents' | 'support';
+type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact' | 'campaigns' | 'learn' | 'sales' | 'agents' | 'support' | 'activity';
 
 function defaultReportFromDate(): string {
   const d = new Date();
@@ -470,6 +471,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       ['campaigns', 'Campaigns', Megaphone],
       ['agents', 'Agents', UserPlus],
       ['support', 'Support', MessagesSquare],
+      ['activity', 'Activity', ScrollText],
       ['learn', 'Learn', BookOpen],
     ] as const
   );
@@ -1569,6 +1571,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
 
         {tab === 'agents' && <AdminAgentsPanel />}
         {tab === 'support' && <AdminSupportAgent />}
+        {tab === 'activity' && <AdminActivityLog />}
 
         {data && tab === 'products' && (
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">

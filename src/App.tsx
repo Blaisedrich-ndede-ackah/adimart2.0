@@ -32,6 +32,7 @@ import SubscriptionPage from '@/pages/SubscriptionPage';
 import WarehousePage from '@/pages/WarehousePage';
 import EcommercePage from '@/pages/EcommercePage';
 import PurchasingPage from '@/pages/PurchasingPage';
+import StockApprovalsPage from '@/pages/StockApprovalsPage';
 import OwnerHomePage from '@/pages/OwnerHomePage';
 import MultiStorePage from '@/pages/MultiStorePage';
 import LearnAdimatPage from '@/pages/LearnAdimatPage';
@@ -437,6 +438,8 @@ export default function App() {
         return role === 'owner' ? <InventoryPage openAddOnLoad={quickAction === 'add-product'} onQuickActionHandled={() => setQuickAction(null)} /> : <POSPage />;
       case 'purchasing':
         return role === 'owner' ? <PurchasingPage /> : <POSPage />;
+      case 'stock-approvals':
+        return <StockApprovalsPage />;
       case 'warehouse':
         return role === 'owner' ? (
           <WarehousePage onBackToSettings={leaveWarehouse} />
