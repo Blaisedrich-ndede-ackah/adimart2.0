@@ -33,6 +33,8 @@ import WarehousePage from '@/pages/WarehousePage';
 import EcommercePage from '@/pages/EcommercePage';
 import PurchasingPage from '@/pages/PurchasingPage';
 import StockApprovalsPage from '@/pages/StockApprovalsPage';
+import AdimatAiPage from '@/pages/AdimatAiPage';
+import HelpSupportPage from '@/pages/HelpSupportPage';
 import OwnerHomePage from '@/pages/OwnerHomePage';
 import MultiStorePage from '@/pages/MultiStorePage';
 import LearnAdimatPage from '@/pages/LearnAdimatPage';
@@ -440,6 +442,10 @@ export default function App() {
         return role === 'owner' ? <PurchasingPage /> : <POSPage />;
       case 'stock-approvals':
         return <StockApprovalsPage />;
+      case 'adimat-ai':
+        return <AdimatAiPage onNavigate={setCurrentPage} />;
+      case 'support':
+        return <HelpSupportPage />;
       case 'warehouse':
         return role === 'owner' ? (
           <WarehousePage onBackToSettings={leaveWarehouse} />

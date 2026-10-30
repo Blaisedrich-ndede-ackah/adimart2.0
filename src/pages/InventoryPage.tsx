@@ -29,6 +29,7 @@ import InventoryInsights from '@/components/InventoryInsights';
 import InventoryTools from '@/components/InventoryTools';
 import ManageProductCategoriesModal from '@/components/ManageProductCategoriesModal';
 import { downloadInventoryCsv, downloadInventoryPdf } from '@/lib/inventoryExport';
+import { scoreSmartSearch } from '@/lib/adimatAi/search';
 
 type SortMode = 'recent' | 'alpha' | 'stock-low' | 'stock-high';
 type InventorySection = 'products' | 'tools' | 'restock';
@@ -228,16 +229,22 @@ export default function InventoryPage({
           (p.name || '').toLowerCase().includes(q) ||
           (p.barcode || '').toLowerCase().includes(q) ||
           (p.category || '').toLowerCase().includes(q) ||
-          (p.sku_type || '').toLowerCase().includes(q)
+          (p.sku_type || '').toLowerCase().includes(q) ||
+          scoreSmartSearch(p, q) > 0
       );
+      if (sortMode === 'recent') {
+        result.sort((a, b) => scoreSmartSearch(b, q) - scoreSmartSearch(a, q));
+      }
     }
 
     switch (sortMode) {
       case 'recent':
-        result.sort(
-          (a, b) =>
-            new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
-        );
+        if (!searchQuery.trim()) {
+          result.sort(
+            (a, b) =>
+              new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
+          );
+        }
         break;
       case 'alpha':
         result.sort((a, b) => (a.name || '').localeCompare(b.name || ''));

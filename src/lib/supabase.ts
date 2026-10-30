@@ -23,11 +23,29 @@ function normalizeSupabaseUrl(url: string): string {
 const SUPABASE_URL = normalizeSupabaseUrl(import.meta.env.VITE_SUPABASE_URL) || 'https://placeholder.supabase.co';
 const SUPABASE_ANON_KEY = normalizeEnvValue(import.meta.env.VITE_SUPABASE_ANON_KEY) || 'placeholder-key';
 
+const SUPPORT_TOKEN_KEY = 'adimat_support_token';
+
+function fetchWithSupportToken(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers);
+  try {
+    const token = sessionStorage.getItem(SUPPORT_TOKEN_KEY);
+    if (token && !headers.has('x-adimat-support-token')) {
+      headers.set('x-adimat-support-token', token);
+    }
+  } catch {
+    // Private mode can block sessionStorage. Local tickets still work.
+  }
+  return fetch(input, { ...init, headers });
+}
+
 export const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: false,
+  },
+  global: {
+    fetch: fetchWithSupportToken,
   },
 });
 

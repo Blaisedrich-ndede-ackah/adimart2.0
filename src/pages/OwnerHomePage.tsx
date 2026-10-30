@@ -28,6 +28,7 @@ import { useT } from '@/lib/i18n';
 import { toQty } from '@/lib/warehouse';
 import { buildCustomerBalances } from '@/lib/customerBalances';
 import { useLiveStoreSales } from '@/hooks/useLiveStoreSales';
+import DailyBriefCard from '@/components/DailyBriefCard';
 
 interface OwnerHomePageProps {
   onNavigate: (page: string, quickAdd?: boolean) => void;
@@ -373,6 +374,8 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
             ))}
           </div>
         </section>
+
+        <DailyBriefCard onNavigate={onNavigate} />
 
         {linkedStoreCount > 1 && (
           <button type="button" onClick={() => onNavigate('multistore')} className="flex w-full items-center justify-between rounded-xl bg-white p-4 text-left shadow-sm touch-target">

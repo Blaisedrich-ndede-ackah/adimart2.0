@@ -31,6 +31,9 @@ import {
 import { triggerAutoSync } from '@/lib/sync';
 import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
+import { scoreSmartSearch } from '@/lib/adimatAi/search';
+import { useAlsoBuy } from '@/lib/adimatAi/useAdimatAi';
+import AlsoBuySuggestions from '@/components/AlsoBuySuggestions';
 import {
   loadOwnerPosLayout,
   saveOwnerPosLayout,
@@ -154,6 +157,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   const canWholesale = canUserSellWholesale(currentUser);
   const isStoreOwner = currentUser?.role === 'owner';
   const showStockQty = canViewStockQuantities(currentUser, currentStore);
+  const alsoBuy = useAlsoBuy(currentStore?.id, cart.items.map((item) => item.product_id));
   const retailLineCount = cart.items.filter((item) => item.sale_mode === 'retail').length;
   const wholesaleLineCount = cart.items.filter((item) => item.sale_mode === 'wholesale').length;
   const packLineCount = cart.items.filter((item) => item.unit_type === 'pack').length;
@@ -366,7 +370,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
       .filter((product) => selectedCategory === 'All' || product.category === selectedCategory)
       .map((product) => ({
         product,
-        relevance: q ? productMatchScore(product, q) : 0,
+        relevance: q ? Math.max(productMatchScore(product, q), scoreSmartSearch(product, q)) : 0,
         rank: salesRank[product.id],
       }))
       .filter(({ relevance }) => !q || relevance > 0)
@@ -1199,6 +1203,13 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                   </button>
                 </div>
 
+                <AlsoBuySuggestions
+                  suggestions={alsoBuy}
+                  onAdd={(productId) => {
+                    const product = products.find((candidate) => candidate.id === productId);
+                    if (product) void handleAddProduct(product);
+                  }}
+                />
                 {cart.items.map((item) => (
                   <div
                     key={item.id}

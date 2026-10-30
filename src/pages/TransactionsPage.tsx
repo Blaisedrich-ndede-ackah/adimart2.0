@@ -20,20 +20,9 @@ import { getPaymentMethodLabel } from '@/lib/paymentMethods';
 import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
 import CloudSyncPanel from '@/components/CloudSyncPanel';
+import { filterSalesByPeriod, type SalesPeriod } from '@/lib/salesRange';
 
-type Period = 'today' | 'week' | 'all';
-
-const PERIODS: Period[] = ['all', 'today', 'week'];
-
-function startOfToday(): number {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-}
-
-function startOfWeek(): number {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6).getTime();
-}
+const PERIODS: SalesPeriod[] = ['all', 'today', 'week', 'custom'];
 
 export default function TransactionsPage() {
   const { currentUser, currentStore } = useAuthStore();
@@ -42,7 +31,9 @@ export default function TransactionsPage() {
   const isOwner = currentUser?.role === 'owner';
   const [transactions, setTransactions] = useState<LocalTransaction[]>([]);
   const [search, setSearch] = useState('');
-  const [period, setPeriod] = useState<Period>('all');
+  const [period, setPeriod] = useState<SalesPeriod>('all');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const [itemsByTxn, setItemsByTxn] = useState<Record<string, LocalTransactionItem[]>>({});
   const [creditPaymentsByTxn, setCreditPaymentsByTxn] = useState<Record<string, LocalCreditPayment[]>>({});
   const [loading, setLoading] = useState(true);
@@ -116,13 +107,11 @@ export default function TransactionsPage() {
     setTimeout(() => setStatus(''), 4000);
   }, [t]);
 
-  const periodFiltered = useMemo(() => {
-    if (period === 'all') return transactions;
-    const floor = period === 'today' ? startOfToday() : startOfWeek();
-    return transactions.filter(
-      (txn) => new Date(txn.created_at).getTime() >= floor
-    );
-  }, [transactions, period]);
+  const periodResult = useMemo(
+    () => filterSalesByPeriod(transactions, period, customFrom, customTo),
+    [transactions, period, customFrom, customTo]
+  );
+  const periodFiltered = periodResult.rows;
 
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -192,7 +181,7 @@ export default function TransactionsPage() {
           />
         </div>
 
-        <div className="mb-3 flex gap-2" role="tablist" aria-label="Sales period">
+        <div className="mb-3 grid grid-cols-2 sm:grid-cols-4 gap-2" role="tablist" aria-label="Sales period">
           {PERIODS.map((option) => (
             <button
               key={option}
@@ -200,7 +189,7 @@ export default function TransactionsPage() {
               role="tab"
               aria-selected={period === option}
               onClick={() => setPeriod(option)}
-              className={`flex-1 rounded-xl px-2 py-2 text-xs font-semibold touch-target transition-colors ${
+              className={`rounded-xl px-2 py-2 text-xs font-semibold touch-target transition-colors ${
                 period === option
                   ? 'bg-primary text-white'
                   : 'bg-white border border-gray-100 text-gray-600 shadow-sm'
@@ -210,10 +199,42 @@ export default function TransactionsPage() {
                 ? t('sales.allTime')
                 : option === 'today'
                   ? t('sales.today')
-                  : t('sales.last7')}
+                  : option === 'week'
+                    ? t('sales.last7')
+                    : t('sales.custom')}
             </button>
           ))}
         </div>
+
+        {period === 'custom' && (
+          <div className="mb-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <label className="rounded-xl bg-white border border-gray-100 shadow-sm px-3 py-2 text-xs text-gray-500">
+              {t('sales.from')}
+              <input
+                type="datetime-local"
+                value={customFrom}
+                onChange={(event) => setCustomFrom(event.target.value)}
+                aria-label={t('sales.from')}
+                className="mt-1 w-full bg-transparent text-sm text-gray-900 outline-none"
+              />
+            </label>
+            <label className="rounded-xl bg-white border border-gray-100 shadow-sm px-3 py-2 text-xs text-gray-500">
+              {t('sales.to')}
+              <input
+                type="datetime-local"
+                value={customTo}
+                onChange={(event) => setCustomTo(event.target.value)}
+                aria-label={t('sales.to')}
+                className="mt-1 w-full bg-transparent text-sm text-gray-900 outline-none"
+              />
+            </label>
+            {periodResult.error ? (
+              <p className="sm:col-span-2 text-xs text-red-700">{t('sales.rangeInvalid')}</p>
+            ) : !customFrom || !customTo ? (
+              <p className="sm:col-span-2 text-xs text-gray-500">{t('sales.rangeHint')}</p>
+            ) : null}
+          </div>
+        )}
 
         {!isOwner && (
           <CloudSyncPanel hint={t('sync.cashierHint')} onSynced={() => void load()} />
@@ -239,7 +260,11 @@ export default function TransactionsPage() {
         {!loading && filtered.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16 text-gray-400">
             <Receipt className="w-12 h-12 mb-3" />
-            <p className="text-sm font-medium">{t('sales.noSales')}</p>
+            <p className="text-sm font-medium">
+              {period === 'custom' && customFrom && customTo && !periodResult.error
+                ? t('sales.rangeEmpty')
+                : t('sales.noSales')}
+            </p>
           </div>
         )}
 

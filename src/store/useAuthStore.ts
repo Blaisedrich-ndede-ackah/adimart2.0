@@ -156,6 +156,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           role: user.role,
         });
       }
+      void import('@/lib/support/access').then(({ issueOwnerSupportToken }) =>
+        issueOwnerSupportToken(user.store_id, user.id, pin)
+      );
       return true;
     }
     

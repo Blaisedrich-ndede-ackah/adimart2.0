@@ -13,6 +13,12 @@ import {
   normalizeDebtReminderMinBalance,
 } from './debtReminderConfig';
 import type { PaymentMethod } from './paymentMethods';
+import type {
+  LocalCannedReply,
+  LocalSupportMessage,
+  LocalSupportNotification,
+  LocalSupportTicket,
+} from './support/types';
 
 // Store represents a business/shop
 export interface LocalStore {
@@ -803,6 +809,10 @@ class AdimatDB extends Dexie {
   stock_receipt_requests!: Table<LocalStockReceiptRequest, string>;
   stock_approval_logs!: Table<LocalStockApprovalLog, string>;
   activity_logs!: Table<LocalActivityLog, string>;
+  support_tickets!: Table<LocalSupportTicket, string>;
+  support_messages!: Table<LocalSupportMessage, string>;
+  support_canned_replies!: Table<LocalCannedReply, string>;
+  support_notifications!: Table<LocalSupportNotification, string>;
 
   /* Agent Portal tables */
   agents!: Table<LocalAgent, string>;
@@ -1080,6 +1090,13 @@ class AdimatDB extends Dexie {
             store.cashiers_can_view_stock = 1;
           }
         });
+      });
+      /* Version 25 — Help & Support tickets, shared by the shop and the admin inbox */
+      this.version(25).stores({
+        support_tickets: 'id, store_id, status, priority, category, reference, updated_at, synced',
+        support_messages: 'id, ticket_id, store_id, created_at, synced',
+        support_canned_replies: 'id, title, synced',
+        support_notifications: 'id, store_id, ticket_id, created_at, read',
       });
   }
 }
@@ -4001,6 +4018,9 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
     const activitySync = await import('./activityLog').then((mod) => mod.pushActivityLogs(storeId));
     syncedCount += activitySync.synced;
     if (activitySync.error) errors.push(activitySync.error);
+    const supportSync = await import('./support/cloud').then((mod) => mod.pushSupportChanges(storeId));
+    syncedCount += supportSync.pushed;
+    if (supportSync.error) errors.push(supportSync.error);
 
     if (errors.length > 0) {
       return { success: false, message: `Partial sync. Errors: ${errors.join('; ')}` };
@@ -4924,6 +4944,17 @@ export async function syncFromSupabase(opts?: {
       const message = pullError instanceof Error ? pullError.message : String(pullError);
       if (!/does not exist|PGRST205|schema cache|permission denied|42501/i.test(message)) {
         errors.push(`Stock approvals: ${message}`);
+      }
+    }
+
+    try {
+      const { pullSupportChanges } = await import('./support/cloud');
+      const supportError = await pullSupportChanges(storeId);
+      if (supportError) errors.push(`Help & Support: ${supportError}`);
+    } catch (pullError) {
+      const message = pullError instanceof Error ? pullError.message : String(pullError);
+      if (!/does not exist|PGRST205|schema cache|permission denied|42501/i.test(message)) {
+        errors.push(`Help & Support: ${message}`);
       }
     }
 

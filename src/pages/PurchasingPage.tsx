@@ -8,6 +8,7 @@ import { addSupplier, cancelPurchaseOrder, createPurchaseOrder, parsePurchaseOrd
 import { triggerPushSync } from '@/lib/sync';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { syncBidirectional } from '@/lib/dexie';
+import { takeDraftPurchaseOrder } from '@/lib/adimatAi/draftPo';
 
 type OrderLineDraft = { productId: string; quantity: string; unitCost: string };
 
@@ -29,6 +30,7 @@ export default function PurchasingPage() {
   const [receivingId, setReceivingId] = useState<string | null>(null);
   const [receiptQuantities, setReceiptQuantities] = useState<Record<string, string>>({});
   const [message, setMessage] = useState('');
+  const [draftNote, setDraftNote] = useState('');
 
   const load = useCallback(async (sync = false) => {
     if (!currentStore?.id) return;
@@ -59,6 +61,20 @@ export default function PurchasingPage() {
       setMessage(error instanceof Error ? error.message : 'Could not load purchasing data.');
     });
   }, [load]);
+
+  useEffect(() => {
+    const draft = takeDraftPurchaseOrder();
+    if (!draft || draft.lines.length === 0) return;
+    setOrderForm(true);
+    setSupplierId(draft.supplierId);
+    setNotes(draft.notes);
+    setDraftNote(draft.notes);
+    setLines(draft.lines.map((line) => ({
+      productId: line.productId,
+      quantity: String(line.quantity),
+      unitCost: String(line.unitCost),
+    })));
+  }, []);
 
   const saveSupplier = async () => {
     if (!currentStore?.id) return;
@@ -217,6 +233,7 @@ export default function PurchasingPage() {
           </div>
           {orderForm && (
             <div className="mb-4 space-y-3 rounded-xl bg-slate-50 p-3">
+              {draftNote && <p className="text-xs text-emerald-800">{draftNote}</p>}
               <select aria-label="Supplier" value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
                 <option value="">Choose supplier</option>
                 {suppliers.filter((supplier) => supplier.is_active === 1).map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
