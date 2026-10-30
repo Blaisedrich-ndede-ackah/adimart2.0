@@ -18,6 +18,7 @@ import LoginPage from '@/pages/LoginPage';
 import CashierBlockedPage from '@/pages/CashierBlockedPage';
 import StoreAccessBlockedPage from '@/pages/StoreAccessBlockedPage';
 import POSPage from '@/pages/POSPage';
+import SearchPage from '@/pages/SearchPage';
 import InventoryPage from '@/pages/InventoryPage';
 import ReportsPage from '@/pages/ReportsPage';
 import ExpensesPage from '@/pages/ExpensesPage';
@@ -414,6 +415,8 @@ export default function App() {
         }} /> : <POSPage />;
       case 'pos':
         return <POSPage onNavigate={setCurrentPage} />;
+      case 'search':
+        return <SearchPage onNavigate={setCurrentPage} />;
       case 'transactions':
         return <TransactionsPage />;
       case 'customers':

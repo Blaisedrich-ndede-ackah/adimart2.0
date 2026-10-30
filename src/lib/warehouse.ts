@@ -1831,6 +1831,50 @@ export async function adjustLocationStock(params: {
   await syncProductStockLevel(params.productId);
 }
 
+/**
+ * Set on-hand quantity to a physical count. Unchanged lines are left alone.
+ * Differences are recorded as stock adjustments with a stock-count note.
+ */
+export async function recordStockCount(params: {
+  storeId: string;
+  locationId: string;
+  userId?: string | null;
+  counts: Array<{ productId: string; countedQty: number }>;
+  note?: string;
+}): Promise<{ adjusted: number; unchanged: number }> {
+  await ensureStoreLocations(params.storeId);
+  const location = await db.locations.get(params.locationId);
+  if (!location || location.store_id !== params.storeId) {
+    throw new Error('Location not found');
+  }
+  const note = (params.note || 'Physical stock count').trim().slice(0, 200);
+  let adjusted = 0;
+  let unchanged = 0;
+  for (const line of params.counts) {
+    const product = await db.products.get(line.productId);
+    if (!product || product.store_id !== params.storeId) {
+      throw new Error('A counted product is no longer in this store.');
+    }
+    const counted = Math.max(0, Math.floor(Number(line.countedQty) || 0));
+    const current = await getLocationStock(line.productId, params.locationId);
+    const delta = counted - current;
+    if (delta === 0) {
+      unchanged += 1;
+      continue;
+    }
+    await adjustLocationStock({
+      storeId: params.storeId,
+      productId: line.productId,
+      locationId: params.locationId,
+      delta,
+      note: `Stock count: ${note}`,
+      userId: params.userId || null,
+    });
+    adjusted += 1;
+  }
+  return { adjusted, unchanged };
+}
+
 export async function processSaleReturn(params: {
   storeId: string;
   userId: string;

@@ -4253,7 +4253,10 @@ export async function syncFromSupabase(opts?: {
           credit_balance: Number(row.credit_balance) || 0,
           status: row.status as 'completed' | 'pending',
           location_id: (row.location_id as string) || undefined,
-          sale_mode: ((row.sale_mode as 'retail' | 'wholesale') || 'retail'),
+          sale_mode:
+            row.sale_mode === 'wholesale' || row.sale_mode === 'mixed' || row.sale_mode === 'retail'
+              ? row.sale_mode
+              : 'retail',
           created_at: row.created_at as string,
           updated_at: (row.updated_at as string) || (row.created_at as string),
           synced: 1,
