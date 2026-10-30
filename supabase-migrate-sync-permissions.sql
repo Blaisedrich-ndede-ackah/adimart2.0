@@ -30,12 +30,24 @@ CREATE POLICY activity_logs_update
   USING (true)
   WITH CHECK (true);
 
-GRANT EXECUTE ON FUNCTION public.adimat_support_actor() TO anon, authenticated, service_role;
-
+-- RETURNS TABLE functions are stored with OUT arguments. Grant by the
+-- installed signature so a name-only grant cannot abort this script.
 DO $$
+DECLARE
+  fn regprocedure;
 BEGIN
+  SELECT p.oid::regprocedure INTO fn
+  FROM pg_proc p
+  JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE n.nspname = 'public'
+    AND p.proname = 'adimat_support_actor'
+  LIMIT 1;
+  IF fn IS NULL THEN
+    RAISE EXCEPTION 'adimat_support_actor is not installed. Run supabase-migrate-customer-care.sql first.';
+  END IF;
+  EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO anon, authenticated, service_role', fn);
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticator') THEN
-    GRANT EXECUTE ON FUNCTION public.adimat_support_actor() TO authenticator;
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO authenticator', fn);
   END IF;
 END $$;
 

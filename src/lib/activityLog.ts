@@ -57,10 +57,62 @@ function cloudPayload(row: LocalActivityLog): Record<string, unknown> {
 
 async function pushRow(row: LocalActivityLog): Promise<void> {
   if (!isSupabaseConfigured()) return;
-  const { error } = await supabase.from('activity_logs').upsert(cloudPayload(row), { onConflict: 'id' });
-  if (!error) {
-    await db.activity_logs.update(row.id, { synced: 1 });
+  await writeActivityRows([row]);
+}
+
+async function postActivity(rows: LocalActivityLog[]): Promise<string[] | null> {
+  try {
+    const response = await fetch('/api/shop-activity', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows: rows.map(cloudPayload) }),
+    });
+    if (response.status === 404) return null;
+    const payload = await response.json().catch(() => ({})) as { syncedIds?: unknown; error?: unknown };
+    if (!response.ok) return null;
+    return Array.isArray(payload.syncedIds) ? payload.syncedIds.map((id) => String(id)) : [];
+  } catch {
+    return null;
   }
+}
+
+async function writeDirect(row: LocalActivityLog): Promise<string> {
+  const payload = cloudPayload(row);
+  const inserted = await supabase.from('activity_logs').insert(payload).setHeader('Prefer', 'return=minimal');
+  if (!inserted.error) return '';
+  const message = inserted.error.message || '';
+  const code = inserted.error.code || '';
+  if (/does not exist|PGRST205|schema cache/i.test(message)) return 'missing';
+  const duplicate = code === '23505' || /duplicate key/i.test(message);
+  if (!duplicate) return message;
+  const updated = await supabase.from('activity_logs').update(payload).eq('id', row.id).setHeader('Prefer', 'return=minimal');
+  if (!updated.error) return '';
+  if (/does not exist|PGRST205|schema cache/i.test(updated.error.message || '')) return 'missing';
+  return updated.error.message || message;
+}
+
+async function writeActivityRows(rows: LocalActivityLog[]): Promise<{ synced: number; error: string }> {
+  if (rows.length === 0) return { synced: 0, error: '' };
+  const apiIds = await postActivity(rows);
+  const accepted = new Set(apiIds || []);
+  let synced = 0;
+  let error = '';
+  for (const row of rows) {
+    if (accepted.has(row.id)) {
+      await db.activity_logs.update(row.id, { synced: 1 });
+      synced += 1;
+      continue;
+    }
+    const direct = await writeDirect(row);
+    if (direct === '') {
+      await db.activity_logs.update(row.id, { synced: 1 });
+      synced += 1;
+      continue;
+    }
+    if (direct === 'missing') return { synced, error: '' };
+    if (!error) error = `Activity log: ${direct}`;
+  }
+  return { synced, error };
 }
 
 function defer(task: () => Promise<void>): void {
@@ -155,14 +207,5 @@ export async function pushActivityLogs(storeId: string): Promise<{ synced: numbe
     .equals(storeId)
     .and((row) => row.synced === 0)
     .toArray();
-  if (rows.length === 0) return { synced: 0, error: '' };
-  const { error } = await supabase.from('activity_logs').upsert(rows.map(cloudPayload), { onConflict: 'id' });
-  if (error) {
-    if (/does not exist|PGRST205|schema cache/i.test(error.message || '')) {
-      return { synced: 0, error: '' };
-    }
-    return { synced: 0, error: `Activity log: ${error.message}` };
-  }
-  await Promise.all(rows.map((row) => db.activity_logs.update(row.id, { synced: 1 })));
-  return { synced: rows.length, error: '' };
+  return writeActivityRows(rows);
 }

@@ -144,11 +144,24 @@ REVOKE ALL ON FUNCTION public.adimat_support_actor() FROM public, anon, authenti
 -- RLS policies call this function as anon. SECURITY DEFINER does not
 -- remove the need for EXECUTE, and the revoke above is what produces
 -- "permission denied for function adimat_support_actor".
-GRANT EXECUTE ON FUNCTION public.adimat_support_actor() TO anon, authenticated, service_role;
+-- Grant the installed signature (RETURNS TABLE is stored with OUT arguments).
 DO $$
+DECLARE
+  fn regprocedure;
 BEGIN
+  SELECT p.oid::regprocedure INTO fn
+  FROM pg_proc p
+  JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE n.nspname = 'public'
+    AND p.proname = 'adimat_support_actor'
+  ORDER BY p.oid DESC
+  LIMIT 1;
+  IF fn IS NULL THEN
+    RAISE EXCEPTION 'adimat_support_actor was not created.';
+  END IF;
+  EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO anon, authenticated, service_role', fn);
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticator') THEN
-    GRANT EXECUTE ON FUNCTION public.adimat_support_actor() TO authenticator;
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO authenticator', fn);
   END IF;
 END $$;
 

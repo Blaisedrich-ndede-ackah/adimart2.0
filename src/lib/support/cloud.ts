@@ -1,5 +1,6 @@
 import { db, type LocalStore, type LocalTransaction } from '@/lib/dexie';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { getSupportToken } from './access';
 import type { LocalCannedReply, LocalSupportMessage, LocalSupportTicket } from './types';
 import { notifyLocal } from './repository';
 
@@ -60,11 +61,73 @@ function toCloudTicket(ticket: LocalSupportTicket): Record<string, unknown> {
   return rest;
 }
 
+type CareResult<T> =
+  | { kind: 'ok'; data: T }
+  | { kind: 'unavailable' }
+  | { kind: 'unauthorized' }
+  | { kind: 'error'; message: string };
+
+async function postCare<T>(body: Record<string, unknown>): Promise<CareResult<T>> {
+  try {
+    const response = await fetch('/api/customer-care', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (response.status === 404) return { kind: 'unavailable' };
+    const payload = await response.json().catch(() => ({})) as T & { error?: unknown };
+    if (response.status === 401) return { kind: 'unauthorized' };
+    if (!response.ok) {
+      const message = typeof payload.error === 'string' && payload.error.trim()
+        ? payload.error
+        : 'Help & Support sync failed.';
+      if (/unknown customer care action/i.test(message)) return { kind: 'unavailable' };
+      return { kind: 'error', message };
+    }
+    return { kind: 'ok', data: payload };
+  } catch {
+    return { kind: 'unavailable' };
+  }
+}
+
+function quietSchemaError(message: string): boolean {
+  return /does not exist|schema cache|PGRST205/i.test(message);
+}
+
 export async function pushSupportChanges(storeId: string): Promise<{ pushed: number; error?: string }> {
   if (!isSupabaseConfigured()) return { pushed: 0 };
   const tickets = await db.support_tickets.where('store_id').equals(storeId).and((row) => row.synced === 0).toArray();
   const messages = await db.support_messages.where('store_id').equals(storeId).and((row) => row.synced === 0).toArray();
   const replies = await db.support_canned_replies.filter((row) => row.synced === 0).toArray();
+  const token = getSupportToken();
+  if (token && (tickets.length > 0 || messages.length > 0 || replies.length > 0)) {
+    const api = await postCare<{ ticketIds?: unknown; messageIds?: unknown; replyIds?: unknown }>({
+      action: 'sync-push',
+      token,
+      storeId,
+      tickets: tickets.map((ticket) => toCloudTicket(ticket)),
+      messages: messages.map((message) => {
+        const { synced: _synced, ...rest } = message;
+        return rest;
+      }),
+      replies: replies.map((reply) => ({ id: reply.id, title: reply.title, body: reply.body, updated_at: reply.updated_at })),
+    });
+    if (api.kind === 'ok') {
+      const ticketIds = new Set(Array.isArray(api.data.ticketIds) ? api.data.ticketIds.map(String) : []);
+      const messageIds = new Set(Array.isArray(api.data.messageIds) ? api.data.messageIds.map(String) : []);
+      const replyIds = new Set(Array.isArray(api.data.replyIds) ? api.data.replyIds.map(String) : []);
+      await Promise.all([
+        ...tickets.filter((ticket) => ticketIds.has(ticket.id)).map((ticket) => db.support_tickets.update(ticket.id, { synced: 1 })),
+        ...messages.filter((message) => messageIds.has(message.id)).map((message) => db.support_messages.update(message.id, { synced: 1 })),
+        ...replies.filter((reply) => replyIds.has(reply.id)).map((reply) => db.support_canned_replies.update(reply.id, { synced: 1 })),
+      ]);
+      return { pushed: ticketIds.size + messageIds.size + replyIds.size };
+    }
+    if (api.kind === 'error') {
+      if (quietSchemaError(api.message)) return { pushed: 0 };
+      return { pushed: 0, error: `Help & Support: ${api.message}` };
+    }
+  }
   let pushed = 0;
   if (tickets.length > 0) {
     const { error } = await supabase.from('support_tickets').upsert(
@@ -72,7 +135,7 @@ export async function pushSupportChanges(storeId: string): Promise<{ pushed: num
       { onConflict: 'id' }
     );
     if (error) {
-      if (/does not exist|schema cache|PGRST205/i.test(error.message)) return { pushed: 0 };
+      if (/does not exist|schema cache|PGRST205|permission denied for function/i.test(error.message)) return { pushed: 0 };
       return { pushed: 0, error: `Help & Support: ${error.message}` };
     }
     await Promise.all(tickets.map((ticket) => db.support_tickets.update(ticket.id, { synced: 1 })));
@@ -87,7 +150,7 @@ export async function pushSupportChanges(storeId: string): Promise<{ pushed: num
       { onConflict: 'id' }
     );
     if (error) {
-      if (/does not exist|schema cache|PGRST205/i.test(error.message)) return { pushed };
+      if (/does not exist|schema cache|PGRST205|permission denied for function/i.test(error.message)) return { pushed };
       return { pushed, error: `Help & Support messages: ${error.message}` };
     }
     await Promise.all(messages.map((message) => db.support_messages.update(message.id, { synced: 1 })));
@@ -120,13 +183,77 @@ async function mergeTicket(remote: LocalSupportTicket): Promise<void> {
   await db.support_tickets.put(remote);
 }
 
+async function applySupportPull(tickets: Record<string, unknown>[], messages: Record<string, unknown>[], replies: Record<string, unknown>[]): Promise<void> {
+  const remoteTickets = tickets.map(ticketFromCloud);
+  for (const ticket of remoteTickets) {
+    const before = await db.support_tickets.get(ticket.id);
+    await mergeTicket(ticket);
+    if (!before) {
+      await notifyLocal({
+        storeId: ticket.store_id,
+        ticketId: ticket.id,
+        title: `Ticket ${ticket.reference}`,
+        body: ticket.subject,
+      });
+    }
+  }
+  for (const row of messages) {
+    const message = messageFromCloud(row);
+    const existing = await db.support_messages.get(message.id);
+    if (!existing) {
+      await db.support_messages.put(message);
+      if (message.author_role === 'admin' && message.visibility === 'public') {
+        await notifyLocal({
+          storeId: message.store_id,
+          ticketId: message.ticket_id,
+          title: 'Customer care replied',
+          body: message.body.slice(0, 140),
+        });
+      }
+    }
+  }
+  for (const row of replies) {
+    const reply: LocalCannedReply = {
+      id: String(row.id),
+      title: String(row.title || ''),
+      body: String(row.body || ''),
+      updated_at: String(row.updated_at || ''),
+      synced: 1,
+    };
+    const local = await db.support_canned_replies.get(reply.id);
+    if (!local || local.synced !== 0) await db.support_canned_replies.put(reply);
+  }
+}
+
 export async function pullSupportChanges(storeId: string | null): Promise<string | null> {
   if (!isSupabaseConfigured()) return null;
+  const token = getSupportToken();
+  if (token) {
+    const api = await postCare<{ tickets?: unknown; messages?: unknown; replies?: unknown }>({
+      action: 'sync-pull',
+      token,
+      storeId,
+    });
+    if (api.kind === 'ok') {
+      const tickets = Array.isArray(api.data.tickets) ? api.data.tickets as Record<string, unknown>[] : [];
+      const messages = Array.isArray(api.data.messages) ? api.data.messages as Record<string, unknown>[] : [];
+      const replies = Array.isArray(api.data.replies) ? api.data.replies as Record<string, unknown>[] : [];
+      await applySupportPull(tickets, messages, replies);
+      return null;
+    }
+    if (api.kind === 'unauthorized') return null;
+    if (api.kind === 'error') {
+      if (quietSchemaError(api.message)) return null;
+      return api.message;
+    }
+  } else {
+    return null;
+  }
   let ticketQuery = supabase.from('support_tickets').select('*');
   if (storeId) ticketQuery = ticketQuery.eq('store_id', storeId);
   const tickets = await ticketQuery;
   if (tickets.error) {
-    if (/does not exist|schema cache|PGRST205|row-level security|42501/i.test(tickets.error.message)) return null;
+    if (/does not exist|schema cache|PGRST205|row-level security|42501|permission denied for function/i.test(tickets.error.message)) return null;
     return tickets.error.message;
   }
   const remoteTickets = ((tickets.data || []) as Record<string, unknown>[]).map(ticketFromCloud);
