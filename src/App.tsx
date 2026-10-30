@@ -19,6 +19,7 @@ import LoginPage from '@/pages/LoginPage';
 import CashierBlockedPage from '@/pages/CashierBlockedPage';
 import StoreAccessBlockedPage from '@/pages/StoreAccessBlockedPage';
 import POSPage from '@/pages/POSPage';
+import SearchPage from '@/pages/SearchPage';
 import InventoryPage from '@/pages/InventoryPage';
 import ReportsPage from '@/pages/ReportsPage';
 import ExpensesPage from '@/pages/ExpensesPage';
@@ -32,12 +33,13 @@ import SubscriptionPage from '@/pages/SubscriptionPage';
 import WarehousePage from '@/pages/WarehousePage';
 import EcommercePage from '@/pages/EcommercePage';
 import PurchasingPage from '@/pages/PurchasingPage';
-import OwnerHomePage from '@/pages/OwnerHomePage';
+import StockApprovalsPage from '@/pages/StockApprovalsPage';
 import AdimatAiPage from '@/pages/AdimatAiPage';
+import HelpSupportPage from '@/pages/HelpSupportPage';
+import OwnerHomePage from '@/pages/OwnerHomePage';
 import MultiStorePage from '@/pages/MultiStorePage';
 import LearnAdimatPage from '@/pages/LearnAdimatPage';
 import CampaignsPage from '@/pages/CampaignsPage';
-import HelpSupportPage from '@/pages/HelpSupportPage';
 import PublicShopPage from '@/pages/PublicShopPage';
 import TermsPage from '@/pages/TermsPage';
 import NotFoundPage from '@/pages/NotFoundPage';
@@ -217,7 +219,7 @@ export default function App() {
   useEffect(() => {
     // Cashiers cannot stay on owner-only pages after switch/login
     if (currentUser?.role !== 'cashier') return;
-    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'customers', 'returns', 'multistore'];
+    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'customers', 'returns', 'multistore', 'adimat-ai'];
     const ecommerceOk = (currentUser.can_manage_ecommerce ?? 0) === 1;
     const cashbookOk = canAccessCashbook(currentUser);
     if (
@@ -418,10 +420,10 @@ export default function App() {
           setQuickAction(quickAdd && page === 'inventory' ? 'add-product' : quickAdd && page === 'expenses' ? 'add-expense' : null);
           setCurrentPage(page);
         }} /> : <POSPage />;
-      case 'adimat-ai':
-        return <AdimatAiPage onNavigate={setCurrentPage} />;
       case 'pos':
         return <POSPage onNavigate={setCurrentPage} />;
+      case 'search':
+        return <SearchPage onNavigate={setCurrentPage} />;
       case 'transactions':
         return <TransactionsPage />;
       case 'customers':
@@ -442,6 +444,12 @@ export default function App() {
         return role === 'owner' ? <InventoryPage openAddOnLoad={quickAction === 'add-product'} onQuickActionHandled={() => setQuickAction(null)} /> : <POSPage />;
       case 'purchasing':
         return role === 'owner' ? <PurchasingPage /> : <POSPage />;
+      case 'stock-approvals':
+        return <StockApprovalsPage />;
+      case 'adimat-ai':
+        return role === 'owner' ? <AdimatAiPage onNavigate={setCurrentPage} /> : <POSPage />;
+      case 'support':
+        return <HelpSupportPage />;
       case 'warehouse':
         return role === 'owner' ? (
           <WarehousePage onBackToSettings={leaveWarehouse} />
@@ -458,8 +466,6 @@ export default function App() {
         return <ExpensesPage openAddOnLoad={quickAction === 'add-expense'} onQuickActionHandled={() => setQuickAction(null)} />;
       case 'cashbook':
         return canAccessCashbook(currentUser) ? <CashBookPage /> : <POSPage />;
-      case 'support':
-        return <HelpSupportPage />;
       case 'settings':
         return role === 'owner' ? (
           <SettingsPage onNavigate={setCurrentPage} />

@@ -5,7 +5,7 @@ import {
   type LocalSupplier,
   type PurchaseOrderLine,
 } from '@/lib/dexie';
-import { receiveStock } from '@/lib/warehouse';
+import { queueStockReceipt } from '@/lib/stockApprovals';
 
 export function parsePurchaseOrderLines(value: string): PurchaseOrderLine[] {
   let parsed: unknown;
@@ -94,69 +94,124 @@ export async function createPurchaseOrder(params: {
   await db.purchase_orders.add(order);
 }
 
+export function purchaseLineOpenQuantity(line: PurchaseOrderLine): number {
+  return Math.max(
+    0,
+    line.quantity - (Number(line.received_quantity) || 0) - (Number(line.pending_quantity) || 0)
+  );
+}
+
 export async function receivePurchaseOrder(params: {
   orderId: string;
   storeId: string;
   locationId: string;
   userId: string;
   quantities: number[];
-}): Promise<void> {
+}): Promise<{ pending: number }> {
+  const [order, location, user] = await Promise.all([
+    db.purchase_orders.get(params.orderId),
+    db.locations.get(params.locationId),
+    db.users.get(params.userId),
+  ]);
+  if (!order || order.store_id !== params.storeId) throw new Error('Purchase order not found.');
+  if (!location || location.store_id !== params.storeId) throw new Error('Location not found.');
+  let pending = 0;
   await db.transaction(
     'rw',
-    [db.purchase_orders, db.suppliers, db.products, db.locations, db.stock_batches, db.stock_movements],
+    [db.purchase_orders, db.suppliers, db.products, db.locations, db.stock_receipt_requests],
     async () => {
-      const order = await db.purchase_orders.get(params.orderId);
-      if (!order || order.store_id !== params.storeId) throw new Error('Purchase order not found.');
-      if (order.status !== 'ordered' && order.status !== 'partially_received') {
+      const fresh = await db.purchase_orders.get(params.orderId);
+      if (!fresh || fresh.store_id !== params.storeId) throw new Error('Purchase order not found.');
+      if (fresh.status !== 'ordered' && fresh.status !== 'partially_received') {
         throw new Error('Only open purchase orders can be received.');
       }
-      const supplier = await db.suppliers.get(order.supplier_id);
+      const supplier = await db.suppliers.get(fresh.supplier_id);
       if (!supplier || supplier.store_id !== params.storeId) throw new Error('Supplier not found.');
 
-      const items = parsePurchaseOrderLines(order.items_json);
-
-      let hasReceipt = false;
+      const items = parsePurchaseOrderLines(fresh.items_json);
       for (const [index, item] of items.entries()) {
-        const remaining = Math.max(0, item.quantity - (Number(item.received_quantity) || 0));
-        const quantity = params.quantities[index] ?? remaining;
-        if (!Number.isSafeInteger(quantity) || quantity < 0 || quantity > remaining) {
-          throw new Error(`Enter a whole received quantity from 0 to ${remaining} for "${item.product_name}".`);
+        const open = purchaseLineOpenQuantity(item);
+        const quantity = params.quantities[index] ?? open;
+        if (!Number.isSafeInteger(quantity) || quantity < 0 || quantity > open) {
+          throw new Error(`Enter a whole received quantity from 0 to ${open} for "${item.product_name}".`);
         }
         if (quantity === 0) continue;
         const product = await db.products.get(item.product_id);
         if (!product || product.store_id !== params.storeId) {
           throw new Error(`Product "${item.product_name}" is no longer in this store.`);
         }
-        await receiveStock({
+        await queueStockReceipt({
           storeId: params.storeId,
           productId: item.product_id,
+          productName: item.product_name,
           locationId: params.locationId,
+          locationName: location.name,
           quantity,
+          kind: 'purchase',
+          note: `Purchase ${fresh.order_number} from ${supplier.name}`,
+          batchCode: fresh.order_number,
           costPrice: item.unit_cost,
-          batchCode: order.order_number,
-          userId: params.userId,
-          note: `Purchase ${order.order_number} from ${supplier.name}`,
+          sourceId: fresh.id,
+          sourceLine: String(index),
+          requestedBy: params.userId,
+          requestedByName: user?.name || 'Staff',
         });
-        await db.products.update(product.id, {
-          cost_price: item.unit_cost,
-          updated_at: new Date().toISOString(),
-          synced: 0,
-        });
-        item.received_quantity = (Number(item.received_quantity) || 0) + quantity;
-        hasReceipt = true;
+        item.pending_quantity = (Number(item.pending_quantity) || 0) + quantity;
+        pending += 1;
       }
 
-      if (!hasReceipt) throw new Error('Enter at least one quantity to receive.');
-      const isFullyReceived = items.every((item) => item.received_quantity >= item.quantity);
-      await db.purchase_orders.update(order.id, {
+      if (pending === 0) throw new Error('Enter at least one quantity to receive.');
+      await db.purchase_orders.update(fresh.id, {
         items_json: JSON.stringify(items),
-        status: isFullyReceived ? 'received' : 'partially_received',
-        received_at: isFullyReceived ? new Date().toISOString() : undefined,
         updated_at: new Date().toISOString(),
         synced: 0,
       });
     }
   );
+  return { pending };
+}
+
+export async function settlePurchaseReceipt(
+  request: { store_id: string; source_id: string | null; source_line: string | null; quantity: number },
+  decision: 'approved' | 'rejected'
+): Promise<void> {
+  if (!request.source_id) return;
+  const order = await db.purchase_orders.get(request.source_id);
+  if (!order || order.store_id !== request.store_id) return;
+  const items = parsePurchaseOrderLines(order.items_json);
+  const line = items[Number(request.source_line)];
+  if (!line) return;
+  const waiting = Math.max(0, Number(line.pending_quantity) || 0);
+  if (decision === 'approved') {
+    line.received_quantity = (Number(line.received_quantity) || 0) + request.quantity;
+    line.pending_quantity = Math.max(0, waiting - request.quantity);
+    const product = await db.products.get(line.product_id);
+    if (product && product.store_id === request.store_id) {
+      await db.products.update(product.id, {
+        cost_price: line.unit_cost,
+        updated_at: new Date().toISOString(),
+        synced: 0,
+      });
+    }
+  } else {
+    line.pending_quantity = Math.max(0, waiting - request.quantity);
+  }
+  const fully = items.every((item) => (Number(item.received_quantity) || 0) >= item.quantity);
+  const anyReceived = items.some((item) => (Number(item.received_quantity) || 0) > 0);
+  const now = new Date().toISOString();
+  await db.purchase_orders.update(order.id, {
+    items_json: JSON.stringify(items),
+    status: order.status === 'cancelled'
+      ? 'cancelled'
+      : fully
+        ? 'received'
+        : anyReceived
+          ? 'partially_received'
+          : 'ordered',
+    received_at: fully ? now : order.received_at,
+    updated_at: now,
+    synced: 0,
+  });
 }
 
 export async function cancelPurchaseOrder(orderId: string, storeId: string): Promise<void> {

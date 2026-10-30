@@ -4,7 +4,7 @@ import { isSupabaseConfigured, supabase, testSupabaseConnection } from './supaba
 import { isAdminSuperPin } from './superPin';
 import { toMoneyAmount } from './money';
 import { formatUnknownError, isUuid, uuidOrNull } from './ids';
-import { cashbookAccessFromCloud } from './staffAccess';
+import { cashbookAccessFromCloud, optionalStaffFlag, storeAllowsCashierStock } from './staffAccess';
 import { normalizeSessionTimeoutMinutes } from './sessionTimeout';
 import {
   DEFAULT_DEBT_REMINDER_INTERVAL_DAYS,
@@ -86,6 +86,8 @@ export interface LocalStore {
   sales_target_daily?: number;
   /** Owner-set monthly sales target used by the live dashboard. */
   sales_target_monthly?: number;
+  /** When 0, cashier sessions hide on-hand quantities. Owners always see them. Default 1. */
+  cashiers_can_view_stock?: number;
   created_at: string;
   synced: number;
 }
@@ -105,6 +107,10 @@ export interface LocalCustomer {
   store_id: string;
   name: string;
   phone: string;
+  /** Preferred drop-off / service location (shop or warehouse) */
+  location_id?: string | null;
+  /** Freeform customer street, neighborhood, or delivery address */
+  address?: string;
   opening_balance: number;
   opening_balance_remaining: number;
   wallet_balance?: number;
@@ -166,6 +172,10 @@ export interface LocalUser {
   can_manage_ecommerce?: number;
   /** Cashiers may open Cash Book when 1. Missing = allowed (legacy). Owners always can. */
   can_access_cashbook?: number;
+  /** Cashiers may see on-hand quantities when 1. Missing follows the store default. */
+  can_view_stock?: number;
+  /** Cashiers may apply discounts when 1. Missing follows the store default. */
+  can_discount?: number;
   /** Owner-configured POS section order, shared across their signed-in devices. */
   pos_layout_json?: string;
   created_at: string;
@@ -415,7 +425,7 @@ export interface LocalTransaction {
   credit_balance?: number;
   status: 'completed' | 'pending';
   location_id?: string;
-  sale_mode?: 'retail' | 'wholesale';
+  sale_mode?: 'retail' | 'wholesale' | 'mixed';
   created_at: string;
   updated_at?: string;
   synced: number;
@@ -433,6 +443,7 @@ export interface LocalTransactionItem {
   unit_type?: string;
   pack_size?: number;
   base_quantity?: number;
+  sale_mode?: 'retail' | 'wholesale';
   batch_id?: string;
   synced: number;
 }
@@ -474,7 +485,7 @@ export interface LocalSaleReturn {
   receipt_number: string;
   location_id: string;
   customer_id?: string | null;
-  refund_method: 'cash' | 'wallet' | 'account' | 'none';
+  refund_method: 'cash' | 'wallet' | 'account' | 'today_sales' | 'none';
   refund_amount: number;
   debt_applied: number;
   wallet_credit: number;
@@ -600,6 +611,8 @@ export interface PurchaseOrderLine {
   quantity: number;
   unit_cost: number;
   received_quantity: number;
+  /** Quantity already sent to a cashier and not yet approved or rejected. */
+  pending_quantity?: number;
 }
 
 export interface LocalPurchaseOrder {
@@ -681,6 +694,69 @@ export interface LocalCashBookEntry {
   account_type?: 'cash' | 'bank';
 }
 
+export type StockReceiptKind = 'receive' | 'adjust_in' | 'purchase' | 'opening' | 'count';
+
+/** Goods or stock increases waiting for a cashier to confirm they are physically present. */
+export interface LocalStockReceiptRequest {
+  id: string;
+  store_id: string;
+  product_id: string;
+  product_name: string;
+  location_id: string;
+  location_name: string;
+  quantity: number;
+  kind: StockReceiptKind;
+  note: string;
+  batch_code: string;
+  expiry_date: string | null;
+  cost_price: number | null;
+  source_id: string | null;
+  source_line: string | null;
+  requested_by: string | null;
+  requested_by_name: string;
+  requested_at: string;
+  status: 'pending' | 'approved' | 'rejected';
+  decided_by: string | null;
+  decided_by_name: string | null;
+  decided_at: string | null;
+  decision_note: string;
+  synced: number;
+}
+
+/** Owner-visible record of who approved or rejected a stock arrival. */
+export interface LocalStockApprovalLog {
+  id: string;
+  store_id: string;
+  request_id: string;
+  product_id: string;
+  product_name: string;
+  quantity: number;
+  kind: string;
+  decision: 'approved' | 'rejected';
+  note: string;
+  approved_by: string | null;
+  approved_by_name: string;
+  approved_at: string;
+  synced: number;
+}
+
+/** Local copy of a platform activity row. The admin portal reads the cloud table, not this UI. */
+export interface LocalActivityLog {
+  id: string;
+  store_id: string;
+  store_name: string;
+  user_id: string;
+  username: string;
+  role: string;
+  activity_type: string;
+  summary: string;
+  details: string;
+  logged_in_at: string | null;
+  logged_out_at: string | null;
+  created_at: string;
+  synced: number;
+}
+
 export interface SyncMeta {
   id: string;
   last_synced_at: string;
@@ -740,6 +816,13 @@ class AdimatDB extends Dexie {
   sync_meta!: Table<SyncMeta, string>;
   app_config!: Table<AppConfig, string>;
   campaign_cache!: Table<CachedCampaigns, string>;
+  stock_receipt_requests!: Table<LocalStockReceiptRequest, string>;
+  stock_approval_logs!: Table<LocalStockApprovalLog, string>;
+  activity_logs!: Table<LocalActivityLog, string>;
+  support_tickets!: Table<LocalSupportTicket, string>;
+  support_messages!: Table<LocalSupportMessage, string>;
+  support_canned_replies!: Table<LocalCannedReply, string>;
+  support_notifications!: Table<LocalSupportNotification, string>;
 
   /* Agent Portal tables */
   agents!: Table<LocalAgent, string>;
@@ -751,10 +834,6 @@ class AdimatDB extends Dexie {
   agent_commissions!: Table<LocalAgentCommission, string>;
   agent_withdrawal_requests!: Table<LocalAgentWithdrawalRequest, string>;
   agent_commission_settings!: Table<LocalAgentCommissionSetting, string>;
-  support_tickets!: Table<LocalSupportTicket, string>;
-  support_messages!: Table<LocalSupportMessage, string>;
-  support_canned_replies!: Table<LocalCannedReply, string>;
-  support_notifications!: Table<LocalSupportNotification, string>;
   sync_outbox!: Table<LocalSyncOutbox, string>;
 
   constructor() {
@@ -997,11 +1076,41 @@ class AdimatDB extends Dexie {
       this.version(22).stores({
         agents: 'id, phone, status, synced',
       });
+      /* Version 23 — customer preferred location for deliveries / service */
       this.version(23).stores({
+        customers: 'id, store_id, name, phone, location_id, is_active, synced',
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table('customers')
+          .toCollection()
+          .modify((customer: LocalCustomer) => {
+            if (typeof customer.location_id !== 'string') {
+              customer.location_id = null;
+            }
+          });
+      });
+      /* Version 24 — stock arrival approval and the platform activity log */
+      this.version(24).stores({
+        stock_receipt_requests: 'id, store_id, product_id, status, requested_at, synced',
+        stock_approval_logs: 'id, store_id, request_id, approved_at, synced',
+        activity_logs: 'id, store_id, user_id, activity_type, created_at, synced',
+      }).upgrade(async (tx) => {
+        await tx.table('stores').toCollection().modify((store: LocalStore) => {
+          if (store.cashiers_can_view_stock !== 0 && store.cashiers_can_view_stock !== 1) {
+            store.cashiers_can_view_stock = 1;
+          }
+        });
+      });
+      /* Version 25 — Help & Support tickets, shared by the shop and the admin inbox */
+      this.version(25).stores({
         support_tickets: 'id, store_id, status, priority, category, reference, updated_at, synced',
         support_messages: 'id, ticket_id, store_id, created_at, synced',
         support_canned_replies: 'id, title, synced',
         support_notifications: 'id, store_id, ticket_id, created_at, read',
+      });
+      /* Version 26 — durable sync outbox for offline changes */
+      this.version(26).stores({
         sync_outbox: 'id, store_id, status, table_name, record_id, next_attempt_at',
       });
   }
@@ -1277,6 +1386,7 @@ export async function createStoreWithOwner(
     discount_allow_fixed: 1,
     cashier_can_discount: 1,
     cashier_can_see_stock: 0,
+    cashiers_can_view_stock: 0,
     session_timeout_minutes: 5,
     momo_account_name: '',
     momo_number: '',
@@ -1636,6 +1746,7 @@ export async function addUserToStore(
   const storeId = await getCurrentStoreId();
   if (!storeId) throw new Error('No store selected');
   
+  const store = await db.stores.get(storeId);
   const user: LocalUser = {
     id: generateId(),
     store_id: storeId,
@@ -1649,6 +1760,8 @@ export async function addUserToStore(
     can_sell_from_warehouse: role === 'owner' ? 1 : 0,
     can_manage_ecommerce: role === 'owner' ? 1 : 0,
     can_access_cashbook: role === 'owner' ? 1 : 0,
+    can_view_stock: role === 'owner' ? 1 : storeAllowsCashierStock(store) ? 1 : 0,
+    can_discount: role === 'owner' ? 1 : (store?.cashier_can_discount ?? 1) === 1 ? 1 : 0,
     created_at: new Date().toISOString(),
     synced: 0,
     pin_dirty: 1,
@@ -1756,15 +1869,19 @@ export async function getCurrentStoreCustomers(): Promise<LocalCustomer[]> {
 export async function createCustomer(
   name: string,
   phone: string,
-  openingBalance: number
+  openingBalance: number,
+  locationId: string | null = null,
+  address: string = ''
 ): Promise<LocalCustomer> {
   const storeId = await getCurrentStoreId();
   if (!storeId) throw new Error('No store selected');
   const cleanName = name.trim();
   const cleanPhone = phone.trim();
+  const cleanAddress = address.trim();
   const balance = toMoneyAmount(openingBalance);
   if (!cleanName) throw new Error('Customer name is required.');
   if (cleanName.length > 255 || cleanPhone.length > 30) throw new Error('Customer name or phone is too long.');
+  if (cleanAddress.length > 500) throw new Error('Customer address must be 500 characters or fewer.');
   if (!Number.isFinite(balance) || balance < 0) throw new Error('Opening balance must be zero or greater.');
   const existing = await db.customers.where('store_id').equals(storeId).toArray();
   if (existing.some((customer) =>
@@ -1780,6 +1897,8 @@ export async function createCustomer(
     store_id: storeId,
     name: cleanName,
     phone: cleanPhone,
+    location_id: locationId || null,
+    address: cleanAddress,
     opening_balance: balance,
     opening_balance_remaining: balance,
     is_active: 1,
@@ -1826,7 +1945,9 @@ export async function createCustomer(
 export async function updateCustomer(
   customerId: string,
   name: string,
-  phone: string
+  phone: string,
+  locationId: string | null = null,
+  address?: string
 ): Promise<void> {
   const storeId = await getCurrentStoreId();
   if (!storeId) throw new Error('No store selected');
@@ -1834,11 +1955,15 @@ export async function updateCustomer(
   if (!customer || customer.store_id !== storeId) throw new Error('Customer not found.');
   const cleanName = name.trim();
   const cleanPhone = phone.trim();
+  const cleanAddress = address === undefined ? customer.address || '' : address.trim();
   if (!cleanName) throw new Error('Customer name is required.');
   if (cleanName.length > 255 || cleanPhone.length > 30) throw new Error('Customer name or phone is too long.');
+  if (cleanAddress.length > 500) throw new Error('Customer address must be 500 characters or fewer.');
   await db.customers.update(customerId, {
     name: cleanName,
     phone: cleanPhone,
+    location_id: locationId || null,
+    address: cleanAddress,
     updated_at: new Date().toISOString(),
     synced: 0,
   });
@@ -2927,13 +3052,34 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
       ignoreDuplicates: appendOnly,
     });
     if (error) {
-      if (
+        if (
         table === 'stores' &&
-        /session_timeout_minutes/i.test(error.message)
+        /session_timeout_minutes|cashiers_can_view_stock|cashier_can_see_stock/i.test(error.message)
       ) {
         const stripped = rows.map((row) => {
           const copy = { ...(row as Record<string, unknown>) };
-          delete copy.session_timeout_minutes;
+          if (/session_timeout_minutes/i.test(error.message)) delete copy.session_timeout_minutes;
+          if (/cashiers_can_view_stock/i.test(error.message)) delete copy.cashiers_can_view_stock;
+          if (/cashier_can_see_stock/i.test(error.message)) delete copy.cashier_can_see_stock;
+          return copy;
+        });
+        const retry = await supabase.from(table).upsert(stripped, {
+          onConflict: 'id',
+          ignoreDuplicates: appendOnly,
+        });
+        if (!retry.error) {
+          await markSynced();
+          return rows.length;
+        }
+      }
+      if (
+        table === 'users' &&
+        /can_view_stock|can_discount/i.test(error.message)
+      ) {
+        const stripped = rows.map((row) => {
+          const copy = { ...(row as Record<string, unknown>) };
+          if (/can_view_stock/i.test(error.message)) delete copy.can_view_stock;
+          if (/can_discount/i.test(error.message)) delete copy.can_discount;
           return copy;
         });
         const retry = await supabase.from(table).upsert(stripped, {
@@ -3127,6 +3273,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
           discount_allow_fixed: (store.discount_allow_fixed ?? 1) === 1,
           cashier_can_discount: (store.cashier_can_discount ?? 1) === 1,
           cashier_can_see_stock: (store.cashier_can_see_stock ?? 0) === 1,
+          cashiers_can_view_stock: (store.cashiers_can_view_stock ?? (store.cashier_can_see_stock ?? 0)) === 1,
           session_timeout_minutes: normalizeSessionTimeoutMinutes(store.session_timeout_minutes),
           momo_account_name: store.momo_account_name || '',
           momo_number: store.momo_number || '',
@@ -3169,6 +3316,8 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
         can_sell_from_warehouse: (u.can_sell_from_warehouse ?? 0) === 1,
         can_manage_ecommerce: (u.can_manage_ecommerce ?? (u.role === 'owner' ? 1 : 0)) === 1,
         can_access_cashbook: u.role === 'owner' ? true : (u.can_access_cashbook ?? 1) === 1,
+        ...(u.can_view_stock === 0 || u.can_view_stock === 1 ? { can_view_stock: u.can_view_stock === 1 } : {}),
+        ...(u.can_discount === 0 || u.can_discount === 1 ? { can_discount: u.can_discount === 1 } : {}),
         pos_layout_json: u.role === 'owner' ? u.pos_layout_json || null : null,
         created_at: u.created_at,
       })),
@@ -3351,8 +3500,46 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
 
     const unsyncedMovements = await db.stock_movements.where('store_id').equals(storeId).and(m => m.synced === 0).toArray();
     const movementsToPush: LocalStockMovement[] = [];
-    for (const movement of unsyncedMovements) {
-      if (!isUuid(movement.id) || !isUuid(movement.store_id) || !isUuid(movement.product_id)) {
+    if (unsyncedMovements.length > 0) {
+      // Ensure products referenced by movements exist in cloud before pushing movements.
+      // Products are pushed earlier in this sync; re-upserting referenced products guards
+      // against rows marked synced locally yet missing from cloud (FK violation 23503).
+      const referencedProductIds = [...new Set(unsyncedMovements.map(m => m.product_id).filter((id): id is string => typeof id === 'string' && id.length > 0))];
+      const referencedProducts = await db.products.where('id').anyOf(referencedProductIds).toArray();
+      const localProductIds = new Set(referencedProducts.filter(p => p.store_id === storeId).map(p => p.id));
+      if (referencedProducts.length > 0) {
+        await upsertToSupabase(
+          'Products (movement references)',
+          'products',
+          referencedProducts.filter(p => p.store_id === storeId).map(p => ({
+            id: p.id,
+            store_id: p.store_id,
+            name: p.name,
+            category: p.category,
+            sku_type: p.sku_type,
+            barcode: p.barcode,
+            cost_price: p.cost_price,
+            selling_price: p.selling_price,
+            stock_level: p.stock_level,
+            is_active: p.is_active === 1,
+            image_url: p.image_url || '',
+            pack_size: p.pack_size ?? 1,
+            track_expiry: (p.track_expiry ?? 0) === 1,
+            wholesale_mode: p.wholesale_mode || 'none',
+            wholesale_pack_price: p.wholesale_pack_price ?? 0,
+            wholesale_unit_price: p.wholesale_unit_price ?? 0,
+            wholesale_tiers_json: p.wholesale_tiers_json || '[]',
+            sell_online: (p.sell_online ?? 0) === 1,
+            reorder_level: Number(p.reorder_level) || 0,
+            created_at: p.created_at,
+            updated_at: p.updated_at,
+          })),
+          async () => {},
+          errors
+        );
+      }
+      for (const movement of unsyncedMovements) {
+        if (!isUuid(movement.id) || !isUuid(movement.store_id) || !isUuid(movement.product_id)) {
         await db.stock_movements.delete(movement.id);
         continue;
       }
@@ -3377,6 +3564,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
       async () => { await Promise.all(movementsToPush.map(m => db.stock_movements.update(m.id, { synced: 1 }))); },
       errors
     );
+    }
 
     const unsyncedCustomers = await db.customers
       .where('store_id')
@@ -3391,6 +3579,8 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
         store_id: customer.store_id,
         name: customer.name,
         phone: customer.phone,
+        location_id: uuidOrNull(customer.location_id),
+        address: customer.address || '',
         opening_balance: customer.opening_balance,
         opening_balance_remaining: customer.opening_balance_remaining,
         wallet_balance: Number(customer.wallet_balance) || 0,
@@ -3588,6 +3778,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
         quantity: i.quantity,
         unit_price: i.unit_price,
         subtotal: i.subtotal,
+        sale_mode: i.sale_mode === 'wholesale' ? 'wholesale' : 'retail',
         unit_type: i.unit_type || 'base',
         pack_size: i.pack_size ?? 1,
         base_quantity: i.base_quantity ?? i.quantity,
@@ -3869,6 +4060,12 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
       errors
     );
 
+    const approvalSync = await import('./stockApprovals').then((mod) => mod.pushStockApprovalRecords(storeId));
+    syncedCount += approvalSync.synced;
+    if (approvalSync.error) errors.push(approvalSync.error);
+    const activitySync = await import('./activityLog').then((mod) => mod.pushActivityLogs(storeId));
+    syncedCount += activitySync.synced;
+    if (activitySync.error) errors.push(activitySync.error);
     try {
       const { pushSupportChanges } = await import('./support/cloud');
       const supportPush = await pushSupportChanges(storeId);
@@ -3970,6 +4167,12 @@ export async function syncFromSupabase(opts?: {
             : remoteStore.cashier_can_see_stock
               ? 1
               : 0,
+        cashiers_can_view_stock:
+          remoteStore.cashiers_can_view_stock == null
+            ? (localStore?.cashiers_can_view_stock ?? (localStore?.cashier_can_see_stock ?? 0))
+            : remoteStore.cashiers_can_view_stock === false
+              ? 0
+              : 1,
         session_timeout_minutes:
           remoteStore.session_timeout_minutes == null
             ? (localStore?.session_timeout_minutes ?? 5)
@@ -4059,6 +4262,8 @@ export async function syncFromSupabase(opts?: {
           can_sell_from_warehouse: row.can_sell_from_warehouse ? 1 : 0,
           can_manage_ecommerce: (row.can_manage_ecommerce || row.role === 'owner') ? 1 : 0,
           can_access_cashbook: cashbookAccessFromCloud(row.role, row.can_access_cashbook),
+          can_view_stock: optionalStaffFlag(row.can_view_stock),
+          can_discount: optionalStaffFlag(row.can_discount),
           pos_layout_json: row.role === 'owner' && typeof row.pos_layout_json === 'string'
             ? row.pos_layout_json
             : undefined,
@@ -4088,6 +4293,8 @@ export async function syncFromSupabase(opts?: {
                 local.can_sell_from_warehouse ?? remote.can_sell_from_warehouse,
               can_manage_ecommerce: local.can_manage_ecommerce ?? remote.can_manage_ecommerce,
               can_access_cashbook: local.can_access_cashbook ?? remote.can_access_cashbook,
+              can_view_stock: local.can_view_stock ?? remote.can_view_stock,
+              can_discount: local.can_discount ?? remote.can_discount,
               pos_layout_json: local.pos_layout_json ?? remote.pos_layout_json,
               synced: 0,
             };
@@ -4125,6 +4332,13 @@ export async function syncFromSupabase(opts?: {
           store_id: String(row.store_id),
           name: String(row.name || ''),
           phone: String(row.phone || ''),
+          location_id:
+            typeof row.location_id === 'string'
+              ? row.location_id
+              : row.location_id === null
+                ? null
+                : undefined,
+          address: typeof row.address === 'string' ? row.address : undefined,
           opening_balance: Number(row.opening_balance) || 0,
           opening_balance_remaining: Number(row.opening_balance_remaining) || 0,
           wallet_balance: Number(row.wallet_balance) || 0,
@@ -4137,14 +4351,31 @@ export async function syncFromSupabase(opts?: {
         dbTable: db.customers,
         merge: async (remote: LocalCustomer, local: LocalCustomer | undefined) => {
           if (!local || local.synced !== 0) {
-            return { ...remote, balance_synced: remote.opening_balance_remaining, synced: 1 };
+            return {
+              ...remote,
+              location_id:
+                remote.location_id === undefined
+                  ? local?.location_id ?? null
+                  : remote.location_id,
+              address: remote.address === undefined ? local?.address ?? '' : remote.address,
+              balance_synced: remote.opening_balance_remaining,
+              synced: 1,
+            };
           }
+          const withAddress = {
+            ...remote,
+            location_id:
+              remote.location_id === undefined ? local.location_id ?? null : remote.location_id,
+            address: remote.address === undefined ? local.address ?? '' : remote.address,
+          };
           const base = local.balance_synced;
           const localDelta = typeof base === 'number' ? local.opening_balance_remaining - base : 0;
-          const remaining = mergeBalanceDeltas(remote.opening_balance_remaining, localDelta);
-          const winner = lastWriteWins(local, remote);
+          const remaining = mergeBalanceDeltas(withAddress.opening_balance_remaining, localDelta);
+          const winner = lastWriteWins(local, withAddress);
           return {
             ...winner,
+            location_id: withAddress.location_id,
+            address: winner.address || withAddress.address,
             opening_balance_remaining: remaining,
             balance_synced: remaining,
             synced: winner === local ? 0 : 1,
@@ -4222,7 +4453,10 @@ export async function syncFromSupabase(opts?: {
           credit_balance: Number(row.credit_balance) || 0,
           status: row.status as 'completed' | 'pending',
           location_id: (row.location_id as string) || undefined,
-          sale_mode: ((row.sale_mode as 'retail' | 'wholesale') || 'retail'),
+          sale_mode:
+            row.sale_mode === 'wholesale' || row.sale_mode === 'mixed' || row.sale_mode === 'retail'
+              ? row.sale_mode
+              : 'retail',
           created_at: row.created_at as string,
           updated_at: (row.updated_at as string) || (row.created_at as string),
           synced: 1,
@@ -4332,6 +4566,12 @@ export async function syncFromSupabase(opts?: {
           quantity: Number(row.quantity) || 0,
           unit_price: Number(row.unit_price) || 0,
           subtotal: Number(row.subtotal) || 0,
+          sale_mode:
+            row.sale_mode === 'wholesale'
+              ? 'wholesale'
+              : row.sale_mode === 'retail'
+                ? 'retail'
+                : undefined,
           unit_type: (row.unit_type as string) || 'base',
           pack_size: Number(row.pack_size) || 1,
           base_quantity: Number(row.base_quantity) || Number(row.quantity) || 0,
@@ -4357,9 +4597,13 @@ export async function syncFromSupabase(opts?: {
           receipt_number: String(row.receipt_number || ''),
           location_id: String(row.location_id || ''),
           customer_id: String(row.customer_id || '') || null,
-          refund_method: row.refund_method === 'cash' || row.refund_method === 'wallet' || row.refund_method === 'account'
-            ? row.refund_method
-            : 'none',
+          refund_method:
+            row.refund_method === 'cash' ||
+            row.refund_method === 'wallet' ||
+            row.refund_method === 'account' ||
+            row.refund_method === 'today_sales'
+              ? row.refund_method
+              : 'none',
           refund_amount: Number(row.refund_amount) || 0,
           debt_applied: Number(row.debt_applied) || 0,
           wallet_credit: Number(row.wallet_credit) || 0,
@@ -4774,6 +5018,27 @@ export async function syncFromSupabase(opts?: {
     const { refreshRemoteLedgerClearAndApply } = await import('./storeLedgerClear');
     const ledgerAfterPull = await refreshRemoteLedgerClearAndApply(storeId);
     const droppedSales = ledgerAfterPull.dropped.transactions;
+
+    try {
+      const { pullStockApprovalRecords } = await import('./stockApprovals');
+      pulledCount += await pullStockApprovalRecords(storeId);
+    } catch (pullError) {
+      const message = pullError instanceof Error ? pullError.message : String(pullError);
+      if (!/does not exist|PGRST205|schema cache|permission denied|42501/i.test(message)) {
+        errors.push(`Stock approvals: ${message}`);
+      }
+    }
+
+    try {
+      const { pullSupportChanges } = await import('./support/cloud');
+      const supportError = await pullSupportChanges(storeId);
+      if (supportError) errors.push(`Help & Support: ${supportError}`);
+    } catch (pullError) {
+      const message = pullError instanceof Error ? pullError.message : String(pullError);
+      if (!/does not exist|PGRST205|schema cache|permission denied|42501/i.test(message)) {
+        errors.push(`Help & Support: ${message}`);
+      }
+    }
 
     if (errors.length > 0) {
       return { success: false, message: `Partial pull. Errors: ${errors.join('; ')}`, pulledCount };

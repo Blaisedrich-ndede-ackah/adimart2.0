@@ -28,10 +28,12 @@ import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 import { playScanBeep } from '@/lib/scanBeep';
 import ProductImage from '@/components/ProductImage';
 import InventoryInsights from '@/components/InventoryInsights';
+import InventoryTools from '@/components/InventoryTools';
 import ManageProductCategoriesModal from '@/components/ManageProductCategoriesModal';
 import { downloadInventoryCsv, downloadInventoryPdf } from '@/lib/inventoryExport';
 
 type SortMode = 'recent' | 'alpha' | 'stock-low' | 'stock-high';
+type InventorySection = 'products' | 'tools' | 'restock';
 
 export default function InventoryPage({
   openAddOnLoad = false,
@@ -62,7 +64,7 @@ export default function InventoryPage({
   const [syncStatus, setSyncStatus] = useState('');
   const [scannedBarcodeForAdd, setScannedBarcodeForAdd] = useState<string | null>(null);
   const [highlightedProductId, setHighlightedProductId] = useState<string | null>(null);
-  const [showInsights, setShowInsights] = useState(false);
+  const [section, setSection] = useState<InventorySection>('products');
   const [showManageCategories, setShowManageCategories] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [exportStatus, setExportStatus] = useState('');
@@ -223,18 +225,28 @@ export default function InventoryPage({
     }
 
     if (searchQuery.trim()) {
-      const q = searchQuery.trim();
-      result = result
-        .map((product) => ({ product, score: scoreSmartSearch(product, q) }))
-        .filter((row) => row.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .map((row) => row.product);
-    } else switch (sortMode) {
+      const q = searchQuery.trim().toLowerCase();
+      result = result.filter(
+        (p) =>
+          (p.name || '').toLowerCase().includes(q) ||
+          (p.barcode || '').toLowerCase().includes(q) ||
+          (p.category || '').toLowerCase().includes(q) ||
+          (p.sku_type || '').toLowerCase().includes(q) ||
+          scoreSmartSearch(p, q) > 0
+      );
+      if (sortMode === 'recent') {
+        result.sort((a, b) => scoreSmartSearch(b, q) - scoreSmartSearch(a, q));
+      }
+    }
+
+    switch (sortMode) {
       case 'recent':
-        result.sort(
-          (a, b) =>
-            new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
-        );
+        if (!searchQuery.trim()) {
+          result.sort(
+            (a, b) =>
+              new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
+          );
+        }
         break;
       case 'alpha':
         result.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
@@ -530,15 +542,29 @@ export default function InventoryPage({
 
       {/* Product List */}
       <div className="page-body no-scrollbar">
-        <div className="mb-3 flex gap-2">
-          <button type="button" onClick={() => setShowInsights(false)} className={`rounded-lg px-3 py-2 text-xs font-semibold touch-target ${!showInsights ? 'bg-primary text-white' : 'bg-white text-gray-700 border border-gray-200'}`}>
-            Products
-          </button>
-          <button type="button" onClick={() => setShowInsights(true)} className={`rounded-lg px-3 py-2 text-xs font-semibold touch-target ${showInsights ? 'bg-primary text-white' : 'bg-white text-gray-700 border border-gray-200'}`}>
-            Restock & audit
-          </button>
+        <div className="mb-3 flex gap-2 overflow-x-auto no-scrollbar">
+          {([
+            ['products', 'Products'],
+            ['tools', 'Stock tools'],
+            ['restock', 'Restock'],
+          ] as const).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setSection(id)}
+              className={`rounded-lg px-3 py-2 text-xs font-semibold whitespace-nowrap touch-target ${
+                section === id ? 'bg-primary text-white' : 'bg-white text-gray-700 border border-gray-200'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
-        {showInsights ? (
+        {section === 'tools' ? (
+          currentStore?.id ? (
+            <InventoryTools products={products} onStockChanged={() => { void loadProducts({ sync: true }); }} />
+          ) : null
+        ) : section === 'restock' ? (
           currentStore?.id ? (
             <InventoryInsights
               storeId={currentStore.id}

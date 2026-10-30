@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle,
   Loader2,
+  MapPin,
   Pencil,
   Plus,
+  Search,
   Send,
   Users,
   X,
@@ -25,6 +27,7 @@ import {
   LocalCustomer,
   LocalCustomerOpeningPayment,
   LocalCustomerWalletTransaction,
+  type LocalLocation,
   LocalSaleReturn,
   LocalCreditPayment,
   LocalTransaction,
@@ -34,6 +37,7 @@ import {
   setCustomerActive,
   updateCustomer,
 } from '@/lib/dexie';
+import { listLocations } from '@/lib/warehouse';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
@@ -49,6 +53,11 @@ import {
 import DebtRemindersPanel from '@/components/DebtRemindersPanel';
 import { setCustomerDebtReminderOptOut } from '@/lib/debtReminders';
 import { shopOwnerLedger, type ShopTransaction } from '@/lib/shopClient';
+import {
+  formatCustomerAddress,
+  joinCustomerAddress,
+  splitCustomerAddress,
+} from '@/lib/customerAddress';
 
 interface CustomersPageProps {
   onNavigate?: (page: string) => void;
@@ -80,8 +89,38 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
   const [editing, setEditing] = useState<LocalCustomer | null>(null);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [street, setStreet] = useState('');
+  const [city, setCity] = useState('');
+  const [region, setRegion] = useState('');
   const [openingBalance, setOpeningBalance] = useState('');
+  const [locationId, setLocationId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [locations, setLocations] = useState<LocalLocation[]>([]);
   const [paymentAmounts, setPaymentAmounts] = useState<Record<string, string>>({});
+
+  const locationNameById = useMemo(
+    () => new Map(locations.map((location) => [location.id, location.name] as const)),
+    [locations]
+  );
+  const filteredCustomers = useMemo(() => {
+    const query = searchQuery.trim().toLocaleLowerCase();
+    if (!query) return customers;
+    return customers.filter((customer) => {
+      const preferredLocation = customer.location_id
+        ? locationNameById.get(customer.location_id) || ''
+        : '';
+      const searchableText = [
+        customer.name,
+        customer.phone,
+        formatCustomerAddress(customer.address),
+        customer.address || '',
+        preferredLocation,
+      ]
+        .join(' ')
+        .toLocaleLowerCase();
+      return searchableText.includes(query);
+    });
+  }, [customers, searchQuery, locationNameById]);
   const [repaymentMethods, setRepaymentMethods] = useState<Record<string, 'cash' | 'momo' | 'cheque' | 'split'>>({});
   const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null);
   const [smsMessage, setSmsMessage] = useState('');
@@ -120,6 +159,11 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
         getCurrentStoreBulkSmsCampaigns(),
         countCurrentStoreCustomerRecipients(),
       ]);
+      const storeId = await getCurrentStoreId();
+      if (storeId) {
+        const locs = await listLocations(storeId);
+        setLocations(locs.filter((l) => l.is_active === 1));
+      }
       const activeAndArchived = allCustomers.sort((a, b) =>
         Number(b.is_active) - Number(a.is_active) || a.name.localeCompare(b.name)
       );
@@ -151,7 +195,6 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
         ] as const)
       );
       setWalletTransactionsByCustomer(Object.fromEntries(walletEntries));
-      const storeId = await getCurrentStoreId();
       const allReturns = storeId
         ? await db.sales_returns.where('store_id').equals(storeId).toArray()
         : [];
@@ -184,16 +227,25 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
     setEditing(null);
     setName('');
     setPhone('');
+    setStreet('');
+    setCity('');
+    setRegion('');
     setOpeningBalance('');
+    setLocationId(null);
     setError('');
   };
 
   const startEdit = (customer: LocalCustomer) => {
     setIsFormOpen(true);
     setEditing(customer);
+    const parts = splitCustomerAddress(customer.address);
     setName(customer.name);
     setPhone(customer.phone);
+    setStreet(parts.street);
+    setCity(parts.city);
+    setRegion(parts.region);
     setOpeningBalance('');
+    setLocationId(customer.location_id ?? null);
     setError('');
   };
 
@@ -202,14 +254,15 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
     setError('');
     setSaving(true);
     try {
+      const address = joinCustomerAddress({ street, city, region });
       if (editing) {
-        await updateCustomer(editing.id, name, phone);
+        await updateCustomer(editing.id, name, phone, locationId, address);
       } else {
         const amount = openingBalance.trim() ? Number(openingBalance) : 0;
         if (!Number.isFinite(amount) || amount < 0) {
           throw new Error('Enter a valid opening balance.');
         }
-        await createCustomer(name, phone, amount);
+        await createCustomer(name, phone, amount, locationId, address);
       }
       resetForm();
       setStatus(editing ? 'Customer details updated.' : 'Customer registered.');
@@ -575,6 +628,70 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                 className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
               />
             </label>
+            <fieldset className="space-y-3 rounded-xl border border-gray-100 p-3">
+              <legend className="px-1 text-sm font-medium text-gray-700">
+                Customer address <span className="text-gray-400 text-xs">(optional)</span>
+              </legend>
+              <label className="block text-sm font-medium text-gray-700">
+                Street, house, or area
+                <input
+                  maxLength={200}
+                  autoComplete="street-address"
+                  value={street}
+                  onChange={(event) => setStreet(event.target.value)}
+                  placeholder="House number, street, or neighborhood"
+                  className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
+                />
+              </label>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  City / town
+                  <input
+                    maxLength={80}
+                    autoComplete="address-level2"
+                    value={city}
+                    onChange={(event) => setCity(event.target.value)}
+                    placeholder="Accra"
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
+                  />
+                </label>
+                <label className="block text-sm font-medium text-gray-700">
+                  Region
+                  <input
+                    maxLength={80}
+                    autoComplete="address-level1"
+                    value={region}
+                    onChange={(event) => setRegion(event.target.value)}
+                    placeholder="Greater Accra"
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
+                  />
+                </label>
+              </div>
+              <p className="text-xs text-gray-400">
+                Saved on the customer record. Search and checkout can find it by street, city, or region.
+              </p>
+            </fieldset>
+            {locations.length > 0 && (
+              <label className="block text-sm font-medium text-gray-700">
+                Preferred location
+                <select
+                  value={locationId || ''}
+                  onChange={(event) => setLocationId(event.target.value || null)}
+                  className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
+                >
+                  <option value="">None (default)</option>
+                  {locations.map((loc) => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.name} ({loc.location_type})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">
+                  The shop or warehouse where this customer prefers to collect
+                  or receive deliveries.
+                </p>
+              </label>
+            )}
             {!editing && (
               <>
                 <label className="block text-sm font-medium text-gray-700">
@@ -629,7 +746,45 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
           </div>
         ) : (
           <div className="space-y-3">
-            {customers.map((customer) => {
+            <div className="relative">
+              <label className="sr-only" htmlFor="customer-search">
+                Search customers by name, phone, address, or preferred location
+              </label>
+              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
+              <input
+                id="customer-search"
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search name, phone, address, or location…"
+                className="w-full pl-9 pr-10 py-2 bg-white border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  aria-label="Clear customer search"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+            {filteredCustomers.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-gray-200 bg-white p-8 text-center shadow-sm" aria-live="polite">
+                <h3 className="font-semibold text-gray-900">No matching customers</h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Try another name, phone number, address, or preferred location.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="mt-4 rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  Clear search
+                </button>
+              </div>
+            ) : filteredCustomers.map((customer) => {
               const customerSales = creditByCustomer.get(customer.id) || [];
               const salesBalance = customerSales.reduce(
                 (balance, transaction) => balance + (Number(transaction.credit_balance) || 0),
@@ -643,6 +798,9 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                 .join('')
                 .toUpperCase()
                 .slice(0, 2);
+              const preferredLocationName = customer.location_id
+                ? locationNameById.get(customer.location_id) || ''
+                : '';
               return (
                 <section key={customer.id} className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm transition-all hover:shadow-md">
                   <div className="p-4">
@@ -671,6 +829,14 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                             <span className="mt-0.5 block text-xs text-gray-500">
                               <Phone className="h-3 w-3 mr-1" /> {customer.phone || 'No phone number'}
                             </span>
+                            {(customer.address || preferredLocationName) && (
+                              <span className="mt-0.5 flex items-start gap-1 text-xs text-gray-500">
+                                <MapPin className="mt-0.5 h-3 w-3 shrink-0 text-gray-400" />
+                                <span className="min-w-0 break-words">
+                                  {[formatCustomerAddress(customer.address), preferredLocationName].filter(Boolean).join(' · ')}
+                                </span>
+                              </span>
+                            )}
                           </div>
                         </div>
                       </button>

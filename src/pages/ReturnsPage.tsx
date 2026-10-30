@@ -9,7 +9,8 @@ import {
   type LocalTransaction,
   type LocalTransactionItem,
 } from '@/lib/dexie';
-import { processSaleReturn } from '@/lib/warehouse';
+import { getTodaySalesCashAvailable, processSaleReturn } from '@/lib/warehouse';
+import { recordActivity } from '@/lib/activityLog';
 import { fileToProductImageDataUrl } from '@/lib/productImage';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useFormatMoney } from '@/lib/currency';
@@ -27,7 +28,8 @@ export default function ReturnsPage() {
   const [quantity, setQuantity] = useState('1');
   const [reason, setReason] = useState('');
   const [photo, setPhoto] = useState('');
-  const [refundMethod, setRefundMethod] = useState<'cash' | 'wallet' | 'account'>('cash');
+  const [refundMethod, setRefundMethod] = useState<'cash' | 'wallet' | 'account' | 'today_sales'>('cash');
+  const [todaySalesCash, setTodaySalesCash] = useState<number | null>(null);
   const [refundCustomerId, setRefundCustomerId] = useState('');
   const [refundCustomerName, setRefundCustomerName] = useState('');
   const [refundCustomerPhone, setRefundCustomerPhone] = useState('');
@@ -72,6 +74,22 @@ export default function ReturnsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (refundMethod !== 'today_sales' || !currentStore?.id) {
+      setTodaySalesCash(null);
+      return;
+    }
+    let active = true;
+    void getTodaySalesCashAvailable(currentStore.id).then((amount) => {
+      if (active) setTodaySalesCash(amount);
+    }).catch(() => {
+      if (active) setTodaySalesCash(null);
+    });
+    return () => {
+      active = false;
+    };
+  }, [refundMethod, currentStore?.id, returns]);
 
   const selectedTransaction = transactions.find((transaction) => transaction.id === selectedTransactionId);
   const itemsForSale = transactionItems.filter((item) => item.transaction_id === selectedTransactionId);
@@ -130,12 +148,18 @@ export default function ReturnsPage() {
       setError(`Enter a quantity up to ${selectedItem.quantity - alreadyReturned}.`);
       return;
     }
-    if (refundMethod !== 'cash' && !refundCustomerId && !refundCustomerName.trim() &&
+    if (refundMethod !== 'cash' && refundMethod !== 'today_sales' && !refundCustomerId && !refundCustomerName.trim() &&
       !(selectedTransaction.customer_name || '').trim()) {
       setError('Enter the customer name to create their store-credit account.');
       return;
     }
-    const outcomeText = refundMethod === 'cash'
+    if (refundMethod === 'today_sales' && estimatedRefund > (todaySalesCash ?? 0) + 0.001) {
+      setError(`Today's cash sales can cover ${money(todaySalesCash ?? 0)}. This refund is larger.`);
+      return;
+    }
+    const outcomeText = refundMethod === 'today_sales'
+      ? `refund ${money(estimatedRefund)} in cash from today's sales`
+      : refundMethod === 'cash'
       ? `refund ${money(estimatedRefund)} in cash`
       : refundMethod === 'wallet'
         ? `add ${money(estimatedRefund)} to the customer wallet`
@@ -159,12 +183,26 @@ export default function ReturnsPage() {
         customerName: refundCustomerName || selectedTransaction.customer_name || '',
         customerPhone: refundCustomerPhone || selectedTransaction.customer_phone || '',
       });
-      const refundSummary = record.refund_method === 'cash'
+      const refundSummary = record.refund_method === 'today_sales'
+        ? `Cash refund ${money(record.refund_amount)} taken from today's sales`
+        : record.refund_method === 'cash'
         ? `Cash refund ${money(record.refund_amount)}`
         : record.refund_method === 'wallet'
           ? `Wallet credit ${money(record.wallet_credit)}`
           : `Debt reduced ${money(record.debt_applied)}${record.wallet_credit > 0 ? ` · wallet credit ${money(record.wallet_credit)}` : ''}`;
       setMessage(`${record.product_name} return recorded; ${record.stock_quantity} inventory unit(s) restocked. ${refundSummary}.`);
+      recordActivity({
+        storeId: currentStore.id,
+        storeName: currentStore.name,
+        userId: currentUser.id,
+        username: currentUser.name,
+        role: currentUser.role,
+        activityType: 'return',
+        summary: `Return ${record.receipt_number}: ${record.product_name} × ${record.quantity}`,
+        details: record.refund_method === 'today_sales'
+          ? `Cash refund ${record.refund_amount} taken from today's sales`
+          : record.refund_method,
+      });
       setSelectedItemId('');
       setQuantity('1');
       setReason('');
@@ -237,6 +275,7 @@ export default function ReturnsPage() {
             <legend className="text-sm font-medium text-gray-700">Refund or account adjustment *</legend>
             {([
               ['cash', 'Refund in cash'],
+              ['today_sales', "Take cash from today's sales"],
               ['wallet', 'Add store credit to customer wallet'],
               ['account', 'Deduct from customer balance'],
             ] as const).map(([value, label]) => (
@@ -253,7 +292,16 @@ export default function ReturnsPage() {
               </label>
             ))}
           </fieldset>
-          {refundMethod !== 'cash' && (
+          {refundMethod === 'today_sales' && (
+            <div className="space-y-2 rounded-xl border border-amber-100 bg-amber-50 p-3 text-sm text-amber-950">
+              <p className="font-medium">Refund from today's sales</p>
+              <p className="text-xs">
+                The cash is taken from today's completed cash sales and recorded against this day in the cash book.
+                Available now: {todaySalesCash == null ? '…' : money(todaySalesCash)}.
+              </p>
+            </div>
+          )}
+          {refundMethod !== 'cash' && refundMethod !== 'today_sales' && (
             <div className="space-y-3 rounded-xl border border-teal-100 bg-teal-50 p-3">
               <p className="text-xs text-teal-900">
                 {refundMethod === 'account'
@@ -415,7 +463,9 @@ export default function ReturnsPage() {
                 <p className="mt-1 text-xs text-gray-700">{record.reason}</p>
                 <p className="mt-1 text-xs font-medium text-emerald-800">Restocked {record.stock_quantity} inventory unit(s)</p>
                 <p className="mt-1 text-xs text-gray-600">
-                  {record.refund_method === 'cash'
+                  {record.refund_method === 'today_sales'
+                    ? `Cash from today's sales: ${money(record.refund_amount)}`
+                    : record.refund_method === 'cash'
                     ? `Cash refund: ${money(record.refund_amount)}`
                     : record.refund_method === 'wallet'
                       ? `Wallet credit: ${money(record.wallet_credit)}`

@@ -3,7 +3,7 @@ import {
   Building2, Users, Package, Wallet, RefreshCcw, LogOut, ChevronLeft, ChevronRight,
   Smartphone, CheckCircle2, AlertCircle, Loader2, Store, CreditCard, CalendarClock, Mail,
   FileBarChart, Download, FileText, Ban, LayoutDashboard, MoreHorizontal, X, Search, Megaphone,
-  BookOpen, Printer, UserPlus, LifeBuoy,
+  BookOpen, Printer, UserPlus, LifeBuoy, ScrollText,
 } from 'lucide-react';
 import {
   AdminDashboardData,
@@ -46,12 +46,12 @@ import AdminStoreWorkspace from '@/components/AdminStoreWorkspace';
 import AdminCreateStoreForm from '@/components/AdminCreateStoreForm';
 import AdminCampaignManager from '@/components/AdminCampaignManager';
 import AdminBroadcastSms from '@/components/AdminBroadcastSms';
-import AdminSupportAgent from '@/components/AdminSupportAgent';
+import CustomerCarePanel from '@/components/CustomerCarePanel';
+import AdminActivityLog from '@/components/AdminActivityLog';
 import CopyableStoreId from '@/components/CopyableStoreId';
 import AdminAgentsPanel from '@/components/AdminAgentsPanel';
-import CustomerCarePanel from '@/components/CustomerCarePanel';
 
-type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact' | 'care' | 'broadcast' | 'campaigns' | 'learn' | 'sales' | 'agents';
+type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact' | 'care' | 'broadcast' | 'campaigns' | 'learn' | 'sales' | 'agents' | 'support' | 'activity';
 
 function defaultReportFromDate(): string {
   const d = new Date();
@@ -472,6 +472,8 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       ['broadcast', 'Broadcast SMS', Megaphone],
       ['campaigns', 'Campaigns', Megaphone],
       ['agents', 'Agents', UserPlus],
+      ['support', 'Help & Support', LifeBuoy],
+      ['activity', 'Activity', ScrollText],
       ['learn', 'Learn', BookOpen],
     ] as const
   );
@@ -479,7 +481,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
   const adminGroups = [
     { label: 'Today', ids: ['overview', 'stores', 'sales'] as const },
     { label: 'Money', ids: ['subscriptions', 'payouts', 'reports'] as const },
-    { label: 'People', ids: ['users', 'care', 'broadcast', 'contact', 'agents'] as const },
+    { label: 'People', ids: ['users', 'care', 'support', 'broadcast', 'activity', 'contact', 'agents'] as const },
     { label: 'Catalog', ids: ['products', 'campaigns', 'learn'] as const },
   ];
   const primaryTabIds = ['overview', 'stores', 'subscriptions', 'payouts'] as const;
@@ -603,7 +605,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 md:px-6 lg:px-8 2xl:px-12 py-3 md:py-5 lg:py-6 2xl:py-8 pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-8"
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
-        {loading && !data && tab !== 'contact' && tab !== 'care' && tab !== 'reports' && tab !== 'learn' && tab !== 'agents' && (
+        {loading && !data && tab !== 'contact' && tab !== 'care' && tab !== 'support' && tab !== 'broadcast' && tab !== 'activity' && tab !== 'reports' && tab !== 'learn' && tab !== 'agents' && (
           <div className="py-8 text-slate-500" role="status">
             <div className="mb-4 space-y-2" aria-hidden="true">
               <div className="ux-skeleton h-20 w-full" />
@@ -1604,6 +1606,8 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
 {tab === 'campaigns' && <AdminCampaignManager />}
 
         {tab === 'agents' && <AdminAgentsPanel />}
+        {tab === 'support' && <CustomerCarePanel />}
+        {tab === 'activity' && <AdminActivityLog />}
 
         {data && tab === 'products' && (
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">

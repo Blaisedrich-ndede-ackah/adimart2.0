@@ -26,6 +26,7 @@ import {
   touchLastActivity,
 } from '@/lib/sessionTimeout';
 import { useCartStore } from '@/store/useCartStore';
+import { recordLogin, recordLogout } from '@/lib/activityLog';
 
 interface AuthState {
   currentUser: LocalUser | null;
@@ -149,6 +150,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isAuthenticated: true, 
         loginError: '' 
       });
+      if (store?.id) {
+        recordLogin({
+          storeId: store.id,
+          storeName: store.name,
+          userId: user.id,
+          username: user.name,
+          role: user.role,
+        });
+      }
+      void import('@/lib/support/access').then(({ issueOwnerSupportToken }) =>
+        issueOwnerSupportToken(user.store_id, user.id, pin)
+      );
       return true;
     }
     
@@ -175,16 +188,27 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       isAuthenticated: true,
       loginError: '',
     });
+    if (store?.id) {
+      recordLogin({
+        storeId: store.id,
+        storeName: store.name,
+        userId: owner.id,
+        username: owner.name,
+        role: owner.role,
+      });
+    }
     return true;
   },
 
   logout: () => {
+    recordLogout();
     clearAllWarehouseSessions();
     void setCurrentUserId(null);
     set({ currentUser: null, isAuthenticated: false, loginError: '' });
   },
 
   switchUser: () => {
+    recordLogout();
     // Keep any pending warehouse login set by Settings → Open warehouse
     clearWarehouseUnlock();
     void setCurrentUserId(null);
@@ -192,6 +216,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   switchStore: async (storeId: string) => {
+    recordLogout();
     clearAllWarehouseSessions();
     useCartStore.getState().clearParkedCarts();
     const store = await switchToStore(storeId);

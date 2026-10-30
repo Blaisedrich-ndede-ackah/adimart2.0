@@ -83,6 +83,8 @@ CREATE TABLE IF NOT EXISTS users (
   can_sell_from_warehouse BOOLEAN DEFAULT FALSE,
   can_manage_ecommerce BOOLEAN DEFAULT FALSE,
   can_access_cashbook BOOLEAN DEFAULT TRUE,
+  can_view_stock BOOLEAN,
+  can_discount BOOLEAN,
   pos_layout_json TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -242,6 +244,7 @@ CREATE TABLE IF NOT EXISTS customers (
   store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
   name VARCHAR(255) NOT NULL,
   phone VARCHAR(30) NOT NULL DEFAULT '',
+  location_id UUID REFERENCES locations(id),
   opening_balance DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (opening_balance >= 0),
   opening_balance_remaining DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (opening_balance_remaining >= 0),
   wallet_balance DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (wallet_balance >= 0),

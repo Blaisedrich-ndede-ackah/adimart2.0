@@ -10,6 +10,7 @@ import {
 import type { ReceiptData } from './printService';
 import { printReceipt } from './printService';
 import { parseOtherCharges } from './otherCharges';
+import { formatCustomerAddress } from './customerAddress';
 
 export async function buildReceiptDataFromTransaction(
   txn: LocalTransaction
@@ -19,6 +20,8 @@ export async function buildReceiptDataFromTransaction(
   const lineSubtotal = items.reduce((sum, i) => sum + i.subtotal, 0);
   const discount = txn.discount_applied || 0;
   const otherCharges = parseOtherCharges(txn.other_charges_json);
+  const customer = txn.customer_id ? await db.customers.get(txn.customer_id) : undefined;
+  const customerAddress = formatCustomerAddress(customer?.address);
 
   return {
     storeName: store?.name || 'Store',
@@ -45,6 +48,7 @@ export async function buildReceiptDataFromTransaction(
     walletAmount: txn.wallet_amount,
     paymentReference: txn.payment_reference || txn.paystack_reference,
     customerName: txn.customer_name,
+    customerAddress,
     outstandingBalance: txn.credit_balance,
   };
 }

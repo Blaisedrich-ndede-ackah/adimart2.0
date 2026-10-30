@@ -53,13 +53,31 @@ export interface ShopProfile {
   orders: ShopOrder[];
 }
 
+function shopErrorText(payload: { error?: unknown; message?: unknown }, status: number): string {
+  const raw = payload.error ?? payload.message;
+  if (typeof raw === 'string' && raw.trim()) return raw.trim();
+  if (raw && typeof raw === 'object' && 'message' in raw) {
+    const message = String((raw as { message?: unknown }).message || '').trim();
+    if (message) return message;
+  }
+  return `The shop could not complete that request (${status}).`;
+}
+
 async function post<T>(path: string, body: Record<string, unknown>, token = ''): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
-  const payload = await response.json().catch(() => ({})) as T & { error?: string };
+  const raw = await response.text();
+  let payload = {} as T & { error?: unknown; message?: unknown };
+  if (raw) {
+    try {
+      payload = JSON.parse(raw) as T & { error?: unknown; message?: unknown };
+    } catch {
+      payload = { error: raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180) } as T & { error?: unknown };
+    }
+  }
   if (!response.ok || payload.error) {
-    throw new Error(payload.error || 'The shop could not complete that request.');
+    throw new Error(shopErrorText(payload, response.status));
   }
   return payload;
 }
@@ -86,7 +104,7 @@ export function shopSignup(input: {
   phone: string;
   email: string;
   password: string;
-}): Promise<{ needsOtp: boolean; phone: string }> {
+}): Promise<{ needsOtp?: boolean; phone?: string; session?: { access_token: string; refresh_token: string } } & Partial<ShopProfile>> {
   return post('/api/shop-auth', { action: 'signup', ...input });
 }
 

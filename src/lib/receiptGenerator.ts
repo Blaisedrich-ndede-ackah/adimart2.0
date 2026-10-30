@@ -32,6 +32,7 @@ export interface ReceiptData {
   paystackReference?: string;
   paymentReference?: string;
   customerName?: string;
+  customerAddress?: string;
   outstandingBalance?: number;
   amountPaid?: number;
   balanceAfterPayment?: number;
@@ -217,6 +218,10 @@ function generateReceiptPDF(data: ReceiptData): jsPDF {
     leftRightText('Customer:', data.customerName, y, 8);
     y += 4;
   }
+  if (data.customerAddress) {
+    leftRightText('Address:', data.customerAddress, y, 8);
+    y += 4;
+  }
   if (data.outstandingBalance !== undefined && data.outstandingBalance > 0) {
     leftRightText('Credit due:', amt(data, data.outstandingBalance), y, 8);
     y += 4;
@@ -333,6 +338,7 @@ function generateOfficialReceiptPdf(data: ReceiptData): FormalPdf {
   const paymentRows = [
     { label: 'Method', value: methodLabel },
     ...(data.customerName ? [{ label: 'Customer', value: data.customerName }] : []),
+    ...(data.customerAddress ? [{ label: 'Address', value: data.customerAddress }] : []),
     ...(data.walletAmount
       ? [{ label: 'Store credit used', value: formatGhsOfficial(data.walletAmount, data.currencyCode) }]
       : []),
@@ -517,6 +523,7 @@ function generateReceiptText(data: ReceiptData): string {
   const methodLabel = data.paymentMethod === 'paystack' ? 'Mobile Money/Card' : getPaymentMethodLabel(data.paymentMethod);
   lines.push(leftRight('Payment:', methodLabel));
   if (data.customerName) lines.push(leftRight('  Customer:', data.customerName));
+  if (data.customerAddress) lines.push(leftRight('  Address:', data.customerAddress));
   if (data.walletAmount) lines.push(leftRight('Store credit used:', amt(data, data.walletAmount)));
   if (data.receiptPurpose === 'credit-payment') {
     lines.push(leftRight('Amount paid:', amt(data, data.amountPaid || 0)));

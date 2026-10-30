@@ -48,6 +48,7 @@ export interface EscPosReceiptData {
   manualPaymentAmount?: number;
   paymentReference?: string;
   customerName?: string;
+  customerAddress?: string;
   outstandingBalance?: number;
   amountPaid?: number;
   balanceAfterPayment?: number;
@@ -133,6 +134,9 @@ function printOnComputer(
       : '',
     data.customerName
       ? `<div class="row"><span>Customer:</span><span>${escapeHtml(data.customerName)}</span></div>`
+      : '',
+    data.customerAddress
+      ? `<div class="row"><span>Address:</span><span>${escapeHtml(data.customerAddress)}</span></div>`
       : '',
     data.outstandingBalance !== undefined && data.outstandingBalance > 0
       ? `<div class="row"><span>Credit due:</span><span>${escapeHtml(amt(data, data.outstandingBalance))}</span></div>`
@@ -345,6 +349,10 @@ export async function buildEscPosReceipt(data: EscPosReceiptData): Promise<Uint8
   bytes.push(LF);
   if (data.customerName) {
     bytes.push(...textToBytes(rightAlign('  Customer:', data.customerName)));
+    bytes.push(LF);
+  }
+  if (data.customerAddress) {
+    bytes.push(...textToBytes(rightAlign('  Address:', data.customerAddress)));
     bytes.push(LF);
   }
   if (data.walletAmount) {

@@ -127,6 +127,10 @@ export default function CustomerCarePanel() {
 
   return (
     <div className="space-y-4">
+      <header>
+        <h2 className="text-lg font-bold text-ink">{t('care.helpTitle')}</h2>
+        <p className="text-sm text-muted">{t('care.helpSubtitle')}</p>
+      </header>
       <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label={t('care.volume')} value={String(report.volume)} />
         <Stat label={t('care.resolutionRate')} value={`${report.resolutionRate}%`} />

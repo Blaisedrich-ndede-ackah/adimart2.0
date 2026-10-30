@@ -6,6 +6,7 @@ import {
   LocalTransaction,
   LocalTransactionItem,
   LocalCreditPayment,
+  db,
   getCurrentStoreTransactions,
   getTransactionsForCashier,
   getTransactionItems,
@@ -21,6 +22,7 @@ import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
 import CloudSyncPanel from '@/components/CloudSyncPanel';
 import { filterSalesByPeriod, type SalesPeriod } from '@/lib/salesRange';
+import { formatCustomerAddress } from '@/lib/customerAddress';
 
 const PERIODS: SalesPeriod[] = ['all', 'today', 'week', 'custom'];
 
@@ -41,6 +43,7 @@ export default function TransactionsPage() {
   const [status, setStatus] = useState('');
   const [statusTone, setStatusTone] = useState<'ok' | 'error'>('ok');
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [previewAddress, setPreviewAddress] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
 
   const load = useCallback(async () => {
@@ -79,6 +82,8 @@ export default function TransactionsPage() {
     async (txn: LocalTransaction) => {
       setPreviewId(txn.id);
       setPreviewLoading(true);
+      const customer = txn.customer_id ? await db.customers.get(txn.customer_id) : undefined;
+      setPreviewAddress(formatCustomerAddress(customer?.address));
       await ensureDetails(txn.id);
       setPreviewLoading(false);
     },
@@ -87,6 +92,7 @@ export default function TransactionsPage() {
 
   const closePreview = () => {
     setPreviewId(null);
+    setPreviewAddress('');
     setPreviewLoading(false);
   };
 
@@ -376,6 +382,15 @@ export default function TransactionsPage() {
                     {getPaymentMethodLabel(previewTxn.payment_method)}
                   </span>
                 </p>
+                {(previewTxn.customer_name || previewAddress) && (
+                  <p className="flex justify-between gap-3">
+                    <span>Customer</span>
+                    <span className="text-right font-semibold text-gray-900">
+                      {previewTxn.customer_name || 'Customer'}
+                      {previewAddress ? ` · ${previewAddress}` : ''}
+                    </span>
+                  </p>
+                )}
               </div>
 
               <div className="rounded-xl border border-gray-100 px-3 py-2">
@@ -392,6 +407,13 @@ export default function TransactionsPage() {
                     <span className="min-w-0">
                       <span className="font-semibold text-gray-900">{item.quantity}×</span>{' '}
                       <span className="break-words">{item.product_name}</span>
+                      {item.sale_mode && (
+                        <span className={`ml-1 inline-flex rounded px-1.5 py-0.5 text-[9px] font-semibold ${
+                          item.sale_mode === 'wholesale' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
+                        }`}>
+                          {item.sale_mode === 'wholesale' ? 'Wholesale' : 'Retail'}
+                        </span>
+                      )}
                       <span className="block text-[10px] text-gray-400">
                         {money(item.unit_price)} each
                       </span>

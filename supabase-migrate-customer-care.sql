@@ -1,7 +1,44 @@
--- Customer care tickets and idempotent stock deltas.
+-- Help & Support tickets and idempotent stock deltas.
 -- Run this once in the Supabase SQL editor after supabase-init.sql.
+-- Shop Help & Support and the admin Help & Support inbox share these tables.
 -- Do not use "allow all" policies. The anon key sees a row only when the
 -- request carries a support token issued by /api/customer-care.
+--
+-- An older support-agent inbox may already occupy support_tickets
+-- (ticket_number, no reference). Move that inbox aside before creating
+-- the Help & Support tables. CREATE TABLE IF NOT EXISTS would otherwise
+-- leave the old columns in place.
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'support_tickets' AND column_name = 'ticket_number'
+  ) AND NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'support_tickets' AND column_name = 'reference'
+  ) THEN
+    ALTER TABLE public.support_tickets RENAME TO support_agent_inbox;
+    IF EXISTS (
+      SELECT 1 FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name = 'support_ticket_messages'
+    ) THEN
+      ALTER TABLE public.support_ticket_messages RENAME TO support_agent_messages;
+    END IF;
+    IF EXISTS (
+      SELECT 1 FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name = 'support_ticket_assignments'
+    ) THEN
+      ALTER TABLE public.support_ticket_assignments RENAME TO support_agent_assignments;
+    END IF;
+    IF EXISTS (
+      SELECT 1 FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name = 'support_ticket_notes'
+    ) THEN
+      ALTER TABLE public.support_ticket_notes RENAME TO support_agent_notes;
+    END IF;
+  END IF;
+END $$;
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 
@@ -104,6 +141,29 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION public.adimat_support_actor() FROM public, anon, authenticated;
+-- RLS policies call this function as anon. SECURITY DEFINER does not
+-- remove the need for EXECUTE, and the revoke above is what produces
+-- "permission denied for function adimat_support_actor".
+-- Grant the installed signature (RETURNS TABLE is stored with OUT arguments).
+DO $$
+DECLARE
+  fn regprocedure;
+BEGIN
+  SELECT p.oid::regprocedure INTO fn
+  FROM pg_proc p
+  JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE n.nspname = 'public'
+    AND p.proname = 'adimat_support_actor'
+  ORDER BY p.oid DESC
+  LIMIT 1;
+  IF fn IS NULL THEN
+    RAISE EXCEPTION 'adimat_support_actor was not created.';
+  END IF;
+  EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO anon, authenticated, service_role', fn);
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticator') THEN
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO authenticator', fn);
+  END IF;
+END $$;
 
 ALTER TABLE support_tickets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE support_messages ENABLE ROW LEVEL SECURITY;
