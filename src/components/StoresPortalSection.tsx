@@ -209,7 +209,7 @@ export default function StoresPortalSection() {
           type="button"
           onClick={() => setShowAddCloud((visible) => !visible)}
           disabled={busy}
-          className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 touch-target"
         >
           <CloudDownload className="h-4 w-4" />
           Restore store from cloud
@@ -227,7 +227,7 @@ export default function StoresPortalSection() {
                 <input
                   value={cloudStoreId}
                   onChange={(event) => setCloudStoreId(event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm font-mono outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+                  className="mt-1 min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm font-mono outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
                   placeholder="Enter Store ID"
                   autoComplete="off"
                 />
@@ -240,7 +240,7 @@ export default function StoresPortalSection() {
                   type="password"
                   inputMode="numeric"
                   maxLength={4}
-                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-center text-lg tracking-[0.45em] outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+                  className="mt-1 min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-center text-lg tracking-[0.45em] outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
                   placeholder="••••"
                   autoComplete="off"
                 />
