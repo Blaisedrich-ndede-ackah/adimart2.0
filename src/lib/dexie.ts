@@ -76,6 +76,8 @@ export interface LocalStore {
   sales_target_daily?: number;
   /** Owner-set monthly sales target used by the live dashboard. */
   sales_target_monthly?: number;
+  /** When 0, cashier sessions hide on-hand quantities. Owners always see them. Default 1. */
+  cashiers_can_view_stock?: number;
   created_at: string;
   synced: number;
 }
@@ -467,7 +469,7 @@ export interface LocalSaleReturn {
   receipt_number: string;
   location_id: string;
   customer_id?: string | null;
-  refund_method: 'cash' | 'wallet' | 'account' | 'none';
+  refund_method: 'cash' | 'wallet' | 'account' | 'today_sales' | 'none';
   refund_amount: number;
   debt_applied: number;
   wallet_credit: number;
@@ -593,6 +595,8 @@ export interface PurchaseOrderLine {
   quantity: number;
   unit_cost: number;
   received_quantity: number;
+  /** Quantity already sent to a cashier and not yet approved or rejected. */
+  pending_quantity?: number;
 }
 
 export interface LocalPurchaseOrder {
@@ -674,6 +678,69 @@ export interface LocalCashBookEntry {
   account_type?: 'cash' | 'bank';
 }
 
+export type StockReceiptKind = 'receive' | 'adjust_in' | 'purchase' | 'opening' | 'count';
+
+/** Goods or stock increases waiting for a cashier to confirm they are physically present. */
+export interface LocalStockReceiptRequest {
+  id: string;
+  store_id: string;
+  product_id: string;
+  product_name: string;
+  location_id: string;
+  location_name: string;
+  quantity: number;
+  kind: StockReceiptKind;
+  note: string;
+  batch_code: string;
+  expiry_date: string | null;
+  cost_price: number | null;
+  source_id: string | null;
+  source_line: string | null;
+  requested_by: string | null;
+  requested_by_name: string;
+  requested_at: string;
+  status: 'pending' | 'approved' | 'rejected';
+  decided_by: string | null;
+  decided_by_name: string | null;
+  decided_at: string | null;
+  decision_note: string;
+  synced: number;
+}
+
+/** Owner-visible record of who approved or rejected a stock arrival. */
+export interface LocalStockApprovalLog {
+  id: string;
+  store_id: string;
+  request_id: string;
+  product_id: string;
+  product_name: string;
+  quantity: number;
+  kind: string;
+  decision: 'approved' | 'rejected';
+  note: string;
+  approved_by: string | null;
+  approved_by_name: string;
+  approved_at: string;
+  synced: number;
+}
+
+/** Local copy of a platform activity row. The admin portal reads the cloud table, not this UI. */
+export interface LocalActivityLog {
+  id: string;
+  store_id: string;
+  store_name: string;
+  user_id: string;
+  username: string;
+  role: string;
+  activity_type: string;
+  summary: string;
+  details: string;
+  logged_in_at: string | null;
+  logged_out_at: string | null;
+  created_at: string;
+  synced: number;
+}
+
 export interface SyncMeta {
   id: string;
   last_synced_at: string;
@@ -733,6 +800,9 @@ class AdimatDB extends Dexie {
   sync_meta!: Table<SyncMeta, string>;
   app_config!: Table<AppConfig, string>;
   campaign_cache!: Table<CachedCampaigns, string>;
+  stock_receipt_requests!: Table<LocalStockReceiptRequest, string>;
+  stock_approval_logs!: Table<LocalStockApprovalLog, string>;
+  activity_logs!: Table<LocalActivityLog, string>;
 
   /* Agent Portal tables */
   agents!: Table<LocalAgent, string>;
@@ -998,6 +1068,18 @@ class AdimatDB extends Dexie {
               customer.location_id = null;
             }
           });
+      });
+      /* Version 24 — stock arrival approval and the platform activity log */
+      this.version(24).stores({
+        stock_receipt_requests: 'id, store_id, product_id, status, requested_at, synced',
+        stock_approval_logs: 'id, store_id, request_id, approved_at, synced',
+        activity_logs: 'id, store_id, user_id, activity_type, created_at, synced',
+      }).upgrade(async (tx) => {
+        await tx.table('stores').toCollection().modify((store: LocalStore) => {
+          if (store.cashiers_can_view_stock !== 0 && store.cashiers_can_view_stock !== 1) {
+            store.cashiers_can_view_stock = 1;
+          }
+        });
       });
   }
 }
@@ -1271,6 +1353,7 @@ export async function createStoreWithOwner(
     discount_allow_percentage: 1,
     discount_allow_fixed: 1,
     cashier_can_discount: 1,
+    cashiers_can_view_stock: 1,
     session_timeout_minutes: 5,
     momo_account_name: '',
     momo_number: '',
@@ -2931,13 +3014,14 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
       ignoreDuplicates: appendOnly,
     });
     if (error) {
-      if (
+        if (
         table === 'stores' &&
-        /session_timeout_minutes/i.test(error.message)
+        /session_timeout_minutes|cashiers_can_view_stock/i.test(error.message)
       ) {
         const stripped = rows.map((row) => {
           const copy = { ...(row as Record<string, unknown>) };
-          delete copy.session_timeout_minutes;
+          if (/session_timeout_minutes/i.test(error.message)) delete copy.session_timeout_minutes;
+          if (/cashiers_can_view_stock/i.test(error.message)) delete copy.cashiers_can_view_stock;
           return copy;
         });
         const retry = await supabase.from(table).upsert(stripped, {
@@ -3129,6 +3213,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
           discount_allow_percentage: (store.discount_allow_percentage ?? 1) === 1,
           discount_allow_fixed: (store.discount_allow_fixed ?? 1) === 1,
           cashier_can_discount: (store.cashier_can_discount ?? 1) === 1,
+          cashiers_can_view_stock: (store.cashiers_can_view_stock ?? 1) === 1,
           session_timeout_minutes: normalizeSessionTimeoutMinutes(store.session_timeout_minutes),
           momo_account_name: store.momo_account_name || '',
           momo_number: store.momo_number || '',
@@ -3910,6 +3995,13 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
       errors
     );
 
+    const approvalSync = await import('./stockApprovals').then((mod) => mod.pushStockApprovalRecords(storeId));
+    syncedCount += approvalSync.synced;
+    if (approvalSync.error) errors.push(approvalSync.error);
+    const activitySync = await import('./activityLog').then((mod) => mod.pushActivityLogs(storeId));
+    syncedCount += activitySync.synced;
+    if (activitySync.error) errors.push(activitySync.error);
+
     if (errors.length > 0) {
       return { success: false, message: `Partial sync. Errors: ${errors.join('; ')}` };
     }
@@ -3996,6 +4088,12 @@ export async function syncFromSupabase(opts?: {
         discount_allow_percentage: remoteStore.discount_allow_percentage === false ? 0 : 1,
         discount_allow_fixed: remoteStore.discount_allow_fixed === false ? 0 : 1,
         cashier_can_discount: remoteStore.cashier_can_discount === false ? 0 : 1,
+        cashiers_can_view_stock:
+          remoteStore.cashiers_can_view_stock == null
+            ? (localStore?.cashiers_can_view_stock ?? 1)
+            : remoteStore.cashiers_can_view_stock === false
+              ? 0
+              : 1,
         session_timeout_minutes:
           remoteStore.session_timeout_minutes == null
             ? (localStore?.session_timeout_minutes ?? 5)
@@ -4253,7 +4351,10 @@ export async function syncFromSupabase(opts?: {
           credit_balance: Number(row.credit_balance) || 0,
           status: row.status as 'completed' | 'pending',
           location_id: (row.location_id as string) || undefined,
-          sale_mode: ((row.sale_mode as 'retail' | 'wholesale') || 'retail'),
+          sale_mode:
+            row.sale_mode === 'wholesale' || row.sale_mode === 'mixed' || row.sale_mode === 'retail'
+              ? row.sale_mode
+              : 'retail',
           created_at: row.created_at as string,
           updated_at: (row.updated_at as string) || (row.created_at as string),
           synced: 1,
@@ -4394,9 +4495,13 @@ export async function syncFromSupabase(opts?: {
           receipt_number: String(row.receipt_number || ''),
           location_id: String(row.location_id || ''),
           customer_id: String(row.customer_id || '') || null,
-          refund_method: row.refund_method === 'cash' || row.refund_method === 'wallet' || row.refund_method === 'account'
-            ? row.refund_method
-            : 'none',
+          refund_method:
+            row.refund_method === 'cash' ||
+            row.refund_method === 'wallet' ||
+            row.refund_method === 'account' ||
+            row.refund_method === 'today_sales'
+              ? row.refund_method
+              : 'none',
           refund_amount: Number(row.refund_amount) || 0,
           debt_applied: Number(row.debt_applied) || 0,
           wallet_credit: Number(row.wallet_credit) || 0,
@@ -4811,6 +4916,16 @@ export async function syncFromSupabase(opts?: {
     const { refreshRemoteLedgerClearAndApply } = await import('./storeLedgerClear');
     const ledgerAfterPull = await refreshRemoteLedgerClearAndApply(storeId);
     const droppedSales = ledgerAfterPull.dropped.transactions;
+
+    try {
+      const { pullStockApprovalRecords } = await import('./stockApprovals');
+      pulledCount += await pullStockApprovalRecords(storeId);
+    } catch (pullError) {
+      const message = pullError instanceof Error ? pullError.message : String(pullError);
+      if (!/does not exist|PGRST205|schema cache|permission denied|42501/i.test(message)) {
+        errors.push(`Stock approvals: ${message}`);
+      }
+    }
 
     if (errors.length > 0) {
       return { success: false, message: `Partial pull. Errors: ${errors.join('; ')}`, pulledCount };

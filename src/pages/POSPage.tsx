@@ -9,6 +9,7 @@ import CheckoutOverlay from '@/components/CheckoutOverlay';
 import FrequentItems from '@/components/FrequentItems';
 import { useCartStore } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { canViewStockQuantities } from '@/lib/stockVisibility';
 import { useAccessibilityStore } from '@/lib/accessibility';
 import { db, LocalProduct, LocalLocation, getActiveStoreOwner, getCurrentStoreActiveProducts, getCurrentStoreId } from '@/lib/dexie';
 import { playScanBeep, primeScanBeep } from '@/lib/scanBeep';
@@ -152,9 +153,12 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
 
   const canWholesale = canUserSellWholesale(currentUser);
   const isStoreOwner = currentUser?.role === 'owner';
+  const showStockQty = canViewStockQuantities(currentUser, currentStore);
   const retailLineCount = cart.items.filter((item) => item.sale_mode === 'retail').length;
   const wholesaleLineCount = cart.items.filter((item) => item.sale_mode === 'wholesale').length;
-  const isMixedCart = retailLineCount > 0 && wholesaleLineCount > 0;
+  const packLineCount = cart.items.filter((item) => item.unit_type === 'pack').length;
+  const unitLineCount = cart.items.length - packLineCount;
+  const isMixedCart = (retailLineCount > 0 && wholesaleLineCount > 0) || (packLineCount > 0 && unitLineCount > 0);
 
   useEffect(() => {
     let active = true;
@@ -285,8 +289,8 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   }, [loadSaleContext]);
 
   useEffect(() => {
-    setSaleContext(selectedLocationId || null, saleMode);
-  }, [selectedLocationId, saleMode, setSaleContext]);
+    setSaleContext(selectedLocationId || null, saleMode, unitType);
+  }, [selectedLocationId, saleMode, unitType, setSaleContext]);
 
   useEffect(() => {
     void loadProducts();
@@ -451,7 +455,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   }, []);
 
   const handleScan = useCallback(async (barcode: string) => {
-    const result = await cart.addItemByBarcode(barcode);
+    const result = await cart.addItemByBarcode(barcode, { saleMode, unitType });
 
     if (result.success && result.product) {
       flashFeedback({ type: 'success', message: `Added: ${result.product.name}` });
@@ -469,7 +473,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
         playScanBeep('error');
       }
     }
-  }, [cart, flashFeedback]);
+  }, [cart, flashFeedback, saleMode, unitType]);
 
   // Handheld Bluetooth / HID scanner → cart (active while not in checkout)
   useBluetoothBarcodeInput(handleScan, scannerActive && !showCheckout);
@@ -478,7 +482,6 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
     const modes = getAvailableSaleModes(product);
     const defaultMode = saleMode === 'wholesale' && modes.includes('wholesale') ? 'wholesale' : 'retail';
     const mode = overrideSaleMode ?? defaultMode;
-    cart.setSaleContext(selectedLocationId || null, defaultMode);
 
     const packSize = Math.max(1, Number(product.pack_size) || 1);
     const usePack = unitType === 'pack' && packSize > 1;
@@ -559,7 +562,20 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
         return;
       }
     }
-    await cart.setItemSaleMode(itemId, nextMode);
+    const result = await cart.setItemSaleMode(itemId, nextMode);
+    if (!result.success && result.error) {
+      flashFeedback({ type: 'warning', message: result.error });
+    }
+  };
+
+  const toggleItemUnitType = async (itemId: string) => {
+    const item = cart.items.find((currentItem) => currentItem.id === itemId);
+    if (!item) return;
+    const nextUnit: UnitType = item.unit_type === 'pack' ? 'base' : 'pack';
+    const result = await cart.setItemUnitType(itemId, nextUnit);
+    if (!result.success && result.error) {
+      flashFeedback({ type: 'warning', message: result.error });
+    }
   };
 
   const handleUpdateQuantity = async (itemId: string, newQty: number) => {
@@ -769,7 +785,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
           </select>
         </div>
         ) : null}
-        <div className="flex gap-2 md:w-auto md:flex-shrink-0">
+        <div className="flex flex-wrap gap-2 md:w-auto md:flex-shrink-0">
           <button
             type="button"
             aria-pressed={saleMode === 'retail'}
@@ -801,16 +817,30 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
           </button>
           <button
             type="button"
-            onClick={() => setUnitType((u) => (u === 'base' ? 'pack' : 'base'))}
-            className={`px-3 py-2 rounded-lg text-xs font-semibold touch-target whitespace-nowrap ${
+            aria-pressed={unitType === 'base'}
+            aria-label="Add the next items by unit"
+            onClick={() => setUnitType('base')}
+            className={`flex-1 md:flex-none md:px-4 py-2 rounded-lg text-xs font-semibold touch-target whitespace-nowrap ${
+              unitType === 'base' ? 'bg-slate-800 text-white' : 'bg-gray-100 text-gray-600'
+            }`}
+          >
+            By unit
+          </button>
+          <button
+            type="button"
+            aria-pressed={unitType === 'pack'}
+            aria-label="Add the next items by pack"
+            onClick={() => setUnitType('pack')}
+            className={`flex-1 md:flex-none md:px-4 py-2 rounded-lg text-xs font-semibold touch-target whitespace-nowrap ${
               unitType === 'pack' ? 'bg-slate-800 text-white' : 'bg-gray-100 text-gray-600'
             }`}
           >
-            {unitType === 'pack' ? 'By pack' : 'By unit'}
+            By pack
           </button>
         </div>
         <p className="text-[10px] leading-snug text-gray-500 md:basis-full">
-          Pricing selection applies to new items; switch each cart line to mix retail and wholesale in one sale.
+          Retail, wholesale, and by unit stay in the same sale. Switching only changes the next item
+          {cart.items.length > 0 ? ` — ${cart.items.length} selected item${cart.items.length === 1 ? '' : 's'} stay in the cart.` : '.'}
         </p>
       </div>
 
@@ -998,6 +1028,8 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                       aria-label={
                         outOfStock
                           ? `${product.name}, out of stock`
+                          : !showStockQty
+                          ? `Add ${product.name} to cart for ${money(toMoney(pricePreview.unitPrice))} per ${unitLabel}`
                           : lowStock
                           ? `${product.name}, low stock — ${stockHere} left`
                           : `Add ${product.name} to cart for ${money(toMoney(pricePreview.unitPrice))} per ${unitLabel}`
@@ -1020,9 +1052,11 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                             {isWholesalePrice ? 'Wholesale price' : ''}
                           </span>
                         )}
-                        <span className={`mt-1 block text-[10px] font-semibold ${outOfStock ? 'text-danger' : lowStock ? 'text-accent' : 'text-gray-500'}`}>
-                          {outOfStock ? 'Out of stock' : lowStock ? `Low stock · ${stockHere} left` : `${stockHere} available`}
-                        </span>
+                        {(showStockQty || outOfStock) && (
+                          <span className={`mt-1 block text-[10px] font-semibold ${outOfStock ? 'text-danger' : lowStock ? 'text-accent' : 'text-gray-500'}`}>
+                            {outOfStock ? 'Out of stock' : lowStock ? `Low stock · ${stockHere} left` : `${stockHere} available`}
+                          </span>
+                        )}
                       </span>
                       <span className="pos-product-add" aria-hidden="true">
                         <Plus className="h-4 w-4" strokeWidth={2.5} />
@@ -1077,7 +1111,9 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
 
           {isMixedCart && (
             <div role="status" aria-live="polite" className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs font-medium text-slate-700">
-              Mixed sale · {retailLineCount} retail line{retailLineCount === 1 ? '' : 's'} · {wholesaleLineCount} wholesale line{wholesaleLineCount === 1 ? '' : 's'}
+              Mixed sale · {retailLineCount} retail · {wholesaleLineCount} wholesale
+              {packLineCount > 0 ? ` · ${packLineCount} by pack` : ''}
+              {unitLineCount > 0 ? ` · ${unitLineCount} by unit` : ''}
             </div>
           )}
 
@@ -1109,6 +1145,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                           if (!context) return;
                           setSelectedLocationId(context.locationId || '');
                           setSaleMode(context.saleMode);
+                          setUnitType(context.unitType || 'base');
                           setPosTab('cart');
                         }}
                         className="flex items-center gap-1 rounded-lg bg-primary px-2.5 py-2 text-xs font-semibold text-white touch-target"
@@ -1197,6 +1234,14 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                                 className="rounded-lg border border-gray-200 px-2 py-1 text-[10px] font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 Use {item.sale_mode === 'retail' ? 'wholesale' : 'retail'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void toggleItemUnitType(item.id)}
+                                aria-label={`Sell ${item.name} ${item.unit_type === 'pack' ? 'by unit' : 'by pack'}`}
+                                className="rounded-lg border border-gray-200 px-2 py-1 text-[10px] font-semibold text-gray-600 hover:bg-gray-50"
+                              >
+                                {item.unit_type === 'pack' ? 'By unit' : 'By pack'}
                               </button>
                             </div>
                           </div>

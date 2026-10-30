@@ -4,7 +4,7 @@ import { db, type LocalProduct, type LocalPurchaseOrder, type LocalSupplier, typ
 import { useAuthStore } from '@/store/useAuthStore';
 import { useFormatMoney } from '@/lib/currency';
 import { ensureStoreLocations } from '@/lib/warehouse';
-import { addSupplier, cancelPurchaseOrder, createPurchaseOrder, parsePurchaseOrderLines, receivePurchaseOrder } from '@/lib/purchasing';
+import { addSupplier, cancelPurchaseOrder, createPurchaseOrder, parsePurchaseOrderLines, purchaseLineOpenQuantity, receivePurchaseOrder } from '@/lib/purchasing';
 import { triggerPushSync } from '@/lib/sync';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { syncBidirectional } from '@/lib/dexie';
@@ -131,7 +131,7 @@ export default function PurchasingPage() {
         locationId: targetLocationId,
         userId: currentUser.id,
         quantities: orderLines.map((line, index) => {
-          const remaining = Math.max(0, line.quantity - (Number(line.received_quantity) || 0));
+          const remaining = purchaseLineOpenQuantity(line);
           return receiptQuantities[`${order.id}:${index}`] === undefined
             ? remaining
             : Number(receiptQuantities[`${order.id}:${index}`]);
@@ -142,7 +142,7 @@ export default function PurchasingPage() {
         Object.entries(previous).filter(([key]) => !key.startsWith(`${order.id}:`))
       ));
       void triggerPushSync('purchase-order-receive');
-      setMessage(`${order.order_number} receipt recorded. Stock and product cost prices have been updated.`);
+      setMessage(`${order.order_number} is waiting for a cashier to confirm the goods are present. Stock and cost prices update after that approval.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not receive purchase order.');
     } finally {
@@ -264,11 +264,12 @@ export default function PurchasingPage() {
                     <div className="mt-2 space-y-1 text-xs text-gray-700">
                       {orderLinesError && <p role="alert" className="rounded bg-red-50 p-2 text-red-800">{orderLinesError}</p>}
                       {orderLines.map((line, index) => {
-                        const remaining = Math.max(0, line.quantity - (Number(line.received_quantity) || 0));
+                        const remaining = purchaseLineOpenQuantity(line);
+                        const waiting = Number(line.pending_quantity) || 0;
                         const open = order.status === 'ordered' || order.status === 'partially_received';
                         return (
                           <div key={`${line.product_id}-${index}`} className="flex flex-wrap items-center justify-between gap-2">
-                            <p>{line.quantity} × {line.product_name} @ {money(line.unit_cost)}{(line.received_quantity || 0) > 0 ? ` · received ${line.received_quantity}` : ''}</p>
+                            <p>{line.quantity} × {line.product_name} @ {money(line.unit_cost)}{(line.received_quantity || 0) > 0 ? ` · received ${line.received_quantity}` : ''}{waiting > 0 ? ` · ${waiting} awaiting cashier approval` : ''}</p>
                             {open && remaining > 0 && (
                               <label className="flex items-center gap-1.5 text-[11px]">
                                 Receive
