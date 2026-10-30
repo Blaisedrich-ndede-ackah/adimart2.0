@@ -92,7 +92,10 @@ CREATE POLICY stock_approval_logs_all
   USING (true)
   WITH CHECK (true);
 
--- Platform activity log. No SELECT grant for the shop anon key.
+-- Platform activity log. The shop anon key may write rows. It has SELECT
+-- privilege only because Postgres requires it for ON CONFLICT upserts.
+-- There is no SELECT policy, so a direct read still returns no rows.
+-- The admin portal reads this table with the service role.
 CREATE TABLE IF NOT EXISTS public.activity_logs (
   id UUID PRIMARY KEY,
   store_id TEXT,
@@ -120,7 +123,7 @@ CREATE INDEX IF NOT EXISTS idx_activity_logs_type
 ALTER TABLE public.activity_logs ENABLE ROW LEVEL SECURITY;
 
 REVOKE ALL ON TABLE public.activity_logs FROM PUBLIC, anon, authenticated;
-GRANT INSERT, UPDATE ON public.activity_logs TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE ON public.activity_logs TO anon, authenticated;
 GRANT ALL ON TABLE public.activity_logs TO service_role;
 
 DROP POLICY IF EXISTS activity_logs_insert ON public.activity_logs;
@@ -219,4 +222,4 @@ CREATE POLICY support_ticket_notes_portal_write
   WITH CHECK (true);
 
 COMMENT ON TABLE public.activity_logs IS
-  'Platform activity and sign-in log. Shop devices can write rows. Only the service-role admin API can read them.';
+  'Platform activity and sign-in log. Shop devices can insert and update rows. SELECT privilege exists so ON CONFLICT upserts succeed. There is no SELECT policy, so a shop read returns no rows. The service-role admin API reads the log.';
