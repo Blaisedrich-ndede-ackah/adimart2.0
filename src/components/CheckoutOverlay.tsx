@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   X, Banknote, CreditCard, Split, Percent, Shield,
   CheckCircle2, Loader2, Printer, AlertTriangle, Share2, Download,
-  Smartphone, MessageCircle, CirclePlus, Trash2
+  Smartphone, MessageCircle, CirclePlus, Trash2, Search
 } from 'lucide-react';
 import { useCartStore, CartItem } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -23,6 +23,9 @@ import {
 } from '@/lib/paymentMethods';
 import { useFormatMoney, getStoreCurrency } from '@/lib/currency';
 import { getBluetoothHardwareStatus } from '@/lib/bluetoothPeripherals';
+import { formatCustomerAddress } from '@/lib/customerAddress';
+import { recordActivity } from '@/lib/activityLog';
+import { canApplyDiscount as cashierMayDiscount } from '@/lib/staffAccess';
 
 interface CheckoutOverlayProps {
   isOpen: boolean;
@@ -50,6 +53,7 @@ interface SaleResult {
   paymentReference?: string;
   customerName?: string;
   customerPhone?: string;
+  customerAddress?: string;
   creditBalance?: number;
   customerBalance?: number;
 }
@@ -71,6 +75,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
   const [walletCustomerId, setWalletCustomerId] = useState('');
   const [walletUseAmount, setWalletUseAmount] = useState('');
   const [creditCustomers, setCreditCustomers] = useState<LocalCustomer[]>([]);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [saleResult, setSaleResult] = useState<SaleResult | null>(null);
   const [error, setError] = useState('');
   const [isPrinting, setIsPrinting] = useState(false);
@@ -90,9 +95,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
   const pinOnDiscount = currentStore?.pin_on_discount_enabled === 1;
   const allowPercentage = (currentStore?.discount_allow_percentage ?? 1) === 1;
   const allowFixed = (currentStore?.discount_allow_fixed ?? 1) === 1;
-  const cashierCanDiscount = (currentStore?.cashier_can_discount ?? 1) === 1;
   const isOwner = currentUser?.role === 'owner';
-  const canApplyDiscount = isOwner || cashierCanDiscount;
+  const canApplyDiscount = isOwner || cashierMayDiscount(currentUser, currentStore);
   const discountsEnabled = allowPercentage || allowFixed;
 
   useEffect(() => {
@@ -164,6 +168,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       paystackReference: result.paystackReference,
       paymentReference: result.paymentReference,
       customerName: result.customerName,
+      customerAddress: result.customerAddress,
       outstandingBalance: method === 'credit' ? undefined : result.creditBalance,
       amountPaid: method === 'credit' ? 0 : result.total,
       balanceAfterPayment: result.customerBalance ?? result.creditBalance,
@@ -318,11 +323,26 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         paymentReference: paymentRef || paystackRef,
         customerName,
         customerPhone,
+        customerAddress: formatCustomerAddress(
+          creditCustomers.find((customer) => customer.id === customerId)?.address
+        ),
         creditBalance: method === 'credit' ? result.total : 0,
         customerBalance: method === 'credit' ? result.customerBalance : undefined,
       };
       setSaleResult(completed);
       setStep('success');
+      if (currentStore?.id) {
+        recordActivity({
+          storeId: currentStore.id,
+          storeName: currentStore.name,
+          userId: currentUser.id,
+          username: currentUser.name,
+          role: currentUser.role,
+          activityType: 'sale',
+          summary: `Completed sale ${result.receiptNumber}`,
+          details: method,
+        });
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
@@ -530,27 +550,44 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
 
   if (!isOpen) return null;
 
+  const checkoutBeat =
+    step === 'success'
+      ? 3
+      : step === 'method' || step === 'discount' || step === 'charges' || step === 'pin-verify'
+        ? 1
+        : 2;
+
   return (
     <div className="sheet-backdrop animate-fade-in">
       <div className="sheet-panel animate-slide-up">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
-          <h2 className="text-lg font-bold text-gray-900">
-            {step === 'method' && 'Checkout'}
-            {step === 'discount' && 'Apply Discount'}
-            {step === 'charges' && 'Add Other Charges'}
-            {step === 'pin-verify' && 'Owner Authorization'}
-            {step === 'cash-input' && 'Cash Payment'}
-            {step === 'split-input' && 'Split Payment'}
-            {step === 'manual-payment' && 'Record Manual Payment'}
-            {step === 'paystack' && 'Processing Payment...'}
-            {step === 'processing' && 'Processing...'}
-            {step === 'success' && 'Sale Complete!'}
-          </h2>
-          {step !== 'processing' && step !== 'paystack' && (
-            <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100 touch-target">
-              <X className="w-5 h-5" />
-            </button>
-          )}
+        <div className="sticky top-0 z-10 border-b border-gray-100 bg-white px-5 py-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-lg font-bold text-gray-900">
+              {step === 'method' && 'Checkout'}
+              {step === 'discount' && 'Apply Discount'}
+              {step === 'charges' && 'Add Other Charges'}
+              {step === 'pin-verify' && 'Owner Authorization'}
+              {step === 'cash-input' && 'Cash Payment'}
+              {step === 'split-input' && 'Split Payment'}
+              {step === 'manual-payment' && 'Record Manual Payment'}
+              {step === 'credit-input' && 'Credit Sale'}
+              {step === 'wallet-input' && 'Wallet Payment'}
+              {step === 'paystack' && 'Processing Payment...'}
+              {step === 'processing' && 'Processing...'}
+              {step === 'success' && 'Sale Complete!'}
+            </h2>
+            {step !== 'processing' && step !== 'paystack' && (
+              <button type="button" onClick={onClose} aria-label="Close checkout" className="rounded-full p-2 hover:bg-gray-100 touch-target">
+                <X className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+          <div className="ux-progress mt-3" aria-hidden="true">
+            <span data-on={checkoutBeat >= 1 ? 'true' : 'false'} />
+            <span data-on={checkoutBeat >= 2 ? 'true' : 'false'} />
+            <span data-on={checkoutBeat >= 3 ? 'true' : 'false'} />
+          </div>
+          <p className="sr-only">Step {checkoutBeat} of 3. The total stays on this screen until the sale is finished.</p>
         </div>
 
         <div className="p-5">
@@ -1133,6 +1170,13 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                 <label htmlFor="credit-customer" className="text-sm font-medium text-gray-700 mb-2 block">
                   Registered customer *
                 </label>
+                <input
+                  type="text"
+                  value={customerSearchQuery}
+                  onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                  placeholder="Search customers by name, phone, or address…"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none mb-2"
+                />
                 <select
                   id="credit-customer"
                   value={creditCustomerId}
@@ -1141,11 +1185,24 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                   autoFocus
                 >
                   <option value="">Select a customer</option>
-                  {creditCustomers.filter((customer) => customer.is_active === 1).map((customer) => (
-                    <option key={customer.id} value={customer.id}>
-                      {customer.name}{customer.phone ? ` · ${customer.phone}` : ''}
-                    </option>
-                  ))}
+                  {creditCustomers
+                    .filter((customer) => customer.is_active === 1)
+                    .filter((customer) => {
+                      const q = customerSearchQuery.toLowerCase().trim();
+                      if (!q) return true;
+                      const address = formatCustomerAddress(customer.address).toLowerCase();
+                      return (
+                        customer.name.toLowerCase().includes(q) ||
+                        customer.phone.toLowerCase().includes(q) ||
+                        address.includes(q)
+                      );
+                    })
+                    .map((customer) => (
+                      <option key={customer.id} value={customer.id}>
+                        {customer.name}{customer.phone ? ` · ${customer.phone}` : ''}
+                        {customer.address ? ` · ${formatCustomerAddress(customer.address)}` : ''}
+                      </option>
+                    ))}
                 </select>
                 {creditCustomers.filter((customer) => customer.is_active === 1).length === 0 && (
                   <p className="mt-2 text-xs text-amber-800">No active customers are registered. Ask the store owner to add the customer in the Customers book before selling on credit.</p>
@@ -1180,6 +1237,13 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
               </div>
               <label className="block text-sm font-medium text-gray-700">
                 Customer wallet *
+                <input
+                  type="text"
+                  value={customerSearchQuery}
+                  onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                  placeholder="Search customers by name, phone, or address…"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none mb-2"
+                />
                 <select
                   value={walletCustomerId}
                   onChange={(event) => {
@@ -1198,9 +1262,20 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                   <option value="">Select customer</option>
                   {creditCustomers
                     .filter((customer) => customer.is_active === 1 && Number(customer.wallet_balance) > 0)
+                    .filter((customer) => {
+                      const q = customerSearchQuery.toLowerCase().trim();
+                      if (!q) return true;
+                      const address = formatCustomerAddress(customer.address).toLowerCase();
+                      return (
+                        customer.name.toLowerCase().includes(q) ||
+                        customer.phone.toLowerCase().includes(q) ||
+                        address.includes(q)
+                      );
+                    })
                     .map((customer) => (
                       <option key={customer.id} value={customer.id}>
                         {customer.name} · wallet {money(customer.wallet_balance || 0)}
+                        {customer.address ? ` · ${formatCustomerAddress(customer.address)}` : ''}
                       </option>
                     ))}
                 </select>
@@ -1321,10 +1396,10 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
           )}
 
           {step === 'processing' && (
-            <div className="flex flex-col items-center py-10">
+            <div className="flex flex-col items-center py-10" role="status">
               <Loader2 className="w-12 h-12 text-primary animate-spin mb-4" />
-              <p className="text-gray-700 font-medium">Processing sale...</p>
-              <p className="text-gray-500 text-sm">Please wait</p>
+              <p className="text-gray-700 font-medium">Saving this sale on this device…</p>
+              <p className="text-gray-500 text-sm">The receipt number appears next.</p>
             </div>
           )}
 
@@ -1334,8 +1409,15 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                 <CheckCircle2 className="w-10 h-10 text-green-600" />
               </div>
               <h3 className="text-xl font-bold text-gray-900 mb-1">Sale Complete!</h3>
+              <p className="mb-2 text-center text-sm text-gray-600">The receipt is saved on this device.</p>
               <p className="text-primary font-mono font-bold text-lg mb-1">{saleResult.receiptNumber}</p>
               <p className="text-2xl font-bold text-gray-900 mb-4">{money(saleResult.total)}</p>
+              {saleResult.customerAddress ? (
+                <p className="mb-3 max-w-xs text-center text-sm text-gray-600">
+                  {saleResult.customerName ? `${saleResult.customerName} · ` : ''}
+                  {saleResult.customerAddress}
+                </p>
+              ) : null}
               {saleResult.paymentMethod === 'credit' && (
                 <p className="w-full rounded-xl bg-amber-50 px-3 py-2 mb-3 text-center text-sm text-amber-900">
                   Credit for {saleResult.customerName}; account balance {money(saleResult.customerBalance ?? saleResult.creditBalance ?? 0)}

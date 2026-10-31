@@ -23,6 +23,7 @@ import {
 } from '@/lib/dexie';
 import { ensureStoreLocations, listLocations } from '@/lib/warehouse';
 import { useAuthStore } from '@/store/useAuthStore';
+import { recordActivity } from '@/lib/activityLog';
 import { isBiometricAvailable, registerBiometric, hasBiometricRegistered, clearBiometricRegistration } from '@/lib/biometric';
 import { isValidGhanaPhone } from '@/lib/platformSettings';
 import { fileToStoreLogoDataUrl, hasStoreLogo } from '@/lib/productImage';
@@ -32,7 +33,7 @@ import LanguageSwitcher from '@/components/LanguageSwitcher';
 import CurrencySelect from '@/components/CurrencySelect';
 import { useI18nStore, useT } from '@/lib/i18n';
 import { DEFAULT_CURRENCY, normalizeCurrencyCode, getStoreCurrency } from '@/lib/currency';
-import { canAccessCashbook } from '@/lib/staffAccess';
+import { canAccessCashbook, canApplyDiscount, canSeeStockQuantities } from '@/lib/staffAccess';
 import {
   DEFAULT_SESSION_TIMEOUT_MINUTES,
   SESSION_TIMEOUT_OPTIONS,
@@ -114,7 +115,11 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
       setAllowPercentage((currentStore.discount_allow_percentage ?? 1) === 1);
       setAllowFixed((currentStore.discount_allow_fixed ?? 1) === 1);
       setCashierCanDiscount((currentStore.cashier_can_discount ?? 1) === 1);
-      setCashierCanSeeStock((currentStore.cashier_can_see_stock ?? 0) === 1);
+      setCashierCanSeeStock(
+        currentStore.cashier_can_see_stock === 0 || currentStore.cashier_can_see_stock === 1
+          ? currentStore.cashier_can_see_stock === 1
+          : (currentStore.cashiers_can_view_stock ?? 0) === 1
+      );
       setSessionTimeoutMinutes(normalizeSessionTimeoutMinutes(currentStore.session_timeout_minutes));
       setMomoAccountName(currentStore.momo_account_name || '');
       setMomoNumber(currentStore.momo_number || '');
@@ -199,6 +204,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         discount_allow_fixed: allowFixed ? 1 : 0,
         cashier_can_discount: cashierCanDiscount ? 1 : 0,
         cashier_can_see_stock: cashierCanSeeStock ? 1 : 0,
+        cashiers_can_view_stock: cashierCanSeeStock ? 1 : 0,
         session_timeout_minutes: normalizeSessionTimeoutMinutes(sessionTimeoutMinutes),
         momo_account_name: momoAccountName.trim(),
         momo_number: momoNumber.trim(),
@@ -215,6 +221,18 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
       });
       
       await refreshStore();
+      if (currentUser) {
+        recordActivity({
+          storeId,
+          storeName: storeName.trim(),
+          userId: currentUser.id,
+          username: currentUser.name,
+          role: currentUser.role,
+          activityType: 'settings',
+          summary: 'Updated store settings',
+          details: 'Updated store settings',
+        });
+      }
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err: unknown) {
@@ -304,6 +322,8 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         | 'can_sell_from_warehouse'
         | 'can_manage_ecommerce'
         | 'can_access_cashbook'
+        | 'can_view_stock'
+        | 'can_discount'
         | 'phone'
       >
     >
@@ -918,6 +938,8 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
                       <p className="text-xs text-gray-500 capitalize">
                         {user.role}
                         {user.phone ? ` · ${user.phone}` : ' · no phone'}
+                        {user.role === 'cashier' && canSeeStockQuantities(user, currentStore) ? ' · stock qty' : ''}
+                        {user.role === 'cashier' && canApplyDiscount(user, currentStore) ? ' · discounts' : ''}
                         {user.role === 'cashier' && (user.can_wholesale === 1 ? ' · wholesale' : '')}
                         {user.role === 'cashier' && (user.can_sell_from_warehouse === 1 ? ' · warehouse sales' : '')}
                         {user.role === 'cashier' && (user.can_manage_ecommerce === 1 ? ' · online shop' : '')}
@@ -1023,6 +1045,32 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
                           ))}
                         </select>
                       </div>
+                      <label className="flex items-center justify-between gap-2 py-1">
+                        <span>
+                          <span className="text-gray-700 font-medium block">Can see stock quantities</span>
+                          <span className="text-[11px] text-gray-500">Turn off to hide on-hand numbers on this cashier’s screens.</span>
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={canSeeStockQuantities(user, currentStore)}
+                          onChange={(e) =>
+                            void updateCashierPerms(user, { can_view_stock: e.target.checked ? 1 : 0 })
+                          }
+                        />
+                      </label>
+                      <label className="flex items-center justify-between gap-2 py-1">
+                        <span>
+                          <span className="text-gray-700 font-medium block">Can apply discounts</span>
+                          <span className="text-[11px] text-gray-500">Turn off to keep discounts for the owner.</span>
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={canApplyDiscount(user, currentStore)}
+                          onChange={(e) =>
+                            void updateCashierPerms(user, { can_discount: e.target.checked ? 1 : 0 })
+                          }
+                        />
+                      </label>
                       <label className="flex items-center justify-between gap-2 py-1">
                         <span className="text-gray-700 font-medium">Can sell wholesale</span>
                         <input

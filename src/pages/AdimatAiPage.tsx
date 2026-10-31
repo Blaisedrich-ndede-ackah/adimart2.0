@@ -124,7 +124,14 @@ export default function AdimatAiPage({ onNavigate }: AdimatAiPageProps) {
         {report?.lowHistory && (
           <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">{t('ai.notEnough')}</p>
         )}
-        {ai.status === 'error' && <p className="text-sm text-red-700">{ai.error}</p>}
+        {ai.status === 'error' && (
+          <div role="alert" className="rounded-xl border border-red-100 bg-red-50 px-3 py-3 text-sm text-red-800">
+            <p>{ai.error}</p>
+            <button type="button" onClick={() => ai.refresh()} className="mt-2 rounded-xl bg-white px-3 py-2 text-sm font-semibold text-primary touch-target">
+              Try again
+            </button>
+          </div>
+        )}
         {ai.locations.length > 1 && (
           <label className="block text-sm">
             <span className="mb-1 block text-xs font-semibold text-gray-500">{t('common.store')}</span>

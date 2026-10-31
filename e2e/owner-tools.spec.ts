@@ -182,7 +182,7 @@ test('owner restores from cloud, filters sales, and cashiers hide stock until al
 
   await page.locator('aside').getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Restore store from cloud' }).click();
-  await page.getByLabel('Cloud store ID').fill('not-a-store');
+  await page.getByLabel('Store ID').fill('not-a-store');
   await page.getByLabel('Owner or admin PIN').fill('1234');
   await page.getByRole('button', { name: 'Restore from cloud' }).click();
   await expect(page.getByText(/Supabase not configured/i)).toBeVisible();

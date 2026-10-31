@@ -9,6 +9,7 @@ import CheckoutOverlay from '@/components/CheckoutOverlay';
 import FrequentItems from '@/components/FrequentItems';
 import { useCartStore } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { canViewStockQuantities } from '@/lib/stockVisibility';
 import { useAccessibilityStore } from '@/lib/accessibility';
 import { db, LocalProduct, LocalLocation, getActiveStoreOwner, getCurrentStoreActiveProducts, getCurrentStoreId } from '@/lib/dexie';
 import { playScanBeep, primeScanBeep } from '@/lib/scanBeep';
@@ -56,6 +57,51 @@ type SpeechWindow = Window & {
   webkitSpeechRecognition?: new () => SpeechRecognitionLike;
 };
 
+function editDistance(left: string, right: string): number {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= left.length; i++) {
+    let diagonal = previous[0];
+    previous[0] = i;
+    for (let j = 1; j <= right.length; j++) {
+      const above = previous[j];
+      previous[j] = Math.min(previous[j] + 1, previous[j - 1] + 1, diagonal + (left[i - 1] === right[j - 1] ? 0 : 1));
+      diagonal = above;
+    }
+  }
+  return previous[right.length];
+}
+
+function productMatchScore(product: LocalProduct, query: string): number {
+  const name = product.name.toLocaleLowerCase();
+  const barcode = product.barcode.toLocaleLowerCase();
+  const category = product.category.toLocaleLowerCase();
+  if (barcode === query) return 1000;
+  if (barcode.includes(query)) return 900;
+  if (query.length >= 3 && query.includes(barcode) && barcode.length >= 3) return 850;
+  if (name === query) return 800;
+  if (name.startsWith(query)) return 750;
+  if (name.includes(query) || name.replace(/\s+/g, '').includes(query.replace(/\s+/g, ''))) return 700;
+  if (category.includes(query)) return 500;
+
+  const queryParts = query.split(/\s+/).filter(Boolean);
+  const words = `${name} ${category}`.split(/[\s/-]+/).filter(Boolean);
+  let score = 0;
+  for (const part of queryParts) {
+    let best = 0;
+    for (const word of words) {
+      if (word.startsWith(part)) best = Math.max(best, 400);
+      else if (part.length >= 3) {
+        const distance = editDistance(part, word);
+        const maxDistance = part.length < 5 ? 1 : Math.min(3, Math.floor(part.length * 0.25));
+        if (distance <= maxDistance) best = Math.max(best, 350 - distance * 20);
+      }
+    }
+    if (best === 0) return 0;
+    score += best;
+  }
+  return score;
+}
+
 function moveBefore<T>(order: readonly T[], source: T, target: T): T[] {
   const next = [...order];
   const sourceIndex = next.indexOf(source);
@@ -79,7 +125,6 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   const cart = useCartStore();
   const setSaleContext = useCartStore((s) => s.setSaleContext);
   const { currentUser, currentStore } = useAuthStore();
-  const alsoBuy = useAlsoBuy(currentStore?.id, cart.items.map((item) => item.product_id));
   const money = useFormatMoney();
   const t = useT();
   const [posTab, setPosTab] = useState<PosTab>('products');
@@ -111,7 +156,16 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
 
   const canWholesale = canUserSellWholesale(currentUser);
   const isStoreOwner = currentUser?.role === 'owner';
-  const showStockQty = cashierCanSeeStockQuantity(currentUser, currentStore);
+  const showStockQty = canViewStockQuantities(currentUser, currentStore);
+  const alsoBuy = useAlsoBuy(
+    currentUser?.role === 'owner' ? currentStore?.id : undefined,
+    currentUser?.role === 'owner' ? cart.items.map((item) => item.product_id) : []
+  );
+  const retailLineCount = cart.items.filter((item) => item.sale_mode === 'retail').length;
+  const wholesaleLineCount = cart.items.filter((item) => item.sale_mode === 'wholesale').length;
+  const packLineCount = cart.items.filter((item) => item.unit_type === 'pack').length;
+  const unitLineCount = cart.items.length - packLineCount;
+  const isMixedCart = (retailLineCount > 0 && wholesaleLineCount > 0) || (packLineCount > 0 && unitLineCount > 0);
 
   useEffect(() => {
     let active = true;
@@ -242,8 +296,8 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   }, [loadSaleContext]);
 
   useEffect(() => {
-    setSaleContext(selectedLocationId || null, saleMode);
-  }, [selectedLocationId, saleMode, setSaleContext]);
+    setSaleContext(selectedLocationId || null, saleMode, unitType);
+  }, [selectedLocationId, saleMode, unitType, setSaleContext]);
 
   useEffect(() => {
     void loadProducts();
@@ -319,7 +373,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
       .filter((product) => selectedCategory === 'All' || product.category === selectedCategory)
       .map((product) => ({
         product,
-        relevance: q ? scoreSmartSearch(product, q) : 0,
+        relevance: q ? Math.max(productMatchScore(product, q), scoreSmartSearch(product, q)) : 0,
         rank: salesRank[product.id],
       }))
       .filter(({ relevance }) => !q || relevance > 0)
@@ -408,7 +462,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   }, []);
 
   const handleScan = useCallback(async (barcode: string) => {
-    const result = await cart.addItemByBarcode(barcode);
+    const result = await cart.addItemByBarcode(barcode, { saleMode, unitType });
 
     if (result.success && result.product) {
       flashFeedback({ type: 'success', message: `Added: ${result.product.name}` });
@@ -426,19 +480,19 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
         playScanBeep('error');
       }
     }
-  }, [cart, flashFeedback]);
+  }, [cart, flashFeedback, saleMode, unitType]);
 
   // Handheld Bluetooth / HID scanner → cart (active while not in checkout)
   useBluetoothBarcodeInput(handleScan, scannerActive && !showCheckout);
 
-  const handleAddProduct = async (product: LocalProduct) => {
+  const handleAddProduct = async (product: LocalProduct, overrideSaleMode?: SaleMode) => {
     const modes = getAvailableSaleModes(product);
-    const mode = saleMode === 'wholesale' && modes.includes('wholesale') ? 'wholesale' : 'retail';
-    if (mode !== saleMode) cart.setSaleContext(selectedLocationId || null, mode);
+    const defaultMode = saleMode === 'wholesale' && modes.includes('wholesale') ? 'wholesale' : 'retail';
+    const mode = overrideSaleMode ?? defaultMode;
 
     const packSize = Math.max(1, Number(product.pack_size) || 1);
     const usePack = unitType === 'pack' && packSize > 1;
-    const result = await cart.addItem(product, { unitType: usePack ? 'pack' : 'base' });
+    const result = await cart.addItem(product, { unitType: usePack ? 'pack' : 'base', saleMode: mode });
 
     if (result.success) {
       flashFeedback({ type: 'success', message: `Added: ${product.name}` }, 2000);
@@ -498,6 +552,37 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
       return;
     }
     void cart.decrementItem(itemId);
+  };
+
+  const toggleItemSaleMode = async (itemId: string) => {
+    const item = cart.items.find((currentItem) => currentItem.id === itemId);
+    if (!item) return;
+    const nextMode: SaleMode = item.sale_mode === 'retail' ? 'wholesale' : 'retail';
+    if (nextMode === 'wholesale') {
+      if (!canWholesale) {
+        flashFeedback({ type: 'warning', message: 'Wholesale pricing is disabled for this cashier.' });
+        return;
+      }
+      const product = await db.products.get(item.product_id);
+      if (!product || !getAvailableSaleModes(product).includes('wholesale')) {
+        flashFeedback({ type: 'warning', message: `No wholesale pricing is configured for ${item.name}.` });
+        return;
+      }
+    }
+    const result = await cart.setItemSaleMode(itemId, nextMode);
+    if (!result.success && result.error) {
+      flashFeedback({ type: 'warning', message: result.error });
+    }
+  };
+
+  const toggleItemUnitType = async (itemId: string) => {
+    const item = cart.items.find((currentItem) => currentItem.id === itemId);
+    if (!item) return;
+    const nextUnit: UnitType = item.unit_type === 'pack' ? 'base' : 'pack';
+    const result = await cart.setItemUnitType(itemId, nextUnit);
+    if (!result.success && result.error) {
+      flashFeedback({ type: 'warning', message: result.error });
+    }
   };
 
   const handleUpdateQuantity = async (itemId: string, newQty: number) => {
@@ -685,7 +770,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
       </div>
 
       {/* Sale context: retail/wholesale + unit. One shop per store — no location picker. */}
-      <div className="bg-white border-b border-emerald-50 px-3 py-2.5 md:px-4 flex-shrink-0 space-y-2 md:space-y-0 md:flex md:items-center md:gap-3">
+      <div className="bg-white border-b border-emerald-50 px-3 py-2.5 md:px-4 flex-shrink-0 space-y-2 md:space-y-0 md:flex md:flex-wrap md:items-center md:gap-3">
         {saleLocations.length > 1 ? (
         <div className="flex items-center gap-2 md:flex-1 md:min-w-0">
           <MapPin className="w-3.5 h-3.5 text-primary flex-shrink-0" />
@@ -707,12 +792,12 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
           </select>
         </div>
         ) : null}
-        <div className="flex gap-2 md:w-auto md:flex-shrink-0">
+        <div className="flex flex-wrap gap-2 md:w-auto md:flex-shrink-0">
           <button
             type="button"
+            aria-pressed={saleMode === 'retail'}
+            aria-label="Use retail pricing for newly added items"
             onClick={() => {
-              if (cart.items.length > 0 && saleMode !== 'retail' && !confirm('Switching to retail clears the cart. Continue?')) return;
-              if (saleMode !== 'retail') cart.clearCart();
               setSaleMode('retail');
             }}
             className={`flex-1 md:flex-none md:px-4 py-2 rounded-lg text-xs font-semibold touch-target ${
@@ -723,30 +808,47 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
           </button>
           <button
             type="button"
+            aria-pressed={saleMode === 'wholesale'}
+            aria-label="Use wholesale pricing for newly added items"
             disabled={!canWholesale}
             onClick={() => {
               if (!canWholesale) return;
-              if (cart.items.length > 0 && saleMode !== 'wholesale' && !confirm('Switching to wholesale clears the cart. Continue?')) return;
-              if (saleMode !== 'wholesale') cart.clearCart();
               setSaleMode('wholesale');
             }}
             className={`flex-1 md:flex-none md:px-4 py-2 rounded-lg text-xs font-semibold touch-target disabled:opacity-40 ${
               saleMode === 'wholesale' ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-600'
             }`}
-            title={canWholesale ? 'Wholesale / bulk pricing' : 'Wholesale disabled for this cashier'}
+            title={canWholesale ? 'Wholesale / bulk pricing for newly added items' : 'Wholesale disabled for this cashier'}
           >
             Wholesale
           </button>
           <button
             type="button"
-            onClick={() => setUnitType((u) => (u === 'base' ? 'pack' : 'base'))}
-            className={`px-3 py-2 rounded-lg text-xs font-semibold touch-target whitespace-nowrap ${
+            aria-pressed={unitType === 'base'}
+            aria-label="Add the next items by unit"
+            onClick={() => setUnitType('base')}
+            className={`flex-1 md:flex-none md:px-4 py-2 rounded-lg text-xs font-semibold touch-target whitespace-nowrap ${
+              unitType === 'base' ? 'bg-slate-800 text-white' : 'bg-gray-100 text-gray-600'
+            }`}
+          >
+            By unit
+          </button>
+          <button
+            type="button"
+            aria-pressed={unitType === 'pack'}
+            aria-label="Add the next items by pack"
+            onClick={() => setUnitType('pack')}
+            className={`flex-1 md:flex-none md:px-4 py-2 rounded-lg text-xs font-semibold touch-target whitespace-nowrap ${
               unitType === 'pack' ? 'bg-slate-800 text-white' : 'bg-gray-100 text-gray-600'
             }`}
           >
-            {unitType === 'pack' ? 'By pack' : 'By unit'}
+            By pack
           </button>
         </div>
+        <p className="text-[10px] leading-snug text-gray-500 md:basis-full">
+          Retail, wholesale, and by unit stay in the same sale. Switching only changes the next item
+          {cart.items.length > 0 ? ` — ${cart.items.length} selected item${cart.items.length === 1 ? '' : 's'} stay in the cart.` : '.'}
+        </p>
       </div>
 
       {/* Scan Feedback */}
@@ -1020,6 +1122,14 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
             </div>
           </div>
 
+          {isMixedCart && (
+            <div role="status" aria-live="polite" className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs font-medium text-slate-700">
+              Mixed sale · {retailLineCount} retail · {wholesaleLineCount} wholesale
+              {packLineCount > 0 ? ` · ${packLineCount} by pack` : ''}
+              {unitLineCount > 0 ? ` · ${unitLineCount} by unit` : ''}
+            </div>
+          )}
+
           <div className={`flex-1 overflow-y-auto px-3 md:px-4 pt-3 no-scrollbar ${cart.items.length > 0 ? 'pb-28 lg:pb-4' : 'pb-4'}`}>
             {cart.parkedCarts.length > 0 && (
               <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
@@ -1034,7 +1144,11 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                           {parked.items.length} item{parked.items.length === 1 ? '' : 's'} · {money(parked.total)}
                         </p>
                         <p className="text-[10px] text-gray-500">
-                          {parked.saleMode === 'wholesale' ? 'Wholesale' : 'Retail'} · {new Date(parked.parkedAt).toLocaleTimeString()}
+                          {parked.items.some((item) => item.sale_mode === 'retail') && parked.items.some((item) => item.sale_mode === 'wholesale')
+                            ? 'Mixed retail + wholesale'
+                            : parked.items.some((item) => item.sale_mode === 'wholesale')
+                              ? 'Wholesale'
+                              : 'Retail'} · {new Date(parked.parkedAt).toLocaleTimeString()}
                         </p>
                       </div>
                       <button
@@ -1044,6 +1158,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                           if (!context) return;
                           setSelectedLocationId(context.locationId || '');
                           setSaleMode(context.saleMode);
+                          setUnitType(context.unitType || 'base');
                           setPosTab('cart');
                         }}
                         className="flex items-center gap-1 rounded-lg bg-primary px-2.5 py-2 text-xs font-semibold text-white touch-target"
@@ -1097,6 +1212,15 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                   </button>
                 </div>
 
+                {currentUser?.role === 'owner' && (
+                  <AlsoBuySuggestions
+                    suggestions={alsoBuy}
+                    onAdd={(productId) => {
+                      const product = products.find((candidate) => candidate.id === productId);
+                      if (product) void handleAddProduct(product);
+                    }}
+                  />
+                )}
                 {cart.items.map((item) => (
                   <div
                     key={item.id}
@@ -1114,11 +1238,33 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                               <p className="text-xs text-gray-500">
                                 {money(item.unit_price)} / {item.unit_type === 'pack' ? 'pack' : 'unit'}
                               </p>
-                              {item.sale_mode === 'wholesale' && (
-                                <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-medium">
-                                  Wholesale
-                                </span>
-                              )}
+                              <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                                item.price_label?.startsWith('Wholesale')
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-blue-100 text-blue-800'
+                              }`}>
+                                {item.price_label || (item.sale_mode === 'wholesale' ? 'Wholesale' : 'Retail')}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => void toggleItemSaleMode(item.id)}
+                                disabled={!canWholesale && item.sale_mode === 'retail'}
+                                aria-label={`Switch ${item.name} to ${item.sale_mode === 'retail' ? 'wholesale' : 'retail'} pricing`}
+                                title={item.sale_mode === 'retail'
+                                  ? canWholesale ? 'Switch this line to wholesale pricing' : 'Wholesale is disabled for this cashier'
+                                  : 'Switch this line to retail pricing'}
+                                className="rounded-lg border border-gray-200 px-2 py-1 text-[10px] font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                Use {item.sale_mode === 'retail' ? 'wholesale' : 'retail'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void toggleItemUnitType(item.id)}
+                                aria-label={`Sell ${item.name} ${item.unit_type === 'pack' ? 'by unit' : 'by pack'}`}
+                                className="rounded-lg border border-gray-200 px-2 py-1 text-[10px] font-semibold text-gray-600 hover:bg-gray-50"
+                              >
+                                {item.unit_type === 'pack' ? 'By unit' : 'By pack'}
+                              </button>
                             </div>
                           </div>
                           <button

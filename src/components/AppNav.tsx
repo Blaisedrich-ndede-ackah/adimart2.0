@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, House,
+  ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, House, Search, ClipboardCheck,
+  Sparkles, LifeBuoy,
   CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare, Moon, Sun,
   ShoppingCart, RotateCcw,
   ContactRound, ArrowLeftRight, Building2, Megaphone,
@@ -68,8 +69,11 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
     () =>
       [
         { id: 'home', label: t('nav.dashboard'), icon: House, show: isOwner },
-        { id: 'adimat-ai', label: t('nav.adimatAi'), icon: Sparkles, show: true },
         { id: 'pos', label: t('nav.pos'), icon: ScanBarcode, show: true },
+        { id: 'search', label: 'Search', icon: Search, show: true },
+        { id: 'adimat-ai', label: t('nav.adimatAi'), shortLabel: 'AI', icon: Sparkles, show: isOwner },
+        { id: 'stock-approvals', label: 'Stock approvals', shortLabel: 'Approvals', icon: ClipboardCheck, show: true },
+        { id: 'support', label: t('nav.support'), shortLabel: 'Help', icon: LifeBuoy, show: true },
         {
           id: 'transactions',
           label: isOwner ? t('nav.salesRecords') : t('nav.mySales'),
@@ -96,7 +100,6 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
           show: ecommerceEnabled && canManageEcommerce,
         },
         { id: 'reports', label: t('nav.reports'), icon: BarChart3, show: isOwner },
-        { id: 'support', label: t('nav.support'), icon: LifeBuoy, show: true },
         { id: 'settings', label: t('nav.settings'), icon: Settings, show: isOwner },
         {
           id: 'community',
@@ -123,7 +126,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   // Group secondary items into logical sections for the mobile More sheet.
   type NavGroup = { label: string; ids: string[] };
   const navGroups: NavGroup[] = [
-    { label: t('nav.main'), ids: ['home', 'adimat-ai', 'pos', 'transactions'] },
+    { label: t('nav.main'), ids: ['home', 'pos', 'search', 'adimat-ai', 'stock-approvals', 'transactions'] },
     { label: 'Shop', ids: ['inventory', 'purchasing', 'warehouse', 'ecommerce', 'multistore'] },
     { label: 'Operations', ids: ['reports', 'expenses', 'cashbook', 'devices', 'subscription', 'returns', 'customers'] },
     { label: 'Help', ids: ['support', 'learn', 'campaigns', 'community', 'settings'] },

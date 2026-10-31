@@ -192,7 +192,7 @@ async function ensureCustomer(storeId: string, name: string, phone: NonNullable<
     return existing;
   }
   const id = crypto.randomUUID();
-  const { error } = await service().from('customers').insert({
+  const full = {
     id,
     store_id: storeId,
     name,
@@ -201,8 +201,18 @@ async function ensureCustomer(storeId: string, name: string, phone: NonNullable<
     opening_balance_remaining: 0,
     wallet_balance: 0,
     is_active: true,
-  });
-  if (error) throw new Error(error.message);
+  };
+  let { error } = await service().from('customers').insert(full);
+  if (error && /column|schema cache/i.test(error.message)) {
+    ({ error } = await service().from('customers').insert({
+      id,
+      store_id: storeId,
+      name,
+      phone: phone.local,
+      is_active: true,
+    }));
+  }
+  if (error) throw new Error(error.message || 'Could not save the customer for this shop.');
   return { id, wallet_balance: 0 };
 }
 
@@ -246,7 +256,7 @@ async function createShopAccount(user: User, storeId: string): Promise<ShopAccou
   }
   const phone = parseGhanaPhone(String(user.phone || meta.phone || ''));
   const name = text(meta.name, 120);
-  const email = text(user.email || meta.email, 255).toLowerCase();
+  const email = text(meta.email, 255).toLowerCase();
   if (!phone || name.length < 2) throw new Error('Confirm your phone number to finish creating the account.');
   const customer = await ensureCustomer(storeId, name, phone);
   const id = crypto.randomUUID();
@@ -263,9 +273,37 @@ async function createShopAccount(user: User, storeId: string): Promise<ShopAccou
   if (error) {
     const again = await accountForUser(storeId, user.id);
     if (again) return again;
-    throw new Error(error.message);
+    throw new Error(error.message || 'Could not save the shop account. Run supabase-migrate-shop-accounts.sql in the Supabase SQL editor.');
   }
   return row;
+}
+
+function shopLoginEmail(phone: NonNullable<ReturnType<typeof parseGhanaPhone>>, email: string): string {
+  return email || `shopper+${phone.digits}@adimatpos.com`;
+}
+
+async function signInShopper(input: {
+  phone: ReturnType<typeof parseGhanaPhone>;
+  email: string;
+  password: string;
+}): Promise<{ user: User; session: { access_token: string; refresh_token: string; expires_in?: number } } | null> {
+  const auth = anonAuth();
+  const tryPassword = async (credentials: { phone: string; password: string } | { email: string; password: string }) => {
+    const { data } = await auth.auth.signInWithPassword(credentials);
+    if (!data.user || !data.session) return null;
+    return { user: data.user, session: data.session };
+  };
+  if (input.phone) {
+    const byPhone = await tryPassword({ phone: input.phone.e164, password: input.password });
+    if (byPhone) return byPhone;
+    const synthetic = await tryPassword({ email: shopLoginEmail(input.phone, ''), password: input.password });
+    if (synthetic) return synthetic;
+  }
+  if (input.email) {
+    const byEmail = await tryPassword({ email: input.email, password: input.password });
+    if (byEmail) return byEmail;
+  }
+  return null;
 }
 
 async function requireAccount(req: ApiRequest, storeId: string): Promise<{ user: User; account: ShopAccountRow }> {
@@ -670,21 +708,40 @@ export async function handleShopAuth(req: ApiRequest, res: ApiResponse): Promise
       if (email && !/^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/.test(email)) throw new Error('Enter a valid email or leave it blank.');
       if (password.length < 8 || password.length > 72) throw new Error('Use a password of 8 to 72 characters.');
       await throttle('signup', ip, phone.e164);
-      const { data: created, error: createError } = await service().auth.admin.createUser({
-        email: email || undefined,
+      const loginEmail = shopLoginEmail(phone, email);
+      const metadata = { name, phone: phone.e164, email, store_id: storeId, login_email: loginEmail };
+      const admin = service();
+      const withPhone = await admin.auth.admin.createUser({
+        email: loginEmail,
         phone: phone.e164,
         password,
         email_confirm: true,
-        phone_confirm: false,
-        user_metadata: { name, phone: phone.e164, email, store_id: storeId },
+        phone_confirm: true,
+        user_metadata: metadata,
       });
-      if (createError) throw new Error(createError.message);
-      const { error: otpError } = await anonAuth().auth.signInWithOtp({
-        phone: phone.e164,
-        options: { shouldCreateUser: false, channel: 'sms' },
-      });
-      if (otpError) throw new Error(otpError.message);
-      return json(res, 200, { needsOtp: true, phone: phone.e164, userId: created.user?.id || '' });
+      let createMessage = withPhone.error?.message || '';
+      if (withPhone.error && /phone|sms|provider/i.test(createMessage)) {
+        const withoutPhone = await admin.auth.admin.createUser({
+          email: loginEmail,
+          password,
+          email_confirm: true,
+          user_metadata: metadata,
+        });
+        createMessage = withoutPhone.error?.message || '';
+      }
+      const signed = await signInShopper({ phone, email: loginEmail, password });
+      if (!signed) {
+        if (/already|registered|exists|duplicate/i.test(createMessage)) {
+          throw new Error('This phone or email already has an account. Log in with the same password.');
+        }
+        throw new Error(createMessage || 'Could not create the account.');
+      }
+      const account = await createShopAccount({
+        ...signed.user,
+        phone: signed.user.phone || phone.e164,
+        user_metadata: { ...signed.user.user_metadata, ...metadata },
+      }, storeId);
+      return json(res, 200, { session: sessionPayload(signed.session), ...(await accountProfile(account)) });
     }
 
     if (action === 'request-otp') {
@@ -719,26 +776,24 @@ export async function handleShopAuth(req: ApiRequest, res: ApiResponse): Promise
       if (!phone && !email) throw new Error('Enter the phone number or email on the account.');
       if (!password) throw new Error('Enter your password.');
       await throttle('login', ip, phone?.e164 || email);
-      const { data, error } = await anonAuth().auth.signInWithPassword(
-        phone ? { phone: phone.e164, password } : { email, password }
-      );
-      if (error || !data.user || !data.session) throw new Error('Phone, email, or password is incorrect.');
-      const account = await accountForUser(storeId, data.user.id);
+      const signed = await signInShopper({ phone, email, password });
+      if (!signed) throw new Error('Phone, email, or password is incorrect.');
+      let account = await accountForUser(storeId, signed.user.id);
       if (!account) {
-        const pendingPhone = parseGhanaPhone(String(data.user.phone || phone?.e164 || ''));
-        if (pendingPhone) {
-          await anonAuth().auth.signInWithOtp({
+        const pendingPhone = parseGhanaPhone(String(signed.user.phone || signed.user.user_metadata?.phone || phone?.e164 || ''));
+        if (!pendingPhone) throw new Error('Confirm your phone number to finish creating the account.');
+        account = await createShopAccount({
+          ...signed.user,
+          phone: signed.user.phone || pendingPhone.e164,
+          user_metadata: {
+            ...signed.user.user_metadata,
+            name: text(signed.user.user_metadata?.name, 120) || 'Shopper',
             phone: pendingPhone.e164,
-            options: { shouldCreateUser: false, channel: 'sms' },
-          });
-        }
-        return json(res, 200, {
-          needsOtp: true,
-          phone: pendingPhone?.e164 || '',
-          message: 'Confirm the SMS code to finish opening this shop account.',
-        });
+            store_id: storeId,
+          },
+        }, storeId);
       }
-      return json(res, 200, { session: sessionPayload(data.session), ...(await accountProfile(account)) });
+      return json(res, 200, { session: sessionPayload(signed.session), ...(await accountProfile(account)) });
     }
 
     if (action === 'reset-email') {
@@ -763,7 +818,8 @@ export async function handleShopAuth(req: ApiRequest, res: ApiResponse): Promise
 
     return json(res, 400, { error: 'Unknown account action.' });
   } catch (error) {
-    return json(res, 400, { error: error instanceof Error ? error.message : 'Account request failed.' });
+    const message = error instanceof Error ? error.message.trim() : '';
+    return json(res, 400, { error: message || 'Account request failed.' });
   }
 }
 

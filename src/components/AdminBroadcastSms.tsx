@@ -6,9 +6,10 @@ import type { AdminStoreRow, AdminUserRow } from '@/lib/adminPortal';
 interface AdminBroadcastSmsProps {
   stores: AdminStoreRow[];
   users: AdminUserRow[];
+  unavailable?: string;
 }
 
-export default function AdminBroadcastSms({ stores, users }: AdminBroadcastSmsProps) {
+export default function AdminBroadcastSms({ stores, users, unavailable = '' }: AdminBroadcastSmsProps) {
   const [message, setMessage] = useState('');
   const [selectedStoreIds, setSelectedStoreIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -79,6 +80,12 @@ export default function AdminBroadcastSms({ stores, users }: AdminBroadcastSmsPr
         </div>
       </div>
 
+      {unavailable && (
+        <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {unavailable || 'The store list has not loaded yet. Open this tab again after the cloud data arrives.'}
+        </p>
+      )}
+
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <label htmlFor="broadcast-message" className="text-sm font-semibold text-slate-800">Message</label>
         <textarea
@@ -113,7 +120,7 @@ export default function AdminBroadcastSms({ stores, users }: AdminBroadcastSmsPr
 
         {error && <div className="mt-4 flex items-start gap-2 rounded-xl bg-red-50 p-3 text-sm text-red-700"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
         {notice && <div className="mt-4 flex items-start gap-2 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />{notice}</div>}
-        <button type="button" onClick={() => void sendBroadcast()} disabled={busy || recipients.length === 0} className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-xl bg-emerald-700 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50">
+        <button type="button" onClick={() => void sendBroadcast()} disabled={busy || recipients.length === 0 || Boolean(unavailable)} className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-xl bg-emerald-700 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50">
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           {busy ? 'Sending...' : 'Send broadcast SMS'}
         </button>

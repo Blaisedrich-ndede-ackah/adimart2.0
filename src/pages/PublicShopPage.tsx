@@ -13,7 +13,7 @@ import {
   type PublicShopProduct,
 } from '@/lib/ecommerce';
 import { formatStoreMoney } from '@/lib/currency';
-import { useI18nStore } from '@/lib/i18n';
+import { useI18nStore, useT } from '@/lib/i18n';
 import {
   currentShopToken,
   rememberSession,
@@ -256,7 +256,13 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
         return;
       }
       const result = await shopSignup({ storeId: catalog.store.id, ...input });
-      setOtpPhone(result.phone);
+      if (result.session && result.account) {
+        await rememberSession(result.session);
+        applyProfile(result);
+        setNotice('Account created.');
+        return;
+      }
+      setOtpPhone(result.phone || input.phone);
       setAuthMode('otp');
       setNotice('Enter the SMS code to finish creating the account.');
     } catch (err) {

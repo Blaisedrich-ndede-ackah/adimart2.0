@@ -23,15 +23,19 @@ function normalizeSupabaseUrl(url: string): string {
 const SUPABASE_URL = normalizeSupabaseUrl(import.meta.env.VITE_SUPABASE_URL) || 'https://placeholder.supabase.co';
 const SUPABASE_ANON_KEY = normalizeEnvValue(import.meta.env.VITE_SUPABASE_ANON_KEY) || 'placeholder-key';
 
-function supportRequestHeaders(input: HeadersInit | undefined): Headers {
-  const headers = new Headers(input);
+const SUPPORT_TOKEN_KEY = 'adimat_support_token';
+
+function fetchWithSupportToken(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers);
   try {
-    const token = sessionStorage.getItem('adimat_support_token');
-    if (token) headers.set('x-adimat-support-token', token);
+    const token = sessionStorage.getItem(SUPPORT_TOKEN_KEY);
+    if (token && !headers.has('x-adimat-support-token')) {
+      headers.set('x-adimat-support-token', token);
+    }
   } catch {
-    // Private mode can block sessionStorage. Support rows stay on the device.
+    // Private mode can block sessionStorage. Local tickets still work.
   }
-  return headers;
+  return fetch(input, { ...init, headers });
 }
 
 export const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -41,7 +45,7 @@ export const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON
     detectSessionInUrl: false,
   },
   global: {
-    fetch: (input, init) => fetch(input, { ...init, headers: supportRequestHeaders(init?.headers) }),
+    fetch: fetchWithSupportToken,
   },
 });
 
