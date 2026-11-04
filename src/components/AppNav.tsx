@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, House, Search, ClipboardCheck,
-  CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare, Moon, Sun,
+  Sparkles, CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare, Moon, Sun,
   ShoppingCart, RotateCcw,
   ContactRound, ArrowLeftRight, Building2, Megaphone,
 } from 'lucide-react';
@@ -70,6 +70,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         { id: 'home', label: t('nav.dashboard'), icon: House, show: isOwner },
         { id: 'pos', label: t('nav.pos'), icon: ScanBarcode, show: true },
         { id: 'search', label: 'Search', icon: Search, show: true },
+        { id: 'adimat-ai', label: t('nav.adimatAi'), shortLabel: 'AI', icon: Sparkles, show: isOwner },
         { id: 'stock-approvals', label: 'Stock approvals', shortLabel: 'Approvals', icon: ClipboardCheck, show: true },
         {
           id: 'transactions',
@@ -123,7 +124,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   // Group secondary items into logical sections for the mobile More sheet.
   type NavGroup = { label: string; ids: string[] };
   const navGroups: NavGroup[] = [
-    { label: t('nav.main'), ids: ['home', 'pos', 'search', 'stock-approvals', 'transactions'] },
+    { label: t('nav.main'), ids: ['home', 'pos', 'search', 'adimat-ai', 'stock-approvals', 'transactions'] },
     { label: 'Shop', ids: ['inventory', 'purchasing', 'warehouse', 'ecommerce', 'multistore'] },
     { label: 'Operations', ids: ['reports', 'expenses', 'cashbook', 'devices', 'subscription', 'returns', 'customers'] },
     { label: 'Help', ids: ['learn', 'campaigns', 'community', 'settings'] },

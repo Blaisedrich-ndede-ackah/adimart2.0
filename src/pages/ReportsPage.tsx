@@ -8,7 +8,7 @@ import {
   Warehouse, Store, MapPin, Camera
 } from 'lucide-react';
 import {
-  db, LocalTransaction, LocalTransactionItem, LocalExpense, LocalCreditPayment, LocalCustomerOpeningPayment, LocalStockBatch, LocalLocation,
+  db, LocalTransaction, LocalTransactionItem, LocalSaleReturn, LocalExpense, LocalCreditPayment, LocalCustomerOpeningPayment, LocalStockBatch, LocalLocation,
   getCurrentStoreTransactions, getCurrentStoreExpenses, getCurrentStoreId,
   addExpense, deleteExpense
 } from '@/lib/dexie';
@@ -17,6 +17,7 @@ import { roundMoney, toMoneyAmount } from '@/lib/money';
 import {
   buildLocationReportSummary,
   buildReportSummary,
+  exportGraSalesRegisterPdf,
   exportLocationReportCsv,
   exportLocationReportPdf,
   exportReportCsv,
@@ -35,7 +36,7 @@ import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
 import { fileToProductImageDataUrl } from '@/lib/productImage';
 
-type ReportTab = 'overview' | 'products' | 'expenses' | 'locations';
+type ReportTab = 'overview' | 'products' | 'expenses' | 'locations' | 'gra';
 
 interface DayData {
   day: string;
@@ -67,6 +68,7 @@ export default function ReportsPage() {
   const [rangeError, setRangeError] = useState('');
   const [tab, setTab] = useState<ReportTab>('overview');
   const [transactions, setTransactions] = useState<LocalTransaction[]>([]);
+  const [periodReturns, setPeriodReturns] = useState<LocalSaleReturn[]>([]);
   const [creditPayments, setCreditPayments] = useState<LocalCreditPayment[]>([]);
   const [customerOpeningPayments, setCustomerOpeningPayments] = useState<LocalCustomerOpeningPayment[]>([]);
   const [outstandingCredit, setOutstandingCredit] = useState(0);
@@ -110,6 +112,11 @@ export default function ReportsPage() {
     try {
       const { start, end } = range;
       const allTxns = (await getCurrentStoreTransactions()).filter(t => t.status === 'completed');
+      const allReturns = await db.sales_returns.where('store_id').equals(storeId).toArray();
+      setPeriodReturns(allReturns.filter((record) => {
+        const returnedAt = new Date(record.created_at);
+        return returnedAt >= start && returnedAt <= end;
+      }));
       const allCreditPayments = await db.credit_payments.where('store_id').equals(storeId).toArray();
       const allCustomerOpeningPayments = await db.customer_opening_payments.where('store_id').equals(storeId).toArray();
       setCustomerOpeningPayments(allCustomerOpeningPayments.filter((payment) => {
@@ -216,6 +223,11 @@ export default function ReportsPage() {
   const handleExportPdf = () => {
     if (!summary || !currentStore) return;
     exportReportPdf(summary, periodLabel, currentStore.name, orgFromStore(currentStore));
+  };
+
+  const handleExportGraSalesRegisterPdf = () => {
+    if (!currentStore) return;
+    exportGraSalesRegisterPdf(transactions, periodReturns, periodLabel, orgFromStore(currentStore));
   };
 
   const handleExportLocation = async (locationId: string, format: 'csv' | 'pdf') => {
@@ -406,6 +418,7 @@ export default function ReportsPage() {
             { key: 'products', label: 'Products', icon: Package },
             { key: 'expenses', label: 'Expenses', icon: PiggyBank },
             { key: 'locations', label: 'Locations', icon: MapPin },
+            { key: 'gra', label: 'GRA', icon: FileText },
           ] as const).map(item => {
             const Icon = item.icon;
             return (
@@ -823,6 +836,57 @@ export default function ReportsPage() {
                 );
               })
             )}
+          </div>
+        )}
+
+        {tab === 'gra' && (
+          <div className="space-y-3 md:max-w-3xl md:mx-auto xl:max-w-none xl:mx-0">
+            <div className="rounded-xl border border-emerald-100 bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-bold text-gray-900">GRA sales register</h2>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Completed sales and recorded returns for {periodLabel}.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleExportGraSalesRegisterPdf}
+                  disabled={!currentStore || loadingReport}
+                  className="flex flex-shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                >
+                  {loadingReport ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                  Export PDF
+                </button>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <div className="rounded-lg bg-slate-50 p-3">
+                  <p className="text-[11px] text-gray-500">Recorded sales total</p>
+                  <p className="mt-1 text-sm font-bold text-gray-900">
+                    {money(transactions.reduce((sum, transaction) => sum + (Number(transaction.total_amount) || 0), 0))}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-slate-50 p-3">
+                  <p className="text-[11px] text-gray-500">Recorded discounts</p>
+                  <p className="mt-1 text-sm font-bold text-gray-900">
+                    {money(transactions.reduce((sum, transaction) => sum + (Number(transaction.discount_applied) || 0), 0))}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-slate-50 p-3">
+                  <p className="text-[11px] text-gray-500">Completed sales</p>
+                  <p className="mt-1 text-sm font-bold text-gray-900">{transactions.length}</p>
+                </div>
+                <div className="rounded-lg bg-slate-50 p-3">
+                  <p className="text-[11px] text-gray-500">Recorded return entries</p>
+                  <p className="mt-1 text-sm font-bold text-gray-900">{periodReturns.length}</p>
+                </div>
+              </div>
+            </div>
+            <div role="note" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs leading-relaxed text-amber-900">
+              This is a sales register for reference, not an official GRA tax return. Adimat does not calculate tax
+              amounts or include tax-identification and purchase-tax data in this report. Review the register against
+              current GRA requirements before filing.
+            </div>
           </div>
         )}
       </div>

@@ -137,6 +137,9 @@ CREATE INDEX IF NOT EXISTS idx_products_store ON products(store_id);
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(store_id, barcode);
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(store_id, category);
 CREATE INDEX IF NOT EXISTS idx_products_is_active ON products(store_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_products_public_shop_catalog
+  ON products(store_id, name, id)
+  WHERE is_active IS TRUE AND sell_online IS TRUE;
 
 CREATE TABLE IF NOT EXISTS product_categories (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

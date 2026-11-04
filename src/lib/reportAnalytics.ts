@@ -2,6 +2,7 @@ import {
   db,
   LocalExpense,
   LocalLocation,
+  LocalSaleReturn,
   LocalTransaction,
 } from './dexie';
 import { FormalPdf, formatGhsOfficial, orgFromStore, type FormalOrg } from './formalPdf';
@@ -359,6 +360,113 @@ export function exportReportPdf(
 
   pdf.signatureBlock('Prepared by', 'Reviewed by');
   pdf.save(`${safeFilePart(storeName)}-report-${periodLabel.toLowerCase().replace(/\s+/g, '-')}.pdf`);
+}
+
+export function exportGraSalesRegisterPdf(
+  transactions: LocalTransaction[],
+  returns: LocalSaleReturn[],
+  periodLabel: string,
+  org: FormalOrg
+): void {
+  const money = (amount: number) => formatGhsOfficial(amount, org.currencyCode);
+  const paymentTotals = new Map<string, { count: number; total: number }>();
+  for (const transaction of transactions) {
+    const method = getPaymentMethodLabel(transaction.payment_method);
+    const current = paymentTotals.get(method) || { count: 0, total: 0 };
+    current.count += 1;
+    current.total += Number(transaction.total_amount) || 0;
+    paymentTotals.set(method, current);
+  }
+
+  const pdf = new FormalPdf(org, {
+    title: 'GRA sales register',
+    subtitle: org.name,
+    period: `Reporting period: ${periodLabel}`,
+    documentLabel: 'FILING SUPPORT',
+    notes: [
+      'This register lists recorded completed POS sales and recorded returns for reference.',
+      'Adimat does not calculate tax amounts or include tax identification and purchase-tax data here. This document is not an official GRA tax return.',
+    ],
+  });
+
+  pdf.section('Recorded sales summary');
+  pdf.kvTable([
+    { label: 'Completed POS sales', value: String(transactions.length) },
+    {
+      label: 'Recorded transaction totals',
+      value: money(transactions.reduce((sum, transaction) => sum + (Number(transaction.total_amount) || 0), 0)),
+      emphasis: 'total',
+    },
+    {
+      label: 'Recorded discounts',
+      value: money(transactions.reduce((sum, transaction) => sum + (Number(transaction.discount_applied) || 0), 0)),
+    },
+    { label: 'Recorded return entries', value: String(returns.length) },
+    {
+      label: 'Cash refunds recorded',
+      value: money(returns.reduce((sum, record) => sum + (Number(record.refund_amount) || 0), 0)),
+    },
+    {
+      label: 'Returns applied to customer debt',
+      value: money(returns.reduce((sum, record) => sum + (Number(record.debt_applied) || 0), 0)),
+    },
+    {
+      label: 'Returns credited to customer wallets',
+      value: money(returns.reduce((sum, record) => sum + (Number(record.wallet_credit) || 0), 0)),
+    },
+  ]);
+
+  if (paymentTotals.size > 0) {
+    pdf.section('Sales by recorded payment method');
+    pdf.dataTable(
+      ['Payment method', 'Receipts', 'Transaction totals'],
+      [...paymentTotals.entries()].map(([method, totals]) => [
+        method,
+        String(totals.count),
+        money(totals.total),
+      ]),
+      [4, 2, 3]
+    );
+  }
+
+  pdf.section('Completed sales register');
+  if (transactions.length === 0) {
+    pdf.paragraph('No completed POS sales were recorded for this period.');
+  } else {
+    pdf.dataTable(
+      ['Date', 'Receipt', 'Customer', 'Cashier', 'Method', 'Total', 'Discount'],
+      transactions.map((transaction) => [
+        new Date(transaction.created_at).toLocaleDateString('en-GB'),
+        transaction.receipt_number,
+        transaction.customer_name || '',
+        transaction.cashier_name || '',
+        getPaymentMethodLabel(transaction.payment_method),
+        money(Number(transaction.total_amount) || 0),
+        money(Number(transaction.discount_applied) || 0),
+      ]),
+      [1.6, 2, 2.4, 1.8, 1.8, 2.1, 2]
+    );
+  }
+
+  if (returns.length > 0) {
+    pdf.section('Recorded returns');
+    pdf.dataTable(
+      ['Date', 'Receipt', 'Product', 'Qty', 'Refund', 'Debt', 'Wallet'],
+      returns.map((record) => [
+        new Date(record.created_at).toLocaleDateString('en-GB'),
+        record.receipt_number,
+        record.product_name,
+        String(record.quantity),
+        money(Number(record.refund_amount) || 0),
+        money(Number(record.debt_applied) || 0),
+        money(Number(record.wallet_credit) || 0),
+      ]),
+      [1.5, 2, 3, 1, 1.8, 1.8, 1.8]
+    );
+  }
+
+  pdf.signatureBlock('Prepared by', 'Reviewed by');
+  pdf.save(`${safeFilePart(org.name)}-gra-sales-register-${periodLabel.toLowerCase().replace(/\s+/g, '-')}.pdf`);
 }
 
 function safeFilePart(value: string): string {
