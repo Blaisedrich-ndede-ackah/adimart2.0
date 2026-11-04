@@ -23,7 +23,7 @@ The Adimat Agent Portal is a mobile-first, offline-first Progressive Web App (PW
 7. The **agent earns a percentage commission** on the subscription, viewable as a balance.
 8. The **agent can request withdrawal** of their balance to their registered Mobile Money (MoMo) number, subject to admin approval.
 
-The portal runs entirely in the browser as a static client, with IndexedDB (Dexie.js) as the local source of truth and optional Supabase (PostgreSQL) cloud backup/sync. There is **no first-party application server**. Production deployment is static hosting of a Vite-built single-file bundle.
+The portal runs entirely in the browser as a static client, with IndexedDB (Dexie.js) as the local source of truth and optional Supabase (PostgreSQL) cloud backup/sync. There is **no first-party application server**. Production is a static Vite build with route-level JavaScript chunks, loaded on demand and cached by the service worker for offline use.
 
 ### Primary capabilities
 
@@ -523,7 +523,7 @@ All data access goes through the Supabase client (anon key + RLS). Recommended R
 
 ## 10. Operations
 
-- **Build:** `npm run build` → Vite single-file bundle via `vite-plugin-singlefile` → static host `dist/`.
+- **Build:** `npm run build` → Vite static assets with route-level chunks and an offline precache manifest → deploy the full `dist/` directory.
 - **Environment variables:** `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_PAYSTACK_PUBLIC_KEY`, `VITE_MNOTIFY_API_KEY` (optional SMS).
 - **Deploy:** Static hosting (Vercel/Netlify or equivalent); PWA install via service worker.
 - **Migrations:** New SQL migration files following the `supabase-migrate-*.sql` naming convention for `agents`, `prospects`, `follow_ups`, `stores`, `invoices`, `payments`, `commissions`, `withdrawal_requests`, `commission_settings`.

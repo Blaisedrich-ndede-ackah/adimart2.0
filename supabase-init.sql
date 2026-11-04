@@ -98,6 +98,27 @@ CREATE POLICY "users_delete" ON users FOR DELETE USING (true);
 CREATE INDEX IF NOT EXISTS idx_users_store ON users(store_id);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
+CREATE INDEX IF NOT EXISTS idx_users_store_updated_at ON users(store_id, updated_at);
+
+-- Browser/device sessions are written and read only through server-side APIs.
+CREATE TABLE IF NOT EXISTS active_device_sessions (
+  session_id UUID PRIMARY KEY,
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  browser VARCHAR(32) NOT NULL,
+  operating_system VARCHAR(32) NOT NULL,
+  device_type VARCHAR(16) NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE active_device_sessions ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE active_device_sessions FROM anon, authenticated;
+GRANT ALL ON TABLE active_device_sessions TO service_role;
+CREATE INDEX IF NOT EXISTS idx_active_device_sessions_last_seen
+  ON active_device_sessions(last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_active_device_sessions_store_last_seen
+  ON active_device_sessions(store_id, last_seen_at DESC);
 
 -- ============================================================
 -- PRODUCTS TABLE (linked to stores)
@@ -134,6 +155,7 @@ CREATE POLICY "products_update" ON products FOR UPDATE USING (true);
 CREATE POLICY "products_delete" ON products FOR DELETE USING (true);
 
 CREATE INDEX IF NOT EXISTS idx_products_store ON products(store_id);
+CREATE INDEX IF NOT EXISTS idx_products_store_updated_at ON products(store_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(store_id, barcode);
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(store_id, category);
 CREATE INDEX IF NOT EXISTS idx_products_is_active ON products(store_id, is_active);
@@ -159,6 +181,7 @@ CREATE POLICY "product_categories_update" ON product_categories FOR UPDATE USING
 CREATE POLICY "product_categories_delete" ON product_categories FOR DELETE USING (true);
 
 CREATE INDEX IF NOT EXISTS idx_product_categories_store ON product_categories(store_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_product_categories_store_updated_at ON product_categories(store_id, updated_at);
 
 -- ============================================================
 -- PRODUCT VARIANTS (size, color, flavor)
@@ -235,7 +258,9 @@ CREATE POLICY "purchase_orders_update" ON purchase_orders FOR UPDATE USING (true
 CREATE POLICY "purchase_orders_delete" ON purchase_orders FOR DELETE USING (true);
 
 CREATE INDEX IF NOT EXISTS idx_suppliers_store ON suppliers(store_id);
+CREATE INDEX IF NOT EXISTS idx_suppliers_store_updated_at ON suppliers(store_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_purchase_orders_store_created ON purchase_orders(store_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_store_updated_at ON purchase_orders(store_id, updated_at);
 
 -- ============================================================
 -- CUSTOMERS TABLE
@@ -263,6 +288,7 @@ CREATE POLICY "customers_insert" ON customers FOR INSERT WITH CHECK (true);
 CREATE POLICY "customers_update" ON customers FOR UPDATE USING (true);
 CREATE POLICY "customers_delete" ON customers FOR DELETE USING (true);
 CREATE INDEX IF NOT EXISTS idx_customers_store ON customers(store_id, is_active, name);
+CREATE INDEX IF NOT EXISTS idx_customers_store_updated_at ON customers(store_id, updated_at);
 
 CREATE TABLE IF NOT EXISTS customer_account_receipts (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -395,6 +421,7 @@ CREATE POLICY "transactions_delete" ON transactions FOR DELETE USING (true);
 
 CREATE INDEX IF NOT EXISTS idx_transactions_store ON transactions(store_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON transactions(store_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_transactions_store_updated_at ON transactions(store_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_transactions_cashier ON transactions(store_id, cashier_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_receipt ON transactions(store_id, receipt_number);
 
@@ -429,6 +456,7 @@ CREATE POLICY "transaction_items_update" ON transaction_items FOR UPDATE USING (
 CREATE POLICY "transaction_items_delete" ON transaction_items FOR DELETE USING (true);
 
 CREATE INDEX IF NOT EXISTS idx_transaction_items_store ON transaction_items(store_id);
+CREATE INDEX IF NOT EXISTS idx_transaction_items_store_created_at ON transaction_items(store_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_transaction_items_txn ON transaction_items(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_transaction_items_variant ON transaction_items(variant_id);
 
@@ -486,6 +514,7 @@ CREATE POLICY "expenses_delete" ON expenses FOR DELETE USING (true);
 CREATE INDEX IF NOT EXISTS idx_expenses_store ON expenses(store_id);
 CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(store_id, category);
 CREATE INDEX IF NOT EXISTS idx_expenses_created_at ON expenses(store_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_expenses_store_updated_at ON expenses(store_id, updated_at);
 
 CREATE TABLE IF NOT EXISTS recurring_expenses (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -522,6 +551,8 @@ CREATE POLICY "expense_budgets_update" ON expense_budgets FOR UPDATE USING (true
 CREATE POLICY "expense_budgets_delete" ON expense_budgets FOR DELETE USING (true);
 CREATE INDEX IF NOT EXISTS idx_recurring_expenses_store ON recurring_expenses(store_id);
 CREATE INDEX IF NOT EXISTS idx_expense_budgets_store ON expense_budgets(store_id);
+CREATE INDEX IF NOT EXISTS idx_recurring_expenses_store_updated_at ON recurring_expenses(store_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_expense_budgets_store_updated_at ON expense_budgets(store_id, updated_at);
 
 -- ============================================================
 -- CASH BOOK (owner cash flow ledger)
@@ -549,6 +580,7 @@ CREATE POLICY "cash_book_entries_update" ON cash_book_entries FOR UPDATE USING (
 CREATE POLICY "cash_book_entries_delete" ON cash_book_entries FOR DELETE USING (true);
 
 CREATE INDEX IF NOT EXISTS idx_cash_book_store ON cash_book_entries(store_id);
+CREATE INDEX IF NOT EXISTS idx_cash_book_entries_store_updated_at ON cash_book_entries(store_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_cash_book_date ON cash_book_entries(store_id, entry_date);
 CREATE INDEX IF NOT EXISTS idx_cash_book_type ON cash_book_entries(store_id, entry_type);
 
@@ -576,6 +608,7 @@ CREATE POLICY "locations_update" ON locations FOR UPDATE USING (true);
 CREATE POLICY "locations_delete" ON locations FOR DELETE USING (true);
 
 CREATE INDEX IF NOT EXISTS idx_locations_store ON locations(store_id);
+CREATE INDEX IF NOT EXISTS idx_locations_store_updated_at ON locations(store_id, updated_at);
 
 -- ============================================================
 -- STORE QUOTAS (admin-managed caps — source of truth for limits)
@@ -652,6 +685,7 @@ CREATE POLICY "stock_movements_delete" ON stock_movements FOR DELETE USING (true
 
 CREATE INDEX IF NOT EXISTS idx_stock_movements_store ON stock_movements(store_id);
 CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_store_created_at ON stock_movements(store_id, created_at);
 
 CREATE TABLE IF NOT EXISTS sales_returns (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -821,6 +855,18 @@ END;
 $$ language 'plpgsql';
 
 -- Apply triggers
+DROP TRIGGER IF EXISTS update_transactions_updated_at ON transactions;
+CREATE TRIGGER update_transactions_updated_at
+  BEFORE UPDATE ON transactions
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_customers_updated_at ON customers;
+CREATE TRIGGER update_customers_updated_at
+  BEFORE UPDATE ON customers
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
 CREATE TRIGGER update_stores_updated_at
   BEFORE UPDATE ON stores
   FOR EACH ROW
@@ -913,7 +959,9 @@ CREATE POLICY "online_order_items_update" ON online_order_items FOR UPDATE USING
 
 CREATE INDEX IF NOT EXISTS idx_online_orders_store ON online_orders(store_id);
 CREATE INDEX IF NOT EXISTS idx_online_orders_status ON online_orders(store_id, status);
+CREATE INDEX IF NOT EXISTS idx_online_orders_store_updated_at ON online_orders(store_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_online_order_items_order ON online_order_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_online_order_items_store_created_at ON online_order_items(store_id, created_at);
 
 CREATE TRIGGER update_online_orders_updated_at
   BEFORE UPDATE ON online_orders
@@ -924,7 +972,8 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS reorder_level INTEGER NOT NULL DEF
 
 -- ============================================================
 -- DEBT REMINDERS (audit trail of the automatic credit chase)
--- ============================================================CREATE TABLE IF NOT EXISTS debt_reminders (
+-- ============================================================
+CREATE TABLE IF NOT EXISTS debt_reminders (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
   customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
@@ -1023,4 +1072,80 @@ BEGIN
     WHEN duplicate_object THEN NULL;
     WHEN undefined_object THEN NULL;
   END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE locations;
+  EXCEPTION
+    WHEN duplicate_object THEN NULL;
+    WHEN undefined_object THEN NULL;
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE customers;
+  EXCEPTION
+    WHEN duplicate_object THEN NULL;
+    WHEN undefined_object THEN NULL;
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE transaction_items;
+  EXCEPTION
+    WHEN duplicate_object THEN NULL;
+    WHEN undefined_object THEN NULL;
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE credit_payments;
+  EXCEPTION
+    WHEN duplicate_object THEN NULL;
+    WHEN undefined_object THEN NULL;
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE sales_returns;
+  EXCEPTION
+    WHEN duplicate_object THEN NULL;
+    WHEN undefined_object THEN NULL;
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE customer_wallet_transactions;
+  EXCEPTION
+    WHEN duplicate_object THEN NULL;
+    WHEN undefined_object THEN NULL;
+  END;
+END $$;
+
+DO $$
+DECLARE
+  table_name TEXT;
+BEGIN
+  FOREACH table_name IN ARRAY ARRAY[
+    'users',
+    'product_categories',
+    'customers',
+    'locations',
+    'transactions',
+    'transaction_items',
+    'customer_account_receipts',
+    'credit_payments',
+    'customer_opening_payments',
+    'sales_returns',
+    'customer_wallet_transactions',
+    'expenses',
+    'recurring_expenses',
+    'expense_budgets',
+    'cash_book_entries',
+    'stock_batches',
+    'stock_movements',
+    'online_orders',
+    'online_order_items',
+    'suppliers',
+    'purchase_orders',
+    'bulk_sms_campaigns'
+  ] LOOP
+    IF to_regclass(format('public.%I', table_name)) IS NULL THEN
+      CONTINUE;
+    END IF;
+    BEGIN
+      EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I', table_name);
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+      WHEN undefined_object THEN NULL;
+    END;
+  END LOOP;
 END $$;

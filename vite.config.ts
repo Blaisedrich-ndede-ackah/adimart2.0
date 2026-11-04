@@ -3,7 +3,6 @@ import { fileURLToPath } from "url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv, type Plugin } from "vite";
-import { viteSingleFile } from "vite-plugin-singlefile";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -127,6 +126,24 @@ async function handleCampaignApi(
   }
 }
 
+function offlinePrecacheManifest(): Plugin {
+  return {
+    name: "adimat-offline-precache-manifest",
+    apply: "build",
+    generateBundle(_options, bundle) {
+      const assets = Object.values(bundle)
+        .filter((entry) => entry.type === "chunk" || (entry.type === "asset" && !entry.fileName.endsWith(".html")))
+        .map((entry) => `/${entry.fileName}`)
+        .sort();
+      this.emitFile({
+        type: "asset",
+        fileName: "precache-manifest.json",
+        source: JSON.stringify(assets),
+      });
+    },
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const fileEnv = loadEnv(mode, __dirname, "");
@@ -135,7 +152,7 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    plugins: [react(), tailwindcss(), viteSingleFile(), promotionalCampaignDevApi()],
+    plugins: [react(), tailwindcss(), offlinePrecacheManifest(), promotionalCampaignDevApi()],
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "src"),

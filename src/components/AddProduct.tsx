@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { X, Camera, Save, AlertTriangle, StopCircle, ScanBarcode, Bluetooth, ImagePlus, Trash2, Plus } from 'lucide-react';
-import { BrowserMultiFormatReader, NotFoundException } from '@zxing/library';
+import type { BrowserMultiFormatReader } from '@zxing/library';
 import { db, generateId, LocalProduct, getCurrentStoreId } from '@/lib/dexie';
 import { setProductStockLevel } from '@/lib/warehouse';
 import { triggerPushSync } from '@/lib/sync';
@@ -177,6 +177,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
     setScannerReady(false);
 
     try {
+      const { BrowserMultiFormatReader, NotFoundException } = await import('@zxing/library');
       const reader = new BrowserMultiFormatReader();
       readerRef.current = reader;
 

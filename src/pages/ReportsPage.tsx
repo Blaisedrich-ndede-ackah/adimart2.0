@@ -31,7 +31,7 @@ import {
 import { getExpiringBatches } from '@/lib/warehouse';
 import FinancialDonutChart from '@/components/FinancialDonutChart';
 import { parseOtherCharges } from '@/lib/otherCharges';
-import { orgFromStore } from '@/lib/formalPdf';
+import { orgFromStore } from '@/lib/formalPdfMeta';
 import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
 import { fileToProductImageDataUrl } from '@/lib/productImage';
@@ -220,14 +220,22 @@ export default function ReportsPage() {
     exportReportCsv(summary, periodLabel, currentStore.name, transactions, expenses);
   };
 
-  const handleExportPdf = () => {
+  const handleExportPdf = async () => {
     if (!summary || !currentStore) return;
-    exportReportPdf(summary, periodLabel, currentStore.name, orgFromStore(currentStore));
+    try {
+      await exportReportPdf(summary, periodLabel, currentStore.name, orgFromStore(currentStore));
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Could not export this report.');
+    }
   };
 
-  const handleExportGraSalesRegisterPdf = () => {
+  const handleExportGraSalesRegisterPdf = async () => {
     if (!currentStore) return;
-    exportGraSalesRegisterPdf(transactions, periodReturns, periodLabel, orgFromStore(currentStore));
+    try {
+      await exportGraSalesRegisterPdf(transactions, periodReturns, periodLabel, orgFromStore(currentStore));
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Could not export the GRA sales register.');
+    }
   };
 
   const handleExportLocation = async (locationId: string, format: 'csv' | 'pdf') => {
@@ -245,7 +253,7 @@ export default function ReportsPage() {
         period
       );
       if (format === 'csv') exportLocationReportCsv(locSummary);
-      else exportLocationReportPdf(locSummary, orgFromStore(currentStore));
+      else await exportLocationReportPdf(locSummary, orgFromStore(currentStore));
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to export location report');
     }

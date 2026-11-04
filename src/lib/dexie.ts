@@ -2772,19 +2772,61 @@ function asQty(value: unknown): number {
 }
 
 /** PostgREST defaults to 1000 rows — page so phone and laptop pull the same full ledger. */
+const INCREMENTAL_PULL_FIELDS: Record<string, string> = {
+  users: 'updated_at',
+  product_categories: 'updated_at',
+  customers: 'updated_at',
+  products: 'updated_at',
+  transactions: 'updated_at',
+  customer_account_receipts: 'created_at',
+  transaction_items: 'created_at',
+  credit_payments: 'created_at',
+  customer_opening_payments: 'created_at',
+  sales_returns: 'created_at',
+  customer_wallet_transactions: 'created_at',
+  expenses: 'updated_at',
+  recurring_expenses: 'updated_at',
+  expense_budgets: 'updated_at',
+  cash_book_entries: 'updated_at',
+  locations: 'updated_at',
+  stock_movements: 'created_at',
+  online_orders: 'updated_at',
+  online_order_items: 'created_at',
+  suppliers: 'updated_at',
+  purchase_orders: 'updated_at',
+  bulk_sms_campaigns: 'created_at',
+  debt_reminders: 'created_at',
+};
+export const FAST_SYNC_TABLES = Object.keys(INCREMENTAL_PULL_FIELDS)
+  .filter((table) => table !== 'debt_reminders');
+
+function pullCursorId(storeId: string, table: string): string {
+  return `pull:${storeId}:${table}`;
+}
+
 async function fetchAllStoreRows(
   table: string,
-  storeId: string
+  storeId: string,
+  cursor?: { column: string; value: string }
 ): Promise<{ data: Record<string, unknown>[] | null; error: { message: string } | null }> {
   const pageSize = 1000;
   const all: Record<string, unknown>[] = [];
   let from = 0;
   for (;;) {
-    const { data, error } = await supabase
+    let query = supabase
       .from(table)
       .select('*')
-      .eq('store_id', storeId)
-      .range(from, from + pageSize - 1);
+      .eq('store_id', storeId);
+    if (cursor) {
+      const overlapStart = new Date(Date.parse(cursor.value) - 2 * 60 * 1000).toISOString();
+      query = query
+        .gte(cursor.column, overlapStart)
+        .order(cursor.column, { ascending: true })
+        .order('id', { ascending: true });
+    } else {
+      query = query.order('id', { ascending: true });
+    }
+    const { data, error } = await query.range(from, from + pageSize - 1);
     if (error) return { data: null, error };
     const rows = (data || []) as Record<string, unknown>[];
     all.push(...rows);
@@ -2918,8 +2960,15 @@ let hydrateInFlight: Promise<{ ok: boolean; message: string }> | null = null;
 /** Last successful cloud stock adopt (ms). Used to skip duplicate pulls. */
 export let lastStockHydrateOkAt = 0;
 
-export async function refreshStockFromCloud(): Promise<{ ok: boolean; message: string }> {
+export async function refreshStockFromCloud(options?: { minIntervalMs?: number }): Promise<{ ok: boolean; message: string }> {
   if (hydrateInFlight) return hydrateInFlight;
+  if (
+    options?.minIntervalMs &&
+    lastStockHydrateOkAt > 0 &&
+    Date.now() - lastStockHydrateOkAt < options.minIntervalMs
+  ) {
+    return { ok: true, message: 'Stock was recently matched to cloud' };
+  }
 
   hydrateInFlight = (async () => {
     const storeId = await getCurrentStoreId();
@@ -4128,6 +4177,8 @@ export async function syncFromSupabase(opts?: {
   onlyTables?: string[];
   skipCatalogAlign?: boolean;
   includeHistory?: boolean;
+  skipPing?: boolean;
+  incremental?: boolean;
 }): Promise<{ success: boolean; message: string; pulledCount: number }> {
   if (!isSupabaseConfigured()) {
     return { success: false, message: 'Supabase not configured.', pulledCount: 0 };
@@ -4138,14 +4189,19 @@ export async function syncFromSupabase(opts?: {
     return { success: false, message: 'No store selected', pulledCount: 0 };
   }
 
-  const connection = await testSupabaseConnection();
-  if (!connection.ok) {
-    return { success: false, message: connection.error || 'Could not connect to Supabase.', pulledCount: 0 };
+  if (!opts?.skipPing) {
+    const connection = await testSupabaseConnection();
+    if (!connection.ok) {
+      return { success: false, message: connection.error || 'Could not connect to Supabase.', pulledCount: 0 };
+    }
   }
 
   let pulledCount = 0;
   const errors: string[] = [];
-  const deletedProductIds = await getDeletedProductIds(storeId);
+  const deletedProductIds = opts?.onlyTables
+    ? new Set<string>()
+    : await getDeletedProductIds(storeId);
+  const pullStartedAt = new Date().toISOString();
 
   try {
     if (!opts?.onlyTables) {
@@ -4944,12 +5000,22 @@ export async function syncFromSupabase(opts?: {
         },
       },
     ] as const;
+    const fullyPulledTables = new Set<string>();
 
     for (const config of tables) {
       if (opts?.onlyTables && !opts.onlyTables.includes(config.table)) continue;
       if (!opts?.includeHistory && config.table === 'stock_movements') continue;
 
-      const { data, error } = await fetchAllStoreRows(config.table, storeId);
+      const cursorField = opts?.incremental ? INCREMENTAL_PULL_FIELDS[config.table] : undefined;
+      const cursorId = cursorField ? pullCursorId(storeId, config.table) : null;
+      const previousCursor = cursorId ? await db.sync_meta.get(cursorId) : undefined;
+      const { data, error } = await fetchAllStoreRows(
+        config.table,
+        storeId,
+        cursorField && previousCursor
+          ? { column: cursorField, value: previousCursor.last_synced_at }
+          : undefined
+      );
 
       if (error) {
         // The debt_reminders table only exists after
@@ -4993,6 +5059,11 @@ export async function syncFromSupabase(opts?: {
           if (!existing) pulledCount++;
         }
       }
+      if (cursorId) {
+        await db.sync_meta.put({ id: cursorId, last_synced_at: pullStartedAt });
+      } else {
+        fullyPulledTables.add(config.table);
+      }
     }
 
     const { refreshRemoteLedgerClearAndApply } = await import('./storeLedgerClear');
@@ -5018,6 +5089,16 @@ export async function syncFromSupabase(opts?: {
       id: 'last_sync',
       last_synced_at: completedSyncAt,
     });
+    if (!opts?.onlyTables) {
+      await Promise.all(
+        [...fullyPulledTables].filter((table) => table in INCREMENTAL_PULL_FIELDS).map((table) =>
+          db.sync_meta.put({
+            id: pullCursorId(storeId, table),
+            last_synced_at: completedSyncAt,
+          })
+        )
+      );
+    }
     if (isSupabaseConfigured() && !opts?.onlyTables) {
       const { error: syncMarkerError } = await supabase
         .from('stores')
@@ -5075,21 +5156,32 @@ export async function pullStockLedgerFromCloud(storeId?: string): Promise<boolea
   return adopted.ok;
 }
 
-export async function syncStockFast(): Promise<{ success: boolean; message: string }> {
+export async function syncStockFast(options?: {
+  tables?: string[];
+  push?: boolean;
+  refreshStock?: boolean;
+  forceStockRefresh?: boolean;
+}): Promise<{ success: boolean; message: string }> {
   // POS/autosync must both push local sales and pull sales created on another
   // device. Stock-only refreshes leave the phone and machine with different totals.
-  const push = await syncToSupabase({ skipPing: true, skipCanonicalize: true });
-  const salesPull = await syncFromSupabase({
-    onlyTables: [
-      'transactions',
-      'transaction_items',
-      'credit_payments',
-      'sales_returns',
-      'customer_wallet_transactions',
-    ],
-    skipCatalogAlign: true,
-  });
-  const adopted = await refreshStockFromCloud();
+  const pullTables = options?.tables ?? FAST_SYNC_TABLES;
+  const push = options?.push === false
+    ? { success: true, message: '' }
+    : await syncToSupabase({ skipPing: true, skipCanonicalize: true });
+  const salesPull = pullTables.length > 0
+    ? await syncFromSupabase({
+      onlyTables: pullTables,
+      skipCatalogAlign: true,
+      skipPing: true,
+      incremental: true,
+      includeHistory: true,
+    })
+    : { success: true, message: 'No table changes to pull', pulledCount: 0 };
+  const adopted = options?.refreshStock === false
+    ? { ok: true, message: 'Stock refresh skipped' }
+    : await refreshStockFromCloud(options?.forceStockRefresh
+      ? undefined
+      : { minIntervalMs: 60_000 });
 
   const syncMessages = [
     push.success ? '' : push.message,

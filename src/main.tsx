@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
 import App from "./App";
@@ -42,6 +42,14 @@ if (
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <Suspense
+      fallback={
+        <div className="h-full min-h-screen bg-primary flex items-center justify-center">
+          <p className="text-white font-medium tracking-wide" role="status">Loading Adimat…</p>
+        </div>
+      }
+    >
+      <App />
+    </Suspense>
   </StrictMode>
 );

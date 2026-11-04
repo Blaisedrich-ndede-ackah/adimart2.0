@@ -50,8 +50,9 @@ import AdminSupportAgent from '@/components/AdminSupportAgent';
 import AdminActivityLog from '@/components/AdminActivityLog';
 import CopyableStoreId from '@/components/CopyableStoreId';
 import AdminAgentsPanel from '@/components/AdminAgentsPanel';
+import AdminActiveDevicesPanel from '@/components/AdminActiveDevicesPanel';
 
-type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact' | 'campaigns' | 'learn' | 'sales' | 'agents' | 'support' | 'activity';
+type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact' | 'campaigns' | 'learn' | 'sales' | 'agents' | 'support' | 'activity' | 'devices';
 
 function defaultReportFromDate(): string {
   const d = new Date();
@@ -472,6 +473,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       ['agents', 'Agents', UserPlus],
       ['support', 'Support', MessagesSquare],
       ['activity', 'Activity', ScrollText],
+      ['devices', 'Active Devices', Smartphone],
       ['learn', 'Learn', BookOpen],
     ] as const
   );
@@ -586,7 +588,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 md:px-6 lg:px-8 2xl:px-12 py-3 md:py-5 lg:py-6 2xl:py-8 pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-8"
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
-        {loading && !data && tab !== 'contact' && tab !== 'reports' && tab !== 'learn' && tab !== 'agents' && tab !== 'support' && (
+        {loading && !data && tab !== 'contact' && tab !== 'reports' && tab !== 'learn' && tab !== 'agents' && tab !== 'support' && tab !== 'devices' && (
           <div className="flex flex-col items-center justify-center py-20 text-slate-500">
             <Loader2 className="w-8 h-8 animate-spin mb-3" />
             <p className="text-sm">Loading cloud data…</p>
@@ -1572,6 +1574,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         {tab === 'agents' && <AdminAgentsPanel />}
         {tab === 'support' && <AdminSupportAgent />}
         {tab === 'activity' && <AdminActivityLog />}
+        {tab === 'devices' && <AdminActiveDevicesPanel />}
 
         {data && tab === 'products' && (
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">

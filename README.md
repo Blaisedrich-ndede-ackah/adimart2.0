@@ -282,7 +282,7 @@ npm run build
 npm run preview
 ```
 
-The build output is a single `index.html` file in the `dist/` directory, optimized for deployment.
+The build outputs `index.html` plus hashed, on-demand JavaScript and CSS assets in `dist/`. Deploy the entire `dist/` directory; the service worker caches the app assets for offline use after installation.
 
 ## Deployment
 
@@ -294,7 +294,7 @@ The build output is a single `index.html` file in the `dist/` directory, optimiz
 
 ### Static Hosting
 
-The built `dist/index.html` can be deployed to any static hosting service:
+The built `dist/` directory can be deployed to any static hosting service:
 
 - Netlify
 - GitHub Pages

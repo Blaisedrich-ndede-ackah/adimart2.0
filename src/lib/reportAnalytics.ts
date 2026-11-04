@@ -5,7 +5,7 @@ import {
   LocalSaleReturn,
   LocalTransaction,
 } from './dexie';
-import { FormalPdf, formatGhsOfficial, orgFromStore, type FormalOrg } from './formalPdf';
+import { formatGhsOfficial, orgFromStore, type FormalOrg } from './formalPdfMeta';
 import { getLocationInventory, listLocations, toMoney, toQty } from './warehouse';
 import { lineBaseQty, roundMoney } from './money';
 import { getPaymentMethodLabel } from './paymentMethods';
@@ -288,12 +288,13 @@ export function exportReportCsv(
   URL.revokeObjectURL(url);
 }
 
-export function exportReportPdf(
+export async function exportReportPdf(
   summary: ReportSummary,
   periodLabel: string,
   storeName: string,
   org?: FormalOrg
-): void {
+): Promise<void> {
+  const { FormalPdf } = await import('./formalPdf');
   const letterhead = org || orgFromStore({ name: storeName });
   const money = (n: number) => formatGhsOfficial(n, letterhead.currencyCode);
   const pdf = new FormalPdf(letterhead, {
@@ -362,12 +363,13 @@ export function exportReportPdf(
   pdf.save(`${safeFilePart(storeName)}-report-${periodLabel.toLowerCase().replace(/\s+/g, '-')}.pdf`);
 }
 
-export function exportGraSalesRegisterPdf(
+export async function exportGraSalesRegisterPdf(
   transactions: LocalTransaction[],
   returns: LocalSaleReturn[],
   periodLabel: string,
   org: FormalOrg
-): void {
+): Promise<void> {
+  const { FormalPdf } = await import('./formalPdf');
   const money = (amount: number) => formatGhsOfficial(amount, org.currencyCode);
   const paymentTotals = new Map<string, { count: number; total: number }>();
   for (const transaction of transactions) {
@@ -627,7 +629,8 @@ export function exportLocationReportCsv(summary: LocationReportSummary): void {
   URL.revokeObjectURL(url);
 }
 
-export function exportLocationReportPdf(summary: LocationReportSummary, org?: FormalOrg): void {
+export async function exportLocationReportPdf(summary: LocationReportSummary, org?: FormalOrg): Promise<void> {
+  const { FormalPdf } = await import('./formalPdf');
   const locLabel = `${summary.location.name} (${summary.location.location_type})`;
   const letterhead = org || orgFromStore({ name: summary.storeName });
   const money = (n: number) => formatGhsOfficial(n, letterhead.currencyCode);
