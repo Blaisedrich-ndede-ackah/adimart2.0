@@ -44,6 +44,7 @@ import {
   type LocationStats,
   type LocationStockRow,
 } from '@/lib/warehouse';
+import { isPendingStockReceipt } from '@/lib/stockApprovals';
 import {
   buildLocationReportSummary,
   exportLocationReportCsv,
@@ -58,7 +59,7 @@ import {
   clearWarehouseUnlock,
   getUnlockedWarehouseLocationId,
 } from '@/lib/warehouseAccess';
-import { orgFromStore } from '@/lib/formalPdf';
+import { orgFromStore } from '@/lib/formalPdfMeta';
 
 type HubMode = 'hub' | 'workspace';
 type WorkspaceTab = 'stock' | 'receive' | 'transfer' | 'expiry' | 'adjust' | 'history' | 'report';
@@ -404,7 +405,7 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
     setBusy(true);
     try {
       const cost = recvCost.trim() ? Number(recvCost) : undefined;
-      await receiveStock({
+      const received = await receiveStock({
         storeId: currentStore.id,
         productId: recvProductId,
         locationId: activeLocationId,
@@ -419,7 +420,9 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
       setRecvBatch('');
       setRecvExpiry('');
       setRecvCost('');
-      flash(`Received ${qty} into ${activeLocation?.name || 'location'}`);
+      flash(isPendingStockReceipt(received)
+        ? `Queued ${qty} for cashier approval. Stock was not added yet.`
+        : `Received ${qty} into ${activeLocation?.name || 'location'}`);
       await loadWorkspace();
       void triggerPushSync('warehouse-receive');
     } catch (err: unknown) {
@@ -495,7 +498,7 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
 
     setBusy(true);
     try {
-      await adjustLocationStock({
+      const adjusted = await adjustLocationStock({
         storeId: currentStore.id,
         productId: adjProductId,
         locationId: activeLocationId,
@@ -506,7 +509,9 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
       setAdjQty('');
       setAdjNote('');
       flash(
-        adjDirection === 'in'
+        adjusted && typeof adjusted === 'object' && 'pending' in adjusted
+          ? `Queued ${qty} for cashier approval. Stock was not added yet.`
+          : adjDirection === 'in'
           ? `Added ${qty} at ${activeLocation?.name || 'location'}`
           : `Removed ${qty} from ${activeLocation?.name || 'location'}`
       );
@@ -1318,10 +1323,14 @@ export default function WarehousePage({ onBackToSettings }: WarehousePageProps) 
                     <button
                       type="button"
                       disabled={!locationReport || reportBusy}
-                      onClick={() =>
-                        locationReport &&
-                        exportLocationReportPdf(locationReport, orgFromStore(currentStore))
-                      }
+                      onClick={async () => {
+                        if (!locationReport) return;
+                        try {
+                          await exportLocationReportPdf(locationReport, orgFromStore(currentStore));
+                        } catch (error) {
+                          alert(error instanceof Error ? error.message : 'Could not export this location report.');
+                        }
+                      }}
                       className="inline-flex items-center gap-1 px-2.5 py-2 rounded-lg bg-slate-100 text-slate-700 text-xs font-semibold touch-target disabled:opacity-40"
                     >
                       <FileText className="w-3.5 h-3.5" />

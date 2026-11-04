@@ -1,6 +1,7 @@
-import { useState, useEffect, type ReactNode } from 'react';
+import { lazy, useState, useEffect, type ReactNode } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { initAutoSync, startLiveStockSync, stopAutoSync, triggerPushSync } from '@/lib/sync';
+import { sendDeviceHeartbeat } from '@/lib/devicePresence';
 import { autoReconnectPeripherals } from '@/lib/bluetoothPeripherals';
 import { clearAdminSession, restoreAdminSession } from '@/lib/adminAuth';
 import { isValidGhanaPhone } from '@/lib/platformSettings';
@@ -13,35 +14,38 @@ import { SyncToast } from '@/components/ui/Toast';
 import AppNav from '@/components/AppNav';
 import AddPhonePrompt from '@/components/AddPhonePrompt';
 import SessionTimeoutGuard from '@/components/SessionTimeoutGuard';
-import StoreSetupPage from '@/pages/StoreSetupPage';
-import LoginPage from '@/pages/LoginPage';
-import CashierBlockedPage from '@/pages/CashierBlockedPage';
-import StoreAccessBlockedPage from '@/pages/StoreAccessBlockedPage';
-import POSPage from '@/pages/POSPage';
-import InventoryPage from '@/pages/InventoryPage';
-import ReportsPage from '@/pages/ReportsPage';
-import ExpensesPage from '@/pages/ExpensesPage';
-import CashBookPage from '@/pages/CashBookPage';
-import SettingsPage from '@/pages/SettingsPage';
-import DevicesPage from '@/pages/DevicesPage';
-import TransactionsPage from '@/pages/TransactionsPage';
-import CustomersPage from '@/pages/CustomersPage';
-import ReturnsPage from '@/pages/ReturnsPage';
-import SubscriptionPage from '@/pages/SubscriptionPage';
-import WarehousePage from '@/pages/WarehousePage';
-import EcommercePage from '@/pages/EcommercePage';
-import PurchasingPage from '@/pages/PurchasingPage';
-import OwnerHomePage from '@/pages/OwnerHomePage';
-import MultiStorePage from '@/pages/MultiStorePage';
-import LearnAdimatPage from '@/pages/LearnAdimatPage';
-import CampaignsPage from '@/pages/CampaignsPage';
-import PublicShopPage from '@/pages/PublicShopPage';
-import TermsPage from '@/pages/TermsPage';
-import NotFoundPage from '@/pages/NotFoundPage';
-import AdminLoginPage from '@/pages/AdminLoginPage';
-import AdminDashboardPage from '@/pages/AdminDashboardPage';
-import AgentLoginPage from '@/pages/AgentLoginPage';
-import AgentShell from '@/components/AgentShell';
+const StoreSetupPage = lazy(() => import('@/pages/StoreSetupPage'));
+const LoginPage = lazy(() => import('@/pages/LoginPage'));
+const CashierBlockedPage = lazy(() => import('@/pages/CashierBlockedPage'));
+const StoreAccessBlockedPage = lazy(() => import('@/pages/StoreAccessBlockedPage'));
+const POSPage = lazy(() => import('@/pages/POSPage'));
+const SearchPage = lazy(() => import('@/pages/SearchPage'));
+const InventoryPage = lazy(() => import('@/pages/InventoryPage'));
+const ReportsPage = lazy(() => import('@/pages/ReportsPage'));
+const ExpensesPage = lazy(() => import('@/pages/ExpensesPage'));
+const CashBookPage = lazy(() => import('@/pages/CashBookPage'));
+const SettingsPage = lazy(() => import('@/pages/SettingsPage'));
+const DevicesPage = lazy(() => import('@/pages/DevicesPage'));
+const TransactionsPage = lazy(() => import('@/pages/TransactionsPage'));
+const CustomersPage = lazy(() => import('@/pages/CustomersPage'));
+const ReturnsPage = lazy(() => import('@/pages/ReturnsPage'));
+const SubscriptionPage = lazy(() => import('@/pages/SubscriptionPage'));
+const WarehousePage = lazy(() => import('@/pages/WarehousePage'));
+const EcommercePage = lazy(() => import('@/pages/EcommercePage'));
+const PurchasingPage = lazy(() => import('@/pages/PurchasingPage'));
+const StockApprovalsPage = lazy(() => import('@/pages/StockApprovalsPage'));
+const AdimatAiPage = lazy(() => import('@/pages/AdimatAiPage'));
+const OwnerHomePage = lazy(() => import('@/pages/OwnerHomePage'));
+const MultiStorePage = lazy(() => import('@/pages/MultiStorePage'));
+const LearnAdimatPage = lazy(() => import('@/pages/LearnAdimatPage'));
+const CampaignsPage = lazy(() => import('@/pages/CampaignsPage'));
+const PublicShopPage = lazy(() => import('@/pages/PublicShopPage'));
+const TermsPage = lazy(() => import('@/pages/TermsPage'));
+const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
+const AdminLoginPage = lazy(() => import('@/pages/AdminLoginPage'));
+const AdminDashboardPage = lazy(() => import('@/pages/AdminDashboardPage'));
+const AgentLoginPage = lazy(() => import('@/pages/AgentLoginPage'));
+const AgentShell = lazy(() => import('@/components/AgentShell'));
 import { useAgentAuthStore } from '@/store/useAgentAuthStore';
 import { isStoreAccessBlocked } from '@/lib/subscription';
 import { checkAndSendSubscriptionExpirySms } from '@/lib/subscriptionReminders';
@@ -158,6 +162,44 @@ export default function App() {
   }, [isAuthenticated, currentStore?.id]);
 
   useEffect(() => {
+    if (!isAuthenticated || !currentStore?.id || !currentUser?.id) return;
+    let active = true;
+    let heartbeatInProgress = false;
+    let hasLoggedFailure = false;
+
+    const sendHeartbeat = async () => {
+      if (!active || heartbeatInProgress || navigator.onLine === false) return;
+      heartbeatInProgress = true;
+      try {
+        await sendDeviceHeartbeat(currentStore.id, currentUser.id);
+        hasLoggedFailure = false;
+      } catch (error) {
+        if (!hasLoggedFailure) {
+          console.warn('[Presence] Could not update this device session:', error);
+          hasLoggedFailure = true;
+        }
+      } finally {
+        heartbeatInProgress = false;
+      }
+    };
+
+    void sendHeartbeat();
+    const interval = window.setInterval(() => void sendHeartbeat(), 60_000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void sendHeartbeat();
+    };
+    const onOnline = () => void sendHeartbeat();
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', onOnline);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', onOnline);
+    };
+  }, [isAuthenticated, currentStore?.id, currentUser?.id]);
+
+  useEffect(() => {
     if (!isAuthenticated || !currentStore?.id) return;
     const runRecurringExpenses = () => {
       void createDueRecurringExpenses()
@@ -211,7 +253,7 @@ export default function App() {
   useEffect(() => {
     // Cashiers cannot stay on owner-only pages after switch/login
     if (currentUser?.role !== 'cashier') return;
-    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'customers', 'returns', 'multistore'];
+    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'customers', 'returns', 'multistore', 'adimat-ai'];
     const ecommerceOk = (currentUser.can_manage_ecommerce ?? 0) === 1;
     const cashbookOk = canAccessCashbook(currentUser);
     if (
@@ -414,6 +456,8 @@ export default function App() {
         }} /> : <POSPage />;
       case 'pos':
         return <POSPage onNavigate={setCurrentPage} />;
+      case 'search':
+        return <SearchPage onNavigate={setCurrentPage} />;
       case 'transactions':
         return <TransactionsPage />;
       case 'customers':
@@ -434,6 +478,10 @@ export default function App() {
         return role === 'owner' ? <InventoryPage openAddOnLoad={quickAction === 'add-product'} onQuickActionHandled={() => setQuickAction(null)} /> : <POSPage />;
       case 'purchasing':
         return role === 'owner' ? <PurchasingPage /> : <POSPage />;
+      case 'stock-approvals':
+        return <StockApprovalsPage />;
+      case 'adimat-ai':
+        return role === 'owner' ? <AdimatAiPage onNavigate={setCurrentPage} /> : <POSPage />;
       case 'warehouse':
         return role === 'owner' ? (
           <WarehousePage onBackToSettings={leaveWarehouse} />

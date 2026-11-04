@@ -76,6 +76,8 @@ export interface LocalStore {
   sales_target_daily?: number;
   /** Owner-set monthly sales target used by the live dashboard. */
   sales_target_monthly?: number;
+  /** When 0, cashier sessions hide on-hand quantities. Owners always see them. Default 1. */
+  cashiers_can_view_stock?: number;
   created_at: string;
   synced: number;
 }
@@ -467,7 +469,7 @@ export interface LocalSaleReturn {
   receipt_number: string;
   location_id: string;
   customer_id?: string | null;
-  refund_method: 'cash' | 'wallet' | 'account' | 'none';
+  refund_method: 'cash' | 'wallet' | 'account' | 'today_sales' | 'none';
   refund_amount: number;
   debt_applied: number;
   wallet_credit: number;
@@ -593,6 +595,8 @@ export interface PurchaseOrderLine {
   quantity: number;
   unit_cost: number;
   received_quantity: number;
+  /** Quantity already sent to a cashier and not yet approved or rejected. */
+  pending_quantity?: number;
 }
 
 export interface LocalPurchaseOrder {
@@ -674,6 +678,69 @@ export interface LocalCashBookEntry {
   account_type?: 'cash' | 'bank';
 }
 
+export type StockReceiptKind = 'receive' | 'adjust_in' | 'purchase' | 'opening' | 'count';
+
+/** Goods or stock increases waiting for a cashier to confirm they are physically present. */
+export interface LocalStockReceiptRequest {
+  id: string;
+  store_id: string;
+  product_id: string;
+  product_name: string;
+  location_id: string;
+  location_name: string;
+  quantity: number;
+  kind: StockReceiptKind;
+  note: string;
+  batch_code: string;
+  expiry_date: string | null;
+  cost_price: number | null;
+  source_id: string | null;
+  source_line: string | null;
+  requested_by: string | null;
+  requested_by_name: string;
+  requested_at: string;
+  status: 'pending' | 'approved' | 'rejected';
+  decided_by: string | null;
+  decided_by_name: string | null;
+  decided_at: string | null;
+  decision_note: string;
+  synced: number;
+}
+
+/** Owner-visible record of who approved or rejected a stock arrival. */
+export interface LocalStockApprovalLog {
+  id: string;
+  store_id: string;
+  request_id: string;
+  product_id: string;
+  product_name: string;
+  quantity: number;
+  kind: string;
+  decision: 'approved' | 'rejected';
+  note: string;
+  approved_by: string | null;
+  approved_by_name: string;
+  approved_at: string;
+  synced: number;
+}
+
+/** Local copy of a platform activity row. The admin portal reads the cloud table, not this UI. */
+export interface LocalActivityLog {
+  id: string;
+  store_id: string;
+  store_name: string;
+  user_id: string;
+  username: string;
+  role: string;
+  activity_type: string;
+  summary: string;
+  details: string;
+  logged_in_at: string | null;
+  logged_out_at: string | null;
+  created_at: string;
+  synced: number;
+}
+
 export interface SyncMeta {
   id: string;
   last_synced_at: string;
@@ -733,6 +800,9 @@ class AdimatDB extends Dexie {
   sync_meta!: Table<SyncMeta, string>;
   app_config!: Table<AppConfig, string>;
   campaign_cache!: Table<CachedCampaigns, string>;
+  stock_receipt_requests!: Table<LocalStockReceiptRequest, string>;
+  stock_approval_logs!: Table<LocalStockApprovalLog, string>;
+  activity_logs!: Table<LocalActivityLog, string>;
 
   /* Agent Portal tables */
   agents!: Table<LocalAgent, string>;
@@ -998,6 +1068,18 @@ class AdimatDB extends Dexie {
               customer.location_id = null;
             }
           });
+      });
+      /* Version 24 — stock arrival approval and the platform activity log */
+      this.version(24).stores({
+        stock_receipt_requests: 'id, store_id, product_id, status, requested_at, synced',
+        stock_approval_logs: 'id, store_id, request_id, approved_at, synced',
+        activity_logs: 'id, store_id, user_id, activity_type, created_at, synced',
+      }).upgrade(async (tx) => {
+        await tx.table('stores').toCollection().modify((store: LocalStore) => {
+          if (store.cashiers_can_view_stock !== 0 && store.cashiers_can_view_stock !== 1) {
+            store.cashiers_can_view_stock = 1;
+          }
+        });
       });
   }
 }
@@ -1271,6 +1353,7 @@ export async function createStoreWithOwner(
     discount_allow_percentage: 1,
     discount_allow_fixed: 1,
     cashier_can_discount: 1,
+    cashiers_can_view_stock: 1,
     session_timeout_minutes: 5,
     momo_account_name: '',
     momo_number: '',
@@ -2689,19 +2772,61 @@ function asQty(value: unknown): number {
 }
 
 /** PostgREST defaults to 1000 rows — page so phone and laptop pull the same full ledger. */
+const INCREMENTAL_PULL_FIELDS: Record<string, string> = {
+  users: 'updated_at',
+  product_categories: 'updated_at',
+  customers: 'updated_at',
+  products: 'updated_at',
+  transactions: 'updated_at',
+  customer_account_receipts: 'created_at',
+  transaction_items: 'created_at',
+  credit_payments: 'created_at',
+  customer_opening_payments: 'created_at',
+  sales_returns: 'created_at',
+  customer_wallet_transactions: 'created_at',
+  expenses: 'updated_at',
+  recurring_expenses: 'updated_at',
+  expense_budgets: 'updated_at',
+  cash_book_entries: 'updated_at',
+  locations: 'updated_at',
+  stock_movements: 'created_at',
+  online_orders: 'updated_at',
+  online_order_items: 'created_at',
+  suppliers: 'updated_at',
+  purchase_orders: 'updated_at',
+  bulk_sms_campaigns: 'created_at',
+  debt_reminders: 'created_at',
+};
+export const FAST_SYNC_TABLES = Object.keys(INCREMENTAL_PULL_FIELDS)
+  .filter((table) => table !== 'debt_reminders');
+
+function pullCursorId(storeId: string, table: string): string {
+  return `pull:${storeId}:${table}`;
+}
+
 async function fetchAllStoreRows(
   table: string,
-  storeId: string
+  storeId: string,
+  cursor?: { column: string; value: string }
 ): Promise<{ data: Record<string, unknown>[] | null; error: { message: string } | null }> {
   const pageSize = 1000;
   const all: Record<string, unknown>[] = [];
   let from = 0;
   for (;;) {
-    const { data, error } = await supabase
+    let query = supabase
       .from(table)
       .select('*')
-      .eq('store_id', storeId)
-      .range(from, from + pageSize - 1);
+      .eq('store_id', storeId);
+    if (cursor) {
+      const overlapStart = new Date(Date.parse(cursor.value) - 2 * 60 * 1000).toISOString();
+      query = query
+        .gte(cursor.column, overlapStart)
+        .order(cursor.column, { ascending: true })
+        .order('id', { ascending: true });
+    } else {
+      query = query.order('id', { ascending: true });
+    }
+    const { data, error } = await query.range(from, from + pageSize - 1);
     if (error) return { data: null, error };
     const rows = (data || []) as Record<string, unknown>[];
     all.push(...rows);
@@ -2725,6 +2850,21 @@ function mapCloudBatch(row: Record<string, unknown>): LocalStockBatch {
     created_at: String(row.created_at || ''),
     updated_at: String(row.updated_at || row.created_at || ''),
     synced: 1,
+  };
+}
+
+function mapLocalBatchToCloud(batch: LocalStockBatch): Record<string, unknown> {
+  return {
+    id: batch.id,
+    store_id: batch.store_id,
+    product_id: batch.product_id,
+    location_id: batch.location_id,
+    batch_code: batch.batch_code || '',
+    expiry_date: dateOrNull(batch.expiry_date),
+    quantity: batch.quantity,
+    cost_price: batch.cost_price,
+    created_at: batch.created_at,
+    updated_at: batch.updated_at,
   };
 }
 
@@ -2820,8 +2960,15 @@ let hydrateInFlight: Promise<{ ok: boolean; message: string }> | null = null;
 /** Last successful cloud stock adopt (ms). Used to skip duplicate pulls. */
 export let lastStockHydrateOkAt = 0;
 
-export async function refreshStockFromCloud(): Promise<{ ok: boolean; message: string }> {
+export async function refreshStockFromCloud(options?: { minIntervalMs?: number }): Promise<{ ok: boolean; message: string }> {
   if (hydrateInFlight) return hydrateInFlight;
+  if (
+    options?.minIntervalMs &&
+    lastStockHydrateOkAt > 0 &&
+    Date.now() - lastStockHydrateOkAt < options.minIntervalMs
+  ) {
+    return { ok: true, message: 'Stock was recently matched to cloud' };
+  }
 
   hydrateInFlight = (async () => {
     const storeId = await getCurrentStoreId();
@@ -2916,6 +3063,19 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
 ): Promise<number> {
   if (rows.length === 0) return 0;
 
+  // Keep large syncs below PostgREST/Postgres statement-timeout limits. Only
+  // mark local rows synced after every chunk has been accepted.
+  const chunkSize = 100;
+  if (rows.length > chunkSize) {
+    for (let offset = 0; offset < rows.length; offset += chunkSize) {
+      const chunk = rows.slice(offset, offset + chunkSize);
+      const uploaded = await upsertToSupabase(label, table, chunk, async () => {}, errors);
+      if (uploaded !== chunk.length) return 0;
+    }
+    await markSynced();
+    return rows.length;
+  }
+
   try {
     // Append-only ledgers have INSERT policies but historically no UPDATE.
     // PostgREST upsert is ON CONFLICT DO UPDATE and needs UPDATE RLS (42501).
@@ -2931,13 +3091,14 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
       ignoreDuplicates: appendOnly,
     });
     if (error) {
-      if (
+        if (
         table === 'stores' &&
-        /session_timeout_minutes/i.test(error.message)
+        /session_timeout_minutes|cashiers_can_view_stock/i.test(error.message)
       ) {
         const stripped = rows.map((row) => {
           const copy = { ...(row as Record<string, unknown>) };
-          delete copy.session_timeout_minutes;
+          if (/session_timeout_minutes/i.test(error.message)) delete copy.session_timeout_minutes;
+          if (/cashiers_can_view_stock/i.test(error.message)) delete copy.cashiers_can_view_stock;
           return copy;
         });
         const retry = await supabase.from(table).upsert(stripped, {
@@ -3129,6 +3290,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
           discount_allow_percentage: (store.discount_allow_percentage ?? 1) === 1,
           discount_allow_fixed: (store.discount_allow_fixed ?? 1) === 1,
           cashier_can_discount: (store.cashier_can_discount ?? 1) === 1,
+          cashiers_can_view_stock: (store.cashiers_can_view_stock ?? 1) === 1,
           session_timeout_minutes: normalizeSessionTimeoutMinutes(store.session_timeout_minutes),
           momo_account_name: store.momo_account_name || '',
           momo_number: store.momo_number || '',
@@ -3332,18 +3494,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
     syncedCount += await upsertToSupabase(
       'Stock batches',
       'stock_batches',
-      batchesToPush.map(b => ({
-        id: b.id,
-        store_id: b.store_id,
-        product_id: b.product_id,
-        location_id: b.location_id,
-        batch_code: b.batch_code || '',
-        expiry_date: dateOrNull(b.expiry_date),
-        quantity: b.quantity,
-        cost_price: b.cost_price,
-        created_at: b.created_at,
-        updated_at: b.updated_at,
-      })),
+      batchesToPush.map(mapLocalBatchToCloud),
       async () => { await Promise.all(batchesToPush.map(b => db.stock_batches.update(b.id, { synced: 1 }))); },
       errors
     );
@@ -3351,12 +3502,63 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
     const unsyncedMovements = await db.stock_movements.where('store_id').equals(storeId).and(m => m.synced === 0).toArray();
     const movementsToPush: LocalStockMovement[] = [];
     if (unsyncedMovements.length > 0) {
+      const movementBatchIds = [...new Set(
+        unsyncedMovements
+          .map((movement) => movement.batch_id)
+          .filter((id): id is string => isUuid(id))
+      )];
+      const cloudBatchIds = new Set<string>();
+      let batchLookupFailed = false;
+      for (let offset = 0; offset < movementBatchIds.length; offset += 200) {
+        const batchIds = movementBatchIds.slice(offset, offset + 200);
+        const { data, error } = await supabase
+          .from('stock_batches')
+          .select('id')
+          .eq('store_id', storeId)
+          .in('id', batchIds);
+        if (error) {
+          errors.push(formatSyncError('Stock batch references', error));
+          batchLookupFailed = true;
+          break;
+        }
+        for (const row of data || []) cloudBatchIds.add(String(row.id));
+      }
+
+      if (!batchLookupFailed) {
+        const localReferencedBatches = movementBatchIds.length > 0
+          ? await db.stock_batches.where('id').anyOf(movementBatchIds).toArray()
+          : [];
+        const batchesToRepair = localReferencedBatches.filter((batch) =>
+          batch.store_id === storeId &&
+          !cloudBatchIds.has(batch.id) &&
+          isUuid(batch.id) &&
+          isUuid(batch.store_id) &&
+          isUuid(batch.product_id) &&
+          isUuid(batch.location_id)
+        );
+        if (batchesToRepair.length > 0) {
+          const repairCount = await upsertToSupabase(
+            'Stock batches (movement references)',
+            'stock_batches',
+            batchesToRepair.map(mapLocalBatchToCloud),
+            async () => {
+              await Promise.all(batchesToRepair.map((batch) =>
+                db.stock_batches.update(batch.id, { synced: 1 })
+              ));
+            },
+            errors
+          );
+          if (repairCount === batchesToRepair.length) {
+            for (const batch of batchesToRepair) cloudBatchIds.add(batch.id);
+          }
+        }
+      }
+
       // Ensure products referenced by movements exist in cloud before pushing movements.
       // Products are pushed earlier in this sync; re-upserting referenced products guards
       // against rows marked synced locally yet missing from cloud (FK violation 23503).
       const referencedProductIds = [...new Set(unsyncedMovements.map(m => m.product_id).filter((id): id is string => typeof id === 'string' && id.length > 0))];
       const referencedProducts = await db.products.where('id').anyOf(referencedProductIds).toArray();
-      const localProductIds = new Set(referencedProducts.filter(p => p.store_id === storeId).map(p => p.id));
       if (referencedProducts.length > 0) {
         await upsertToSupabase(
           'Products (movement references)',
@@ -3388,32 +3590,46 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
           errors
         );
       }
+      let blockedBatchReferences = 0;
       for (const movement of unsyncedMovements) {
         if (!isUuid(movement.id) || !isUuid(movement.store_id) || !isUuid(movement.product_id)) {
-        await db.stock_movements.delete(movement.id);
-        continue;
+          await db.stock_movements.delete(movement.id);
+          continue;
+        }
+        if (
+          movement.batch_id !== null &&
+          isUuid(movement.batch_id) &&
+          (batchLookupFailed || !cloudBatchIds.has(movement.batch_id))
+        ) {
+          blockedBatchReferences += 1;
+          continue;
+        }
+        movementsToPush.push(movement);
       }
-      movementsToPush.push(movement);
-    }
-    syncedCount += await upsertToSupabase(
-      'Stock movements',
-      'stock_movements',
-      movementsToPush.map(m => ({
-        id: m.id,
-        store_id: m.store_id,
-        product_id: m.product_id,
-        batch_id: uuidOrNull(m.batch_id),
-        from_location_id: uuidOrNull(m.from_location_id),
-        to_location_id: uuidOrNull(m.to_location_id),
-        movement_type: m.movement_type,
-        quantity: m.quantity,
-        note: m.note || '',
-        user_id: uuidOrNull(m.user_id),
-        created_at: m.created_at,
-      })),
-      async () => { await Promise.all(movementsToPush.map(m => db.stock_movements.update(m.id, { synced: 1 }))); },
-      errors
-    );
+      if (blockedBatchReferences > 0) {
+        errors.push(
+          `Stock movements: skipped ${blockedBatchReferences} movement(s) because their referenced stock batch is missing from cloud. The movement will remain pending for retry.`
+        );
+      }
+      syncedCount += await upsertToSupabase(
+        'Stock movements',
+        'stock_movements',
+        movementsToPush.map(m => ({
+          id: m.id,
+          store_id: m.store_id,
+          product_id: m.product_id,
+          batch_id: uuidOrNull(m.batch_id),
+          from_location_id: uuidOrNull(m.from_location_id),
+          to_location_id: uuidOrNull(m.to_location_id),
+          movement_type: m.movement_type,
+          quantity: m.quantity,
+          note: m.note || '',
+          user_id: uuidOrNull(m.user_id),
+          created_at: m.created_at,
+        })),
+        async () => { await Promise.all(movementsToPush.map(m => db.stock_movements.update(m.id, { synced: 1 }))); },
+        errors
+      );
     }
 
     const unsyncedCustomers = await db.customers
@@ -3910,6 +4126,13 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
       errors
     );
 
+    const approvalSync = await import('./stockApprovals').then((mod) => mod.pushStockApprovalRecords(storeId));
+    syncedCount += approvalSync.synced;
+    if (approvalSync.error) errors.push(approvalSync.error);
+    const activitySync = await import('./activityLog').then((mod) => mod.pushActivityLogs(storeId));
+    syncedCount += activitySync.synced;
+    if (activitySync.error) errors.push(activitySync.error);
+
     if (errors.length > 0) {
       return { success: false, message: `Partial sync. Errors: ${errors.join('; ')}` };
     }
@@ -3954,6 +4177,8 @@ export async function syncFromSupabase(opts?: {
   onlyTables?: string[];
   skipCatalogAlign?: boolean;
   includeHistory?: boolean;
+  skipPing?: boolean;
+  incremental?: boolean;
 }): Promise<{ success: boolean; message: string; pulledCount: number }> {
   if (!isSupabaseConfigured()) {
     return { success: false, message: 'Supabase not configured.', pulledCount: 0 };
@@ -3964,14 +4189,19 @@ export async function syncFromSupabase(opts?: {
     return { success: false, message: 'No store selected', pulledCount: 0 };
   }
 
-  const connection = await testSupabaseConnection();
-  if (!connection.ok) {
-    return { success: false, message: connection.error || 'Could not connect to Supabase.', pulledCount: 0 };
+  if (!opts?.skipPing) {
+    const connection = await testSupabaseConnection();
+    if (!connection.ok) {
+      return { success: false, message: connection.error || 'Could not connect to Supabase.', pulledCount: 0 };
+    }
   }
 
   let pulledCount = 0;
   const errors: string[] = [];
-  const deletedProductIds = await getDeletedProductIds(storeId);
+  const deletedProductIds = opts?.onlyTables
+    ? new Set<string>()
+    : await getDeletedProductIds(storeId);
+  const pullStartedAt = new Date().toISOString();
 
   try {
     if (!opts?.onlyTables) {
@@ -3996,6 +4226,12 @@ export async function syncFromSupabase(opts?: {
         discount_allow_percentage: remoteStore.discount_allow_percentage === false ? 0 : 1,
         discount_allow_fixed: remoteStore.discount_allow_fixed === false ? 0 : 1,
         cashier_can_discount: remoteStore.cashier_can_discount === false ? 0 : 1,
+        cashiers_can_view_stock:
+          remoteStore.cashiers_can_view_stock == null
+            ? (localStore?.cashiers_can_view_stock ?? 1)
+            : remoteStore.cashiers_can_view_stock === false
+              ? 0
+              : 1,
         session_timeout_minutes:
           remoteStore.session_timeout_minutes == null
             ? (localStore?.session_timeout_minutes ?? 5)
@@ -4253,7 +4489,10 @@ export async function syncFromSupabase(opts?: {
           credit_balance: Number(row.credit_balance) || 0,
           status: row.status as 'completed' | 'pending',
           location_id: (row.location_id as string) || undefined,
-          sale_mode: ((row.sale_mode as 'retail' | 'wholesale') || 'retail'),
+          sale_mode:
+            row.sale_mode === 'wholesale' || row.sale_mode === 'mixed' || row.sale_mode === 'retail'
+              ? row.sale_mode
+              : 'retail',
           created_at: row.created_at as string,
           updated_at: (row.updated_at as string) || (row.created_at as string),
           synced: 1,
@@ -4394,9 +4633,13 @@ export async function syncFromSupabase(opts?: {
           receipt_number: String(row.receipt_number || ''),
           location_id: String(row.location_id || ''),
           customer_id: String(row.customer_id || '') || null,
-          refund_method: row.refund_method === 'cash' || row.refund_method === 'wallet' || row.refund_method === 'account'
-            ? row.refund_method
-            : 'none',
+          refund_method:
+            row.refund_method === 'cash' ||
+            row.refund_method === 'wallet' ||
+            row.refund_method === 'account' ||
+            row.refund_method === 'today_sales'
+              ? row.refund_method
+              : 'none',
           refund_amount: Number(row.refund_amount) || 0,
           debt_applied: Number(row.debt_applied) || 0,
           wallet_credit: Number(row.wallet_credit) || 0,
@@ -4757,12 +5000,22 @@ export async function syncFromSupabase(opts?: {
         },
       },
     ] as const;
+    const fullyPulledTables = new Set<string>();
 
     for (const config of tables) {
       if (opts?.onlyTables && !opts.onlyTables.includes(config.table)) continue;
       if (!opts?.includeHistory && config.table === 'stock_movements') continue;
 
-      const { data, error } = await fetchAllStoreRows(config.table, storeId);
+      const cursorField = opts?.incremental ? INCREMENTAL_PULL_FIELDS[config.table] : undefined;
+      const cursorId = cursorField ? pullCursorId(storeId, config.table) : null;
+      const previousCursor = cursorId ? await db.sync_meta.get(cursorId) : undefined;
+      const { data, error } = await fetchAllStoreRows(
+        config.table,
+        storeId,
+        cursorField && previousCursor
+          ? { column: cursorField, value: previousCursor.last_synced_at }
+          : undefined
+      );
 
       if (error) {
         // The debt_reminders table only exists after
@@ -4806,11 +5059,26 @@ export async function syncFromSupabase(opts?: {
           if (!existing) pulledCount++;
         }
       }
+      if (cursorId) {
+        await db.sync_meta.put({ id: cursorId, last_synced_at: pullStartedAt });
+      } else {
+        fullyPulledTables.add(config.table);
+      }
     }
 
     const { refreshRemoteLedgerClearAndApply } = await import('./storeLedgerClear');
     const ledgerAfterPull = await refreshRemoteLedgerClearAndApply(storeId);
     const droppedSales = ledgerAfterPull.dropped.transactions;
+
+    try {
+      const { pullStockApprovalRecords } = await import('./stockApprovals');
+      pulledCount += await pullStockApprovalRecords(storeId);
+    } catch (pullError) {
+      const message = pullError instanceof Error ? pullError.message : String(pullError);
+      if (!/does not exist|PGRST205|schema cache|permission denied|42501/i.test(message)) {
+        errors.push(`Stock approvals: ${message}`);
+      }
+    }
 
     if (errors.length > 0) {
       return { success: false, message: `Partial pull. Errors: ${errors.join('; ')}`, pulledCount };
@@ -4821,6 +5089,16 @@ export async function syncFromSupabase(opts?: {
       id: 'last_sync',
       last_synced_at: completedSyncAt,
     });
+    if (!opts?.onlyTables) {
+      await Promise.all(
+        [...fullyPulledTables].filter((table) => table in INCREMENTAL_PULL_FIELDS).map((table) =>
+          db.sync_meta.put({
+            id: pullCursorId(storeId, table),
+            last_synced_at: completedSyncAt,
+          })
+        )
+      );
+    }
     if (isSupabaseConfigured() && !opts?.onlyTables) {
       const { error: syncMarkerError } = await supabase
         .from('stores')
@@ -4878,21 +5156,32 @@ export async function pullStockLedgerFromCloud(storeId?: string): Promise<boolea
   return adopted.ok;
 }
 
-export async function syncStockFast(): Promise<{ success: boolean; message: string }> {
+export async function syncStockFast(options?: {
+  tables?: string[];
+  push?: boolean;
+  refreshStock?: boolean;
+  forceStockRefresh?: boolean;
+}): Promise<{ success: boolean; message: string }> {
   // POS/autosync must both push local sales and pull sales created on another
   // device. Stock-only refreshes leave the phone and machine with different totals.
-  const push = await syncToSupabase({ skipPing: true, skipCanonicalize: true });
-  const salesPull = await syncFromSupabase({
-    onlyTables: [
-      'transactions',
-      'transaction_items',
-      'credit_payments',
-      'sales_returns',
-      'customer_wallet_transactions',
-    ],
-    skipCatalogAlign: true,
-  });
-  const adopted = await refreshStockFromCloud();
+  const pullTables = options?.tables ?? FAST_SYNC_TABLES;
+  const push = options?.push === false
+    ? { success: true, message: '' }
+    : await syncToSupabase({ skipPing: true, skipCanonicalize: true });
+  const salesPull = pullTables.length > 0
+    ? await syncFromSupabase({
+      onlyTables: pullTables,
+      skipCatalogAlign: true,
+      skipPing: true,
+      incremental: true,
+      includeHistory: true,
+    })
+    : { success: true, message: 'No table changes to pull', pulledCount: 0 };
+  const adopted = options?.refreshStock === false
+    ? { ok: true, message: 'Stock refresh skipped' }
+    : await refreshStockFromCloud(options?.forceStockRefresh
+      ? undefined
+      : { minIntervalMs: 60_000 });
 
   const syncMessages = [
     push.success ? '' : push.message,

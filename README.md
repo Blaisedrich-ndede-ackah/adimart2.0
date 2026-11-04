@@ -204,6 +204,7 @@ For credit sales, owner-managed product categories, and Cash/Bank cash-book entr
 For the Customers book and registered-customer credit checkout, run `supabase-migrate-customers-book.sql` after the credit-sales migration and before syncing. It also links existing credit sales to registered customer records.
 For automated debt reminders, the live owner dashboard and the multi-store consolidated view, run `supabase-migrate-debt-reminders-dashboard.sql`. It adds the reminder rules and sales targets to `stores`, the per-customer opt-out to `customers`, the `debt_reminders` audit table, and publishes `transactions` to the realtime channel so the dashboard live feed works.
 For owner bulk SMS campaigns, run `supabase-migrate-bulk-sms.sql`. If you already ran it, run `supabase-migrate-bulk-sms-device-writes.sql` as well — it lets the device save its own campaign log, which is what stops the sync failing with "new row violates row-level security policy for table bulk_sms_campaigns".
+For device sign-in and activity logging, run `supabase-migrate-stock-approvals-activity.sql`. If sync reports an activity-log permission or row-level security error on an existing project, run `supabase-migrate-activity-log-device-writes.sql`; it restores device insert/update access without granting devices permission to read log contents.
 
 ### Multi-store on one device
 
@@ -282,7 +283,7 @@ npm run build
 npm run preview
 ```
 
-The build output is a single `index.html` file in the `dist/` directory, optimized for deployment.
+The build outputs `index.html` plus hashed, on-demand JavaScript and CSS assets in `dist/`. Deploy the entire `dist/` directory; the service worker caches the app assets for offline use after installation.
 
 ## Deployment
 
@@ -294,7 +295,7 @@ The build output is a single `index.html` file in the `dist/` directory, optimiz
 
 ### Static Hosting
 
-The built `dist/index.html` can be deployed to any static hosting service:
+The built `dist/` directory can be deployed to any static hosting service:
 
 - Netlify
 - GitHub Pages

@@ -11,6 +11,7 @@ import {
   type LocalStore,
   type LocalUser,
 } from '@/lib/dexie';
+import { queueStockReceipt, type StockReceiptKind } from '@/lib/stockApprovals';
 import { emitStockChanged, type StockChange } from '@/lib/stockEvents';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { canonicalShopId, openingBatchId, legacyShopId, isUuid, stableUuid } from '@/lib/ids';
@@ -992,6 +993,12 @@ export async function reconcileProductStockBatches(
   return syncProductStockLevel(productId);
 }
 
+async function stockRequesterName(userId?: string | null): Promise<string> {
+  if (!userId) return 'Staff';
+  const user = await db.users.get(userId);
+  return user?.name || 'Staff';
+}
+
 export async function setProductStockLevel(params: {
   storeId: string;
   productId: string;
@@ -999,13 +1006,13 @@ export async function setProductStockLevel(params: {
   locationId?: string | null;
   note?: string;
   userId?: string | null;
-}): Promise<number> {
+}): Promise<{ totalQty: number; pending: boolean; requestId?: string }> {
   await ensureStoreLocations(params.storeId);
   const target = Math.max(0, Math.floor(Number(params.targetQty) || 0));
   const current = await getProductTotalStock(params.productId);
   const delta = target - current;
   if (delta === 0) {
-    return syncProductStockLevel(params.productId);
+    return { totalQty: await syncProductStockLevel(params.productId), pending: false };
   }
 
   const locations = await db.locations.where('store_id').equals(params.storeId).toArray();
@@ -1016,17 +1023,22 @@ export async function setProductStockLevel(params: {
     locations[0]?.id;
   if (!locationId) throw new Error('No location available for stock update');
 
-  await adjustLocationStock({
+  const note = params.note || 'Inventory stock update';
+  const kind: StockReceiptKind | undefined = delta > 0 && /opening/i.test(note) ? 'opening' : undefined;
+  const queued = await adjustLocationStock({
     storeId: params.storeId,
     productId: params.productId,
     locationId,
     delta,
-    note: params.note || 'Inventory stock update',
+    note,
     userId: params.userId || null,
+    kind,
   });
-  // syncProductStockLevel (via adjust) already emits; return live totals
   const totalQty = await getProductTotalStock(params.productId);
-  return totalQty;
+  if (queued && typeof queued === 'object' && 'pending' in queued) {
+    return { totalQty, pending: true, requestId: queued.requestId };
+  }
+  return { totalQty, pending: false };
 }
 
 export async function receiveStock(params: {
@@ -1039,7 +1051,9 @@ export async function receiveStock(params: {
   costPrice?: number;
   userId?: string | null;
   note?: string;
-}): Promise<LocalStockBatch> {
+  /** Set only by cashier approval. Unapproved receipts wait in the arrival queue. */
+  approved?: boolean;
+}): Promise<LocalStockBatch | { pending: true; requestId: string }> {
   const quantity = Math.floor(Number(params.quantity) || 0);
   if (quantity <= 0) throw new Error('Quantity must be greater than zero');
 
@@ -1052,6 +1066,25 @@ export async function receiveStock(params: {
   const product = await db.products.get(params.productId);
   if (!product || product.store_id !== params.storeId) {
     throw new Error('Product not found');
+  }
+
+  if (!params.approved) {
+    const requestId = await queueStockReceipt({
+      storeId: params.storeId,
+      productId: params.productId,
+      productName: product.name,
+      locationId: params.locationId,
+      locationName: location.name,
+      quantity,
+      kind: 'receive',
+      note: params.note,
+      batchCode: params.batchCode,
+      expiryDate: dateOnly(params.expiryDate),
+      costPrice: params.costPrice ?? product.cost_price ?? 0,
+      requestedBy: params.userId || null,
+      requestedByName: await stockRequesterName(params.userId),
+    });
+    return { pending: true, requestId };
   }
 
   const now = nowIso();
@@ -1750,7 +1783,10 @@ export async function adjustLocationStock(params: {
   delta: number;
   note?: string;
   userId?: string | null;
-}): Promise<void> {
+  /** Positive additions wait for cashier approval unless this is the approval itself. */
+  approved?: boolean;
+  kind?: StockReceiptKind;
+}): Promise<void | { pending: true; requestId: string }> {
   const delta = Math.trunc(Number(params.delta) || 0);
   if (delta === 0) throw new Error('Adjustment quantity cannot be zero');
 
@@ -1768,6 +1804,23 @@ export async function adjustLocationStock(params: {
 
   const now = nowIso();
   const note = (params.note || '').trim() || 'Stock adjustment';
+
+  if (delta > 0 && !params.approved) {
+    const requestId = await queueStockReceipt({
+      storeId: params.storeId,
+      productId: params.productId,
+      productName: product.name,
+      locationId: params.locationId,
+      locationName: location.name,
+      quantity: delta,
+      kind: params.kind || 'adjust_in',
+      note,
+      costPrice: product.cost_price || 0,
+      requestedBy: params.userId || null,
+      requestedByName: await stockRequesterName(params.userId),
+    });
+    return { pending: true, requestId };
+  }
 
   if (delta > 0) {
     const batch: LocalStockBatch = {
@@ -1831,6 +1884,80 @@ export async function adjustLocationStock(params: {
   await syncProductStockLevel(params.productId);
 }
 
+/**
+ * Set on-hand quantity to a physical count. Unchanged lines are left alone.
+ * Differences are recorded as stock adjustments with a stock-count note.
+ */
+export async function recordStockCount(params: {
+  storeId: string;
+  locationId: string;
+  userId?: string | null;
+  counts: Array<{ productId: string; countedQty: number }>;
+  note?: string;
+}): Promise<{ adjusted: number; unchanged: number; pending: number }> {
+  await ensureStoreLocations(params.storeId);
+  const location = await db.locations.get(params.locationId);
+  if (!location || location.store_id !== params.storeId) {
+    throw new Error('Location not found');
+  }
+  const note = (params.note || 'Physical stock count').trim().slice(0, 200);
+  let adjusted = 0;
+  let unchanged = 0;
+  let pending = 0;
+  for (const line of params.counts) {
+    const product = await db.products.get(line.productId);
+    if (!product || product.store_id !== params.storeId) {
+      throw new Error('A counted product is no longer in this store.');
+    }
+    const counted = Math.max(0, Math.floor(Number(line.countedQty) || 0));
+    const current = await getLocationStock(line.productId, params.locationId);
+    const delta = counted - current;
+    if (delta === 0) {
+      unchanged += 1;
+      continue;
+    }
+    const queued = await adjustLocationStock({
+      storeId: params.storeId,
+      productId: line.productId,
+      locationId: params.locationId,
+      delta,
+      note: `Stock count: ${note}`,
+      userId: params.userId || null,
+      kind: delta > 0 ? 'count' : undefined,
+    });
+    if (queued && typeof queued === 'object' && 'pending' in queued) pending += 1;
+    else adjusted += 1;
+  }
+  return { adjusted, unchanged, pending };
+}
+
+export const TODAY_SALES_REFUND_CATEGORY = "Today's sales refund";
+
+/** Cash taken in today, minus refunds already drawn from today's sales. */
+export async function getTodaySalesCashAvailable(
+  storeId: string,
+  day = new Date().toISOString().slice(0, 10)
+): Promise<number> {
+  const sales = await db.transactions.where('store_id').equals(storeId).toArray();
+  let available = 0;
+  for (const sale of sales) {
+    if (sale.status !== 'completed') continue;
+    if (!String(sale.created_at || '').startsWith(day)) continue;
+    available += Math.max(0, Number(sale.cash_amount) || 0);
+  }
+  const entries = await db.cash_book_entries.where('store_id').equals(storeId).toArray();
+  for (const entry of entries) {
+    if (
+      entry.entry_date === day &&
+      entry.entry_type === 'expense' &&
+      entry.category === TODAY_SALES_REFUND_CATEGORY
+    ) {
+      available -= Math.max(0, Number(entry.amount) || 0);
+    }
+  }
+  return toMoney(Math.max(0, available));
+}
+
 export async function processSaleReturn(params: {
   storeId: string;
   userId: string;
@@ -1839,7 +1966,7 @@ export async function processSaleReturn(params: {
   quantity: number;
   reason: string;
   photoDataUrl: string;
-  refundMethod: 'cash' | 'wallet' | 'account' | 'none';
+  refundMethod: 'cash' | 'wallet' | 'account' | 'today_sales' | 'none';
   customerId?: string;
   customerName?: string;
   customerPhone?: string;
@@ -2102,13 +2229,24 @@ export async function processSaleReturn(params: {
           synced: 0,
         });
       }
-      if (params.refundMethod === 'cash' && refundAmount > 0) {
+      const fromTodaySales = params.refundMethod === 'today_sales';
+      if (fromTodaySales && refundAmount > 0) {
+        const available = await getTodaySalesCashAvailable(params.storeId, now.slice(0, 10));
+        if (refundAmount > available + 0.001) {
+          throw new Error(
+            `Today's cash sales can cover ${available.toFixed(2)}. This refund is larger, so choose another method or a smaller quantity.`
+          );
+        }
+      }
+      if ((params.refundMethod === 'cash' || fromTodaySales) && refundAmount > 0) {
         await db.cash_book_entries.add({
           id: generateId(),
           store_id: params.storeId,
           entry_type: 'expense',
-          description: `Cash refund for return ${transaction.receipt_number}`,
-          category: 'Sales refund',
+          description: fromTodaySales
+            ? `Cash refund from today's sales for return ${transaction.receipt_number}`
+            : `Cash refund for return ${transaction.receipt_number}`,
+          category: fromTodaySales ? TODAY_SALES_REFUND_CATEGORY : 'Sales refund',
           amount: refundAmount,
           notes: `${item.product_name} × ${quantity}`,
           entry_date: now.slice(0, 10),

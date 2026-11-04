@@ -3,19 +3,9 @@
  */
 
 import jsPDF from 'jspdf';
-import { formatOfficialMoney } from './currency';
-
-export interface FormalOrg {
-  name: string;
-  address?: string;
-  phone?: string;
-  logoDataUrl?: string;
-  /** Short official caption under the title — not a system UUID. */
-  reference?: string;
-  /** Internal store identifier, printed only in the footer. */
-  storeId?: string;
-  currencyCode?: string;
-}
+import type { FormalOrg } from './formalPdfMeta';
+export { formatGhsOfficial, orgFromStore } from './formalPdfMeta';
+export type { FormalOrg } from './formalPdfMeta';
 
 export interface FormalDocMeta {
   title: string;
@@ -47,10 +37,6 @@ const HEADER_BG: [number, number, number] = [6, 78, 59];
 const BAND: [number, number, number] = [236, 253, 245];
 const TABLE_HEAD: [number, number, number] = [241, 245, 249];
 const WHITE: [number, number, number] = [255, 255, 255];
-
-export function formatGhsOfficial(amount: number, currencyCode?: string | null): string {
-  return formatOfficialMoney(amount, currencyCode);
-}
 
 export function formatOfficialDate(value: Date | string = new Date()): string {
   let d: Date;
@@ -376,22 +362,4 @@ export class FormalPdf {
 function looksLikeStoreId(value: string): boolean {
   return /store id\s+[0-9a-f-]{8,}/i.test(value.trim())
     || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim());
-}
-
-export function orgFromStore(store?: {
-  name?: string;
-  address?: string;
-  support_number?: string;
-  logo_url?: string;
-  id?: string;
-  currency_code?: string;
-} | null): FormalOrg {
-  return {
-    name: store?.name?.trim() || 'Store',
-    address: store?.address?.trim() || '',
-    phone: store?.support_number?.trim() || '',
-    logoDataUrl: store?.logo_url?.startsWith('data:image/') ? store.logo_url : '',
-    storeId: store?.id || '',
-    currencyCode: store?.currency_code || 'GHS',
-  };
 }

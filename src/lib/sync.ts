@@ -1,18 +1,21 @@
 import { isSupabaseConfigured, supabase } from './supabase';
-import { syncStockFast, syncToSupabase } from './dexie';
+import { FAST_SYNC_TABLES, syncStockFast, syncToSupabase } from './dexie';
 
 const AUTO_SYNC_KEY = 'adimat_auto_sync';
 const LAST_SYNC_ERROR_KEY = 'adimat_last_sync_error';
-const AUTO_SYNC_INTERVAL_MS = 45 * 1000;
-const LIVE_DEBOUNCE_MS = 1500;
+const AUTO_SYNC_INTERVAL_MS = 60 * 1000;
+const LIVE_DEBOUNCE_MS = 600;
 const MIN_ONLINE_GAP_MS = 30_000;
 
 let syncInProgress = false;
 let syncQueued = false;
+let syncQueuedAllTables = false;
+const syncQueuedTables = new Set<string>();
 let syncTimer: ReturnType<typeof setInterval> | null = null;
 let lastAutoSyncAt = 0;
 let liveChannel: ReturnType<typeof supabase.channel> | null = null;
 let lastOnlineSyncAt = 0;
+let liveCooldownTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function isAutoSyncEnabled(): boolean {
   return localStorage.getItem(AUTO_SYNC_KEY) !== 'false';
@@ -28,6 +31,19 @@ export function setAutoSyncEnabled(enabled: boolean): void {
 }
 
 let liveDebounce: ReturnType<typeof setTimeout> | null = null;
+const liveTables = new Set<string>();
+
+function scheduleQueuedSync(delayMs: number): void {
+  if (liveCooldownTimer) return;
+  liveCooldownTimer = setTimeout(() => {
+    liveCooldownTimer = null;
+    const nextTables = syncQueuedAllTables ? undefined : [...syncQueuedTables];
+    syncQueued = false;
+    syncQueuedAllTables = false;
+    syncQueuedTables.clear();
+    void triggerAutoSync(nextTables ? 'live' : 'queued', nextTables);
+  }, delayMs);
+}
 
 function dispatchSyncEvent(phase: 'start' | 'complete' | 'error', detail: Record<string, unknown>): void {
   try {
@@ -41,16 +57,39 @@ function isOnline(): boolean {
   return typeof navigator === 'undefined' || navigator.onLine !== false;
 }
 
-export async function triggerAutoSync(reason = 'auto'): Promise<void> {
+async function withCrossTabSyncLock(task: () => Promise<void>): Promise<boolean> {
+  if (typeof navigator === 'undefined' || !navigator.locks) {
+    await task();
+    return true;
+  }
+
+  let acquired = false;
+  await navigator.locks.request('adimat-cloud-sync', { ifAvailable: true }, async (lock) => {
+    if (!lock) return;
+    acquired = true;
+    await task();
+  });
+  return acquired;
+}
+
+export async function triggerAutoSync(reason = 'auto', onlyTables?: string[]): Promise<void> {
   if (!isAutoSyncEnabled() || !isSupabaseConfigured()) return;
   if ((reason === 'online' || reason === 'focus' || reason === 'visible') && !isOnline()) return;
   if (syncInProgress) {
     syncQueued = true;
+    if (onlyTables) onlyTables.forEach((table) => syncQueuedTables.add(table));
+    else syncQueuedAllTables = true;
     return;
   }
 
   const now = Date.now();
   if ((reason === 'auto' || reason === 'interval' || reason === 'live') && now - lastAutoSyncAt < 8_000) {
+    if (reason === 'live') {
+      syncQueued = true;
+      if (onlyTables) onlyTables.forEach((table) => syncQueuedTables.add(table));
+      else syncQueuedAllTables = true;
+      scheduleQueuedSync(8_000 - (now - lastAutoSyncAt));
+    }
     return;
   }
 
@@ -60,16 +99,38 @@ export async function triggerAutoSync(reason = 'auto'): Promise<void> {
   }
 
   syncInProgress = true;
-  dispatchSyncEvent('start', { reason });
   try {
-    const result = await syncStockFast();
-    recordSyncOutcome(result);
-    lastAutoSyncAt = Date.now();
-    dispatchSyncEvent('complete', {
-      success: result.success,
-      message: result.message,
-      reason,
+    const acquired = await withCrossTabSyncLock(async () => {
+      dispatchSyncEvent('start', { reason });
+      const livePull = onlyTables !== undefined;
+      const refreshStock = !livePull || onlyTables.some((table) =>
+        table === 'stock_batches' || table === 'locations'
+      );
+      const pullTables = onlyTables?.filter((table) => table !== 'stock_batches');
+      const result = await syncStockFast(livePull
+        ? {
+          tables: pullTables,
+          push: false,
+          refreshStock,
+          forceStockRefresh: refreshStock,
+        }
+        : undefined);
+      recordSyncOutcome(result);
+      lastAutoSyncAt = Date.now();
+      dispatchSyncEvent('complete', {
+        success: result.success,
+        message: result.message,
+        reason,
+      });
     });
+    if (!acquired) {
+      dispatchSyncEvent('complete', {
+        success: true,
+        message: 'Another tab is synchronizing this device.',
+        reason,
+        skipped: true,
+      });
+    }
   } catch (error) {
     recordSyncOutcome({ success: false, message: error instanceof Error ? error.message : String(error) });
     dispatchSyncEvent('error', {
@@ -80,8 +141,12 @@ export async function triggerAutoSync(reason = 'auto'): Promise<void> {
   } finally {
     syncInProgress = false;
     if (syncQueued) {
+      const nextTables = syncQueuedAllTables ? undefined : [...syncQueuedTables];
+      const nextReason = nextTables ? 'live' : 'queued';
       syncQueued = false;
-      void triggerAutoSync('queued');
+      syncQueuedAllTables = false;
+      syncQueuedTables.clear();
+      void triggerAutoSync(nextReason, nextTables);
     }
   }
 }
@@ -96,16 +161,26 @@ export async function triggerPushSync(reason = 'push'): Promise<void> {
   }
 
   syncInProgress = true;
-  dispatchSyncEvent('start', { reason });
   try {
-    const result = await syncToSupabase();
-    recordSyncOutcome(result);
-    lastAutoSyncAt = Date.now();
-    dispatchSyncEvent('complete', {
-      success: result.success,
-      message: result.message,
-      reason,
+    const acquired = await withCrossTabSyncLock(async () => {
+      dispatchSyncEvent('start', { reason });
+      const result = await syncToSupabase();
+      recordSyncOutcome(result);
+      lastAutoSyncAt = Date.now();
+      dispatchSyncEvent('complete', {
+        success: result.success,
+        message: result.message,
+        reason,
+      });
     });
+    if (!acquired) {
+      dispatchSyncEvent('complete', {
+        success: true,
+        message: 'Another tab is synchronizing this device.',
+        reason,
+        skipped: true,
+      });
+    }
   } catch (error) {
     recordSyncOutcome({ success: false, message: error instanceof Error ? error.message : String(error) });
     dispatchSyncEvent('error', {
@@ -116,8 +191,12 @@ export async function triggerPushSync(reason = 'push'): Promise<void> {
   } finally {
     syncInProgress = false;
     if (syncQueued) {
+      const nextTables = syncQueuedAllTables ? undefined : [...syncQueuedTables];
+      const nextReason = nextTables ? 'live' : 'queued';
       syncQueued = false;
-      void triggerAutoSync('queued');
+      syncQueuedAllTables = false;
+      syncQueuedTables.clear();
+      void triggerAutoSync(nextReason, nextTables);
     }
   }
 }
@@ -135,36 +214,39 @@ export function startLiveStockSync(storeId: string): () => void {
   stopLiveStockSync();
   if (!isSupabaseConfigured() || !storeId) return () => undefined;
 
-  liveChannel = supabase
-    .channel(`adimat-stock-${storeId}`)
-    .on(
+  const queueLiveSync = (table: string) => {
+    liveTables.add(table);
+    if (liveDebounce) clearTimeout(liveDebounce);
+    liveDebounce = setTimeout(() => {
+      liveDebounce = null;
+      const changedTables = [...liveTables];
+      liveTables.clear();
+      void triggerAutoSync('live', changedTables);
+    }, LIVE_DEBOUNCE_MS);
+  };
+  const tables = [...new Set([
+    ...FAST_SYNC_TABLES,
+    'stock_batches',
+  ])];
+  let channel = supabase.channel(`adimat-sync-${storeId}`);
+  for (const table of tables) {
+    channel = channel.on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'stock_batches', filter: `store_id=eq.${storeId}` },
-      () => {
-        if (liveDebounce) clearTimeout(liveDebounce);
-        liveDebounce = setTimeout(() => {
-          liveDebounce = null;
-          void triggerAutoSync('live');
-        }, LIVE_DEBOUNCE_MS);
-      }
-    )
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'products', filter: `store_id=eq.${storeId}` },
-      () => {
-        if (liveDebounce) clearTimeout(liveDebounce);
-        liveDebounce = setTimeout(() => {
-          liveDebounce = null;
-          void triggerAutoSync('live');
-        }, LIVE_DEBOUNCE_MS);
-      }
-    )
-    .subscribe();
+      { event: '*', schema: 'public', table, filter: `store_id=eq.${storeId}` },
+      () => queueLiveSync(table)
+    );
+  }
+  liveChannel = channel.subscribe();
 
   return stopLiveStockSync;
 }
 
 export function stopLiveStockSync(): void {
+  if (liveDebounce) {
+    clearTimeout(liveDebounce);
+    liveDebounce = null;
+  }
+  liveTables.clear();
   if (liveChannel) {
     void supabase.removeChannel(liveChannel);
     liveChannel = null;
@@ -192,6 +274,13 @@ export function stopAutoSync(): void {
   window.removeEventListener('online', handleOnline);
   window.removeEventListener('focus', handleFocus);
   document.removeEventListener('visibilitychange', handleVisible);
+  if (liveCooldownTimer) {
+    clearTimeout(liveCooldownTimer);
+    liveCooldownTimer = null;
+  }
+  syncQueued = false;
+  syncQueuedAllTables = false;
+  syncQueuedTables.clear();
   stopLiveStockSync();
 }
 

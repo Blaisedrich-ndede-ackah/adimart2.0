@@ -48,18 +48,13 @@ export async function printBarcodeLabel(
   await sendRawBytes(new Uint8Array(bytes));
 }
 
-export function downloadBarcodeLabel(
+function drawBarcodeLabel(
+  doc: jsPDF,
   product: LocalProduct,
   storeName: string,
   currencyCode?: string
 ): void {
   const barcode = ensureProductBarcode(product);
-  const doc = new jsPDF({
-    orientation: 'landscape',
-    unit: 'mm',
-    format: [58, 40],
-  });
-
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   doc.text(storeName.slice(0, 28), 29, 6, { align: 'center' });
@@ -74,7 +69,41 @@ export function downloadBarcodeLabel(
   doc.text(barcode, 29, 28, { align: 'center' });
   doc.setFontSize(7);
   doc.text('Scan at checkout', 29, 34, { align: 'center' });
+}
 
-  const safeName = product.name.replace(/[^a-z0-9]/gi, '_').slice(0, 20);
+export function downloadBarcodeLabel(
+  product: LocalProduct,
+  storeName: string,
+  currencyCode?: string
+): void {
+  downloadBarcodeLabels([product], storeName, currencyCode, 1);
+}
+
+/** One shelf label per page, repeated for the requested number of copies. */
+export function downloadBarcodeLabels(
+  products: LocalProduct[],
+  storeName: string,
+  currencyCode?: string,
+  copies = 1
+): void {
+  const labels = products.filter(Boolean);
+  if (labels.length === 0) return;
+  const repeat = Math.max(1, Math.min(20, Math.floor(copies) || 1));
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: [58, 40],
+  });
+  let first = true;
+  for (const product of labels) {
+    for (let copy = 0; copy < repeat; copy += 1) {
+      if (!first) doc.addPage([58, 40], 'landscape');
+      first = false;
+      drawBarcodeLabel(doc, product, storeName, currencyCode);
+    }
+  }
+  const safeName = labels.length === 1
+    ? labels[0].name.replace(/[^a-z0-9]/gi, '_').slice(0, 20)
+    : `${labels.length}-products`;
   doc.save(`label-${safeName}.pdf`);
 }

@@ -426,6 +426,15 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
         </div>
       </header>
 
+      {catalog.catalogError && (
+        <div role="alert" className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+          <span>Some products could not be loaded: {catalog.catalogError}</span>
+          <button type="button" onClick={() => void load()} className="shrink-0 font-semibold underline">
+            Retry
+          </button>
+        </div>
+      )}
+
       <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain" style={{ WebkitOverflowScrolling: 'touch' }}>
         <div className="mx-auto w-full px-4 py-5 pb-28 xl:px-8">
           {view === 'catalog' ? (

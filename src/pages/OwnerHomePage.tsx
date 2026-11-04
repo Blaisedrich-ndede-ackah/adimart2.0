@@ -28,6 +28,7 @@ import { useT } from '@/lib/i18n';
 import { toQty } from '@/lib/warehouse';
 import { buildCustomerBalances } from '@/lib/customerBalances';
 import { useLiveStoreSales } from '@/hooks/useLiveStoreSales';
+import DailyBriefCard from '@/components/DailyBriefCard';
 
 interface OwnerHomePageProps {
   onNavigate: (page: string, quickAdd?: boolean) => void;
@@ -262,6 +263,8 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
             <p className="mt-2 text-lg font-bold text-red-950">{loading ? '…' : outOfStockCount}</p>
           </button>
         </section>
+
+        <DailyBriefCard onNavigate={onNavigate} />
 
         {/* Sales targets */}
         {(dailyTarget > 0 || monthlyTarget > 0) && (
