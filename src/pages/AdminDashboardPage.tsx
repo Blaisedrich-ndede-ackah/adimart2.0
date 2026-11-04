@@ -3,7 +3,7 @@ import {
   Building2, Users, Package, Wallet, RefreshCcw, LogOut, ChevronLeft, ChevronRight,
   Smartphone, CheckCircle2, AlertCircle, Loader2, Store, CreditCard, CalendarClock, Mail,
   FileBarChart, Download, FileText, Ban, LayoutDashboard, MoreHorizontal, X, Search, Megaphone,
-  BookOpen, Printer, UserPlus, MessagesSquare, ScrollText,
+  BookOpen, Printer, UserPlus, MessagesSquare, ScrollText, Send,
 } from 'lucide-react';
 import {
   AdminDashboardData,
@@ -52,7 +52,7 @@ import CopyableStoreId from '@/components/CopyableStoreId';
 import AdminAgentsPanel from '@/components/AdminAgentsPanel';
 import AdminActiveDevicesPanel from '@/components/AdminActiveDevicesPanel';
 
-type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact' | 'campaigns' | 'learn' | 'sales' | 'agents' | 'support' | 'activity' | 'devices';
+type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact' | 'campaigns' | 'learn' | 'sales' | 'agents' | 'support' | 'activity' | 'devices' | 'sms';
 
 function defaultReportFromDate(): string {
   const d = new Date();
@@ -474,6 +474,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       ['support', 'Support', MessagesSquare],
       ['activity', 'Activity', ScrollText],
       ['devices', 'Active Devices', Smartphone],
+      ['sms', 'Bulk SMS', Send],
       ['learn', 'Learn', BookOpen],
     ] as const
   );
@@ -570,7 +571,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       </header>
 
       {/* Desktop / tablet top tabs */}
-      <nav className="ios-pane hidden lg:flex flex-shrink-0 gap-1 overflow-x-auto border-b border-white/50 px-2 py-2 no-scrollbar md:px-4 lg:px-8 2xl:px-12">
+      <nav className="ios-pane hidden lg:flex flex-shrink-0 flex-wrap gap-1 border-b border-white/50 px-2 py-2 md:px-4 lg:px-8 2xl:px-12">
         {tabs.map(([id, label]) => (
           <button
             key={id}
@@ -1575,6 +1576,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         {tab === 'support' && <AdminSupportAgent />}
         {tab === 'activity' && <AdminActivityLog />}
         {tab === 'devices' && <AdminActiveDevicesPanel />}
+        {data && tab === 'sms' && <AdminBroadcastSms stores={data.stores} users={data.users} />}
 
         {data && tab === 'products' && (
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
@@ -1823,7 +1825,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
             onClick={() => setMoreOpen(false)}
           />
           <div
-            className="ios-glass relative rounded-t-[20px] shadow-2xl animate-slide-up"
+            className="ios-glass relative max-h-[85dvh] overflow-y-auto rounded-t-[20px] shadow-2xl animate-slide-up"
             style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
           >
             <div className="px-4 pb-2 pt-2">
