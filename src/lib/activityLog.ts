@@ -55,12 +55,24 @@ function cloudPayload(row: LocalActivityLog): Record<string, unknown> {
   };
 }
 
+async function writeCloudRow(row: LocalActivityLog): Promise<void> {
+  const payload = cloudPayload(row);
+  const { id, ...updates } = payload;
+  const { error: insertError } = await supabase.from('activity_logs').insert(payload);
+  if (!insertError) return;
+  if (insertError.code !== '23505') throw new Error(insertError.message);
+
+  const { error: updateError } = await supabase
+    .from('activity_logs')
+    .update(updates)
+    .eq('id', String(id));
+  if (updateError) throw new Error(updateError.message);
+}
+
 async function pushRow(row: LocalActivityLog): Promise<void> {
   if (!isSupabaseConfigured()) return;
-  const { error } = await supabase.from('activity_logs').upsert(cloudPayload(row), { onConflict: 'id' });
-  if (!error) {
-    await db.activity_logs.update(row.id, { synced: 1 });
-  }
+  await writeCloudRow(row);
+  await db.activity_logs.update(row.id, { synced: 1 });
 }
 
 function defer(task: () => Promise<void>): void {
@@ -156,13 +168,35 @@ export async function pushActivityLogs(storeId: string): Promise<{ synced: numbe
     .and((row) => row.synced === 0)
     .toArray();
   if (rows.length === 0) return { synced: 0, error: '' };
-  const { error } = await supabase.from('activity_logs').upsert(rows.map(cloudPayload), { onConflict: 'id' });
-  if (error) {
-    if (/does not exist|PGRST205|schema cache/i.test(error.message || '')) {
+
+  const { error: insertError } = await supabase
+    .from('activity_logs')
+    .insert(rows.map(cloudPayload));
+  if (!insertError) {
+    await Promise.all(rows.map((row) => db.activity_logs.update(row.id, { synced: 1 })));
+    return { synced: rows.length, error: '' };
+  }
+
+  if (insertError.code !== '23505') {
+    if (/does not exist|PGRST205|schema cache/i.test(insertError.message || '')) {
       return { synced: 0, error: '' };
     }
-    return { synced: 0, error: `Activity log: ${error.message}` };
+    return { synced: 0, error: `Activity log: ${insertError.message}` };
   }
-  await Promise.all(rows.map((row) => db.activity_logs.update(row.id, { synced: 1 })));
-  return { synced: rows.length, error: '' };
+
+  let synced = 0;
+  for (const row of rows) {
+    try {
+      await writeCloudRow(row);
+      await db.activity_logs.update(row.id, { synced: 1 });
+      synced += 1;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/does not exist|PGRST205|schema cache/i.test(message)) {
+        return { synced, error: '' };
+      }
+      return { synced, error: `Activity log: ${message}` };
+    }
+  }
+  return { synced, error: '' };
 }

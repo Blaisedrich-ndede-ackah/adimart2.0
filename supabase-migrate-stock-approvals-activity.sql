@@ -121,6 +121,7 @@ ALTER TABLE public.activity_logs ENABLE ROW LEVEL SECURITY;
 
 REVOKE ALL ON TABLE public.activity_logs FROM PUBLIC, anon, authenticated;
 GRANT INSERT, UPDATE ON public.activity_logs TO anon, authenticated;
+GRANT SELECT (id) ON public.activity_logs TO anon, authenticated;
 GRANT ALL ON TABLE public.activity_logs TO service_role;
 
 DROP POLICY IF EXISTS activity_logs_insert ON public.activity_logs;
