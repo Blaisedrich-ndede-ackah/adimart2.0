@@ -51,7 +51,7 @@ import { useAgentAuthStore } from '@/store/useAgentAuthStore';
 import { isStoreAccessBlocked } from '@/lib/subscription';
 import { checkAndSendSubscriptionExpirySms } from '@/lib/subscriptionReminders';
 import { checkAndSendDebtReminders } from '@/lib/debtReminders';
-import { canAccessCashbook } from '@/lib/staffAccess';
+import { canAccessCashbook, canRecordCustomerPayments } from '@/lib/staffAccess';
 import { createAutomaticStoreBackup, recordBackupIssue } from '@/lib/storeBackup';
 import { createDueRecurringExpenses } from '@/lib/dexie';
 import { useAccessibilityStore } from '@/lib/accessibility';
@@ -219,17 +219,18 @@ export default function App() {
   useEffect(() => {
     // Cashiers cannot stay on owner-only pages after switch/login
     if (currentUser?.role !== 'cashier') return;
+    const paymentsOk = canRecordCustomerPayments(currentUser, currentStore);
     const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'customers', 'returns', 'multistore', 'adimat-ai'];
     const ecommerceOk = (currentUser.can_manage_ecommerce ?? 0) === 1;
     const cashbookOk = canAccessCashbook(currentUser);
     if (
-      ownerOnly.includes(currentPage) ||
+      (ownerOnly.includes(currentPage) && !(currentPage === 'customers' && paymentsOk)) ||
       (currentPage === 'ecommerce' && !ecommerceOk) ||
       (currentPage === 'cashbook' && !cashbookOk)
     ) {
       setCurrentPage('pos');
     }
-  }, [currentUser, currentPage]);
+  }, [currentUser, currentPage, currentStore]);
 
   useEffect(() => {
     if (!isAuthenticated || !currentStore?.id) return;
@@ -427,7 +428,9 @@ export default function App() {
       case 'transactions':
         return <TransactionsPage />;
       case 'customers':
-        return role === 'owner' ? <CustomersPage onNavigate={setCurrentPage} /> : <POSPage />;
+        return role === 'owner' || canRecordCustomerPayments(currentUser, currentStore)
+          ? <CustomersPage onNavigate={setCurrentPage} />
+          : <POSPage />;
       case 'multistore':
         return role === 'owner' ? <MultiStorePage onNavigate={setCurrentPage} /> : <POSPage />;
       case 'returns':

@@ -68,6 +68,20 @@ export function cashierCanSeeStockQuantity(
   return canSeeStockQuantities(user, store);
 }
 
+/**
+ * Owners can always record a customer payment and print that receipt.
+ * Cashiers can do both only after the owner turns the store switch on.
+ */
+export function canRecordCustomerPayments(
+  user?: { role?: string | null } | null,
+  store?: { cashier_can_record_payments?: number | null } | null
+): boolean {
+  if (!user) return false;
+  if (user.role === 'owner') return true;
+  if (user.role !== 'cashier') return false;
+  return (store?.cashier_can_record_payments ?? 0) === 1;
+}
+
 /** Map a cloud boolean onto local 0/1. Missing column = allowed (legacy). */
 export function cashbookAccessFromCloud(role: unknown, value: unknown): number {
   if (role === 'owner') return 1;

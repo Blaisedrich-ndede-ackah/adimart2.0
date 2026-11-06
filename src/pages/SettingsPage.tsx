@@ -70,6 +70,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [allowFixed, setAllowFixed] = useState(true);
   const [cashierCanDiscount, setCashierCanDiscount] = useState(true);
   const [cashierCanSeeStock, setCashierCanSeeStock] = useState(false);
+  const [cashierCanRecordPayments, setCashierCanRecordPayments] = useState(false);
   const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState(DEFAULT_SESSION_TIMEOUT_MINUTES);
   const [momoAccountName, setMomoAccountName] = useState('');
   const [momoNumber, setMomoNumber] = useState('');
@@ -120,6 +121,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
           ? currentStore.cashier_can_see_stock === 1
           : (currentStore.cashiers_can_view_stock ?? 0) === 1
       );
+      setCashierCanRecordPayments((currentStore.cashier_can_record_payments ?? 0) === 1);
       setSessionTimeoutMinutes(normalizeSessionTimeoutMinutes(currentStore.session_timeout_minutes));
       setMomoAccountName(currentStore.momo_account_name || '');
       setMomoNumber(currentStore.momo_number || '');
@@ -205,6 +207,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         cashier_can_discount: cashierCanDiscount ? 1 : 0,
         cashier_can_see_stock: cashierCanSeeStock ? 1 : 0,
         cashiers_can_view_stock: cashierCanSeeStock ? 1 : 0,
+        cashier_can_record_payments: cashierCanRecordPayments ? 1 : 0,
         session_timeout_minutes: normalizeSessionTimeoutMinutes(sessionTimeoutMinutes),
         momo_account_name: momoAccountName.trim(),
         momo_number: momoNumber.trim(),
@@ -589,6 +592,24 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
                 onClick={() => setCashierCanSeeStock(!cashierCanSeeStock)}
                 className={`w-12 h-7 rounded-full transition-colors flex items-center px-0.5 touch-target ${
                   cashierCanSeeStock ? 'bg-primary justify-end' : 'bg-gray-300 justify-start'
+                }`}
+              >
+                <div className="w-6 h-6 bg-white rounded-full shadow" />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-gray-700">Cashiers can record customer payments</p>
+                <p className="text-xs text-gray-500">Lets cashiers take a payment on a customer account and print, save, or share that receipt. Off until you allow it. Owners always can.</p>
+              </div>
+              <button
+                type="button"
+                aria-pressed={cashierCanRecordPayments}
+                aria-label="Cashiers can record customer payments"
+                onClick={() => setCashierCanRecordPayments(!cashierCanRecordPayments)}
+                className={`w-12 h-7 rounded-full transition-colors flex items-center px-0.5 touch-target ${
+                  cashierCanRecordPayments ? 'bg-primary justify-end' : 'bg-gray-300 justify-start'
                 }`}
               >
                 <div className="w-6 h-6 bg-white rounded-full shadow" />

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlertCircle,
   CheckCircle,
@@ -58,14 +59,20 @@ import {
   joinCustomerAddress,
   splitCustomerAddress,
 } from '@/lib/customerAddress';
+import { canRecordCustomerPayments } from '@/lib/staffAccess';
 
 interface CustomersPageProps {
   onNavigate?: (page: string) => void;
 }
 
-export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
+function CustomersPageView({ onNavigate }: CustomersPageProps = {}) {
   const { currentUser, currentStore } = useAuthStore();
   const money = useFormatMoney();
+  const isOwner = currentUser?.role === 'owner';
+  const canTakePayments = canRecordCustomerPayments(currentUser, currentStore);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const [customers, setCustomers] = useState<LocalCustomer[]>([]);
   const [transactions, setTransactions] = useState<LocalTransaction[]>([]);
   const [paymentsByCustomer, setPaymentsByCustomer] = useState<
@@ -150,8 +157,8 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
       });
   }, [expandedCustomerId, currentUser?.id, currentUser?.role, currentStore?.id]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoading(true);
     try {
       const [allCustomers, allTransactions, campaigns, recipients] = await Promise.all([
         getCurrentStoreCustomers(),
@@ -165,7 +172,8 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
         setLocations(locs.filter((l) => l.is_active === 1));
       }
       const activeAndArchived = allCustomers.sort((a, b) =>
-        Number(b.is_active) - Number(a.is_active) || a.name.localeCompare(b.name)
+        Number(b.is_active) - Number(a.is_active) ||
+        String(a.name || '').localeCompare(String(b.name || ''))
       );
       setCustomers(activeAndArchived);
       setSmsCampaigns(campaigns);
@@ -201,7 +209,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
       setReturnsByCustomer(Object.fromEntries(allCustomers.map((customer) => [
         customer.id,
         allReturns.filter((saleReturn) => saleReturn.customer_id === customer.id).sort(
-          (a, b) => a.created_at.localeCompare(b.created_at)
+          (a, b) => String(a.created_at || '').localeCompare(String(b.created_at || ''))
         ),
       ])));
       const creditPaymentEntries = await Promise.all(
@@ -235,12 +243,50 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
     setError('');
   };
 
+  const openCreateForm = () => {
+    setEditing(null);
+    setName('');
+    setPhone('');
+    setStreet('');
+    setCity('');
+    setRegion('');
+    setOpeningBalance('');
+    setLocationId(null);
+    setError('');
+    setIsFormOpen(true);
+  };
+
+  const closeForm = () => {
+    if (saving) return;
+    resetForm();
+  };
+
+  useEffect(() => {
+    if (!isFormOpen) return;
+    const frame = window.requestAnimationFrame(() => nameInputRef.current?.focus());
+    return () => {
+      window.cancelAnimationFrame(frame);
+      addButtonRef.current?.focus();
+    };
+  }, [isFormOpen]);
+
+  useEffect(() => {
+    if (!isFormOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || saving) return;
+      event.preventDefault();
+      resetForm();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isFormOpen, saving]);
+
   const startEdit = (customer: LocalCustomer) => {
     setIsFormOpen(true);
     setEditing(customer);
     const parts = splitCustomerAddress(customer.address);
-    setName(customer.name);
-    setPhone(customer.phone);
+    setName(String(customer.name || ''));
+    setPhone(String(customer.phone || ''));
     setStreet(parts.street);
     setCity(parts.city);
     setRegion(parts.region);
@@ -249,12 +295,12 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
     setError('');
   };
 
-  const handleSaveCustomer = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleSaveCustomer = async () => {
     setError('');
     setSaving(true);
     try {
       const address = joinCustomerAddress({ street, city, region });
+      const wasEditing = Boolean(editing);
       if (editing) {
         await updateCustomer(editing.id, name, phone, locationId, address);
       } else {
@@ -262,11 +308,18 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
         if (!Number.isFinite(amount) || amount < 0) {
           throw new Error('Enter a valid opening balance.');
         }
-        await createCustomer(name, phone, amount, locationId, address);
+        const created = await createCustomer(name, phone, amount, locationId, address);
+        setCustomers((current) => {
+          const next = [created, ...current.filter((row) => row.id !== created.id)];
+          return next.sort((a, b) =>
+            Number(b.is_active) - Number(a.is_active) ||
+            String(a.name || '').localeCompare(String(b.name || ''))
+          );
+        });
       }
       resetForm();
-      setStatus(editing ? 'Customer details updated.' : 'Customer registered.');
-      await load();
+      setStatus(wasEditing ? 'Customer details updated.' : 'Customer registered.');
+      await load({ silent: true });
       void triggerPushSync('customer-save');
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Could not save customer.');
@@ -276,6 +329,10 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
   };
 
   const handleAccountPayment = async (customer: LocalCustomer) => {
+    if (!canRecordCustomerPayments(currentUser, currentStore)) {
+      setError('The owner has not allowed cashiers to record customer payments.');
+      return;
+    }
     setError('');
     setSaving(true);
     try {
@@ -304,7 +361,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
         [`${customer.id}:cheque`]: '',
       }));
       setStatus(`Payment of ${money(receipt.amount)} recorded. Balance remaining: ${money(receipt.balance_after)}.`);
-      await load();
+      await load({ silent: true });
       void triggerPushSync('customer-account-payment');
     } catch (paymentError: unknown) {
       setError(paymentError instanceof Error ? paymentError.message : 'Could not record payment.');
@@ -351,7 +408,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
     setError('');
     try {
       await setCustomerActive(customer.id, customer.is_active !== 1);
-      await load();
+      await load({ silent: true });
       setStatus(customer.is_active === 1 ? 'Customer archived.' : 'Customer reactivated.');
       void triggerPushSync('customer-status');
     } catch (archiveError) {
@@ -364,7 +421,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
     const optedOut = (customer.debt_reminder_opt_out ?? 0) === 1;
     try {
       await setCustomerDebtReminderOptOut(customer.id, !optedOut);
-      await load();
+      await load({ silent: true });
       setStatus(
         optedOut
           ? `${customer.name} will receive debt reminders again.`
@@ -397,7 +454,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
           : t('bulkSms.partial', { sent: result.sentCount, total: result.recipientCount, failed: result.failedCount })
       );
       setSmsMessage('');
-      await load();
+      await load({ silent: true });
       void triggerPushSync('bulk-sms');
     } catch (sendError) {
       setSmsError(sendError instanceof Error ? sendError.message : t('bulkSms.failed', { error: 'Unknown error' }));
@@ -420,28 +477,42 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
     return total + salesBalance + (Number(customer.opening_balance_remaining) || 0);
   }, 0);
   const totalWalletCredit = customers.reduce((total, customer) => total + (Number(customer.wallet_balance) || 0), 0);
+  const formDirty = Boolean(
+    editing || name.trim() || phone.trim() || street.trim() || city.trim() || region.trim() || openingBalance.trim()
+  );
+  const fieldClass = 'mt-1.5 w-full min-h-11 rounded-xl border border-gray-200 px-3.5 py-3 text-base focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all';
 
   return (
+    <>
     <div className="page-shell">
       <div className="page-header">
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
             <div className="inline-flex items-center gap-2 rounded-xl bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-700 mb-2">
               <Users className="h-3.5 w-3.5" />
               <span>Customers book</span>
             </div>
-            <h1 className="text-white font-bold text-lg tracking-tight">Customer management</h1>
+            <h1 className="truncate text-white font-bold text-lg tracking-tight">
+              {isOwner ? 'Customer management' : 'Customer payments'}
+            </h1>
             <p className="text-emerald-200 text-xs mt-0.5">
-              Registered customers, credit sales, and account balances
+              {isOwner
+                ? 'Registered customers, credit sales, and account balances'
+                : 'Record a payment and print the receipt'}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => { resetForm(); setIsFormOpen(true); }}
-            className="inline-flex items-center gap-2 rounded-xl bg-white px-3.5 py-2 text-sm font-semibold text-emerald-800 shadow-sm hover:bg-emerald-50 transition-all"
-          >
-            <Plus className="h-4 w-4" /> Add customer
-          </button>
+          {isOwner && (
+            <button
+              ref={addButtonRef}
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded={isFormOpen}
+              onClick={openCreateForm}
+              className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-white px-3.5 py-2 text-sm font-semibold text-emerald-800 shadow-sm hover:bg-emerald-50 transition-all touch-target"
+            >
+              <Plus className="h-4 w-4" /> Add customer
+            </button>
+          )}
         </div>
       </div>
 
@@ -497,7 +568,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
         </div>
 
         {/* Alert / status toast */}
-        {error && (
+        {error && !isFormOpen && (
           <div role="alert" className="flex items-start gap-3 rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-700 shadow-sm">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
             <span>{error}</span>
@@ -511,7 +582,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
         )}
 
         {/* Bulk SMS composer — owner-only promotional broadcast */}
-        <section className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-5 shadow-sm">
+        {isOwner && <section className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-5 shadow-sm">
           <div className="flex items-center gap-2.5 mb-1">
             <div className="rounded-lg bg-emerald-100 p-1.5">
               <Send className="h-4 w-4 text-emerald-600" />
@@ -588,139 +659,12 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
               </div>
             </div>
           )}
-        </section>
+        </section>}
 
-        <DebtRemindersPanel onOpenSettings={onNavigate ? () => onNavigate('settings') : undefined} />
-
-        {isFormOpen && (
-          <form
-            onSubmit={(event) => void handleSaveCustomer(event)}
-            className="space-y-4 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm"
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="rounded-lg bg-emerald-100 p-1.5">
-                  {editing ? <Pencil className="h-4 w-4 text-emerald-600" /> : <Plus className="h-4 w-4 text-emerald-600" />}
-                </div>
-                <h2 className="font-semibold text-gray-900">{editing ? 'Edit customer' : 'Register customer'}</h2>
-              </div>
-              <button type="button" onClick={resetForm} aria-label="Close form">
-                <X className="h-5 w-5 text-gray-400 hover:text-gray-600 transition-colors" />
-              </button>
-            </div>
-            <label className="block text-sm font-medium text-gray-700">
-              Customer name <span className="text-red-500">*</span>
-              <input
-                required
-                maxLength={255}
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
-              />
-            </label>
-            <label className="block text-sm font-medium text-gray-700">
-              Phone <span className="text-gray-400 text-xs">(optional)</span>
-              <input
-                type="tel"
-                maxLength={30}
-                value={phone}
-                onChange={(event) => setPhone(event.target.value)}
-                className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
-              />
-            </label>
-            <fieldset className="space-y-3 rounded-xl border border-gray-100 p-3">
-              <legend className="px-1 text-sm font-medium text-gray-700">
-                Customer address <span className="text-gray-400 text-xs">(optional)</span>
-              </legend>
-              <label className="block text-sm font-medium text-gray-700">
-                Street, house, or area
-                <input
-                  maxLength={200}
-                  autoComplete="street-address"
-                  value={street}
-                  onChange={(event) => setStreet(event.target.value)}
-                  placeholder="House number, street, or neighborhood"
-                  className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
-                />
-              </label>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <label className="block text-sm font-medium text-gray-700">
-                  City / town
-                  <input
-                    maxLength={80}
-                    autoComplete="address-level2"
-                    value={city}
-                    onChange={(event) => setCity(event.target.value)}
-                    placeholder="Accra"
-                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
-                  />
-                </label>
-                <label className="block text-sm font-medium text-gray-700">
-                  Region
-                  <input
-                    maxLength={80}
-                    autoComplete="address-level1"
-                    value={region}
-                    onChange={(event) => setRegion(event.target.value)}
-                    placeholder="Greater Accra"
-                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
-                  />
-                </label>
-              </div>
-              <p className="text-xs text-gray-400">
-                Saved on the customer record. Search and checkout can find it by street, city, or region.
-              </p>
-            </fieldset>
-            {locations.length > 0 && (
-              <label className="block text-sm font-medium text-gray-700">
-                Preferred location
-                <select
-                  value={locationId || ''}
-                  onChange={(event) => setLocationId(event.target.value || null)}
-                  className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
-                >
-                  <option value="">None (default)</option>
-                  {locations.map((loc) => (
-                    <option key={loc.id} value={loc.id}>
-                      {loc.name} ({loc.location_type})
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-400 mt-1">
-                  The shop or warehouse where this customer prefers to collect
-                  or receive deliveries.
-                </p>
-              </label>
-            )}
-            {!editing && (
-              <>
-                <label className="block text-sm font-medium text-gray-700">
-                  Starting account balance <span className="text-gray-400 text-xs">(optional)</span>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min="0"
-                    step="0.01"
-                    value={openingBalance}
-                    onChange={(event) => setOpeningBalance(event.target.value)}
-                    placeholder="0.00"
-                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
-                  />
-                </label>
-                <p className="text-xs text-gray-400">
-                  Enter credit not already recorded as a credit sale. It will be added to their account balance.
-                </p>
-              </>
-            )}
-            <button
-              type="submit"
-              disabled={saving}
-              className="w-full rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50 disabled:hover:bg-emerald-600 transition-all"
-            >
-              {saving ? 'Saving…' : editing ? 'Save customer' : 'Register customer'}
-            </button>
-          </form>
+        {isOwner && (
+          <DebtRemindersPanel onOpenSettings={onNavigate ? () => onNavigate('settings') : undefined} />
         )}
+
 
         {loading ? (
           <div className="flex flex-col items-center justify-center py-12 gap-3">
@@ -734,15 +678,19 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
             </div>
             <h3 className="font-semibold text-gray-900">No customers registered yet</h3>
             <p className="mt-1 text-sm text-gray-500">
-              Register a customer before recording a credit sale.
+              {isOwner
+                ? 'Register a customer before recording a credit sale.'
+                : 'Payments show up here after the owner registers a customer.'}
             </p>
-            <button
-              type="button"
-              onClick={() => { resetForm(); setIsFormOpen(true); }}
-              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 transition-all"
-            >
-              <Plus className="h-4 w-4" /> Add first customer
-            </button>
+            {isOwner && (
+              <button
+                type="button"
+                onClick={openCreateForm}
+                className="mt-5 inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 transition-all touch-target"
+              >
+                <Plus className="h-4 w-4" /> Add first customer
+              </button>
+            )}
           </div>
         ) : (
           <div className="space-y-3">
@@ -792,12 +740,13 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
               );
               const balance = salesBalance + (Number(customer.opening_balance_remaining) || 0);
               const expanded = expandedCustomerId === customer.id;
-              const initials = customer.name
-                .split(' ')
-                .map((n) => n[0])
+              const displayName = String(customer.name || 'Customer');
+              const initials = displayName
+                .split(/\s+/)
+                .map((part) => part[0] || '')
                 .join('')
                 .toUpperCase()
-                .slice(0, 2);
+                .slice(0, 2) || '?';
               const preferredLocationName = customer.location_id
                 ? locationNameById.get(customer.location_id) || ''
                 : '';
@@ -816,7 +765,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                           </div>
                           <div className="min-w-0">
                             <span className="flex items-center gap-2 font-semibold text-gray-900">
-                              <span className="truncate block">{customer.name}</span>
+                              <span className="truncate block">{displayName}</span>
                               {customer.is_active !== 1 && (
                                 <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-500">
                                   Archived
@@ -847,7 +796,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                         </p>
                       </div>
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
+                    {isOwner && <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
                         onClick={() => startEdit(customer)}
@@ -876,12 +825,12 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                           ? 'Reminders off'
                           : 'Reminders on'}
                       </button>
-                    </div>
+                    </div>}
                   </div>
 
                   {expanded && (
                     <div className="space-y-3 border-t border-gray-100 bg-gray-50/50 p-4 backdrop-blur-sm">
-                      {customer.is_active === 1 && balance > 0 && (
+                      {canTakePayments && customer.is_active === 1 && balance > 0 && (
                         <div className="space-y-3 rounded-xl border border-amber-100 bg-amber-50 p-4 shadow-sm">
                           <div className="flex items-center gap-2">
                             <div className="rounded-lg bg-amber-100 p-1.5">
@@ -923,15 +872,16 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                                       ...current,
                                       [`${customer.id}:${kind}`]: event.target.value,
                                     }))}
-                                    className="rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 transition-all"
+                                    className="min-h-11 rounded-xl border border-gray-200 px-3 py-2.5 text-base focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 transition-all"
                                   />
                                 </label>
                               ))}
                             </div>
                           ) : (
                             <div className="flex flex-col gap-1">
-                              <label className="block text-xs font-medium text-gray-600">Amount</label>
+                              <label htmlFor={`payment-amount-${customer.id}`} className="block text-xs font-medium text-gray-600">Amount</label>
                               <input
+                                id={`payment-amount-${customer.id}`}
                                 type="number"
                                 inputMode="decimal"
                                 min="0.01"
@@ -942,7 +892,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                                   ...current,
                                   [customer.id]: event.target.value,
                                 }))}
-                                className="rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 transition-all"
+                                className="min-h-11 rounded-xl border border-gray-200 px-3 py-2.5 text-base focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 transition-all"
                               />
                             </div>
                           )}
@@ -955,7 +905,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                                 ? paymentAmounts[`${customer.id}:cash`] || paymentAmounts[`${customer.id}:momo`] || paymentAmounts[`${customer.id}:cheque`]
                                 : paymentAmounts[customer.id]
                             )}
-                            className="w-full rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-amber-700 disabled:opacity-50 disabled:hover:bg-amber-700 transition-all"
+                            className="w-full min-h-11 rounded-xl bg-amber-600 px-4 py-3 text-base font-semibold text-white shadow-sm hover:bg-amber-700 disabled:opacity-50 disabled:hover:bg-amber-700 transition-all touch-target"
                           >
                             {saving ? 'Saving payment…' : `Record payment · balance ${money(balance)}`}
                           </button>
@@ -1022,29 +972,31 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                               {receipt.cheque_amount ? ` · Cheque ${money(receipt.cheque_amount)}` : ''}
                             </p>
                           </div>
+                          {canTakePayments && (
                           <div className="flex gap-1.5">
                             <button
                               type="button"
-                              onClick={() => { void printReceipt(buildAccountReceiptData(receipt, customer.name)); }}
-                              className="rounded-xl border border-emerald-200 px-2.5 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 transition-colors"
+                              onClick={() => { void printReceipt(buildAccountReceiptData(receipt, displayName)); }}
+                              className="min-h-11 rounded-xl border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 transition-colors touch-target"
                             >
                               Print
                             </button>
                             <button
                               type="button"
-                              onClick={() => downloadReceipt(buildAccountReceiptData(receipt, customer.name))}
-                              className="rounded-xl border border-emerald-200 px-2.5 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 transition-colors"
+                              onClick={() => downloadReceipt(buildAccountReceiptData(receipt, displayName))}
+                              className="min-h-11 rounded-xl border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 transition-colors touch-target"
                             >
                               PDF
                             </button>
                             <button
                               type="button"
-                              onClick={() => { void shareReceipt(buildAccountReceiptData(receipt, customer.name)); }}
-                              className="rounded-xl border border-emerald-200 px-2.5 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 transition-colors"
+                              onClick={() => { void shareReceipt(buildAccountReceiptData(receipt, displayName)); }}
+                              className="min-h-11 rounded-xl border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 transition-colors touch-target"
                             >
                               Share
                             </button>
                           </div>
+                          )}
                         </div>
                       ))}
                       {onlineBalance[customer.id] !== undefined ? (
@@ -1065,7 +1017,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                           <span className="text-gray-700">{entry.description}</span>
                           <span className="text-xs text-gray-400">{new Date(entry.created_at).toLocaleDateString()}</span>
                           <span className={`font-semibold ${entry.type === 'return_credit' || entry.type === 'topup' || entry.type === 'refund' ? 'text-emerald-700' : 'text-teal-700'}`}>
-                            {entry.type === 'return_credit' || entry.type === 'topup' || entry.type === 'refund' || (entry.type === 'adjustment' && !entry.description.startsWith('Debit')) ? '+' : '−'}{money(entry.amount)}
+                            {entry.type === 'return_credit' || entry.type === 'topup' || entry.type === 'refund' || (entry.type === 'adjustment' && !String(entry.description || '').startsWith('Debit')) ? '+' : '−'}{money(entry.amount)}
                           </span>
                           <span className="text-xs text-gray-400">wallet {money(entry.balance_after)}</span>
                         </div>
@@ -1086,7 +1038,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                             )}
                           </div>
                         ))}
-                      {customerSales.length === 0 && customer.opening_balance <= 0 && (
+                      {customerSales.length === 0 && (Number(customer.opening_balance) || 0) <= 0 && (
                         <div className="flex items-center gap-2 py-2 rounded-xl bg-gray-50 px-3">
                           <Clock className="h-3 w-3 text-gray-400" />
                           <span className="text-xs text-gray-500">No credit balance or credit sales recorded.</span>
@@ -1101,5 +1053,241 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
         )}
       </div>
     </div>
+    {isFormOpen && createPortal(
+      <div className="fixed inset-0 z-[80] flex items-end justify-center sm:items-center">
+        <button
+          type="button"
+          aria-label="Dismiss customer form"
+          className="absolute inset-0 bg-slate-900/50"
+          onClick={() => {
+            if (saving || formDirty) return;
+            resetForm();
+          }}
+        />
+        <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="customer-form-title"
+          className="relative z-10 flex max-h-[min(92dvh,40rem)] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl"
+          onKeyDown={(event) => {
+            if (event.key !== 'Tab') return;
+            const root = dialogRef.current;
+            if (!root) return;
+            const focusable = Array.from(root.querySelectorAll<HTMLElement>(
+              'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])'
+            ));
+            if (focusable.length === 0) return;
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+              event.preventDefault();
+              last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+              event.preventDefault();
+              first.focus();
+            }
+          }}
+        >
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleSaveCustomer();
+            }}
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
+            <div className="flex items-center justify-between gap-3">
+              <h2 id="customer-form-title" className="font-semibold text-gray-900">
+                {editing ? 'Edit customer' : 'Register customer'}
+              </h2>
+              <button
+                type="button"
+                onClick={closeForm}
+                disabled={saving}
+                aria-label="Close"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-gray-500 hover:bg-gray-100 disabled:opacity-50"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <p className="text-sm text-gray-500">
+              Only the name is required. Phone, address, and a starting balance can wait.
+            </p>
+            {error && (
+              <p role="alert" className="flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{error}</span>
+              </p>
+            )}
+            <label className="block text-sm font-medium text-gray-700">
+              Customer name <span className="text-red-500">*</span>
+              <input
+                ref={nameInputRef}
+                required
+                maxLength={255}
+                autoComplete="name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                className={fieldClass}
+              />
+            </label>
+            <label className="block text-sm font-medium text-gray-700">
+              Phone <span className="text-gray-400 text-xs">(optional)</span>
+              <input
+                type="tel"
+                inputMode="tel"
+                maxLength={30}
+                autoComplete="tel"
+                value={phone}
+                onChange={(event) => setPhone(event.target.value)}
+                className={fieldClass}
+              />
+            </label>
+            <fieldset className="space-y-3 rounded-xl border border-gray-100 p-3">
+              <legend className="px-1 text-sm font-medium text-gray-700">
+                Customer address <span className="text-gray-400 text-xs">(optional)</span>
+              </legend>
+              <label className="block text-sm font-medium text-gray-700">
+                Street, house, or area
+                <input
+                  maxLength={200}
+                  autoComplete="street-address"
+                  value={street}
+                  onChange={(event) => setStreet(event.target.value)}
+                  placeholder="House number, street, or neighborhood"
+                  className={fieldClass}
+                />
+              </label>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  City / town
+                  <input
+                    maxLength={80}
+                    autoComplete="address-level2"
+                    value={city}
+                    onChange={(event) => setCity(event.target.value)}
+                    placeholder="Accra"
+                    className={fieldClass}
+                  />
+                </label>
+                <label className="block text-sm font-medium text-gray-700">
+                  Region
+                  <input
+                    maxLength={80}
+                    autoComplete="address-level1"
+                    value={region}
+                    onChange={(event) => setRegion(event.target.value)}
+                    placeholder="Greater Accra"
+                    className={fieldClass}
+                  />
+                </label>
+              </div>
+            </fieldset>
+            {locations.length > 0 && (
+              <label className="block text-sm font-medium text-gray-700">
+                Preferred location
+                <select
+                  value={locationId || ''}
+                  onChange={(event) => setLocationId(event.target.value || null)}
+                  className={fieldClass}
+                >
+                  <option value="">None (default)</option>
+                  {locations.map((loc) => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.name} ({loc.location_type})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {!editing && (
+              <label className="block text-sm font-medium text-gray-700">
+                Starting account balance <span className="text-gray-400 text-xs">(optional)</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="0.01"
+                  value={openingBalance}
+                  onChange={(event) => setOpeningBalance(event.target.value)}
+                  placeholder="0.00"
+                  className={fieldClass}
+                />
+                <span className="mt-1 block text-xs text-gray-400">
+                  Credit that is not already a credit sale. It is added to the account balance.
+                </span>
+              </label>
+            )}
+            </div>
+            <div
+              className="space-y-2 border-t border-gray-100 bg-white p-4"
+              style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+            >
+              <button
+                type="submit"
+                disabled={saving}
+                className="w-full min-h-11 rounded-xl bg-emerald-600 px-4 py-3 text-base font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50 touch-target"
+              >
+                {saving ? 'Saving…' : editing ? 'Save customer' : 'Register customer'}
+              </button>
+              <button
+                type="button"
+                onClick={closeForm}
+                disabled={saving}
+                className="w-full min-h-11 rounded-xl border border-gray-200 px-4 py-3 text-base font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 touch-target"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>,
+      document.body
+    )}
+    </>
+  );
+}
+
+class CustomerPageBoundary extends Component<{ children: ReactNode }, { error: string; nonce: number }> {
+  state = { error: '', nonce: 0 };
+
+  static getDerivedStateFromError(error: unknown) {
+    return { error: error instanceof Error ? error.message : 'The customer page hit a problem.' };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error('[Customers] Page render failed:', error);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="page-shell">
+          <div className="page-body">
+            <div role="alert" className="rounded-2xl border border-red-100 bg-white p-5 shadow-sm">
+              <h1 className="font-semibold text-gray-900">Customer page stopped</h1>
+              <p className="mt-2 text-sm text-gray-600">{this.state.error}</p>
+              <button
+                type="button"
+                className="mt-4 min-h-11 rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white touch-target"
+                onClick={() => this.setState((current) => ({ error: '', nonce: current.nonce + 1 }))}
+              >
+                Try again
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return <div key={this.state.nonce}>{this.props.children}</div>;
+  }
+}
+
+export default function CustomersPage(props: CustomersPageProps = {}) {
+  return (
+    <CustomerPageBoundary>
+      <CustomersPageView {...props} />
+    </CustomerPageBoundary>
   );
 }

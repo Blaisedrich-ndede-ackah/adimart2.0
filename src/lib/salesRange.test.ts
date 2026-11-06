@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { filterSalesByPeriod } from './salesRange';
-import { cashierCanSeeStockQuantity } from './staffAccess';
+import { canRecordCustomerPayments, cashierCanSeeStockQuantity } from './staffAccess';
 
 const rows = [
   { created_at: '2026-10-20T09:00:00.000Z', receipt: 'old' },
@@ -27,6 +27,17 @@ describe('filterSalesByPeriod', () => {
 
   it('leaves the list unchanged until both custom times are set', () => {
     expect(filterSalesByPeriod(rows, 'custom', '2026-10-24T14:00', '').rows).toHaveLength(3);
+  });
+});
+
+describe('canRecordCustomerPayments', () => {
+  it('lets owners record payments and waits for the owner to allow cashiers', () => {
+    expect(canRecordCustomerPayments({ role: 'owner' }, { cashier_can_record_payments: 0 })).toBe(true);
+    expect(canRecordCustomerPayments({ role: 'cashier' }, {})).toBe(false);
+    expect(canRecordCustomerPayments({ role: 'cashier' }, { cashier_can_record_payments: 0 })).toBe(false);
+    expect(canRecordCustomerPayments({ role: 'cashier' }, { cashier_can_record_payments: 1 })).toBe(true);
+    expect(canRecordCustomerPayments({ role: 'manager' }, { cashier_can_record_payments: 1 })).toBe(false);
+    expect(canRecordCustomerPayments(null, { cashier_can_record_payments: 1 })).toBe(false);
   });
 });
 

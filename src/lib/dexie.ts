@@ -38,6 +38,8 @@ export interface LocalStore {
   cashier_can_discount?: number;
   /** Allow cashiers to see on-hand quantities (0/1). Default hidden. */
   cashier_can_see_stock?: number;
+  /** Allow cashiers to record customer payments and print those receipts (0/1). Default off. */
+  cashier_can_record_payments?: number;
   /** Idle minutes before staff return to the PIN screen. 0 = never. Default 5. */
   session_timeout_minutes?: number;
   /** Preferred Mobile Money account name for Paystack payouts */
@@ -1387,6 +1389,7 @@ export async function createStoreWithOwner(
     cashier_can_discount: 1,
     cashier_can_see_stock: 0,
     cashiers_can_view_stock: 0,
+    cashier_can_record_payments: 0,
     session_timeout_minutes: 5,
     momo_account_name: '',
     momo_number: '',
@@ -1886,8 +1889,8 @@ export async function createCustomer(
   const existing = await db.customers.where('store_id').equals(storeId).toArray();
   if (existing.some((customer) =>
     customer.is_active === 1 &&
-    customer.name.trim().toLowerCase() === cleanName.toLowerCase() &&
-    customer.phone.trim() === cleanPhone
+    String(customer.name || '').trim().toLowerCase() === cleanName.toLowerCase() &&
+    String(customer.phone || '').trim() === cleanPhone
   )) {
     throw new Error('An active customer with this name and phone is already registered.');
   }
@@ -2052,7 +2055,7 @@ export async function recordCustomerAccountPayment(
           transaction.status === 'completed' &&
           toMoneyAmount(transaction.credit_balance ?? transaction.total_amount) > 0
         )
-        .sort((a, b) => a.created_at.localeCompare(b.created_at));
+        .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
 
       const openingRemaining = toMoneyAmount(customer.opening_balance_remaining);
       const accountBalance = toMoneyAmount(
@@ -3054,13 +3057,14 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
     if (error) {
         if (
         table === 'stores' &&
-        /session_timeout_minutes|cashiers_can_view_stock|cashier_can_see_stock/i.test(error.message)
+        /session_timeout_minutes|cashiers_can_view_stock|cashier_can_see_stock|cashier_can_record_payments/i.test(error.message)
       ) {
         const stripped = rows.map((row) => {
           const copy = { ...(row as Record<string, unknown>) };
           if (/session_timeout_minutes/i.test(error.message)) delete copy.session_timeout_minutes;
           if (/cashiers_can_view_stock/i.test(error.message)) delete copy.cashiers_can_view_stock;
           if (/cashier_can_see_stock/i.test(error.message)) delete copy.cashier_can_see_stock;
+          if (/cashier_can_record_payments/i.test(error.message)) delete copy.cashier_can_record_payments;
           return copy;
         });
         const retry = await supabase.from(table).upsert(stripped, {
@@ -3093,7 +3097,7 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
       }
       if (
         table === 'stores' &&
-        /debt_reminder|sales_target|cashier_can_see_stock/i.test(error.message)
+        /debt_reminder|sales_target|cashier_can_see_stock|cashier_can_record_payments/i.test(error.message)
       ) {
         // Cloud project predates the debt-reminder / sales-target columns.
         // Push the store without them so the rest of the profile still syncs.
@@ -3106,6 +3110,7 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
           delete copy.sales_target_daily;
           delete copy.sales_target_monthly;
           delete copy.cashier_can_see_stock;
+          delete copy.cashier_can_record_payments;
           return copy;
         });
         const retry = await supabase.from(table).upsert(stripped, {
@@ -3274,6 +3279,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
           cashier_can_discount: (store.cashier_can_discount ?? 1) === 1,
           cashier_can_see_stock: (store.cashier_can_see_stock ?? 0) === 1,
           cashiers_can_view_stock: (store.cashiers_can_view_stock ?? (store.cashier_can_see_stock ?? 0)) === 1,
+          cashier_can_record_payments: (store.cashier_can_record_payments ?? 0) === 1,
           session_timeout_minutes: normalizeSessionTimeoutMinutes(store.session_timeout_minutes),
           momo_account_name: store.momo_account_name || '',
           momo_number: store.momo_number || '',
@@ -4165,6 +4171,12 @@ export async function syncFromSupabase(opts?: {
           remoteStore.cashier_can_see_stock === undefined
             ? (localStore?.cashier_can_see_stock ?? 0)
             : remoteStore.cashier_can_see_stock
+              ? 1
+              : 0,
+        cashier_can_record_payments:
+          remoteStore.cashier_can_record_payments === undefined
+            ? (localStore?.cashier_can_record_payments ?? 0)
+            : remoteStore.cashier_can_record_payments
               ? 1
               : 0,
         cashiers_can_view_stock:
