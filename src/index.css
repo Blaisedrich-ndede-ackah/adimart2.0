@@ -46,31 +46,31 @@
 
   :root.dark {
     color-scheme: dark;
-    --color-primary: #EA7C69;
-    --color-primary-light: #F4A394;
-    --color-primary-dark: #C4513F;
-    --color-primary-subtle: #3A2A32;
-    --color-accent: #EA7C69;
-    --color-surface: #252836;
-    --color-surface-muted: #2D303E;
-    --color-surface-card: #1F1D2B;
-    --color-border: #393C49;
-    --color-ink: #ffffff;
-    --color-muted: #ABBBC2;
-    --color-bg: #252836;
-    --color-text: #ffffff;
-    --color-text-muted: #ABBBC2;
-    --color-border-subtle: #393C49;
-    --ios-label: #ffffff;
-    --ios-secondary-label: #ABBBC2;
-    --ios-tertiary-label: #889898;
-    --ios-separator: #393C49;
-    --ios-fill: #2D303E;
-    --ios-fill-strong: #393C49;
-    --ios-grouped: #252836;
-    --ios-bar: #252836;
-    --ios-glass: #1F1D2B;
-    --ios-glass-strong: #1F1D2B;
+    --color-primary: #E08B78;
+    --color-primary-light: #F0B5A6;
+    --color-primary-dark: #C96B58;
+    --color-primary-subtle: #3A2E2C;
+    --color-accent: #E08B78;
+    --color-surface: #2B2830;
+    --color-surface-muted: #35323C;
+    --color-surface-card: #24222A;
+    --color-border: #4A4654;
+    --color-ink: #F4EFE8;
+    --color-muted: #C9BEB4;
+    --color-bg: #2B2830;
+    --color-text: #F4EFE8;
+    --color-text-muted: #C9BEB4;
+    --color-border-subtle: #4A4654;
+    --ios-label: #F4EFE8;
+    --ios-secondary-label: #C9BEB4;
+    --ios-tertiary-label: #A89C93;
+    --ios-separator: #4A4654;
+    --ios-fill: #35323C;
+    --ios-fill-strong: #4A4654;
+    --ios-grouped: #2B2830;
+    --ios-bar: #2B2830;
+    --ios-glass: #24222A;
+    --ios-glass-strong: #24222A;
     --ios-blur: none;
     --ios-highlight: none;
     --ios-depth: none;
@@ -152,7 +152,7 @@ body {
 
 /* Keep utility-heavy legacy screens readable when dark mode is enabled. */
 .dark body {
-  background: #252836;
+  background: #2B2830;
 }
 
 .dark .bg-white {
@@ -160,8 +160,20 @@ body {
 }
 
 .dark .bg-gray-50,
+.dark .bg-gray-100,
+.dark .bg-gray-200,
 .dark .bg-slate-50 {
   background-color: var(--color-surface-muted);
+}
+
+.dark .text-white {
+  color: #F4EFE8;
+}
+
+.dark .text-red-400,
+.dark .text-red-500,
+.dark .text-red-600 {
+  color: #E7A8A4;
 }
 
 .dark .bg-emerald-50,
@@ -173,8 +185,8 @@ body {
 .dark .bg-emerald-700,
 .dark .bg-green-600,
 .dark .bg-green-700 {
-  background-color: #EA7C69;
-  color: #1F1D2B;
+  background-color: #E08B78;
+  color: #24222A;
 }
 
 .dark .bg-amber-50,
@@ -203,7 +215,7 @@ body {
 .dark .text-emerald-700,
 .dark .text-emerald-800,
 .dark .text-green-700 {
-  color: #93c5fd;
+  color: #F0C2B4;
 }
 
 .dark .text-amber-700,
@@ -1313,28 +1325,28 @@ html.dark .ios-pane,
 html.dark .ios-glass,
 html.dark .surface-card,
 html.dark .sheet-panel {
-  background-color: #1F1D2B;
+  background-color: #24222A;
   background-image: none;
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
-  border-color: #393C49;
+  border-color: #4A4654;
   box-shadow: none;
-  color: #fff;
+  color: #F4EFE8;
 }
 
 html.dark .page-header,
 html.dark .ios-bar {
-  background-color: #252836;
+  background-color: #2B2830;
 }
 
 html.dark .page-body {
-  background: #252836;
+  background: #2B2830;
 }
 
 html.dark button.bg-primary,
 html.dark a.bg-primary {
-  background-color: #EA7C69;
-  color: #1F1D2B;
+  background-color: #E08B78;
+  color: #2C2420;
 }
 
 html.dark button:focus-visible,
@@ -1342,12 +1354,12 @@ html.dark a:focus-visible,
 html.dark input:focus-visible,
 html.dark select:focus-visible,
 html.dark textarea:focus-visible {
-  outline-color: #EA7C69;
+  outline-color: #E08B78;
 }
 
 .food-rail {
   width: 104px;
-  background: #1F1D2B;
+  background: #24222A;
   border: 0;
   align-items: center;
   padding: 12px 0 8px;
@@ -1365,7 +1377,7 @@ html.dark textarea:focus-visible {
 }
 
 .food-rail-logo span {
-  color: #EA7C69;
+  color: #E08B78;
   font-size: 22px;
   font-weight: 700;
 }
@@ -1389,9 +1401,9 @@ html.dark textarea:focus-visible {
   width: 48px;
   height: 48px;
   border-radius: 999px;
-  border: 1px dashed #ABBBC2;
-  background: #2D303E;
-  color: #EA7C69;
+  border: 1px dashed #C9BEB4;
+  background: #35323C;
+  color: #E08B78;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1411,14 +1423,14 @@ html.dark textarea:focus-visible {
 }
 
 .pos-profile-label {
-  color: #fff;
+  color: #F4EFE8;
   font-size: 14px;
   font-weight: 600;
   line-height: 1.2;
 }
 
 .pos-profile-date {
-  color: #ABBBC2;
+  color: #C9BEB4;
   font-size: 12px;
   margin-top: 2px;
   white-space: nowrap;
@@ -1428,7 +1440,7 @@ html.dark textarea:focus-visible {
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  color: #ABBBC2;
+  color: #C9BEB4;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1452,7 +1464,7 @@ html.dark textarea:focus-visible {
   justify-content: center;
   gap: 4px;
   border-radius: 12px;
-  color: #ABBBC2;
+  color: #C9BEB4;
   background: transparent;
   font-size: 10px;
   font-weight: 600;
@@ -1468,9 +1480,9 @@ html.dark textarea:focus-visible {
 }
 
 .food-rail-item.is-active {
-  background: #EA7C69;
-  color: #1F1D2B;
-  box-shadow: 0 8px 18px rgba(234, 124, 105, 0.35);
+  background: #E08B78;
+  color: #2C2420;
+  box-shadow: 0 8px 18px rgba(224, 139, 120, 0.22);
 }
 
 .food-rail .p-2 {
@@ -1506,7 +1518,7 @@ html.dark textarea:focus-visible {
   padding: 0;
   justify-content: center;
   gap: 0;
-  color: #ABBBC2;
+  color: #C9BEB4;
   font-size: 0;
 }
 
@@ -1528,11 +1540,16 @@ html.dark textarea:focus-visible {
 .pos-search {
   height: 44px;
   border-radius: 8px;
-  border: 1px solid #393C49;
-  background: #2D303E;
-  color: #fff;
+  border: 1px solid #4A4654;
+  background: #35323C;
+  color: #F4EFE8;
   font-size: 16px;
   outline: none;
+}
+
+html.dark .pos-mode button[aria-pressed="true"] {
+  background: #E08B78;
+  color: #2C2420;
 }
 
 .pos-mode {
@@ -1575,9 +1592,9 @@ html.dark textarea:focus-visible {
   max-width: calc(100% - 2rem);
   padding: 0.45rem 0.9rem;
   border-radius: 999px;
-  background: #1F1D2B;
-  color: #fff;
-  border: 1px solid #393C49;
+  background: #24222A;
+  color: #F4EFE8;
+  border: 1px solid #4A4654;
   pointer-events: none;
 }
 
@@ -1607,7 +1624,7 @@ html.dark textarea:focus-visible {
 }
 
 .pos-categories {
-  border-bottom: 1px solid #393C49;
+  border-bottom: 1px solid #4A4654;
 }
 
 .pos-category {
@@ -1615,7 +1632,7 @@ html.dark textarea:focus-visible {
   border-bottom: 3px solid transparent;
   border-radius: 0;
   background: transparent;
-  color: #ABBBC2;
+  color: #C9BEB4;
   font-size: 14px;
   font-weight: 600;
   padding: 0.7rem 0.1rem 0.55rem;
@@ -1623,8 +1640,8 @@ html.dark textarea:focus-visible {
 }
 
 .pos-category.is-active {
-  color: #EA7C69;
-  border-bottom-color: #EA7C69;
+  color: #E08B78;
+  border-bottom-color: #E08B78;
 }
 
 .pos-choose {
@@ -1638,12 +1655,12 @@ html.dark textarea:focus-visible {
 .pos-choose h2 {
   font-size: 20px;
   font-weight: 600;
-  color: #fff;
+  color: #F4EFE8;
 }
 
 .pos-choose p {
   font-size: 13px;
-  color: #ABBBC2;
+  color: #C9BEB4;
 }
 
 html.dark .pos-product-grid {
@@ -1663,12 +1680,12 @@ html.dark .pos-product-card:focus {
   padding: 1.1rem 0.85rem 1rem;
   border: 0;
   border-radius: 16px;
-  background: #1F1D2B;
+  background: #35323C;
   background-image: none;
   box-shadow: none;
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
-  color: #fff;
+  color: #F4EFE8;
   content-visibility: auto;
   contain-intrinsic-size: 180px 220px;
 }
@@ -1679,8 +1696,8 @@ html.dark .pos-product-card .bg-gray-100 {
   height: 108px;
   border-radius: 999px;
   object-fit: cover;
-  background: #2D303E;
-  color: #ABBBC2;
+  background: #2B2830;
+  color: #C9BEB4;
 }
 
 html.dark .pos-product-add {
@@ -1688,17 +1705,17 @@ html.dark .pos-product-add {
 }
 
 html.dark .pos-dish-price {
-  color: #fff;
+  color: #FFF7F0;
 }
 
 .pos-ticket {
-  background: #1F1D2B;
-  color: #fff;
+  background: #24222A;
+  color: #F4EFE8;
 }
 
 .pos-ticket-footer {
-  border-top: 1px solid #393C49;
-  background: #1F1D2B;
+  border-top: 1px solid #4A4654;
+  background: #24222A;
 }
 
 .pos-pay {
@@ -1710,11 +1727,11 @@ html.dark .pos-dish-price {
   gap: 0.75rem;
   border: 0;
   border-radius: 8px;
-  background: #EA7C69;
-  color: #1F1D2B;
+  background: #E08B78;
+  color: #2C2420;
   font-size: 15px;
   font-weight: 700;
-  box-shadow: 0 8px 16px rgba(234, 124, 105, 0.28);
+  box-shadow: 0 8px 16px rgba(224, 139, 120, 0.22);
 }
 
 .pos-pay:active {
@@ -1729,9 +1746,9 @@ html.dark .pos-dish-price {
 }
 
 html.dark .sync-banner {
-  background: #1F1D2B !important;
-  color: #ABBBC2;
-  border-color: #393C49;
+  background: #24222A !important;
+  color: #C9BEB4;
+  border-color: #4A4654;
 }
 
 html.dark .sync-banner[data-status="error"],
