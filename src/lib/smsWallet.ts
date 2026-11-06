@@ -53,25 +53,39 @@ async function remember(storeId: string, snapshot: SmsWalletSnapshot): Promise<v
 }
 
 async function postSmsWallet(body: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const response = await fetch('/api/sms-wallet', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const payload = (await response.json().catch(() => ({}))) as { error?: string } & Record<string, unknown>;
+  let response: Response;
+  try {
+    response = await fetch('/api/sms-wallet', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new Error('The SMS wallet could not be reached. Check the connection and try again.');
+  }
+  const raw = await response.text();
+  let payload: { error?: unknown } & Record<string, unknown> = {};
+  try {
+    payload = raw ? JSON.parse(raw) as { error?: unknown } & Record<string, unknown> : {};
+  } catch {
+    throw new Error('The SMS wallet could not be reached. The server did not answer.');
+  }
   if (!response.ok) {
-    throw new Error(payload.error || 'The SMS wallet could not be reached.');
+    throw new Error(typeof payload.error === 'string' && payload.error
+      ? payload.error
+      : 'The SMS wallet could not be reached.');
   }
   return payload;
 }
 
 function snapshotFrom(payload: Record<string, unknown>): SmsWalletSnapshot {
-  if (typeof payload.balancePesewas !== 'number') {
+  const balancePesewas = Number(payload.balancePesewas);
+  if (!Number.isFinite(balancePesewas)) {
     throw new Error('The SMS wallet could not be reached.');
   }
   const entries = Array.isArray(payload.entries) ? payload.entries : [];
   return {
-    balancePesewas: Number(payload.balancePesewas) || 0,
+    balancePesewas,
     receiptSmsEnabled: payload.receiptSmsEnabled === true,
     entries: entries.map((row) => {
       const entry = row as Record<string, unknown>;
