@@ -63,7 +63,8 @@ export function SyncStatusBanner() {
       type="button"
       onClick={() => void syncNow()}
       aria-live="polite"
-      className={`flex min-h-11 w-full items-center gap-2 border-b border-black/5 px-4 py-2 text-left text-[13px] font-medium ${
+      data-status={status}
+      className={`sync-banner flex min-h-11 w-full items-center gap-2 border-b border-black/5 px-4 py-2 text-left text-[13px] font-medium ${
         status === 'error' ? 'bg-[#FFF4E5] text-[#C2410C]' : status === 'syncing' ? 'bg-[#E5F1FF] text-[#007AFF]' : status === 'offline' ? 'bg-[#FFF4E5] text-[#C2410C]' : 'bg-white/70 text-muted'
       }`}
       title={message || t('sync.status.now')}

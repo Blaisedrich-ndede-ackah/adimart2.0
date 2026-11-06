@@ -46,17 +46,34 @@
 
   :root.dark {
     color-scheme: dark;
-    --color-surface: #0b1220;
-    --color-surface-muted: #111b2d;
-    --color-surface-card: #162238;
-    --color-border: #2a3a53;
-    --color-ink: #f1f5f9;
-    --color-muted: #9aabc0;
-    --color-bg: #0b1220;
-    --color-text: #f1f5f9;
-    --color-text-muted: #9aabc0;
-    --color-border-subtle: #223149;
-    --color-primary-subtle: #172554;
+    --color-primary: #EA7C69;
+    --color-primary-light: #F4A394;
+    --color-primary-dark: #C4513F;
+    --color-primary-subtle: #3A2A32;
+    --color-accent: #EA7C69;
+    --color-surface: #252836;
+    --color-surface-muted: #2D303E;
+    --color-surface-card: #1F1D2B;
+    --color-border: #393C49;
+    --color-ink: #ffffff;
+    --color-muted: #ABBBC2;
+    --color-bg: #252836;
+    --color-text: #ffffff;
+    --color-text-muted: #ABBBC2;
+    --color-border-subtle: #393C49;
+    --ios-label: #ffffff;
+    --ios-secondary-label: #ABBBC2;
+    --ios-tertiary-label: #889898;
+    --ios-separator: #393C49;
+    --ios-fill: #2D303E;
+    --ios-fill-strong: #393C49;
+    --ios-grouped: #252836;
+    --ios-bar: #252836;
+    --ios-glass: #1F1D2B;
+    --ios-glass-strong: #1F1D2B;
+    --ios-blur: none;
+    --ios-highlight: none;
+    --ios-depth: none;
   }
   html {
     -webkit-text-size-adjust: 100%;
@@ -118,10 +135,7 @@ body {
 
 /* Keep utility-heavy legacy screens readable when dark mode is enabled. */
 .dark body {
-  background:
-    radial-gradient(900px 500px at 0% -10%, rgba(59, 130, 246, 0.16), transparent 58%),
-    radial-gradient(800px 480px at 100% 0%, rgba(124, 58, 237, 0.14), transparent 56%),
-    var(--color-surface);
+  background: #252836;
 }
 
 .dark .bg-white {
@@ -135,14 +149,15 @@ body {
 
 .dark .bg-emerald-50,
 .dark .bg-green-50 {
-  background-color: #172554;
+  background-color: #3A2A32;
 }
 
 .dark .bg-emerald-600,
 .dark .bg-emerald-700,
 .dark .bg-green-600,
 .dark .bg-green-700 {
-  background-color: #2563eb;
+  background-color: #EA7C69;
+  color: #1F1D2B;
 }
 
 .dark .bg-amber-50,
@@ -1264,6 +1279,292 @@ html, body, #root {
   input, select, textarea {
     font-size: 16px;
   }
+}
+
+/* Food POS Dark tablet. Flat surfaces replace the frosted bars so the
+   catalog paints faster and the screen matches the tablet design. */
+html.dark .page-header,
+html.dark .ios-bar,
+html.dark .ios-tabbar,
+html.dark .ios-pane,
+html.dark .ios-glass,
+html.dark .surface-card,
+html.dark .sheet-panel {
+  background-color: #1F1D2B;
+  background-image: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border-color: #393C49;
+  box-shadow: none;
+  color: #fff;
+}
+
+html.dark .page-header,
+html.dark .ios-bar {
+  background-color: #252836;
+}
+
+html.dark .page-body {
+  background: #252836;
+}
+
+html.dark button.bg-primary,
+html.dark a.bg-primary {
+  background-color: #EA7C69;
+  color: #1F1D2B;
+}
+
+html.dark button:focus-visible,
+html.dark a:focus-visible,
+html.dark input:focus-visible,
+html.dark select:focus-visible,
+html.dark textarea:focus-visible {
+  outline-color: #EA7C69;
+}
+
+.food-rail {
+  width: 104px;
+  background: #1F1D2B;
+  border: 0;
+  align-items: center;
+  padding: 12px 0 8px;
+}
+
+.food-rail-logo {
+  width: 56px;
+  height: 56px;
+  margin: 8px auto 12px;
+  border-radius: 16px;
+  background: rgba(234, 124, 105, 0.26);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.food-rail-logo span {
+  color: #EA7C69;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.food-rail nav {
+  width: 100%;
+}
+
+.food-rail nav p {
+  display: none;
+}
+
+.food-rail-item {
+  width: 76px;
+  margin: 6px auto;
+  min-height: 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-radius: 12px;
+  color: #ABBBC2;
+  background: transparent;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.food-rail-item span {
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.food-rail-item.is-active {
+  background: #EA7C69;
+  color: #1F1D2B;
+  box-shadow: 0 8px 18px rgba(234, 124, 105, 0.35);
+}
+
+.food-rail .p-2 {
+  width: 100%;
+  padding: 8px;
+}
+
+.food-rail-foot {
+  width: 104px;
+  overflow: hidden;
+}
+
+.food-rail-foot [role="group"] {
+  flex-direction: column;
+  width: 88px;
+  margin: 0 auto;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.food-rail-foot [role="group"] button {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 4px;
+  font-size: 11px;
+}
+
+.food-rail-foot > button {
+  width: 44px;
+  height: 44px;
+  margin: 4px auto;
+  padding: 0;
+  justify-content: center;
+  gap: 0;
+  color: #ABBBC2;
+  font-size: 0;
+}
+
+.food-rail-foot svg {
+  width: 20px;
+  height: 20px;
+}
+
+.pos-topbar h1 {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.pos-categories {
+  border-bottom: 1px solid #393C49;
+}
+
+.pos-category {
+  border: 0;
+  border-bottom: 3px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: #ABBBC2;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 0.7rem 0.1rem 0.55rem;
+  white-space: nowrap;
+}
+
+.pos-category.is-active {
+  color: #EA7C69;
+  border-bottom-color: #EA7C69;
+}
+
+.pos-choose {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 0.85rem;
+}
+
+.pos-choose h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.pos-choose p {
+  font-size: 13px;
+  color: #ABBBC2;
+}
+
+html.dark .pos-product-grid {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 1rem;
+}
+
+html.dark .pos-product-card,
+html.dark .pos-product-card:hover,
+html.dark .pos-product-card:focus {
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: center;
+  gap: 0.35rem;
+  min-height: 210px;
+  padding: 1.1rem 0.85rem 1rem;
+  border: 0;
+  border-radius: 16px;
+  background: #1F1D2B;
+  background-image: none;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  color: #fff;
+  content-visibility: auto;
+  contain-intrinsic-size: 180px 220px;
+}
+
+html.dark .pos-product-card .product-image,
+html.dark .pos-product-card .bg-gray-100 {
+  width: 108px;
+  height: 108px;
+  border-radius: 999px;
+  object-fit: cover;
+  background: #2D303E;
+  color: #ABBBC2;
+}
+
+html.dark .pos-product-add {
+  display: none;
+}
+
+html.dark .pos-dish-price {
+  color: #fff;
+}
+
+.pos-ticket {
+  background: #1F1D2B;
+  color: #fff;
+}
+
+.pos-ticket-footer {
+  border-top: 1px solid #393C49;
+  background: #1F1D2B;
+}
+
+.pos-pay {
+  width: 100%;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  border: 0;
+  border-radius: 8px;
+  background: #EA7C69;
+  color: #1F1D2B;
+  font-size: 15px;
+  font-weight: 700;
+  box-shadow: 0 8px 16px rgba(234, 124, 105, 0.28);
+}
+
+.pos-pay:active {
+  transform: scale(0.99);
+}
+
+@media (min-width: 1024px) {
+  html.dark .pos-product-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1.15rem;
+  }
+}
+
+html.dark .sync-banner {
+  background: #1F1D2B !important;
+  color: #ABBBC2;
+  border-color: #393C49;
+}
+
+html.dark .sync-banner[data-status="error"],
+html.dark .sync-banner[data-status="offline"] {
+  background: #3A2B15;
+  color: #FBBF74;
 }
 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {

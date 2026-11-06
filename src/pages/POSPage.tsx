@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
-  ShoppingCart, Minus, Plus, Trash2, Search, ChevronRight, Package, AlertCircle, Bluetooth,
+  ShoppingCart, Minus, Plus, Trash2, Search, Package, AlertCircle, Bluetooth,
   ScanBarcode, MapPin, X, Settings2, GripVertical, MoveUp, MoveDown, Mic, Pause, Play,
   CircleCheck, CircleX, Banknote,
 } from 'lucide-react';
@@ -671,10 +671,13 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   return (
     <div className="page-shell relative">
       {/* Header */}
-      <div className="page-header flex items-center justify-between">
-        <div>
-          <h1>POS</h1>
-          <p className="text-emerald-200 text-xs mt-0.5">Hi, {currentUser?.name}</p>
+      <div className="page-header pos-topbar flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="truncate">{currentStore?.name || 'POS'}</h1>
+          <p className="text-emerald-200 text-xs mt-0.5">
+            {new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })}
+            {currentUser?.name ? ` · ${currentUser.name}` : ''}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           {(btStatus.hidScannerEnabled || btStatus.scannerConnected) && (
@@ -963,21 +966,26 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
               </span>
             </div>
             {voiceSearchError && <p role="status" className="px-1 text-[11px] text-amber-800">{voiceSearchError}</p>}
-            <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+            <div className="pos-categories flex gap-4 overflow-x-auto no-scrollbar" role="tablist" aria-label="Product categories">
               {categories.map((cat) => (
                 <button
                   key={cat}
                   type="button"
+                  role="tab"
+                  aria-selected={selectedCategory === cat}
                   onClick={() => setSelectedCategory(cat)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap touch-target ${
-                    selectedCategory === cat
-                      ? 'bg-primary text-white'
-                      : 'bg-white text-gray-600 border border-gray-200'
-                  }`}
+                  className={`pos-category touch-target ${selectedCategory === cat ? 'is-active' : ''}`}
                 >
                   {cat === 'All' ? t('common.all') : cat}
                 </button>
               ))}
+            </div>
+            <div className="pos-choose">
+              <h2>Choose items</h2>
+              <p>
+                {saleMode === 'wholesale' ? 'Wholesale' : 'Retail'}
+                {unitType === 'pack' ? ' · By pack' : ' · By unit'}
+              </p>
             </div>
             <div className="flex items-center justify-between gap-3 px-0.5 text-[11px] text-gray-500">
               <p role="status" aria-live="polite">
@@ -1054,14 +1062,14 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                       }
                       className="pos-product-card"
                     >
-                      <ProductImage src={product.image_url} alt="" size="md" />
-                      <span className="flex-1 min-w-0 text-left">
-                        <span className="pos-product-name block text-sm font-semibold leading-snug text-gray-900">
+                      <ProductImage src={product.image_url} alt="" size="lg" className="product-image" />
+                      <span className="pos-dish-copy">
+                        <span className="pos-product-name block text-sm font-medium leading-snug text-gray-900">
                           {product.name}
                         </span>
-                        <span className="mt-1 block text-sm font-bold text-primary">
+                        <span className="pos-dish-price mt-1 block text-sm font-semibold">
                           {money(toMoney(pricePreview.unitPrice))}
-                          <span className="text-[10px] text-gray-500 font-medium"> / {unitLabel}</span>
+                          <span className="text-[10px] font-medium text-gray-500"> / {unitLabel}</span>
                         </span>
                         {(product.track_expiry === 1 || isWholesalePrice) && (
                           <span className="mt-1 block text-[10px] leading-4 text-gray-500">
@@ -1099,11 +1107,11 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
           style={{ order: posLayout.paneOrder.indexOf('cart') }}
           className={`${
             posTab === 'cart' ? 'flex' : 'hidden'
-          } ios-pane lg:flex flex-col w-full lg:w-[420px] 2xl:w-[460px] flex-shrink-0 min-h-0 border-l border-white/50`}
+          } pos-ticket ios-pane lg:flex flex-col w-full lg:w-[400px] flex-shrink-0 min-h-0`}
         >
-          <div className="flex items-center justify-between gap-2 px-3 lg:px-4 py-3 border-b border-emerald-100 flex-shrink-0">
-            <h3 className="text-sm font-bold text-gray-800">
-              Cart{cartCount > 0 ? ` (${cartCount})` : ''}
+          <div className="flex items-center justify-between gap-2 px-4 pt-5 pb-3 flex-shrink-0">
+            <h3 className="text-xl font-semibold text-white">
+              Orders{cartCount > 0 ? ` #${cartCount}` : ''}
             </h3>
             <div className="flex items-center gap-2">
               {cart.parkedCarts.length > 0 && (
@@ -1338,12 +1346,14 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
 
           {/* Desktop checkout docked in cart column */}
           {cart.items.length > 0 && (
-            <div className="hidden lg:block flex-shrink-0 border-t border-emerald-100 p-4 bg-white">
-              <div className="mb-2 flex items-center justify-between gap-2 text-xs text-gray-500">
-                <span>{cartCount} item{cartCount === 1 ? '' : 's'} in this sale</span>
-                {cart.discountAmount > 0 && (
-                  <span className="font-semibold text-emerald-700">Saved {money(cart.discountAmount)}</span>
-                )}
+            <div className="pos-ticket-footer hidden lg:block flex-shrink-0 p-4">
+              <div className="mb-1 flex items-center justify-between gap-2 text-sm text-gray-500">
+                <span>Discount</span>
+                <span>{money(cart.discountAmount || 0)}</span>
+              </div>
+              <div className="mb-4 flex items-center justify-between gap-2 text-sm text-white">
+                <span>Sub total</span>
+                <span className="font-semibold">{money(cart.total)}</span>
               </div>
               <button
                 type="button"
@@ -1351,16 +1361,9 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                   setScannerActive(false);
                   setShowCheckout(true);
                 }}
-                className="w-full bg-primary text-white py-3.5 rounded-2xl flex items-center justify-between px-5 shadow-md active:bg-primary-dark transition touch-target"
+                className="pos-pay touch-target"
               >
-                <div className="flex items-center gap-2">
-                  <ShoppingCart className="w-5 h-5" />
-                  <span className="font-bold text-base">{t('pos.checkout')}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-lg font-bold">{money(cart.total)}</span>
-                  <ChevronRight className="w-5 h-5" />
-                </div>
+                Continue to Payment
               </button>
             </div>
           )}
@@ -1376,16 +1379,10 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
               setScannerActive(false);
               setShowCheckout(true);
             }}
-            className="pointer-events-auto w-full bg-primary text-white py-4 rounded-2xl flex items-center justify-between px-5 shadow-lg active:bg-primary-dark transition touch-target"
+            className="pos-pay pointer-events-auto touch-target"
           >
-            <div className="flex items-center gap-2">
-              <ShoppingCart className="w-5 h-5" />
-              <span className="font-bold text-lg">{t('pos.checkout')}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xl font-bold">{money(cart.total)}</span>
-              <ChevronRight className="w-5 h-5" />
-            </div>
+            <span>Continue to Payment</span>
+            <span>{money(cart.total)}</span>
           </button>
         </div>
       )}
