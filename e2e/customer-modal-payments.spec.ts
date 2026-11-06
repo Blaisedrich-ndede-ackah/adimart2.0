@@ -195,6 +195,19 @@ test('adding a customer opens a dialog and stays on the page', async ({ page }) 
   await expect(page.getByText('Customer registered.')).toBeVisible();
   await expect(page.getByText('Efua Boateng')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Customer management' })).toBeVisible();
+  const scroll = await page.evaluate(() => {
+    const body = document.querySelector('.page-body');
+    if (!(body instanceof HTMLElement)) return { ok: false, scrollHeight: 0, clientHeight: 0, scrollTop: 0 };
+    const before = body.scrollTop;
+    body.scrollTop = body.scrollHeight;
+    return {
+      ok: body.scrollHeight > body.clientHeight + 20 && body.scrollTop > before,
+      scrollHeight: body.scrollHeight,
+      clientHeight: body.clientHeight,
+      scrollTop: body.scrollTop,
+    };
+  });
+  expect(scroll.ok, `customer list did not scroll (${scroll.scrollTop}/${scroll.scrollHeight}, view ${scroll.clientHeight})`).toBe(true);
   expect(navigations).toBe(0);
   expect(pageErrors).toEqual([]);
   await page.screenshot({ path: `${SHOTS}/customer-registered.png` });
@@ -206,6 +219,8 @@ test('owner can let a cashier record a payment and print the receipt', async ({ 
   await openApp(page);
   await signIn(page, '5678');
   await expect(page.locator('aside').getByRole('button', { name: 'Customers', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Record payment' })).toHaveCount(0);
+  await expect(page.locator('aside').getByRole('button', { name: 'POS', exact: true })).toBeVisible();
 
   await page.locator('aside').getByRole('button', { name: 'Switch user', exact: true }).click();
   await signIn(page, '1234');
@@ -220,13 +235,17 @@ test('owner can let a cashier record a payment and print the receipt', async ({ 
 
   await page.locator('aside').getByRole('button', { name: 'Switch user', exact: true }).click();
   await signIn(page, '5678');
-  await page.locator('aside').getByRole('button', { name: 'Customers', exact: true }).click();
+  await expect(page.locator('aside').getByRole('button', { name: 'POS', exact: true })).toBeVisible();
+  await expect(page.locator('aside').getByRole('button', { name: 'My Sales', exact: true })).toBeVisible();
+  await expect(page.locator('aside').getByRole('button', { name: 'Record payment', exact: true })).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/cashier-record-payment-button.png` });
+  await page.locator('.page-header').getByRole('button', { name: 'Record payment' }).click();
   await expect(page.getByRole('heading', { name: 'Customer payments' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Add customer' })).toHaveCount(0);
 
   await page.getByRole('button', { name: /Akosua Mensah/ }).click();
   await page.getByLabel('Amount').fill('10');
-  await page.getByRole('button', { name: /Record payment/ }).click();
+  await page.locator('.page-body').getByRole('button', { name: /Record payment · balance/ }).click();
   await expect(page.getByText(/Payment of/)).toBeVisible();
   const printButton = page.getByRole('button', { name: 'Print', exact: true });
   await expect(printButton).toBeVisible();

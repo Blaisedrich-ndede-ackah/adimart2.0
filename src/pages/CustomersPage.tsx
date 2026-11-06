@@ -1280,7 +1280,7 @@ class CustomerPageBoundary extends Component<{ children: ReactNode }, { error: s
         </div>
       );
     }
-    return <div key={this.state.nonce}>{this.props.children}</div>;
+    return <div key={this.state.nonce} className="flex h-full min-h-0 flex-col">{this.props.children}</div>;
   }
 }
 

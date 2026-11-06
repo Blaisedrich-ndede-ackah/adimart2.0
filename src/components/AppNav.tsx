@@ -4,7 +4,7 @@ import {
   Sparkles, LifeBuoy,
   CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare, Moon, Sun,
   ShoppingCart, RotateCcw,
-  ContactRound, ArrowLeftRight, Building2, Megaphone,
+  ContactRound, ArrowLeftRight, Building2, Megaphone, Banknote,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -82,7 +82,13 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
           icon: Receipt,
           show: true,
         },
-        { id: 'customers', label: 'Customers', icon: ContactRound, show: isOwner || paymentsOk },
+        {
+          id: 'customers',
+          label: isOwner ? 'Customers' : 'Record payment',
+          shortLabel: isOwner ? 'Customers' : 'Payments',
+          icon: isOwner ? ContactRound : Banknote,
+          show: isOwner || paymentsOk,
+        },
         { id: 'returns', label: 'Returns', icon: RotateCcw, show: isOwner },
         { id: 'expenses', label: t('nav.expenses'), icon: PiggyBank, show: true },
         { id: 'cashbook', label: t('nav.cashbook'), icon: BookOpen, show: cashbookOk },
@@ -116,9 +122,13 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   // Keep bottom bar to a few primary destinations; rest live under More
   const primaryIds: readonly string[] = isOwner
     ? ['home', 'pos', 'transactions']
-    : cashbookOk
-      ? ['pos', 'transactions', 'cashbook']
-      : ['pos', 'transactions', 'expenses'];
+    : paymentsOk
+      ? cashbookOk
+        ? ['pos', 'transactions', 'customers', 'cashbook']
+        : ['pos', 'transactions', 'customers', 'expenses']
+      : cashbookOk
+        ? ['pos', 'transactions', 'cashbook']
+        : ['pos', 'transactions', 'expenses'];
 
   const primaryItems = navItems.filter((item) => primaryIds.includes(item.id));
   const moreItems = navItems.filter((item) => !primaryIds.includes(item.id));
@@ -127,9 +137,9 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   // Group secondary items into logical sections for the mobile More sheet.
   type NavGroup = { label: string; ids: string[] };
   const navGroups: NavGroup[] = [
-    { label: t('nav.main'), ids: ['home', 'pos', 'search', 'adimat-ai', 'stock-approvals', 'transactions'] },
+    { label: t('nav.main'), ids: ['home', 'pos', 'search', 'adimat-ai', 'stock-approvals', 'transactions', ...(!isOwner && paymentsOk ? ['customers'] : [])] },
     { label: 'Shop', ids: ['inventory', 'purchasing', 'warehouse', 'ecommerce', 'multistore'] },
-    { label: 'Operations', ids: ['reports', 'expenses', 'cashbook', 'devices', 'subscription', 'returns', 'customers'] },
+    { label: 'Operations', ids: ['reports', 'expenses', 'cashbook', 'devices', 'subscription', 'returns', ...(isOwner ? ['customers'] : [])] },
     { label: 'Help', ids: ['support', 'learn', 'campaigns', 'community', 'settings'] },
   ];
   const groupedMoreItems = navGroups

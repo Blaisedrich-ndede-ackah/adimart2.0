@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, type KeyboardEvent a
 import {
   ShoppingCart, Minus, Plus, Trash2, Search, ChevronRight, Package, AlertCircle, Bluetooth,
   ScanBarcode, MapPin, X, Settings2, GripVertical, MoveUp, MoveDown, Mic, Pause, Play,
-  CircleCheck, CircleX,
+  CircleCheck, CircleX, Banknote,
 } from 'lucide-react';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import CheckoutOverlay from '@/components/CheckoutOverlay';
@@ -10,6 +10,7 @@ import FrequentItems from '@/components/FrequentItems';
 import { useCartStore } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { canViewStockQuantities } from '@/lib/stockVisibility';
+import { canRecordCustomerPayments } from '@/lib/staffAccess';
 import { useAccessibilityStore } from '@/lib/accessibility';
 import { db, LocalProduct, LocalLocation, getActiveStoreOwner, getCurrentStoreActiveProducts, getCurrentStoreId } from '@/lib/dexie';
 import { playScanBeep, primeScanBeep } from '@/lib/scanBeep';
@@ -695,6 +696,16 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
           >
             <ScanBarcode className="w-5 h-5" />
           </button>
+          {!isStoreOwner && canRecordCustomerPayments(currentUser, currentStore) && (
+            <button
+              type="button"
+              onClick={() => onNavigate?.('customers')}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3 py-2 text-sm font-semibold text-emerald-800 shadow-sm touch-target"
+            >
+              <Banknote className="h-4 w-4" />
+              Record payment
+            </button>
+          )}
           {isStoreOwner && (
             <button
               type="button"
