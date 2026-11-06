@@ -169,9 +169,13 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         leftHanded ? 'lg:order-2' : ''
       }`}>
         <div className="food-rail-logo" aria-hidden="true">
-          <span>{(currentStore?.name || 'A').slice(0, 1).toUpperCase()}</span>
+          {currentUser?.photo_url?.startsWith('data:image/') ? (
+            <img src={currentUser.photo_url} alt="" />
+          ) : (
+            <span>{(currentUser?.name || 'A').slice(0, 1).toUpperCase()}</span>
+          )}
         </div>
-        <p className="sr-only">{currentStore?.name || 'Store'} · {currentUser?.name}</p>
+        <p className="sr-only">{currentUser?.name || 'Signed in'}</p>
         <nav className="flex-1 overflow-y-auto py-1 px-2 space-y-1">
           {navGroups.map((group) => {
             const groupItems = navItems.filter((item) => group.ids.includes(item.id));

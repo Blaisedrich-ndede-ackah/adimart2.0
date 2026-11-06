@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 
 const SHOTS = '/opt/cursor/artifacts/screenshots';
 
@@ -119,7 +119,21 @@ test('the tablet POS uses the dark order layout and keeps checkout', async ({ pa
   await page.screenshot({ path: `${SHOTS}/food-pos-dashboard.png` });
 
   await page.getByRole('button', { name: 'POS', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Care Test Shop' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Upload your profile photo' })).toBeVisible();
+  await expect(page.getByText('Your photo')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Care Test Shop' })).toHaveCount(0);
+  await expect(page.getByText('Your store')).toHaveCount(0);
+  const photoPath = '/tmp/pos-profile.png';
+  writeFileSync(
+    photoPath,
+    Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    ),
+  );
+  await page.locator('input[type="file"][accept="image/*"]').setInputFiles(photoPath);
+  await expect(page.getByRole('button', { name: 'Change your profile photo' })).toBeVisible();
+  await expect(page.getByText('Photo saved')).toBeVisible();
   await expect(page.getByRole('tab', { name: 'All' })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Food' })).toBeVisible();
   await page.getByRole('button', { name: /Add Rice/ }).click();

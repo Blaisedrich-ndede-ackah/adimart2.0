@@ -1347,6 +1347,70 @@ html.dark textarea:focus-visible {
   font-weight: 700;
 }
 
+.food-rail-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.pos-profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.pos-profile-photo {
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  border: 1px dashed #ABBBC2;
+  background: #2D303E;
+  color: #EA7C69;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.pos-profile-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.pos-profile-photo:disabled {
+  opacity: 0.6;
+}
+
+.pos-profile-label {
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.pos-profile-date {
+  color: #ABBBC2;
+  font-size: 12px;
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+.pos-profile-remove {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  color: #ABBBC2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .food-rail nav {
   width: 100%;
 }

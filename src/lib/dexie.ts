@@ -184,6 +184,8 @@ export interface LocalUser {
   can_discount?: number;
   /** Owner-configured POS section order, shared across their signed-in devices. */
   pos_layout_json?: string;
+  /** Compressed JPEG data URL. Each person sets their own; missing stays empty. */
+  photo_url?: string;
   created_at: string;
   synced: number;
   /** Local only: 1 while a PIN change on this device still has to reach the cloud. */
@@ -1837,6 +1839,14 @@ export async function updateUserPhone(userId: string, phoneRaw: string): Promise
   return display;
 }
 
+/** Save this person's profile photo on this device, then let the next sync carry it. */
+export async function updateUserPhoto(userId: string, photoUrl: string): Promise<void> {
+  const existing = await db.users.get(userId);
+  if (!existing) throw new Error('This account could not be found on this device.');
+  const next = photoUrl.startsWith('data:image/') ? photoUrl : '';
+  await db.users.update(userId, { photo_url: next, synced: 0 });
+}
+
 /** Active owner for the current (or given) store — used after warehouse PIN login. */
 export async function getActiveStoreOwner(storeId?: string): Promise<LocalUser | null> {
   const id = storeId || (await getCurrentStoreId());
@@ -3085,12 +3095,13 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
       }
       if (
         table === 'users' &&
-        /can_view_stock|can_discount/i.test(error.message)
+        /can_view_stock|can_discount|photo_url/i.test(error.message)
       ) {
         const stripped = rows.map((row) => {
           const copy = { ...(row as Record<string, unknown>) };
           if (/can_view_stock/i.test(error.message)) delete copy.can_view_stock;
           if (/can_discount/i.test(error.message)) delete copy.can_discount;
+          if (/photo_url/i.test(error.message)) delete copy.photo_url;
           return copy;
         });
         const retry = await supabase.from(table).upsert(stripped, {
@@ -3335,6 +3346,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
         ...(u.can_view_stock === 0 || u.can_view_stock === 1 ? { can_view_stock: u.can_view_stock === 1 } : {}),
         ...(u.can_discount === 0 || u.can_discount === 1 ? { can_discount: u.can_discount === 1 } : {}),
         pos_layout_json: u.role === 'owner' ? u.pos_layout_json || null : null,
+        photo_url: u.photo_url || '',
         created_at: u.created_at,
       })),
       async () => {
@@ -4299,6 +4311,7 @@ export async function syncFromSupabase(opts?: {
           pos_layout_json: row.role === 'owner' && typeof row.pos_layout_json === 'string'
             ? row.pos_layout_json
             : undefined,
+          photo_url: typeof row.photo_url === 'string' ? row.photo_url : undefined,
           created_at: row.created_at as string,
           synced: 1,
         }),
@@ -4328,6 +4341,7 @@ export async function syncFromSupabase(opts?: {
               can_view_stock: local.can_view_stock ?? remote.can_view_stock,
               can_discount: local.can_discount ?? remote.can_discount,
               pos_layout_json: local.pos_layout_json ?? remote.pos_layout_json,
+              photo_url: local.photo_url ?? remote.photo_url,
               synced: 0,
             };
           }
@@ -4335,6 +4349,7 @@ export async function syncFromSupabase(opts?: {
           return {
             ...remote,
             phone: (remote.phone || '').trim() || local.phone || '',
+            photo_url: typeof remote.photo_url === 'string' ? remote.photo_url : (local.photo_url || ''),
           };
         },
       },

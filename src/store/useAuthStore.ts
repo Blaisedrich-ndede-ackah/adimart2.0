@@ -16,6 +16,7 @@ import {
   setCurrentUserId,
   switchToStore,
   updateUserPhone,
+  updateUserPhoto,
 } from '@/lib/dexie';
 import { clearAllWarehouseSessions, clearWarehouseUnlock } from '@/lib/warehouseAccess';
 import { applyStoreLanguageDefault, tNow } from '@/lib/i18n';
@@ -49,6 +50,7 @@ interface AuthState {
   getAllUsers: () => Promise<LocalUser[]>;
   refreshStore: () => Promise<void>;
   updateMyPhone: (phone: string) => Promise<void>;
+  setMyPhoto: (photoUrl: string) => Promise<void>;
   setStoreSetup: (value: boolean) => void;
 }
 
@@ -262,6 +264,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         ? refreshed
         : { ...user, phone: saved },
     });
+  },
+
+  setMyPhoto: async (photoUrl: string) => {
+    const user = get().currentUser;
+    if (!user) throw new Error('Not signed in');
+    await updateUserPhoto(user.id, photoUrl);
+    const refreshed = await (await import('@/lib/dexie')).db.users.get(user.id);
+    if (refreshed) set({ currentUser: refreshed });
   },
 
   setStoreSetup: (value: boolean) => {

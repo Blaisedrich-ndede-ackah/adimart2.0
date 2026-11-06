@@ -504,7 +504,7 @@ export default function App() {
             currentUser?.role === 'owner' ? () => setCurrentPage('subscription') : undefined
           }
         />
-        <StoreBrandingBar />
+        {currentPage !== 'pos' && <StoreBrandingBar />}
         <div className="flex-1 min-h-0 overflow-hidden pb-[calc(4.75rem+env(safe-area-inset-bottom))] lg:pb-0">
           {renderPage()}
         </div>

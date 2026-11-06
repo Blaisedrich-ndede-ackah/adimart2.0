@@ -5,6 +5,7 @@ import {
   CircleCheck, CircleX, Banknote,
 } from 'lucide-react';
 import BarcodeScanner from '@/components/BarcodeScanner';
+import PosProfilePhoto from '@/components/PosProfilePhoto';
 import CheckoutOverlay from '@/components/CheckoutOverlay';
 import FrequentItems from '@/components/FrequentItems';
 import { useCartStore } from '@/store/useCartStore';
@@ -681,12 +682,8 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
       )}
       {/* Header */}
       <div className="page-header pos-topbar flex items-center gap-3">
-        <div className="min-w-0 shrink-0">
-          <h1 className="truncate">{currentStore?.name || 'POS'}</h1>
-          <p className="text-emerald-200 text-xs mt-0.5">
-            {new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })}
-          </p>
-        </div>
+        <h1 className="sr-only">Point of sale</h1>
+        <PosProfilePhoto />
         <div className="relative hidden min-w-0 flex-1 lg:block">
           <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
           <input
