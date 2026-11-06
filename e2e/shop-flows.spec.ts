@@ -128,7 +128,7 @@ test('POS sale completes checkout', async ({ page }) => {
   await login(page);
   await page.getByRole('button', { name: 'POS', exact: true }).first().click();
   await page.getByRole('button', { name: /Test Rice/ }).click();
-  await page.getByRole('button', { name: /Checkout/ }).first().click();
+  await page.getByRole('button', { name: 'Continue to Payment' }).click();
   await page.getByRole('button', { name: 'Cash Payment' }).click();
   await page.getByLabel(/Cash received/).fill('5');
   await page.getByRole('button', { name: 'Complete Sale' }).click();
@@ -165,13 +165,13 @@ test('offline sale waits to sync and reconnects', async ({ page, context }) => {
   await context.setOffline(true);
   await page.getByRole('button', { name: 'POS', exact: true }).first().click();
   await page.getByRole('button', { name: /Test Rice/ }).click();
-  await page.getByRole('button', { name: /Checkout/ }).first().click();
+  await page.getByRole('button', { name: 'Continue to Payment' }).click();
   await page.getByRole('button', { name: 'Cash Payment' }).click();
   await page.getByLabel(/Cash received/).fill('5');
   await page.getByRole('button', { name: 'Complete Sale' }).click();
-  await expect(page.getByText(/changes waiting|Sync error|Offline/).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/Offline/).first()).toBeVisible({ timeout: 15_000 });
   await page.getByRole('button', { name: 'New Sale' }).click();
   await context.setOffline(false);
-  await page.getByRole('button', { name: 'Sync now' }).click();
-  await expect(page.getByText(/Online|Sync error|Syncing/).first()).toBeVisible();
+  await expect(page.getByText('Synced with cloud')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Sync now' })).toHaveCount(0);
 });

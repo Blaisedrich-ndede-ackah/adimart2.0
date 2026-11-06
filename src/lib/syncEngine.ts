@@ -108,8 +108,7 @@ async function rememberOutbox(table: string, id: string, storeId: string): Promi
 
 export async function countPendingChanges(storeId: string | null): Promise<number> {
   if (!storeId) return db.sync_outbox.where('status').equals('pending').count();
-  const rows = await db.sync_outbox.where('store_id').equals(storeId).toArray();
-  return rows.filter((row) => row.status === 'pending').length;
+  return db.sync_outbox.where('store_id').equals(storeId).and((row) => row.status === 'pending').count();
 }
 
 export async function outboxReady(now = Date.now()): Promise<boolean> {

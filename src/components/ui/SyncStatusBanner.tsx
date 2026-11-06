@@ -48,6 +48,9 @@ export function SyncStatusBanner() {
     };
   }, []);
 
+  const quiet = status !== 'offline' && status !== 'error';
+  if (quiet) return null;
+
   const label = status === 'syncing'
     ? t('sync.status.syncing')
     : status === 'error'

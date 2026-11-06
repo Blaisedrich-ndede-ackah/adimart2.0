@@ -1283,6 +1283,12 @@ html, body, #root {
 
 /* Food POS Dark tablet. Flat surfaces replace the frosted bars so the
    catalog paints faster and the screen matches the tablet design. */
+html.dark,
+html.dark * {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
 html.dark .page-header,
 html.dark .ios-bar,
 html.dark .ios-tabbar,

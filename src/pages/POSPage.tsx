@@ -390,16 +390,20 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
 
   useEffect(() => {
     let active = true;
-    void (async () => {
+    let idleId = 0;
+    let timerId = 0;
+    const loadRank = async () => {
       const storeId = await getCurrentStoreId();
-      if (!storeId) return;
+      if (!storeId || !active) return;
       const since = Date.now() - 30 * 24 * 60 * 60 * 1000;
-      const [transactions, items] = await Promise.all([
-        db.transactions.where('store_id').equals(storeId).filter((transaction) =>
-          transaction.status === 'completed' && new Date(transaction.created_at).getTime() >= since
-        ).toArray(),
-        db.transaction_items.where('store_id').equals(storeId).toArray(),
-      ]);
+      const transactions = await db.transactions.where('store_id').equals(storeId).filter((transaction) =>
+        transaction.status === 'completed' && new Date(transaction.created_at).getTime() >= since
+      ).toArray();
+      if (!active) return;
+      const ids = transactions.map((transaction) => transaction.id);
+      const items = ids.length === 0
+        ? []
+        : await db.transaction_items.where('transaction_id').anyOf(ids).toArray();
       const transactionDates = new Map(transactions.map((transaction) => [transaction.id, new Date(transaction.created_at).getTime()]));
       const next: Record<string, { quantity: number; lastSold: number }> = {};
       for (const item of items) {
@@ -411,10 +415,25 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
         next[item.product_id] = entry;
       }
       if (active) setSalesRank(next);
-    })().catch((error: unknown) => {
-      console.error('[POS] Could not load product sales ranking:', error);
-    });
-    return () => { active = false; };
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+      idleId = window.requestIdleCallback(() => {
+        void loadRank().catch((error: unknown) => {
+          console.error('[POS] Could not load product sales ranking:', error);
+        });
+      }, { timeout: 2000 });
+    } else {
+      timerId = window.setTimeout(() => {
+        void loadRank().catch((error: unknown) => {
+          console.error('[POS] Could not load product sales ranking:', error);
+        });
+      }, 400);
+    }
+    return () => {
+      active = false;
+      if (idleId) window.cancelIdleCallback(idleId);
+      if (timerId) window.clearTimeout(timerId);
+    };
   }, [currentStore?.id]);
 
   const startVoiceSearch = useCallback(() => {
