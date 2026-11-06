@@ -1,4 +1,5 @@
 import { sendSmsViaMnotify } from '@/lib/mnotify';
+import { sendStoreSms } from '@/lib/smsWallet';
 import { loadPlatformSettings } from '@/lib/platformSettings';
 import { db } from '@/lib/dexie';
 import { notifyLocal } from './repository';
@@ -52,9 +53,11 @@ export async function notifyTicketReply(ticket: LocalSupportTicket, body: string
   const store = await db.stores.get(ticket.store_id);
   const recipient = ticket.customer_phone.trim() || store?.support_number || '';
   if (!recipient) return;
-  const result = await sendSmsViaMnotify(
-    recipient,
-    `Adimat care ${ticket.reference}: ${body}`.slice(0, 160)
-  );
-  if (result.success || result.skipped) remember(key);
+  const result = await sendStoreSms({
+    storeId: ticket.store_id,
+    kind: 'care',
+    recipients: [recipient],
+    message: `Adimat care ${ticket.reference}: ${body}`.slice(0, 160),
+  });
+  if (result.ok) remember(key);
 }

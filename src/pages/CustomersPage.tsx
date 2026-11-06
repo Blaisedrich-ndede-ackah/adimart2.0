@@ -60,6 +60,7 @@ import {
   splitCustomerAddress,
 } from '@/lib/customerAddress';
 import { canRecordCustomerPayments } from '@/lib/staffAccess';
+import { sendReceiptSmsIfCustomerOnFile } from '@/lib/smsWallet';
 
 interface CustomersPageProps {
   onNavigate?: (page: string) => void;
@@ -360,7 +361,19 @@ function CustomersPageView({ onNavigate }: CustomersPageProps = {}) {
         [`${customer.id}:momo`]: '',
         [`${customer.id}:cheque`]: '',
       }));
-      setStatus(`Payment of ${money(receipt.amount)} recorded. Balance remaining: ${money(receipt.balance_after)}.`);
+      let smsNote = '';
+      if (currentStore?.id && currentUser?.id) {
+        smsNote = await sendReceiptSmsIfCustomerOnFile({
+          storeId: currentStore.id,
+          userId: currentUser.id,
+          customerId: customer.id,
+          storeName: currentStore.name,
+          receiptNumber: receipt.receipt_number,
+          totalLabel: money(receipt.amount),
+          balanceLabel: money(receipt.balance_after),
+        });
+      }
+      setStatus(`Payment of ${money(receipt.amount)} recorded. Balance remaining: ${money(receipt.balance_after)}.${smsNote ? ` ${smsNote}` : ''}`);
       await load({ silent: true });
       void triggerPushSync('customer-account-payment');
     } catch (paymentError: unknown) {

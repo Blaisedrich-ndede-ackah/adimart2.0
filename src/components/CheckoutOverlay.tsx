@@ -26,6 +26,7 @@ import { getBluetoothHardwareStatus } from '@/lib/bluetoothPeripherals';
 import { formatCustomerAddress } from '@/lib/customerAddress';
 import { recordActivity } from '@/lib/activityLog';
 import { canApplyDiscount as cashierMayDiscount } from '@/lib/staffAccess';
+import { sendReceiptSmsIfCustomerOnFile } from '@/lib/smsWallet';
 
 interface CheckoutOverlayProps {
   isOpen: boolean;
@@ -90,6 +91,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
   const [chargeAmount, setChargeAmount] = useState('');
   const [chargeCustomLabel, setChargeCustomLabel] = useState('');
   const [chargeError, setChargeError] = useState('');
+  const [receiptSmsNote, setReceiptSmsNote] = useState('');
 
   const discountCap = currentStore?.discount_cap_percentage ?? 10;
   const pinOnDiscount = currentStore?.pin_on_discount_enabled === 1;
@@ -111,6 +113,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       setCreditCustomerId('');
       setWalletCustomerId('');
       setWalletUseAmount('');
+      setReceiptSmsNote('');
       setCreditCustomers([]);
       setSaleResult(null);
       setError('');
@@ -330,7 +333,20 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         customerBalance: method === 'credit' ? result.customerBalance : undefined,
       };
       setSaleResult(completed);
+      setReceiptSmsNote('');
       setStep('success');
+      if (currentStore?.id) {
+        void sendReceiptSmsIfCustomerOnFile({
+          storeId: currentStore.id,
+          userId: currentUser.id,
+          customerId,
+          phone: customerPhone,
+          storeName: currentStore.name,
+          receiptNumber: result.receiptNumber,
+          totalLabel: money(result.total),
+          balanceLabel: method === 'credit' ? money(result.customerBalance ?? result.total) : undefined,
+        }).then((note) => setReceiptSmsNote(note));
+      }
       if (currentStore?.id) {
         recordActivity({
           storeId: currentStore.id,
@@ -1412,6 +1428,9 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
               <p className="mb-2 text-center text-sm text-gray-600">The receipt is saved on this device.</p>
               <p className="text-primary font-mono font-bold text-lg mb-1">{saleResult.receiptNumber}</p>
               <p className="text-2xl font-bold text-gray-900 mb-4">{money(saleResult.total)}</p>
+              {receiptSmsNote ? (
+                <p className="mb-3 max-w-xs text-center text-sm text-gray-700">{receiptSmsNote}</p>
+              ) : null}
               {saleResult.customerAddress ? (
                 <p className="mb-3 max-w-xs text-center text-sm text-gray-600">
                   {saleResult.customerName ? `${saleResult.customerName} · ` : ''}

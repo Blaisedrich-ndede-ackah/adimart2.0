@@ -1033,12 +1033,19 @@ export async function handlePaystackWebhook(req: ApiRequest, res: ApiResponse): 
   try {
     const event = JSON.parse(raw) as { event?: string; data?: { reference?: string; amount?: number; currency?: string; status?: string } };
     if (event.event === 'charge.success' && event.data?.reference) {
-      await finalizeIntent(String(event.data.reference), {
-        reference: String(event.data.reference),
+      const reference = String(event.data.reference);
+      const charge = {
+        reference,
         amount: Number(event.data.amount) || 0,
         currency: String(event.data.currency || ''),
         status: String(event.data.status || ''),
-      });
+      };
+      if (reference.startsWith('SMS-')) {
+        const { settleSmsTopup } = await import('./smsWallet');
+        await settleSmsTopup(charge);
+      } else {
+        await finalizeIntent(reference, charge);
+      }
     }
     return json(res, 200, { received: true });
   } catch (error) {
@@ -1050,6 +1057,13 @@ export function handlePaystackReturn(req: ApiRequest, res: ApiResponse): void {
   const url = new URL(req.url || '/', 'https://shop.local');
   const shop = (url.searchParams.get('shop') || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 80);
   const reference = text(url.searchParams.get('reference') || url.searchParams.get('trxref'), 80);
+  if (reference.startsWith('SMS-')) {
+    res.status(302);
+    res.setHeader('Location', `/?smsWallet=1&reference=${encodeURIComponent(reference)}`);
+    if (res.end) res.end();
+    else res.json({ redirect: true });
+    return;
+  }
   res.status(302);
   res.setHeader('Location', `/#/shop/${shop}?reference=${encodeURIComponent(reference)}`);
   if (res.end) res.end();

@@ -18,7 +18,8 @@ import {
   type LocalStore,
 } from '@/lib/dexie';
 import { buildCustomerBalances, type CustomerBalance } from '@/lib/customerBalances';
-import { sendSmsViaMnotify, normalizeRecipientList } from '@/lib/mnotify';
+import { normalizeRecipientList } from '@/lib/mnotify';
+import { sendStoreSms } from '@/lib/smsWallet';
 import { formatOfficialMoney } from '@/lib/currency';
 import {
   DEBT_REMINDER_MAX_CHARS,
@@ -206,7 +207,13 @@ export async function sendPreparedDebtReminder(input: {
     });
     return { ok: false, error: 'No phone number on file.' };
   }
-  const sendResult = await sendSmsViaMnotify(input.phone, message);
+  const wallet = await sendStoreSms({
+    storeId: input.storeId,
+    kind: 'debt',
+    recipients: [input.phone],
+    message,
+  });
+  const sendResult = { success: wallet.ok, error: wallet.error };
   await recordReminder({
     store_id: input.storeId,
     customer_id: input.customerId,
@@ -292,11 +299,15 @@ export async function sendDebtRemindersForStore(
       continue;
     }
 
-    const sendResult = await sendSmsViaMnotify(candidate.phone, message);
-    if (sendResult.error === 'mNotify API key not configured') {
-      // Nothing can be sent on this device. Stop the sweep without burning
-      // each customer's reminder interval on a failed attempt.
-      result.reason = 'mNotify API key is not configured on this device.';
+    const wallet = await sendStoreSms({
+      storeId: store.id,
+      kind: 'debt',
+      recipients: [candidate.phone],
+      message,
+    });
+    const sendResult = { success: wallet.ok, error: wallet.error };
+    if (sendResult.error && /SMS credit is too low|could not be reached|supabase-migrate-sms-wallet|mNotify is not configured|Sign in again/i.test(sendResult.error)) {
+      result.reason = sendResult.error;
       return result;
     }
     if (sendResult.success) {
