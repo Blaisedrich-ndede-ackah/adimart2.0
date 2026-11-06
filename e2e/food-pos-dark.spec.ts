@@ -119,7 +119,16 @@ test('the tablet POS uses the dark order layout and keeps checkout', async ({ pa
   await page.screenshot({ path: `${SHOTS}/food-pos-dashboard.png` });
 
   await page.getByRole('button', { name: 'POS', exact: true }).click();
+  await expect(page.getByText('Install Adimat App')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Upload your profile photo' })).toBeVisible();
+  const locked = await page.evaluate(() => ({
+    select: getComputedStyle(document.body).userSelect,
+    viewport: document.querySelector('meta[name="viewport"]')?.getAttribute('content') || '',
+    copyBlocked: !document.dispatchEvent(new Event('copy', { cancelable: true })),
+  }));
+  expect(locked.select).toBe('none');
+  expect(locked.viewport).toContain('user-scalable=no');
+  expect(locked.copyBlocked).toBe(true);
   await expect(page.getByText('Your photo')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Care Test Shop' })).toHaveCount(0);
   await expect(page.getByText('Your store')).toHaveCount(0);
