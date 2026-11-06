@@ -120,7 +120,7 @@ test('the tablet POS uses the dark order layout and keeps checkout', async ({ pa
 
   await page.getByRole('button', { name: 'POS', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Care Test Shop' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Choose items' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'All' })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Food' })).toBeVisible();
   await page.getByRole('button', { name: /Add Rice/ }).click();
   await expect(page.getByRole('button', { name: 'Continue to Payment' })).toBeVisible();
