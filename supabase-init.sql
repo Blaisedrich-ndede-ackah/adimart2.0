@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS users (
   can_view_stock BOOLEAN,
   can_discount BOOLEAN,
   pos_layout_json TEXT,
+  photo_url TEXT DEFAULT '',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );

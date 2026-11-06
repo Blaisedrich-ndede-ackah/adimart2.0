@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
-  ShoppingCart, Minus, Plus, Trash2, Search, ChevronRight, Package, AlertCircle, Bluetooth,
+  ShoppingCart, Minus, Plus, Trash2, Search, Package, AlertCircle, Bluetooth,
   ScanBarcode, MapPin, X, Settings2, GripVertical, MoveUp, MoveDown, Mic, Pause, Play,
   CircleCheck, CircleX, Banknote,
 } from 'lucide-react';
 import BarcodeScanner from '@/components/BarcodeScanner';
+import PosProfilePhoto from '@/components/PosProfilePhoto';
 import CheckoutOverlay from '@/components/CheckoutOverlay';
 import FrequentItems from '@/components/FrequentItems';
 import { useCartStore } from '@/store/useCartStore';
@@ -33,8 +34,6 @@ import { triggerAutoSync } from '@/lib/sync';
 import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
 import { scoreSmartSearch } from '@/lib/adimatAi/search';
-import { useAlsoBuy } from '@/lib/adimatAi/useAdimatAi';
-import AlsoBuySuggestions from '@/components/AlsoBuySuggestions';
 import {
   loadOwnerPosLayout,
   saveOwnerPosLayout,
@@ -158,10 +157,6 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   const canWholesale = canUserSellWholesale(currentUser);
   const isStoreOwner = currentUser?.role === 'owner';
   const showStockQty = canViewStockQuantities(currentUser, currentStore);
-  const alsoBuy = useAlsoBuy(
-    currentUser?.role === 'owner' ? currentStore?.id : undefined,
-    currentUser?.role === 'owner' ? cart.items.map((item) => item.product_id) : []
-  );
   const retailLineCount = cart.items.filter((item) => item.sale_mode === 'retail').length;
   const wholesaleLineCount = cart.items.filter((item) => item.sale_mode === 'wholesale').length;
   const packLineCount = cart.items.filter((item) => item.unit_type === 'pack').length;
@@ -395,16 +390,20 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
 
   useEffect(() => {
     let active = true;
-    void (async () => {
+    let idleId = 0;
+    let timerId = 0;
+    const loadRank = async () => {
       const storeId = await getCurrentStoreId();
-      if (!storeId) return;
+      if (!storeId || !active) return;
       const since = Date.now() - 30 * 24 * 60 * 60 * 1000;
-      const [transactions, items] = await Promise.all([
-        db.transactions.where('store_id').equals(storeId).filter((transaction) =>
-          transaction.status === 'completed' && new Date(transaction.created_at).getTime() >= since
-        ).toArray(),
-        db.transaction_items.where('store_id').equals(storeId).toArray(),
-      ]);
+      const transactions = await db.transactions.where('store_id').equals(storeId).filter((transaction) =>
+        transaction.status === 'completed' && new Date(transaction.created_at).getTime() >= since
+      ).toArray();
+      if (!active) return;
+      const ids = transactions.map((transaction) => transaction.id);
+      const items = ids.length === 0
+        ? []
+        : await db.transaction_items.where('transaction_id').anyOf(ids).toArray();
       const transactionDates = new Map(transactions.map((transaction) => [transaction.id, new Date(transaction.created_at).getTime()]));
       const next: Record<string, { quantity: number; lastSold: number }> = {};
       for (const item of items) {
@@ -416,10 +415,25 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
         next[item.product_id] = entry;
       }
       if (active) setSalesRank(next);
-    })().catch((error: unknown) => {
-      console.error('[POS] Could not load product sales ranking:', error);
-    });
-    return () => { active = false; };
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+      idleId = window.requestIdleCallback(() => {
+        void loadRank().catch((error: unknown) => {
+          console.error('[POS] Could not load product sales ranking:', error);
+        });
+      }, { timeout: 2000 });
+    } else {
+      timerId = window.setTimeout(() => {
+        void loadRank().catch((error: unknown) => {
+          console.error('[POS] Could not load product sales ranking:', error);
+        });
+      }, 400);
+    }
+    return () => {
+      active = false;
+      if (idleId) window.cancelIdleCallback(idleId);
+      if (timerId) window.clearTimeout(timerId);
+    };
   }, [currentStore?.id]);
 
   const startVoiceSearch = useCallback(() => {
@@ -670,13 +684,60 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
 
   return (
     <div className="page-shell relative">
-      {/* Header */}
-      <div className="page-header flex items-center justify-between">
-        <div>
-          <h1>POS</h1>
-          <p className="text-emerald-200 text-xs mt-0.5">Hi, {currentUser?.name}</p>
+      {(scanFeedback || stockError) && (
+        <div
+          role="status"
+          className={`pos-toast ${
+            stockError || scanFeedback?.type === 'warning'
+              ? 'is-warning'
+              : scanFeedback?.type === 'error'
+                ? 'is-error'
+                : ''
+          }`}
+        >
+          {(stockError || scanFeedback?.type === 'warning') && <AlertCircle className="w-4 h-4" />}
+          {stockError || scanFeedback?.message}
         </div>
-        <div className="flex items-center gap-2">
+      )}
+      {/* Header */}
+      <div className="page-header pos-topbar flex items-center gap-3">
+        <h1 className="sr-only">Point of sale</h1>
+        <PosProfilePhoto />
+        <div className="relative hidden min-w-0 flex-1 lg:block">
+          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
+            placeholder={t('pos.search')}
+            aria-label="Search products by name, barcode, or category"
+            aria-describedby="pos-search-keyboard-hint"
+            data-allow-typing="true"
+            className="pos-search w-full pl-9 pr-24"
+          />
+          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
+            {voiceSearchAvailable && (
+              <button
+                type="button"
+                onClick={startVoiceSearch}
+                aria-label={voiceSearchActive ? 'Listening for product name' : 'Search products by voice'}
+                className={`icon-btn ${voiceSearchActive ? 'text-primary' : ''}`}
+              >
+                <Mic className="h-4 w-4" />
+              </button>
+            )}
+            {searchQuery && (
+              <button type="button" onClick={() => setSearchQuery('')} aria-label="Clear product search" className="icon-btn">
+                <X className="w-4 h-4" aria-hidden="true" />
+              </button>
+            )}
+          </div>
+          <span id="pos-search-keyboard-hint" className="sr-only">
+            Press Enter to add the only matching in-stock product. Press Escape to clear the search.
+          </span>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
           {(btStatus.hidScannerEnabled || btStatus.scannerConnected) && (
             <div
               className="bg-white/15 px-2 py-1 rounded-lg flex items-center gap-1"
@@ -780,128 +841,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
         ))}
       </div>
 
-      {/* Sale context: retail/wholesale + unit. One shop per store — no location picker. */}
-      <div className="bg-white border-b border-emerald-50 px-3 py-2.5 md:px-4 flex-shrink-0 space-y-2 md:space-y-0 md:flex md:flex-wrap md:items-center md:gap-3">
-        {saleLocations.length > 1 ? (
-        <div className="flex items-center gap-2 md:flex-1 md:min-w-0">
-          <MapPin className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-          <select
-            value={selectedLocationId}
-            onChange={(e) => {
-              if (cart.items.length > 0 && !confirm('Change location clears the cart. Continue?')) return;
-              cart.clearCart();
-              setSelectedLocationId(e.target.value);
-            }}
-            className="flex-1 text-xs font-semibold bg-emerald-50/60 border border-emerald-100 rounded-lg px-2 py-2 outline-none"
-          >
-            {saleLocations.length === 0 && <option value="">No location</option>}
-            {saleLocations.map((loc) => (
-              <option key={loc.id} value={loc.id}>
-                {loc.name} ({loc.location_type})
-              </option>
-            ))}
-          </select>
-        </div>
-        ) : null}
-        <div className="flex flex-wrap gap-2 md:w-auto md:flex-shrink-0">
-          <button
-            type="button"
-            aria-pressed={saleMode === 'retail'}
-            aria-label="Use retail pricing for newly added items"
-            onClick={() => {
-              setSaleMode('retail');
-            }}
-            className={`flex-1 md:flex-none md:px-4 py-2 rounded-lg text-xs font-semibold touch-target ${
-              saleMode === 'retail' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'
-            }`}
-          >
-            Retail
-          </button>
-          <button
-            type="button"
-            aria-pressed={saleMode === 'wholesale'}
-            aria-label="Use wholesale pricing for newly added items"
-            disabled={!canWholesale}
-            onClick={() => {
-              if (!canWholesale) return;
-              setSaleMode('wholesale');
-            }}
-            className={`flex-1 md:flex-none md:px-4 py-2 rounded-lg text-xs font-semibold touch-target disabled:opacity-40 ${
-              saleMode === 'wholesale' ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-600'
-            }`}
-            title={canWholesale ? 'Wholesale / bulk pricing for newly added items' : 'Wholesale disabled for this cashier'}
-          >
-            Wholesale
-          </button>
-          <button
-            type="button"
-            aria-pressed={unitType === 'base'}
-            aria-label="Add the next items by unit"
-            onClick={() => setUnitType('base')}
-            className={`flex-1 md:flex-none md:px-4 py-2 rounded-lg text-xs font-semibold touch-target whitespace-nowrap ${
-              unitType === 'base' ? 'bg-slate-800 text-white' : 'bg-gray-100 text-gray-600'
-            }`}
-          >
-            By unit
-          </button>
-          <button
-            type="button"
-            aria-pressed={unitType === 'pack'}
-            aria-label="Add the next items by pack"
-            onClick={() => setUnitType('pack')}
-            className={`flex-1 md:flex-none md:px-4 py-2 rounded-lg text-xs font-semibold touch-target whitespace-nowrap ${
-              unitType === 'pack' ? 'bg-slate-800 text-white' : 'bg-gray-100 text-gray-600'
-            }`}
-          >
-            By pack
-          </button>
-        </div>
-        <p className="text-[10px] leading-snug text-gray-500 md:basis-full">
-          Retail, wholesale, and by unit stay in the same sale. Switching only changes the next item
-          {cart.items.length > 0 ? ` — ${cart.items.length} selected item${cart.items.length === 1 ? '' : 's'} stay in the cart.` : '.'}
-        </p>
-      </div>
-
-      {/* Scan Feedback */}
-      {scanFeedback && (
-        <div
-          className={`px-4 py-2.5 text-sm font-medium text-center animate-fade-in flex items-center justify-center gap-2 flex-shrink-0 ${
-            scanFeedback.type === 'success'
-              ? 'bg-green-100 text-green-800'
-              : scanFeedback.type === 'warning'
-              ? 'bg-amber-100 text-amber-800'
-              : 'bg-red-100 text-red-800'
-          }`}
-        >
-          {scanFeedback.type === 'warning' && <AlertCircle className="w-4 h-4" />}
-          {scanFeedback.message}
-        </div>
-      )}
-
-      {/* Stock Error Toast */}
-      {stockError && (
-        <div className="px-4 py-2.5 bg-amber-100 text-amber-800 text-sm font-medium text-center animate-fade-in flex items-center justify-center gap-2 flex-shrink-0">
-          <AlertCircle className="w-4 h-4" />
-          {stockError}
-        </div>
-      )}
-
-      {posLayout.topOrder.map((section) =>
-        section === 'scanner'
-          ? showCameraScanner && (
-              <div key={section} className="px-3 md:px-4 pt-3 flex-shrink-0">
-                <BarcodeScanner onScan={handleScan} active={scannerActive && !showCheckout} />
-              </div>
-            )
-          : (
-              <FrequentItems
-                key={section}
-                onAddProduct={(product) => handleScan(product.barcode || product.id)}
-              />
-            )
-      )}
-
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
+      <div className="pos-workspace">
         {/* Products pane */}
         <section
           style={{ order: posLayout.paneOrder.indexOf('products') }}
@@ -909,97 +849,128 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
             posTab === 'products' ? 'flex' : 'hidden'
           } lg:flex flex-col flex-1 min-w-0 min-h-0 lg:border-r lg:border-emerald-100`}
         >
-          <div className="px-3 md:px-4 pt-3 flex-shrink-0 space-y-2">
-            <div className="relative">
+          <div className="pos-catalog-head">
+            <div className="relative lg:hidden">
               <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={handleSearchKeyDown}
-                placeholder={t('pos.search') + '...'}
+                placeholder={t('pos.search')}
                 aria-label="Search products by name, barcode, or category"
-                aria-describedby="pos-search-keyboard-hint"
                 data-allow-typing="true"
-                className="w-full pl-9 pr-20 py-3 bg-surface-card border border-border rounded-xl text-base outline-none focus:ring-2 focus:ring-primary"
+                className="pos-search w-full pl-9 pr-12"
               />
-              <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                {voiceSearchAvailable && (
-                  <button
-                    type="button"
-                    onClick={startVoiceSearch}
-                    aria-label={voiceSearchActive ? 'Listening for product name' : 'Search products by voice'}
-                    title={voiceSearchActive ? 'Listening…' : 'Search by voice'}
-                    className={`icon-btn ${voiceSearchActive ? 'text-primary' : ''}`}
-                  >
-                    <Mic className="h-4 w-4" />
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowCameraScanner((v) => !v);
-                    if (!showCameraScanner) setScannerActive(true);
-                  }}
-                  aria-label="Scan product barcode with camera"
-                  title="Scan barcode"
-                  className="icon-btn-primary"
-                >
-                  <ScanBarcode className="h-4 w-4" />
-                </button>
-                {searchQuery && (
-                  <button
-                    type="button"
-                    onClick={() => setSearchQuery('')}
-                    aria-label="Clear product search"
-                    className="icon-btn"
-                  >
-                    <X className="w-4 h-4" aria-hidden="true" />
-                  </button>
-                )}
-              </div>
-              <span id="pos-search-keyboard-hint" className="sr-only">
-                Press Enter to add the only matching in-stock product. Press Escape to clear the search.
-              </span>
             </div>
             {voiceSearchError && <p role="status" className="px-1 text-[11px] text-amber-800">{voiceSearchError}</p>}
-            <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
-              {categories.map((cat) => (
-                <button
-                  key={cat}
-                  type="button"
-                  onClick={() => setSelectedCategory(cat)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap touch-target ${
-                    selectedCategory === cat
-                      ? 'bg-primary text-white'
-                      : 'bg-white text-gray-600 border border-gray-200'
-                  }`}
-                >
-                  {cat === 'All' ? t('common.all') : cat}
-                </button>
-              ))}
+            <div className="flex items-center gap-3">
+              <div className="pos-categories flex min-w-0 flex-1 gap-4 overflow-x-auto no-scrollbar" role="tablist" aria-label="Product categories">
+                {categories.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    role="tab"
+                    aria-selected={selectedCategory === cat}
+                    onClick={() => setSelectedCategory(cat)}
+                    className={`pos-category touch-target ${selectedCategory === cat ? 'is-active' : ''}`}
+                  >
+                    {cat === 'All' ? t('common.all') : cat}
+                  </button>
+                ))}
+              </div>
+              <div className="pos-mode">
+                {saleLocations.length > 1 ? (
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <MapPin className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                    <select
+                      value={selectedLocationId}
+                      onChange={(e) => {
+                        if (cart.items.length > 0 && !confirm('Change location clears the cart. Continue?')) return;
+                        cart.clearCart();
+                        setSelectedLocationId(e.target.value);
+                      }}
+                      aria-label="Sale location"
+                      className="max-w-[9rem] text-xs font-semibold bg-transparent border border-emerald-100/40 rounded-lg px-2 py-1.5 outline-none"
+                    >
+                      {saleLocations.map((loc) => (
+                        <option key={loc.id} value={loc.id}>
+                          {loc.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+                <div className="flex gap-1.5" role="group" aria-label="How the next item is priced">
+                  <button
+                    type="button"
+                    aria-pressed={saleMode === 'retail'}
+                    aria-label="Use retail pricing for newly added items"
+                    onClick={() => setSaleMode('retail')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold touch-target ${
+                      saleMode === 'retail' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'
+                    }`}
+                  >
+                    Retail
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={saleMode === 'wholesale'}
+                    aria-label="Use wholesale pricing for newly added items"
+                    disabled={!canWholesale}
+                    onClick={() => {
+                      if (!canWholesale) return;
+                      setSaleMode('wholesale');
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold touch-target disabled:opacity-40 ${
+                      saleMode === 'wholesale' ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-600'
+                    }`}
+                    title={canWholesale ? 'Wholesale pricing for newly added items' : 'Wholesale disabled for this cashier'}
+                  >
+                    Wholesale
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={unitType === 'base'}
+                    aria-label="Add the next items by unit"
+                    onClick={() => setUnitType('base')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold touch-target whitespace-nowrap ${
+                      unitType === 'base' ? 'bg-slate-800 text-white' : 'bg-gray-100 text-gray-600'
+                    }`}
+                  >
+                    Unit
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={unitType === 'pack'}
+                    aria-label="Add the next items by pack"
+                    onClick={() => setUnitType('pack')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold touch-target whitespace-nowrap ${
+                      unitType === 'pack' ? 'bg-slate-800 text-white' : 'bg-gray-100 text-gray-600'
+                    }`}
+                  >
+                    Pack
+                  </button>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center justify-between gap-3 px-0.5 text-[11px] text-gray-500">
-              <p role="status" aria-live="polite">
-                {loadingProducts
-                  ? 'Loading products…'
-                  : searchQuery.trim() || selectedCategory !== 'All'
-                    ? `${filteredProducts.length} of ${products.length} products`
-                    : `${products.length} products`}
-              </p>
-              {!loadingProducts &&
-                searchQuery.trim() &&
-                filteredProducts.length === 1 &&
-                (locationStock[filteredProducts[0].id] ?? toQty(filteredProducts[0].stock_level)) > 0 && (
-                  <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-                    <kbd className="rounded border border-gray-200 bg-white px-1.5 py-0.5 font-semibold text-gray-600">Enter</kbd>
-                    adds match
-                  </span>
-                )}
-            </div>
+            <p className="sr-only" role="status" aria-live="polite">
+              {loadingProducts
+                ? 'Loading products…'
+                : `${filteredProducts.length} products`}
+            </p>
           </div>
 
-          <div className={`flex-1 overflow-y-auto px-3 md:px-4 pt-2 no-scrollbar ${cart.items.length > 0 ? 'pb-28 lg:pb-4' : 'pb-4'}`}>
+          {showCameraScanner && (
+            <div className="px-3 md:px-4 pt-2 flex-shrink-0">
+              <BarcodeScanner onScan={handleScan} active={scannerActive && !showCheckout} />
+            </div>
+          )}
+
+          <div className={`pos-catalog-scroll ${cart.items.length > 0 ? 'pb-28 lg:pb-4' : 'pb-4'}`}>
+            {posLayout.topOrder.includes('frequent') && (
+              <FrequentItems onAddProduct={(product) => handleScan(product.barcode || product.id)} />
+            )}
             {loadingProducts ? (
               <div className="flex flex-col items-center justify-center py-16 text-gray-400">
                 <Package className="w-10 h-10 mb-2 animate-pulse" />
@@ -1054,14 +1025,14 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                       }
                       className="pos-product-card"
                     >
-                      <ProductImage src={product.image_url} alt="" size="md" />
-                      <span className="flex-1 min-w-0 text-left">
-                        <span className="pos-product-name block text-sm font-semibold leading-snug text-gray-900">
+                      <ProductImage src={product.image_url} alt="" size="lg" className="product-image" />
+                      <span className="pos-dish-copy">
+                        <span className="pos-product-name block text-sm font-medium leading-snug text-gray-900">
                           {product.name}
                         </span>
-                        <span className="mt-1 block text-sm font-bold text-primary">
+                        <span className="pos-dish-price mt-1 block text-sm font-semibold">
                           {money(toMoney(pricePreview.unitPrice))}
-                          <span className="text-[10px] text-gray-500 font-medium"> / {unitLabel}</span>
+                          <span className="text-[10px] font-medium text-gray-500"> / {unitLabel}</span>
                         </span>
                         {(product.track_expiry === 1 || isWholesalePrice) && (
                           <span className="mt-1 block text-[10px] leading-4 text-gray-500">
@@ -1099,11 +1070,11 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
           style={{ order: posLayout.paneOrder.indexOf('cart') }}
           className={`${
             posTab === 'cart' ? 'flex' : 'hidden'
-          } ios-pane lg:flex flex-col w-full lg:w-[420px] 2xl:w-[460px] flex-shrink-0 min-h-0 border-l border-white/50`}
+          } pos-ticket ios-pane lg:flex flex-col w-full flex-shrink-0 min-h-0`}
         >
-          <div className="flex items-center justify-between gap-2 px-3 lg:px-4 py-3 border-b border-emerald-100 flex-shrink-0">
-            <h3 className="text-sm font-bold text-gray-800">
-              Cart{cartCount > 0 ? ` (${cartCount})` : ''}
+          <div className="flex items-center justify-between gap-2 px-4 pt-5 pb-3 flex-shrink-0">
+            <h3 className="text-xl font-semibold text-white">
+              Orders{cartCount > 0 ? ` #${cartCount}` : ''}
             </h3>
             <div className="flex items-center gap-2">
               {cart.parkedCarts.length > 0 && (
@@ -1223,15 +1194,6 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                   </button>
                 </div>
 
-                {currentUser?.role === 'owner' && (
-                  <AlsoBuySuggestions
-                    suggestions={alsoBuy}
-                    onAdd={(productId) => {
-                      const product = products.find((candidate) => candidate.id === productId);
-                      if (product) void handleAddProduct(product);
-                    }}
-                  />
-                )}
                 {cart.items.map((item) => (
                   <div
                     key={item.id}
@@ -1245,38 +1207,16 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                             <p className="pos-product-name text-sm font-semibold leading-snug text-gray-900">
                               {item.name}
                             </p>
-                            <div className="flex items-center gap-2 mt-1 flex-wrap">
-                              <p className="text-xs text-gray-500">
-                                {money(item.unit_price)} / {item.unit_type === 'pack' ? 'pack' : 'unit'}
-                              </p>
-                              <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                            <p className="mt-0.5 text-xs text-gray-500">
+                              {money(item.unit_price)} / {item.unit_type === 'pack' ? 'pack' : 'unit'}
+                              <span className={`ml-2 rounded px-1.5 py-0.5 text-[10px] font-medium ${
                                 item.price_label?.startsWith('Wholesale')
                                   ? 'bg-amber-100 text-amber-800'
                                   : 'bg-blue-100 text-blue-800'
                               }`}>
                                 {item.price_label || (item.sale_mode === 'wholesale' ? 'Wholesale' : 'Retail')}
                               </span>
-                              <button
-                                type="button"
-                                onClick={() => void toggleItemSaleMode(item.id)}
-                                disabled={!canWholesale && item.sale_mode === 'retail'}
-                                aria-label={`Switch ${item.name} to ${item.sale_mode === 'retail' ? 'wholesale' : 'retail'} pricing`}
-                                title={item.sale_mode === 'retail'
-                                  ? canWholesale ? 'Switch this line to wholesale pricing' : 'Wholesale is disabled for this cashier'
-                                  : 'Switch this line to retail pricing'}
-                                className="rounded-lg border border-gray-200 px-2 py-1 text-[10px] font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                Use {item.sale_mode === 'retail' ? 'wholesale' : 'retail'}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => void toggleItemUnitType(item.id)}
-                                aria-label={`Sell ${item.name} ${item.unit_type === 'pack' ? 'by unit' : 'by pack'}`}
-                                className="rounded-lg border border-gray-200 px-2 py-1 text-[10px] font-semibold text-gray-600 hover:bg-gray-50"
-                              >
-                                {item.unit_type === 'pack' ? 'By unit' : 'By pack'}
-                              </button>
-                            </div>
+                            </p>
                           </div>
                           <button
                             type="button"
@@ -1316,34 +1256,48 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                               <Plus className="w-3.5 h-3.5 text-primary" />
                             </button>
                           </div>
-                          <div className="text-right min-w-[70px]">
-                            <p className="text-[10px] font-medium text-gray-500">Line total</p>
-                            <p className="text-sm font-bold text-gray-900">{money(item.subtotal)}</p>
-                          </div>
+                          <p className="text-sm font-bold text-gray-900">{money(item.subtotal)}</p>
+                        </div>
+                        <div className="mt-2 flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void toggleItemSaleMode(item.id)}
+                            disabled={!canWholesale && item.sale_mode === 'retail'}
+                            aria-label={`Switch ${item.name} to ${item.sale_mode === 'retail' ? 'wholesale' : 'retail'} pricing`}
+                            title={item.sale_mode === 'retail'
+                              ? canWholesale ? 'Switch this line to wholesale pricing' : 'Wholesale is disabled for this cashier'
+                              : 'Switch this line to retail pricing'}
+                            className="rounded-lg border border-gray-200 px-2 py-1 text-[10px] font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Use {item.sale_mode === 'retail' ? 'wholesale' : 'retail'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void toggleItemUnitType(item.id)}
+                            aria-label={`Sell ${item.name} ${item.unit_type === 'pack' ? 'by unit' : 'by pack'}`}
+                            className="rounded-lg border border-gray-200 px-2 py-1 text-[10px] font-semibold text-gray-600 hover:bg-gray-50"
+                          >
+                            {item.unit_type === 'pack' ? 'By unit' : 'By pack'}
+                          </button>
                         </div>
                       </div>
                     </div>
                   </div>
                 ))}
-                <AlsoBuySuggestions
-                  suggestions={alsoBuy}
-                  onAdd={(productId) => {
-                    const product = products.find((item) => item.id === productId);
-                    if (product) void cart.addItem(product);
-                  }}
-                />
               </div>
             )}
           </div>
 
           {/* Desktop checkout docked in cart column */}
           {cart.items.length > 0 && (
-            <div className="hidden lg:block flex-shrink-0 border-t border-emerald-100 p-4 bg-white">
-              <div className="mb-2 flex items-center justify-between gap-2 text-xs text-gray-500">
-                <span>{cartCount} item{cartCount === 1 ? '' : 's'} in this sale</span>
-                {cart.discountAmount > 0 && (
-                  <span className="font-semibold text-emerald-700">Saved {money(cart.discountAmount)}</span>
-                )}
+            <div className="pos-ticket-footer hidden lg:block flex-shrink-0 p-4">
+              <div className="mb-1 flex items-center justify-between gap-2 text-sm text-gray-500">
+                <span>Discount</span>
+                <span>{money(cart.discountAmount || 0)}</span>
+              </div>
+              <div className="mb-4 flex items-center justify-between gap-2 text-sm text-white">
+                <span>Sub total</span>
+                <span className="font-semibold">{money(cart.total)}</span>
               </div>
               <button
                 type="button"
@@ -1351,16 +1305,9 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                   setScannerActive(false);
                   setShowCheckout(true);
                 }}
-                className="w-full bg-primary text-white py-3.5 rounded-2xl flex items-center justify-between px-5 shadow-md active:bg-primary-dark transition touch-target"
+                className="pos-pay touch-target"
               >
-                <div className="flex items-center gap-2">
-                  <ShoppingCart className="w-5 h-5" />
-                  <span className="font-bold text-base">{t('pos.checkout')}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-lg font-bold">{money(cart.total)}</span>
-                  <ChevronRight className="w-5 h-5" />
-                </div>
+                Continue to Payment
               </button>
             </div>
           )}
@@ -1376,16 +1323,10 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
               setScannerActive(false);
               setShowCheckout(true);
             }}
-            className="pointer-events-auto w-full bg-primary text-white py-4 rounded-2xl flex items-center justify-between px-5 shadow-lg active:bg-primary-dark transition touch-target"
+            className="pos-pay pointer-events-auto touch-target"
           >
-            <div className="flex items-center gap-2">
-              <ShoppingCart className="w-5 h-5" />
-              <span className="font-bold text-lg">{t('pos.checkout')}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xl font-bold">{money(cart.total)}</span>
-              <ChevronRight className="w-5 h-5" />
-            </div>
+            <span>Continue to Payment</span>
+            <span>{money(cart.total)}</span>
           </button>
         </div>
       )}

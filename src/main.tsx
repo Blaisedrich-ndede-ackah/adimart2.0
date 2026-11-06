@@ -52,6 +52,36 @@ if (
   });
 }
 
+function isFormField(target: EventTarget | null): boolean {
+  const element = target instanceof Element ? target : document.activeElement;
+  return Boolean(element?.closest('input, textarea, select, [contenteditable="true"]'));
+}
+
+document.addEventListener('gesturestart', (event) => event.preventDefault());
+document.addEventListener('gesturechange', (event) => event.preventDefault());
+document.addEventListener('touchmove', (event) => {
+  if (event.touches.length > 1) event.preventDefault();
+}, { passive: false });
+document.addEventListener('wheel', (event) => {
+  if (event.ctrlKey) event.preventDefault();
+}, { passive: false });
+document.addEventListener('keydown', (event) => {
+  const command = event.ctrlKey || event.metaKey;
+  const zoomKey = event.key === '+' || event.key === '-' || event.key === '=' || event.key === '0';
+  if (command && zoomKey) event.preventDefault();
+  const copyKey = event.key === 'c' || event.key === 'C' || event.key === 'x' || event.key === 'X';
+  if (command && copyKey && !isFormField(document.activeElement)) event.preventDefault();
+});
+document.addEventListener('copy', (event) => {
+  if (!isFormField(event.target)) event.preventDefault();
+});
+document.addEventListener('cut', (event) => {
+  if (!isFormField(event.target)) event.preventDefault();
+});
+document.addEventListener('contextmenu', (event) => {
+  if (!isFormField(event.target)) event.preventDefault();
+});
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App />

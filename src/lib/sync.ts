@@ -17,7 +17,8 @@ import {
 
 const AUTO_SYNC_KEY = 'adimat_auto_sync';
 const LAST_SYNC_ERROR_KEY = 'adimat_last_sync_error';
-const LIVE_DEBOUNCE_MS = 1000;
+const LIVE_DEBOUNCE_MS = 5000;
+const VISIBLE_SYNC_GAP_MS = 60_000;
 const PUSH_DEBOUNCE_MS = 1000;
 
 const LIVE_TABLES = [
@@ -51,6 +52,15 @@ let queuedReason = 'queued';
 let liveChannel: ReturnType<typeof supabase.channel> | null = null;
 let liveDebounce: ReturnType<typeof setTimeout> | null = null;
 let hooksReady = false;
+let lastVisibleSyncAt = 0;
+
+function deferUntilIdle(work: () => void): void {
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(() => work(), { timeout: 2500 });
+    return;
+  }
+  window.setTimeout(work, 1200);
+}
 
 export function isAutoSyncEnabled(): boolean {
   return localStorage.getItem(AUTO_SYNC_KEY) !== 'false';
@@ -235,7 +245,10 @@ function handleOnline(): void {
 function handleVisible(): void {
   if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
   if (!isOnline()) return;
-  void triggerReconnectSync('visible');
+  const now = Date.now();
+  if (now - lastVisibleSyncAt < VISIBLE_SYNC_GAP_MS) return;
+  lastVisibleSyncAt = now;
+  void triggerAutoSync('visible');
 }
 
 export function initAutoSync(): void {
@@ -266,7 +279,10 @@ export function initAutoSync(): void {
   void publishPending();
   if (!isAutoSyncEnabled() || !isSupabaseConfigured()) return;
   startAutoSync();
-  void triggerReconnectSync('startup');
+  deferUntilIdle(() => {
+    lastVisibleSyncAt = Date.now();
+    void triggerReconnectSync('startup');
+  });
 }
 
 export async function ensureFirstFullPull(storeId: string): Promise<void> {

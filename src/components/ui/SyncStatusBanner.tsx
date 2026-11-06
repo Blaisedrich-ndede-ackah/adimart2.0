@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Radio, WifiOff, Loader2, AlertTriangle } from 'lucide-react';
+import { WifiOff, AlertTriangle } from 'lucide-react';
 import { useT } from '@/lib/i18n';
 import { syncNow } from '@/lib/sync';
 
@@ -48,27 +48,22 @@ export function SyncStatusBanner() {
     };
   }, []);
 
-  const label = status === 'syncing'
-    ? t('sync.status.syncing')
-    : status === 'error'
-      ? t('sync.status.error')
-      : status === 'offline'
-        ? t('sync.status.offline', { count: pending })
-        : pending > 0
-          ? t('sync.status.pending', { count: pending })
-          : t('sync.status.online');
+  if (status !== 'offline' && status !== 'error') return null;
+
+  const label = status === 'error'
+    ? t('sync.status.error')
+    : t('sync.status.offline', { count: pending });
 
   return (
     <button
       type="button"
       onClick={() => void syncNow()}
       aria-live="polite"
-      className={`flex min-h-11 w-full items-center gap-2 border-b border-black/5 px-4 py-2 text-left text-[13px] font-medium ${
-        status === 'error' ? 'bg-[#FFF4E5] text-[#C2410C]' : status === 'syncing' ? 'bg-[#E5F1FF] text-[#007AFF]' : status === 'offline' ? 'bg-[#FFF4E5] text-[#C2410C]' : 'bg-white/70 text-muted'
-      }`}
+      data-status={status}
+      className="sync-banner flex min-h-11 w-full items-center gap-2 border-b border-black/5 bg-[#FFF4E5] px-4 py-2 text-left text-[13px] font-medium text-[#C2410C]"
       title={message || t('sync.status.now')}
     >
-      {status === 'syncing' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : status === 'error' ? <AlertTriangle className="h-3.5 w-3.5" /> : status === 'offline' ? <WifiOff className="h-3.5 w-3.5" /> : <Radio className="h-3.5 w-3.5" />}
+      {status === 'error' ? <AlertTriangle className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
       <span>{label}</span>
       <span className="ml-auto text-[12px] font-semibold">{t('sync.status.now')}</span>
     </button>
