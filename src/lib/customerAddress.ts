@@ -6,7 +6,7 @@ export interface CustomerAddressParts {
 
 /** Split a stored customer address into street, city, and region. */
 export function splitCustomerAddress(address: string | null | undefined): CustomerAddressParts {
-  const raw = (address || '').replace(/\r\n/g, '\n').trim();
+  const raw = (typeof address === 'string' ? address : '').replace(/\r\n/g, '\n').trim();
   if (!raw) return { street: '', city: '', region: '' };
   const lines = raw.split('\n').map((line) => line.trim());
   if (lines.length === 1) return { street: lines[0], city: '', region: '' };
