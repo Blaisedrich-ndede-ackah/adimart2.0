@@ -6,7 +6,8 @@
 
 import { db, generateId, getCurrentStore, getCurrentStoreCustomers, getCurrentStoreId, type LocalBulkSmsCampaign } from '@/lib/dexie';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
-import { sendBulkSmsViaMnotify, normalizeRecipientList, type BulkSmsResult } from '@/lib/mnotify';
+import { normalizeRecipientList, type BulkSmsResult } from '@/lib/mnotify';
+import { sendStoreSms } from '@/lib/smsWallet';
 
 export type { LocalBulkSmsCampaign } from '@/lib/dexie';
 
@@ -34,7 +35,7 @@ function validateMessage(message: string): string | null {
 /**
  * Send a bulk SMS to every registered customer of the current store.
  * Records an audit row locally and pushes it to the cloud on the next sync.
- * Safe to call offline — it only sends when mNotify is configured.
+ * The store SMS wallet pays for the text. Nothing is sent when that balance is short.
  */
 export async function sendBulkSmsToCurrentStoreCustomers(
   input: BulkSmsCampaignInput
@@ -77,7 +78,15 @@ export async function sendBulkSmsToCurrentStoreCustomers(
   }
 
   const message = input.message.trim();
-  const result = await sendBulkSmsViaMnotify(phones, message);
+  const wallet = await sendStoreSms({ storeId, kind: 'bulk', recipients: phones, message });
+  const result: BulkSmsResult = {
+    success: wallet.ok,
+    recipientCount: wallet.recipientCount,
+    sentCount: wallet.sentCount,
+    failedCount: wallet.failedCount,
+    status: wallet.ok ? 'sent' : 'failed',
+    error: wallet.error,
+  };
 
   const campaign: LocalBulkSmsCampaign = {
     id: generateId(),

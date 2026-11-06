@@ -40,6 +40,10 @@ export interface LocalStore {
   cashier_can_see_stock?: number;
   /** Allow cashiers to record customer payments and print those receipts (0/1). Default off. */
   cashier_can_record_payments?: number;
+  /** Store SMS balance in pesewas. The server is the source of truth. */
+  sms_balance_pesewas?: number;
+  /** Text a receipt when the customer phone is already saved (0/1). Default off. */
+  receipt_sms_enabled?: number;
   /** Idle minutes before staff return to the PIN screen. 0 = never. Default 5. */
   session_timeout_minutes?: number;
   /** Preferred Mobile Money account name for Paystack payouts */
@@ -1390,6 +1394,8 @@ export async function createStoreWithOwner(
     cashier_can_see_stock: 0,
     cashiers_can_view_stock: 0,
     cashier_can_record_payments: 0,
+    sms_balance_pesewas: 0,
+    receipt_sms_enabled: 0,
     session_timeout_minutes: 5,
     momo_account_name: '',
     momo_number: '',
@@ -3057,7 +3063,7 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
     if (error) {
         if (
         table === 'stores' &&
-        /session_timeout_minutes|cashiers_can_view_stock|cashier_can_see_stock|cashier_can_record_payments/i.test(error.message)
+        /session_timeout_minutes|cashiers_can_view_stock|cashier_can_see_stock|cashier_can_record_payments|receipt_sms_enabled/i.test(error.message)
       ) {
         const stripped = rows.map((row) => {
           const copy = { ...(row as Record<string, unknown>) };
@@ -3065,6 +3071,7 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
           if (/cashiers_can_view_stock/i.test(error.message)) delete copy.cashiers_can_view_stock;
           if (/cashier_can_see_stock/i.test(error.message)) delete copy.cashier_can_see_stock;
           if (/cashier_can_record_payments/i.test(error.message)) delete copy.cashier_can_record_payments;
+          if (/receipt_sms_enabled/i.test(error.message)) delete copy.receipt_sms_enabled;
           return copy;
         });
         const retry = await supabase.from(table).upsert(stripped, {
@@ -3097,7 +3104,7 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
       }
       if (
         table === 'stores' &&
-        /debt_reminder|sales_target|cashier_can_see_stock|cashier_can_record_payments/i.test(error.message)
+        /debt_reminder|sales_target|cashier_can_see_stock|cashier_can_record_payments|receipt_sms_enabled/i.test(error.message)
       ) {
         // Cloud project predates the debt-reminder / sales-target columns.
         // Push the store without them so the rest of the profile still syncs.
@@ -3111,6 +3118,8 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
           delete copy.sales_target_monthly;
           delete copy.cashier_can_see_stock;
           delete copy.cashier_can_record_payments;
+          delete copy.receipt_sms_enabled;
+          delete copy.sms_balance_pesewas;
           return copy;
         });
         const retry = await supabase.from(table).upsert(stripped, {
@@ -3280,6 +3289,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
           cashier_can_see_stock: (store.cashier_can_see_stock ?? 0) === 1,
           cashiers_can_view_stock: (store.cashiers_can_view_stock ?? (store.cashier_can_see_stock ?? 0)) === 1,
           cashier_can_record_payments: (store.cashier_can_record_payments ?? 0) === 1,
+          receipt_sms_enabled: (store.receipt_sms_enabled ?? 0) === 1,
           session_timeout_minutes: normalizeSessionTimeoutMinutes(store.session_timeout_minutes),
           momo_account_name: store.momo_account_name || '',
           momo_number: store.momo_number || '',
@@ -4177,6 +4187,16 @@ export async function syncFromSupabase(opts?: {
           remoteStore.cashier_can_record_payments === undefined
             ? (localStore?.cashier_can_record_payments ?? 0)
             : remoteStore.cashier_can_record_payments
+              ? 1
+              : 0,
+        sms_balance_pesewas:
+          remoteStore.sms_balance_pesewas == null
+            ? (localStore?.sms_balance_pesewas ?? 0)
+            : Math.max(0, Math.round(Number(remoteStore.sms_balance_pesewas) || 0)),
+        receipt_sms_enabled:
+          remoteStore.receipt_sms_enabled === undefined
+            ? (localStore?.receipt_sms_enabled ?? 0)
+            : remoteStore.receipt_sms_enabled
               ? 1
               : 0,
         cashiers_can_view_stock:

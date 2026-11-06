@@ -23,6 +23,7 @@ import {
   type LocalTransaction,
 } from '@/lib/dexie';
 import { useAuthStore } from '@/store/useAuthStore';
+import SmsWalletCard from '@/components/SmsWalletCard';
 import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
 import { toQty } from '@/lib/warehouse';
@@ -71,7 +72,7 @@ function timeAgo(iso: string): string {
 }
 
 export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
-  const { currentStore } = useAuthStore();
+  const { currentStore, currentUser } = useAuthStore();
   const money = useFormatMoney();
   const t = useT();
   const [transactions, setTransactions] = useState<LocalTransaction[]>([]);
@@ -208,6 +209,15 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
             <button type="button" onClick={() => void load()} className="shrink-0 rounded-lg bg-white px-3 py-2 text-xs font-semibold">Refresh</button>
           </div>
         )}
+
+        {currentStore?.id && currentUser?.id ? (
+          <SmsWalletCard
+            storeId={currentStore.id}
+            userId={currentUser.id}
+            localBalancePesewas={currentStore.sms_balance_pesewas ?? 0}
+            localReceiptSms={(currentStore.receipt_sms_enabled ?? 0) === 1}
+          />
+        ) : null}
 
         <section className="grid grid-cols-2 gap-3" aria-label="Today's store summary">
           <article className="col-span-2 rounded-2xl bg-white p-4 shadow-sm border border-emerald-50">
