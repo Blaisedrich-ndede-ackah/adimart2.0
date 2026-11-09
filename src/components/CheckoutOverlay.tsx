@@ -20,6 +20,7 @@ import {
 } from '@/lib/otherCharges';
 import {
   MANUAL_PAYMENT_METHODS,
+  getPaymentMethodLabel,
   isManualPaymentMethod,
   type PaymentMethod,
 } from '@/lib/paymentMethods';
@@ -27,6 +28,7 @@ import { useFormatMoney, getStoreCurrency } from '@/lib/currency';
 import { getBluetoothHardwareStatus } from '@/lib/bluetoothPeripherals';
 import { formatCustomerAddress } from '@/lib/customerAddress';
 import { recordActivity } from '@/lib/activityLog';
+import { queueSms, receiptSmsText } from '@/lib/smsOutbox';
 
 interface CheckoutOverlayProps {
   isOpen: boolean;
@@ -84,6 +86,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
   const [error, setError] = useState('');
   const [isPrinting, setIsPrinting] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
+  const [smsPhone, setSmsPhone] = useState('');
+  const [smsNote, setSmsNote] = useState('');
   const [printError, setPrintError] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
   const [paystackError, setPaystackError] = useState('');
@@ -341,6 +345,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         loyaltyRedeemAmount: result.loyaltyRedeemAmount,
       };
       setSaleResult(completed);
+      setSmsPhone(customerPhone || creditCustomers.find((customer) => customer.id === (customerId || cart.loyaltyCustomerId))?.phone || '');
+      setSmsNote('');
       setStep('success');
       if (currentStore?.id) {
         recordActivity({
@@ -406,6 +412,38 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
     }
     
     setIsSharing(false);
+  }
+
+  async function handleSmsReceipt() {
+    if (!currentStore || !saleResult) return;
+    if (!smsPhone.trim()) {
+      setSmsNote('Enter the customer phone number.');
+      return;
+    }
+    setSmsNote('');
+    try {
+      const row = await queueSms({
+        storeId: currentStore.id,
+        kind: 'receipt',
+        recipient: smsPhone,
+        message: receiptSmsText({
+          storeName: currentStore.name,
+          receiptNumber: saleResult.receiptNumber,
+          lines: saleResult.items.map((item) => ({
+            name: item.name,
+            quantity: item.quantity,
+            unit: item.measure_unit,
+            subtotal: item.subtotal,
+          })),
+          total: saleResult.total,
+          paymentMethod: getPaymentMethodLabel(saleResult.paymentMethod || 'cash'),
+          currency: currentStore.currency_code || 'GHS',
+        }),
+      });
+      setSmsNote(row.status === 'sent' ? 'Receipt SMS sent.' : 'Receipt SMS is queued and will send when this device is online.');
+    } catch (err) {
+      setSmsNote(err instanceof Error ? err.message : 'Could not queue the receipt SMS.');
+    }
   }
 
   function handleWhatsAppReceipt() {
@@ -1509,6 +1547,28 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                   <Download className="w-4 h-4" />
                   PDF
                 </button>
+              </div>
+
+              <div className="ios-glass mb-3 w-full space-y-2 rounded-2xl p-3">
+                <label className="block text-xs font-semibold text-gray-700">
+                  SMS receipt
+                  <input
+                    value={smsPhone}
+                    onChange={(event) => setSmsPhone(event.target.value)}
+                    placeholder="Customer phone"
+                    inputMode="tel"
+                    className="mt-1 w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void handleSmsReceipt()}
+                  className="flex w-full items-center justify-center gap-1 rounded-xl bg-emerald-700 py-2.5 text-xs font-semibold text-white"
+                >
+                  <MessageCircle className="h-4 w-4" />
+                  Send SMS
+                </button>
+                {smsNote && <p className="text-center text-[11px] text-gray-600">{smsNote}</p>}
               </div>
 
               {printError && (

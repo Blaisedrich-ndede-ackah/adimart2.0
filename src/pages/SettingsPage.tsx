@@ -73,6 +73,10 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [loyaltyEarnRate, setLoyaltyEarnRate] = useState('0');
   const [loyaltyRedeemValue, setLoyaltyRedeemValue] = useState('0');
   const [creditLimitAction, setCreditLimitAction] = useState<'warn' | 'block'>('warn');
+  const [closingSmsEnabled, setClosingSmsEnabled] = useState(false);
+  const [closingSmsTime, setClosingSmsTime] = useState('20:00');
+  const [cashiersCanRecordExpenses, setCashiersCanRecordExpenses] = useState(true);
+  const [closingSmsNote, setClosingSmsNote] = useState('');
   const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState(DEFAULT_SESSION_TIMEOUT_MINUTES);
   const [momoAccountName, setMomoAccountName] = useState('');
   const [momoNumber, setMomoNumber] = useState('');
@@ -122,6 +126,9 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
       setLoyaltyEarnRate(String(Math.max(0, Math.floor(Number(currentStore.loyalty_earn_rate) || 0))));
       setLoyaltyRedeemValue(String(Number(currentStore.loyalty_redeem_value) || 0));
       setCreditLimitAction(currentStore.credit_limit_action === 'block' ? 'block' : 'warn');
+      setClosingSmsEnabled((currentStore.closing_sms_enabled ?? 0) === 1);
+      setClosingSmsTime(currentStore.closing_sms_time || '20:00');
+      setCashiersCanRecordExpenses((currentStore.cashiers_can_record_expenses ?? 1) === 1);
       setSessionTimeoutMinutes(normalizeSessionTimeoutMinutes(currentStore.session_timeout_minutes));
       setMomoAccountName(currentStore.momo_account_name || '');
       setMomoNumber(currentStore.momo_number || '');
@@ -209,6 +216,9 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         loyalty_earn_rate: Math.max(0, Math.floor(Number(loyaltyEarnRate) || 0)),
         loyalty_redeem_value: Math.max(0, Number(loyaltyRedeemValue) || 0),
         credit_limit_action: creditLimitAction,
+        closing_sms_enabled: closingSmsEnabled ? 1 : 0,
+        closing_sms_time: closingSmsTime || '20:00',
+        cashiers_can_record_expenses: cashiersCanRecordExpenses ? 1 : 0,
         session_timeout_minutes: normalizeSessionTimeoutMinutes(sessionTimeoutMinutes),
         momo_account_name: momoAccountName.trim(),
         momo_number: momoNumber.trim(),
@@ -568,6 +578,55 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
               <option value="block">Block the sale</option>
             </select>
           </label>
+        </div>
+
+        <div className="ios-glass mb-3 space-y-3 rounded-2xl p-4">
+          <h3 className="font-bold text-gray-900">Closing SMS</h3>
+          <p className="text-xs text-gray-600">
+            Sends today’s sales, cash, MoMo, credit, voids, expenses, and net to the store phone. If the device is offline, the message waits until it reconnects.
+          </p>
+          <label className="flex items-center justify-between gap-3 text-sm">
+            <span>Send automatically</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={closingSmsEnabled}
+              onClick={() => setClosingSmsEnabled((value) => !value)}
+              className={`flex h-7 w-12 items-center rounded-full px-0.5 ${closingSmsEnabled ? 'justify-end bg-primary' : 'justify-start bg-gray-300'}`}
+            >
+              <span className="h-6 w-6 rounded-full bg-white shadow" />
+            </button>
+          </label>
+          <label className="block text-sm">
+            Closing time
+            <input type="time" value={closingSmsTime} onChange={(event) => setClosingSmsTime(event.target.value)} className="mt-1 w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2" />
+          </label>
+          <label className="flex items-center justify-between gap-3 text-sm">
+            <span>Cashiers can record expenses</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={cashiersCanRecordExpenses}
+              onClick={() => setCashiersCanRecordExpenses((value) => !value)}
+              className={`flex h-7 w-12 items-center rounded-full px-0.5 ${cashiersCanRecordExpenses ? 'justify-end bg-primary' : 'justify-start bg-gray-300'}`}
+            >
+              <span className="h-6 w-6 rounded-full bg-white shadow" />
+            </button>
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              void import('@/lib/smsOutbox').then(async (mod) => {
+                if (!currentStore) return;
+                const result = await mod.sendClosingSummary({ ...currentStore, closing_sms_enabled: 1, support_number: supportNumber || currentStore.support_number }, true);
+                setClosingSmsNote(result === 'sent' ? 'Closing SMS sent.' : result === 'queued' ? 'Closing SMS queued until this device is online.' : 'Add the store phone first.');
+              });
+            }}
+            className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white"
+          >
+            Send today’s closing SMS now
+          </button>
+          {closingSmsNote && <p className="text-xs text-gray-600">{closingSmsNote}</p>}
         </div>
 
         {/* Discount Settings */}

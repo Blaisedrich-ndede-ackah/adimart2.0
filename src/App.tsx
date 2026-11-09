@@ -51,6 +51,7 @@ import { useAgentAuthStore } from '@/store/useAgentAuthStore';
 import { isStoreAccessBlocked } from '@/lib/subscription';
 import { checkAndSendSubscriptionExpirySms } from '@/lib/subscriptionReminders';
 import { checkAndSendDebtReminders } from '@/lib/debtReminders';
+import { flushSmsOutbox, sendClosingSummary } from '@/lib/smsOutbox';
 import { canAccessCashbook } from '@/lib/staffAccess';
 import { createAutomaticStoreBackup, recordBackupIssue } from '@/lib/storeBackup';
 import { createDueRecurringExpenses } from '@/lib/dexie';
@@ -292,6 +293,21 @@ export default function App() {
     const timer = window.setInterval(() => void checkAndSendDebtReminders(), 6 * 60 * 60 * 1000);
     return () => window.clearInterval(timer);
   }, [isAuthenticated, currentStore?.id, currentUser?.role]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentStore?.id) return;
+    const run = () => {
+      void flushSmsOutbox(currentStore.id);
+      if (currentUser?.role === 'owner') void sendClosingSummary(currentStore);
+    };
+    run();
+    const timer = window.setInterval(run, 60_000);
+    window.addEventListener('online', run);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('online', run);
+    };
+  }, [isAuthenticated, currentStore, currentUser?.role]);
 
   if (publicShopSlug) {
     return <PublicShopPage slug={publicShopSlug} />;
