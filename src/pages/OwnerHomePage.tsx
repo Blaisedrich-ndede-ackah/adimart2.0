@@ -79,6 +79,9 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
   const [lowStockCount, setLowStockCount] = useState(0);
   const [outOfStockCount, setOutOfStockCount] = useState(0);
   const [outstandingCredit, setOutstandingCredit] = useState(0);
+  const [todayExpenses, setTodayExpenses] = useState(0);
+  const [todayNet, setTodayNet] = useState(0);
+  const [cashAfterExpenses, setCashAfterExpenses] = useState(0);
   const [dailyTarget, setDailyTarget] = useState(0);
   const [monthlyTarget, setMonthlyTarget] = useState(0);
   const [linkedStoreCount, setLinkedStoreCount] = useState(1);
@@ -92,20 +95,38 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
     try {
       const start = startOfToday().getTime();
       const monthStart = startOfMonth().getTime();
-      const [allTransactions, products, storeRow, balances, stores] = await Promise.all([
+      const [allTransactions, products, storeRow, balances, stores, expenseRows, itemRows] = await Promise.all([
         db.transactions.where('store_id').equals(storeId).toArray(),
         db.products.where('store_id').equals(storeId).and((product) => product.is_active === 1).toArray(),
         db.stores.get(storeId),
         buildCustomerBalances(storeId),
         listLocalStores(),
+        db.expenses.where('store_id').equals(storeId).toArray(),
+        db.transaction_items.where('store_id').equals(storeId).toArray(),
       ]);
 
       const completed = allTransactions.filter((transaction) => transaction.status === 'completed' && transaction.void_status !== 'voided');
-      setTransactions(
-        completed.filter((transaction) =>
-          new Date(transaction.created_at).getTime() >= start
-        )
+      const todaySales = completed.filter((transaction) =>
+        new Date(transaction.created_at).getTime() >= start
       );
+      setTransactions(todaySales);
+      const todayKey = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
+      const dayExpenses = expenseRows.filter((expense) => (expense.expense_date || expense.created_at).slice(0, 10) === todayKey || (
+        !expense.expense_date && new Date(expense.created_at).getTime() >= start
+      ));
+      const expenseTotal = dayExpenses.reduce((sum, expense) => sum + toNumber(expense.amount), 0);
+      const cashSpent = dayExpenses.reduce((sum, expense) => sum + (expense.payment_method === 'cash' ? toNumber(expense.amount) : 0), 0);
+      const productCost = new Map(products.map((product) => [product.id, toNumber(product.cost_price)]));
+      const todayIds = new Set(todaySales.map((sale) => sale.id));
+      const cogs = itemRows.reduce((sum, item) => (
+        todayIds.has(item.transaction_id)
+          ? sum + (toNumber(item.base_quantity || item.quantity) * (productCost.get(item.product_id) || 0))
+          : sum
+      ), 0);
+      const salesTotal = todaySales.reduce((sum, sale) => sum + toNumber(sale.total_amount), 0);
+      setTodayExpenses(expenseTotal);
+      setTodayNet(salesTotal - cogs - expenseTotal);
+      setCashAfterExpenses(todaySales.reduce((sum, sale) => sum + toNumber(sale.cash_amount), 0) - cashSpent);
       setMonthSales(
         completed.reduce(
           (total, transaction) =>
@@ -230,7 +251,21 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
               <Banknote className="h-4 w-4 text-emerald-600" />
               <span className="text-xs font-medium">Cash received</span>
             </div>
-            {loading ? <div className="mt-2 h-6 w-24 animate-pulse rounded bg-gray-100" /> : <p className="mt-2 text-lg font-bold">{money(cashTotal)}</p>}
+            {loading ? <div className="mt-2 h-6 w-24 animate-pulse rounded bg-gray-100" /> : (
+              <>
+                <p className="mt-2 text-lg font-bold">{money(cashTotal)}</p>
+                <p className="mt-1 text-[10px] text-gray-500">On hand after cash expenses {money(cashAfterExpenses)}</p>
+              </>
+            )}
+          </article>
+          <article className="rounded-2xl bg-white p-4 shadow-sm border border-gray-100">
+            <span className="text-xs font-medium text-gray-500">Today’s expenses</span>
+            {loading ? <div className="mt-2 h-6 w-24 animate-pulse rounded bg-gray-100" /> : <p className="mt-2 text-lg font-bold text-red-600">{money(todayExpenses)}</p>}
+          </article>
+          <article className="rounded-2xl bg-white p-4 shadow-sm border border-gray-100">
+            <span className="text-xs font-medium text-gray-500">Net profit</span>
+            <p className="mt-1 text-[10px] text-gray-400">Gross profit minus expenses</p>
+            {loading ? <div className="mt-2 h-6 w-24 animate-pulse rounded bg-gray-100" /> : <p className="mt-2 text-lg font-bold">{money(todayNet)}</p>}
           </article>
           <article className="rounded-2xl bg-white p-4 shadow-sm border border-gray-100">
             <div className="flex items-center gap-2 text-gray-500">

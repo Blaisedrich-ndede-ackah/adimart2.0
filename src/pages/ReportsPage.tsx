@@ -504,7 +504,8 @@ export default function ReportsPage() {
                 <p className="text-lg font-bold text-green-600">{money(summary.grossProfit)}</p>
               </div>
               <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100">
-                <p className="text-xs text-gray-500">Net Profit</p>
+                <p className="text-xs text-gray-500">Net profit</p>
+                <p className="text-[10px] text-gray-400">Gross profit minus expenses</p>
                 <p className={`text-lg font-bold ${summary.netProfit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                   {money(summary.netProfit)}
                 </p>

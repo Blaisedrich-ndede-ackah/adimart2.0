@@ -211,7 +211,7 @@ export async function buildReportSummary(
   const periodExpenses = roundMoney(
     expenses
       .filter(e => {
-        const d = new Date(e.created_at);
+        const d = new Date(e.expense_date || e.created_at);
         return d >= start && d <= end;
       })
       .reduce((sum, e) => sum + (Number(e.amount) || 0), 0)

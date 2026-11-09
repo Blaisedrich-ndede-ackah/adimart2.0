@@ -21,7 +21,17 @@ import { useFormatMoney } from '@/lib/currency';
 import { cashbookCategoryLabel, useT } from '@/lib/i18n';
 import { fileToProductImageDataUrl } from '@/lib/productImage';
 
-const EXPENSE_CATEGORIES = ['Rent', 'Utilities', 'Supplier', 'Salaries', 'Transport', 'Other'];
+const EXPENSE_CATEGORIES = [
+  'Rent',
+  'ECG / electricity',
+  'Water',
+  'Transport',
+  'Stock transport',
+  'Salaries',
+  'Utilities',
+  'Supplier',
+  'Other',
+];
 function currentMonth(): string {
   const date = new Date();
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -38,10 +48,11 @@ export default function ExpensesPage({
   openAddOnLoad?: boolean;
   onQuickActionHandled?: () => void;
 }) {
-  const { currentUser } = useAuthStore();
+  const { currentUser, currentStore } = useAuthStore();
   const money = useFormatMoney();
   const t = useT();
   const isOwner = currentUser?.role === 'owner';
+  const canRecord = isOwner || (currentStore?.cashiers_can_record_expenses ?? 1) === 1;
 
   const [expenses, setExpenses] = useState<LocalExpense[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,6 +60,13 @@ export default function ExpensesPage({
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('Other');
+  const [customCategory, setCustomCategory] = useState('');
+  const [expenseDate, setExpenseDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'momo' | 'bank'>('cash');
+  const [filterCategory, setFilterCategory] = useState('all');
+  const [filterMethod, setFilterMethod] = useState('all');
+  const [filterFrom, setFilterFrom] = useState('');
+  const [filterTo, setFilterTo] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -111,6 +129,15 @@ export default function ExpensesPage({
     }));
   }, [budgets, expenses]);
 
+  const visibleExpenses = useMemo(() => expenses.filter((expense) => {
+    const day = (expense.expense_date || expense.created_at).slice(0, 10);
+    if (filterFrom && day < filterFrom) return false;
+    if (filterTo && day > filterTo) return false;
+    if (filterCategory !== 'all' && expense.category !== filterCategory) return false;
+    if (filterMethod !== 'all' && (expense.payment_method || '') !== filterMethod) return false;
+    return true;
+  }), [expenses, filterFrom, filterTo, filterCategory, filterMethod]);
+
   const handleReceiptPick = async (file?: File) => {
     setReceiptError('');
     if (!file) return;
@@ -146,15 +173,18 @@ export default function ExpensesPage({
 
       await addExpense({
         description: description.trim(),
-        category,
+        category: customCategory.trim() || category,
         amount: value,
         notes: noteParts.join(' · '),
         receipt_image_data_url: receiptImage || undefined,
+        expense_date: expenseDate,
+        payment_method: paymentMethod,
       });
       setDescription('');
       setAmount('');
       setNotes('');
       setCategory('Other');
+      setCustomCategory('');
       setReceiptImage('');
       setShowAdd(false);
       await load();
@@ -241,6 +271,7 @@ export default function ExpensesPage({
             >
               <RefreshCcw className={`w-4 h-4 text-white ${loading ? 'animate-spin' : ''}`} />
             </button>
+            {canRecord && (
             <button
               type="button"
               onClick={() => {
@@ -252,6 +283,7 @@ export default function ExpensesPage({
               <Plus className="w-3.5 h-3.5" />
               Add
             </button>
+            )}
           </div>
         </div>
       </div>
@@ -336,7 +368,7 @@ export default function ExpensesPage({
           <p className="text-xs text-gray-400">{expenses.length} item{expenses.length === 1 ? '' : 's'}</p>
         </div>
 
-        {showAdd && (
+        {showAdd && canRecord && (
           <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 space-y-3">
             <p className="text-sm font-semibold text-gray-900">New expense</p>
             <input
@@ -366,6 +398,26 @@ export default function ExpensesPage({
                   </option>
                 ))}
               </select>
+            </div>
+            <input
+              value={customCategory}
+              onChange={(e) => setCustomCategory(e.target.value)}
+              placeholder="Custom category (optional)"
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm"
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <label className="text-xs text-gray-600">
+                Date
+                <input type="date" value={expenseDate} onChange={(event) => setExpenseDate(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm" />
+              </label>
+              <label className="text-xs text-gray-600">
+                Paid with
+                <select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value as 'cash' | 'momo' | 'bank')} className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                  <option value="cash">Cash</option>
+                  <option value="momo">MoMo</option>
+                  <option value="bank">Bank</option>
+                </select>
+              </label>
             </div>
             <input
               value={notes}
@@ -407,17 +459,45 @@ export default function ExpensesPage({
           </div>
         )}
 
+        <section className="ios-glass grid gap-2 rounded-2xl p-3 sm:grid-cols-4">
+          <label className="text-xs text-gray-600">
+            From
+            <input type="date" value={filterFrom} onChange={(event) => setFilterFrom(event.target.value)} className="mt-1 w-full rounded-lg border border-white/70 bg-white/80 px-2 py-2 text-sm" />
+          </label>
+          <label className="text-xs text-gray-600">
+            To
+            <input type="date" value={filterTo} onChange={(event) => setFilterTo(event.target.value)} className="mt-1 w-full rounded-lg border border-white/70 bg-white/80 px-2 py-2 text-sm" />
+          </label>
+          <label className="text-xs text-gray-600">
+            Category
+            <select value={filterCategory} onChange={(event) => setFilterCategory(event.target.value)} className="mt-1 w-full rounded-lg border border-white/70 bg-white/80 px-2 py-2 text-sm">
+              <option value="all">All categories</option>
+              {[...new Set(expenses.map((expense) => expense.category))].map((item) => <option key={item}>{item}</option>)}
+            </select>
+          </label>
+          <label className="text-xs text-gray-600">
+            Method
+            <select value={filterMethod} onChange={(event) => setFilterMethod(event.target.value)} className="mt-1 w-full rounded-lg border border-white/70 bg-white/80 px-2 py-2 text-sm">
+              <option value="all">All methods</option>
+              <option value="cash">Cash</option>
+              <option value="momo">MoMo</option>
+              <option value="bank">Bank</option>
+              <option value="">Not set</option>
+            </select>
+          </label>
+        </section>
+
         {loading ? (
           <div className="flex justify-center py-12 text-gray-400">
             <Loader2 className="w-6 h-6 animate-spin" />
           </div>
-        ) : expenses.length === 0 ? (
+        ) : visibleExpenses.length === 0 ? (
           <div className="bg-white rounded-xl p-8 text-center text-gray-400 text-sm">
             No expenses recorded yet. Tap Add to record your first store cost.
           </div>
         ) : (
           <div className="space-y-2">
-            {expenses.map((expense) => (
+            {visibleExpenses.map((expense) => (
               <div
                 key={expense.id}
                 className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 flex items-center justify-between gap-3"
@@ -427,8 +507,10 @@ export default function ExpensesPage({
                     {expense.description}
                   </p>
                   <p className="text-xs text-gray-500">
-                    {expense.category} ·{' '}
-                    {new Date(expense.created_at).toLocaleString()}
+                    {expense.category}
+                    {expense.payment_method ? ` · ${expense.payment_method}` : ''}
+                    {' · '}
+                    {(expense.expense_date || expense.created_at).slice(0, 10)}
                   </p>
                   {expense.notes ? (
                     <p className="text-[11px] text-gray-400 mt-0.5 truncate">
