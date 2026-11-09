@@ -78,6 +78,18 @@ export interface LocalStore {
   sales_target_monthly?: number;
   /** When 0, cashier sessions hide on-hand quantities. Owners always see them. Default 1. */
   cashiers_can_view_stock?: number;
+  /** Points earned per 1 currency unit spent. 0 disables earning. */
+  loyalty_earn_rate?: number;
+  /** Currency value of one loyalty point. */
+  loyalty_redeem_value?: number;
+  /** What checkout does when a credit sale would pass the customer's limit. */
+  credit_limit_action?: 'warn' | 'block';
+  /** 1 sends the owner a closing SMS at closing_sms_time. */
+  closing_sms_enabled?: number;
+  /** Local time HH:mm for the automatic closing SMS. */
+  closing_sms_time?: string;
+  /** Cashiers may record shop expenses when 1. Default on so existing floor recording stays. */
+  cashiers_can_record_expenses?: number;
   created_at: string;
   synced: number;
 }
@@ -107,6 +119,11 @@ export interface LocalCustomer {
   is_active: number;
   /** Customer asked not to receive automated debt reminder SMS (0/1) */
   debt_reminder_opt_out?: number;
+  loyalty_points_balance?: number;
+  /** Null or omitted means no credit limit. */
+  credit_limit?: number | null;
+  /** Days after a credit sale when payment is due. Null means no due date. */
+  credit_terms_days?: number | null;
   created_at: string;
   updated_at: string;
   synced: number;
@@ -348,6 +365,10 @@ export interface LocalProduct {
   /** List this product on the public e-commerce storefront */
   sell_online?: number;
   reorder_level?: number;
+  /** Selling unit: pcs, kg, litre, olonka, and so on. */
+  unit?: string;
+  /** 1 when the POS may sell fractional quantities such as 2.5 kg. */
+  allow_decimal?: number;
   created_at: string;
   updated_at: string;
   synced: number;
@@ -407,6 +428,22 @@ export interface LocalTransaction {
   customer_id?: string | null;
   credit_paid_amount?: number;
   credit_balance?: number;
+  /** Separate from status so older completed/pending checks keep working. */
+  void_status?: 'none' | 'requested' | 'voided';
+  void_reason?: string;
+  void_requested_by?: string | null;
+  void_requested_by_name?: string;
+  void_requested_at?: string | null;
+  voided_by?: string | null;
+  voided_by_name?: string;
+  voided_at?: string | null;
+  loyalty_points_earned?: number;
+  loyalty_points_redeemed?: number;
+  loyalty_redeem_amount?: number;
+  promotion_discount?: number;
+  promotion_summary?: string;
+  coupon_code?: string;
+  credit_due_date?: string | null;
   status: 'completed' | 'pending';
   location_id?: string;
   sale_mode?: 'retail' | 'wholesale' | 'mixed';
@@ -429,6 +466,10 @@ export interface LocalTransactionItem {
   base_quantity?: number;
   sale_mode?: 'retail' | 'wholesale';
   batch_id?: string;
+  variant_id?: string | null;
+  measure_unit?: string;
+  list_unit_price?: number;
+  promotion_label?: string;
   synced: number;
 }
 
@@ -552,6 +593,7 @@ export interface LocalStockBatch {
   expiry_date: string | null;
   quantity: number;
   cost_price: number;
+  variant_id?: string | null;
   created_at: string;
   updated_at: string;
   synced: number;
@@ -608,9 +650,78 @@ export interface LocalPurchaseOrder {
   items_json: string;
   total_amount: number;
   notes: string;
+  amount_paid?: number;
+  due_date?: string | null;
   created_at: string;
   updated_at: string;
   received_at?: string;
+  synced: number;
+}
+
+export interface LocalProductVariant {
+  id: string;
+  store_id: string;
+  product_id: string;
+  variant_name: string;
+  variant_value: string;
+  sku: string;
+  barcode: string;
+  price_adjustment: number;
+  stock_level: number;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export interface LocalLoyaltyTransaction {
+  id: string;
+  store_id: string;
+  customer_id: string;
+  transaction_id: string | null;
+  type: 'earn' | 'redeem';
+  points: number;
+  balance_after: number;
+  reason: string;
+  created_at: string;
+  synced: number;
+}
+
+export interface LocalSupplierPayment {
+  id: string;
+  store_id: string;
+  supplier_id: string;
+  purchase_order_id: string | null;
+  amount: number;
+  method: 'cash' | 'momo' | 'bank';
+  note: string;
+  paid_at: string;
+  created_by: string | null;
+  created_by_name: string;
+  created_at: string;
+  synced: number;
+}
+
+export type StorePromoType = 'sale_price' | 'percent' | 'fixed' | 'multibuy' | 'coupon';
+
+export interface LocalStorePromotion {
+  id: string;
+  store_id: string;
+  name: string;
+  promo_type: StorePromoType;
+  product_id: string | null;
+  category: string;
+  sale_price: number;
+  percent_off: number;
+  amount_off: number;
+  buy_quantity: number;
+  free_quantity: number;
+  coupon_code: string;
+  starts_at: string | null;
+  ends_at: string | null;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
   synced: number;
 }
 
@@ -624,8 +735,25 @@ export interface LocalExpense {
   receipt_image_data_url?: string;
   recurring_expense_id?: string | null;
   recurrence_month?: string | null;
+  /** YYYY-MM-DD. Empty means the created_at date. */
+  expense_date?: string | null;
+  /** cash, momo, or bank. Empty on expenses recorded before this field existed. */
+  payment_method?: '' | 'cash' | 'momo' | 'bank';
   created_at: string;
   updated_at: string;
+  synced: number;
+}
+
+export interface LocalSmsOutbox {
+  id: string;
+  store_id: string;
+  kind: 'receipt' | 'closing';
+  recipient: string;
+  message: string;
+  status: 'queued' | 'sent' | 'failed';
+  error_message: string;
+  created_at: string;
+  sent_at: string | null;
   synced: number;
 }
 
@@ -803,6 +931,11 @@ class AdimatDB extends Dexie {
   stock_receipt_requests!: Table<LocalStockReceiptRequest, string>;
   stock_approval_logs!: Table<LocalStockApprovalLog, string>;
   activity_logs!: Table<LocalActivityLog, string>;
+  product_variants!: Table<LocalProductVariant, string>;
+  customer_loyalty_transactions!: Table<LocalLoyaltyTransaction, string>;
+  supplier_payments!: Table<LocalSupplierPayment, string>;
+  store_promotions!: Table<LocalStorePromotion, string>;
+  sms_outbox!: Table<LocalSmsOutbox, string>;
 
   /* Agent Portal tables */
   agents!: Table<LocalAgent, string>;
@@ -1081,6 +1214,47 @@ class AdimatDB extends Dexie {
           }
         });
       });
+      /* Version 25 — voids, payables, measured qty, loyalty, variants, credit, store deals.
+         New columns are optional so rows already on the device stay valid. */
+      this.version(25).stores({
+        product_variants: 'id, store_id, product_id, barcode, sku, is_active, synced',
+        customer_loyalty_transactions: 'id, store_id, customer_id, transaction_id, created_at, synced',
+        supplier_payments: 'id, store_id, supplier_id, purchase_order_id, paid_at, synced',
+        store_promotions: 'id, store_id, promo_type, coupon_code, is_active, synced',
+      }).upgrade(async (tx) => {
+        await tx.table('stores').toCollection().modify((store: LocalStore) => {
+          if (typeof store.loyalty_earn_rate !== 'number') store.loyalty_earn_rate = 0;
+          if (typeof store.loyalty_redeem_value !== 'number') store.loyalty_redeem_value = 0;
+          if (store.credit_limit_action !== 'warn' && store.credit_limit_action !== 'block') {
+            store.credit_limit_action = 'warn';
+          }
+        });
+        await tx.table('products').toCollection().modify((product: LocalProduct) => {
+          if (typeof product.unit !== 'string' || !product.unit) product.unit = 'pcs';
+          if (product.allow_decimal !== 0 && product.allow_decimal !== 1) product.allow_decimal = 0;
+        });
+        await tx.table('customers').toCollection().modify((customer: LocalCustomer) => {
+          if (typeof customer.loyalty_points_balance !== 'number') customer.loyalty_points_balance = 0;
+        });
+        await tx.table('transactions').toCollection().modify((sale: LocalTransaction) => {
+          if (!sale.void_status) sale.void_status = 'none';
+        });
+        await tx.table('purchase_orders').toCollection().modify((order: LocalPurchaseOrder) => {
+          if (typeof order.amount_paid !== 'number') order.amount_paid = 0;
+        });
+      });
+      /* Version 26 — SMS outbox, closing summary, expense date and payment method. */
+      this.version(26).stores({
+        sms_outbox: 'id, store_id, kind, status, created_at, synced',
+      }).upgrade(async (tx) => {
+        await tx.table('stores').toCollection().modify((store: LocalStore) => {
+          if (store.closing_sms_enabled !== 0 && store.closing_sms_enabled !== 1) store.closing_sms_enabled = 0;
+          if (typeof store.closing_sms_time !== 'string' || !store.closing_sms_time) store.closing_sms_time = '20:00';
+          if (store.cashiers_can_record_expenses !== 0 && store.cashiers_can_record_expenses !== 1) {
+            store.cashiers_can_record_expenses = 1;
+          }
+        });
+      });
   }
 }
 
@@ -1354,6 +1528,12 @@ export async function createStoreWithOwner(
     discount_allow_fixed: 1,
     cashier_can_discount: 1,
     cashiers_can_view_stock: 1,
+    loyalty_earn_rate: 0,
+    loyalty_redeem_value: 0,
+    credit_limit_action: 'warn',
+    closing_sms_enabled: 0,
+    closing_sms_time: '20:00',
+    cashiers_can_record_expenses: 1,
     session_timeout_minutes: 5,
     momo_account_name: '',
     momo_number: '',
@@ -1835,7 +2015,8 @@ export async function createCustomer(
   phone: string,
   openingBalance: number,
   locationId: string | null = null,
-  address: string = ''
+  address: string = '',
+  credit?: { creditLimit?: number | null; creditTermsDays?: number | null }
 ): Promise<LocalCustomer> {
   const storeId = await getCurrentStoreId();
   if (!storeId) throw new Error('No store selected');
@@ -1866,6 +2047,9 @@ export async function createCustomer(
     opening_balance: balance,
     opening_balance_remaining: balance,
     is_active: 1,
+    loyalty_points_balance: 0,
+    credit_limit: credit?.creditLimit == null || credit.creditLimit <= 0 ? null : credit.creditLimit,
+    credit_terms_days: credit?.creditTermsDays == null || credit.creditTermsDays < 0 ? null : Math.floor(credit.creditTermsDays),
     created_at: now,
     updated_at: now,
     synced: 0,
@@ -1911,7 +2095,8 @@ export async function updateCustomer(
   name: string,
   phone: string,
   locationId: string | null = null,
-  address?: string
+  address?: string,
+  credit?: { creditLimit?: number | null; creditTermsDays?: number | null }
 ): Promise<void> {
   const storeId = await getCurrentStoreId();
   if (!storeId) throw new Error('No store selected');
@@ -1928,6 +2113,12 @@ export async function updateCustomer(
     phone: cleanPhone,
     location_id: locationId || null,
     address: cleanAddress,
+    ...(credit
+      ? {
+          credit_limit: credit.creditLimit == null || credit.creditLimit <= 0 ? null : credit.creditLimit,
+          credit_terms_days: credit.creditTermsDays == null || credit.creditTermsDays < 0 ? null : Math.floor(credit.creditTermsDays),
+        }
+      : {}),
     updated_at: new Date().toISOString(),
     synced: 0,
   });
@@ -2767,8 +2958,8 @@ function formatSyncError(label: string, error: unknown): string {
 function asQty(value: unknown): number {
   const n = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(n) || n <= 0) return 0;
-  const floored = Math.floor(n);
-  return floored > 50_000_000 ? 0 : floored;
+  const rounded = Math.round(n * 1000) / 1000;
+  return rounded > 50_000_000 ? 0 : rounded;
 }
 
 /** PostgREST defaults to 1000 rows — page so phone and laptop pull the same full ledger. */
@@ -2796,6 +2987,35 @@ const INCREMENTAL_PULL_FIELDS: Record<string, string> = {
   purchase_orders: 'updated_at',
   bulk_sms_campaigns: 'created_at',
   debt_reminders: 'created_at',
+  product_variants: 'updated_at',
+  customer_loyalty_transactions: 'created_at',
+  supplier_payments: 'created_at',
+  store_promotions: 'updated_at',
+  sms_outbox: 'created_at',
+};
+
+const OPTIONAL_CLOUD_TABLES = new Set([
+  'debt_reminders',
+  'product_variants',
+  'customer_loyalty_transactions',
+  'supplier_payments',
+  'store_promotions',
+  'sms_outbox',
+]);
+
+const OPTIONAL_PUSH_COLUMNS: Record<string, string[]> = {
+  stores: ['loyalty_earn_rate', 'loyalty_redeem_value', 'credit_limit_action', 'closing_sms_enabled', 'closing_sms_time', 'cashiers_can_record_expenses'],
+  expenses: ['expense_date', 'payment_method'],
+  products: ['unit', 'allow_decimal'],
+  customers: ['loyalty_points_balance', 'credit_limit', 'credit_terms_days'],
+  transactions: [
+    'void_status', 'void_reason', 'void_requested_by', 'void_requested_by_name', 'void_requested_at',
+    'voided_by', 'voided_by_name', 'voided_at', 'loyalty_points_earned', 'loyalty_points_redeemed',
+    'loyalty_redeem_amount', 'promotion_discount', 'promotion_summary', 'coupon_code', 'credit_due_date',
+  ],
+  transaction_items: ['variant_id', 'measure_unit', 'list_unit_price', 'promotion_label'],
+  purchase_orders: ['amount_paid', 'due_date'],
+  stock_batches: ['variant_id'],
 };
 export const FAST_SYNC_TABLES = Object.keys(INCREMENTAL_PULL_FIELDS)
   .filter((table) => table !== 'debt_reminders');
@@ -2863,6 +3083,7 @@ function mapLocalBatchToCloud(batch: LocalStockBatch): Record<string, unknown> {
     expiry_date: dateOrNull(batch.expiry_date),
     quantity: batch.quantity,
     cost_price: batch.cost_price,
+    variant_id: batch.variant_id || null,
     created_at: batch.created_at,
     updated_at: batch.updated_at,
   };
@@ -3205,6 +3426,22 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
         );
         return 0;
       }
+      const optionalColumns = OPTIONAL_PUSH_COLUMNS[table];
+      if (optionalColumns?.some((column) => error.message.includes(column))) {
+        const stripped = rows.map((row) => {
+          const copy = { ...(row as Record<string, unknown>) };
+          for (const column of optionalColumns) delete copy[column];
+          return copy;
+        });
+        const retry = await supabase.from(table).upsert(stripped, {
+          onConflict: 'id',
+          ignoreDuplicates: appendOnly,
+        });
+        if (!retry.error) {
+          await markSynced();
+          return rows.length;
+        }
+      }
       errors.push(formatSyncError(label, error));
       return 0;
     }
@@ -3305,6 +3542,12 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
           debt_reminder_message: store.debt_reminder_message || DEFAULT_DEBT_REMINDER_TEMPLATE,
           sales_target_daily: Math.max(0, Number(store.sales_target_daily) || 0),
           sales_target_monthly: Math.max(0, Number(store.sales_target_monthly) || 0),
+          loyalty_earn_rate: Math.max(0, Math.floor(Number(store.loyalty_earn_rate) || 0)),
+          loyalty_redeem_value: Math.max(0, Number(store.loyalty_redeem_value) || 0),
+          credit_limit_action: store.credit_limit_action === 'block' ? 'block' : 'warn',
+          closing_sms_enabled: (store.closing_sms_enabled ?? 0) === 1,
+          closing_sms_time: store.closing_sms_time || '20:00',
+          cashiers_can_record_expenses: (store.cashiers_can_record_expenses ?? 1) === 1,
           created_at: store.created_at,
         }],
         async () => { await db.stores.update(storeId, { synced: 1 }); },
@@ -3447,6 +3690,8 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
         wholesale_tiers_json: p.wholesale_tiers_json || '[]',
         sell_online: (p.sell_online ?? 0) === 1,
         reorder_level: Number(p.reorder_level) || 0,
+        unit: p.unit || 'pcs',
+        allow_decimal: (p.allow_decimal ?? 0) === 1,
         created_at: p.created_at,
         updated_at: p.updated_at,
       })),
@@ -3582,11 +3827,13 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
             wholesale_unit_price: p.wholesale_unit_price ?? 0,
             wholesale_tiers_json: p.wholesale_tiers_json || '[]',
             sell_online: (p.sell_online ?? 0) === 1,
-            reorder_level: Number(p.reorder_level) || 0,
-            created_at: p.created_at,
-            updated_at: p.updated_at,
-          })),
-          async () => {},
+        reorder_level: Number(p.reorder_level) || 0,
+        unit: p.unit || 'pcs',
+        allow_decimal: (p.allow_decimal ?? 0) === 1,
+        created_at: p.created_at,
+        updated_at: p.updated_at,
+      })),
+      async () => {},
           errors
         );
       }
@@ -3652,6 +3899,9 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
         wallet_balance: Number(customer.wallet_balance) || 0,
         is_active: customer.is_active === 1,
         debt_reminder_opt_out: (customer.debt_reminder_opt_out ?? 0) === 1,
+        loyalty_points_balance: Math.max(0, Math.floor(Number(customer.loyalty_points_balance) || 0)),
+        credit_limit: customer.credit_limit == null ? null : Math.max(0, Number(customer.credit_limit) || 0),
+        credit_terms_days: customer.credit_terms_days == null ? null : Math.max(0, Math.floor(Number(customer.credit_terms_days) || 0)),
         created_at: customer.created_at,
         updated_at: customer.updated_at,
       })),
@@ -3727,6 +3977,21 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
         status: t.status,
         location_id: uuidOrNull(t.location_id),
         sale_mode: t.sale_mode || 'retail',
+        void_status: t.void_status || 'none',
+        void_reason: t.void_reason || '',
+        void_requested_by: t.void_requested_by || null,
+        void_requested_by_name: t.void_requested_by_name || '',
+        void_requested_at: t.void_requested_at || null,
+        voided_by: t.voided_by || null,
+        voided_by_name: t.voided_by_name || '',
+        voided_at: t.voided_at || null,
+        loyalty_points_earned: Math.max(0, Math.floor(Number(t.loyalty_points_earned) || 0)),
+        loyalty_points_redeemed: Math.max(0, Math.floor(Number(t.loyalty_points_redeemed) || 0)),
+        loyalty_redeem_amount: Number(t.loyalty_redeem_amount) || 0,
+        promotion_discount: Number(t.promotion_discount) || 0,
+        promotion_summary: t.promotion_summary || '',
+        coupon_code: t.coupon_code || '',
+        credit_due_date: t.credit_due_date || null,
         created_at: t.created_at,
         updated_at: t.updated_at || t.created_at,
       })),
@@ -3849,6 +4114,10 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
         pack_size: i.pack_size ?? 1,
         base_quantity: i.base_quantity ?? i.quantity,
         batch_id: uuidOrNull(i.batch_id),
+        variant_id: uuidOrNull(i.variant_id),
+        measure_unit: i.measure_unit || '',
+        list_unit_price: Number(i.list_unit_price) || Number(i.unit_price) || 0,
+        promotion_label: i.promotion_label || '',
       })),
       async () => { await Promise.all(unsyncedItems.map(i => db.transaction_items.update(i.id, { synced: 1 }))); },
       errors
@@ -3938,6 +4207,8 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
         receipt_image_data_url: e.receipt_image_data_url || '',
         recurring_expense_id: uuidOrNull(e.recurring_expense_id),
         recurrence_month: e.recurrence_month || null,
+        expense_date: e.expense_date || null,
+        payment_method: e.payment_method || '',
         created_at: e.created_at,
         updated_at: e.updated_at,
       })),
@@ -4118,6 +4389,8 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
         items_json: o.items_json,
         total_amount: o.total_amount,
         notes: o.notes,
+        amount_paid: Number(o.amount_paid) || 0,
+        due_date: o.due_date || null,
         created_at: o.created_at,
         updated_at: o.updated_at,
         received_at: o.received_at || null,
@@ -4132,6 +4405,12 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
     const activitySync = await import('./activityLog').then((mod) => mod.pushActivityLogs(storeId));
     syncedCount += activitySync.synced;
     if (activitySync.error) errors.push(activitySync.error);
+    const extensionSync = await import('./shopSync').then((mod) => mod.pushShopExtensions(storeId));
+    syncedCount += extensionSync.synced;
+    if (extensionSync.error) errors.push(extensionSync.error);
+    const smsSync = await import('./smsOutbox').then((mod) => mod.pushSmsOutbox(storeId));
+    syncedCount += smsSync.synced;
+    if (smsSync.error) errors.push(smsSync.error);
 
     if (errors.length > 0) {
       return { success: false, message: `Partial sync. Errors: ${errors.join('; ')}` };
@@ -4293,6 +4572,30 @@ export async function syncFromSupabase(opts?: {
           remoteStore.sales_target_monthly == null
             ? (localStore?.sales_target_monthly ?? 0)
             : Math.max(0, Number(remoteStore.sales_target_monthly) || 0),
+        loyalty_earn_rate:
+          remoteStore.loyalty_earn_rate == null
+            ? (localStore?.loyalty_earn_rate ?? 0)
+            : Math.max(0, Math.floor(Number(remoteStore.loyalty_earn_rate) || 0)),
+        loyalty_redeem_value:
+          remoteStore.loyalty_redeem_value == null
+            ? (localStore?.loyalty_redeem_value ?? 0)
+            : Math.max(0, Number(remoteStore.loyalty_redeem_value) || 0),
+        credit_limit_action:
+          remoteStore.credit_limit_action === 'block' || remoteStore.credit_limit_action === 'warn'
+            ? remoteStore.credit_limit_action
+            : (localStore?.credit_limit_action ?? 'warn'),
+        closing_sms_enabled:
+          remoteStore.closing_sms_enabled == null
+            ? (localStore?.closing_sms_enabled ?? 0)
+            : remoteStore.closing_sms_enabled ? 1 : 0,
+        closing_sms_time:
+          typeof remoteStore.closing_sms_time === 'string' && remoteStore.closing_sms_time
+            ? remoteStore.closing_sms_time
+            : (localStore?.closing_sms_time || '20:00'),
+        cashiers_can_record_expenses:
+          remoteStore.cashiers_can_record_expenses == null
+            ? (localStore?.cashiers_can_record_expenses ?? 1)
+            : remoteStore.cashiers_can_record_expenses ? 1 : 0,
         created_at: remoteStore.created_at,
         synced: localStore?.synced === 0 ? 0 : 1,
       });
@@ -4399,6 +4702,17 @@ export async function syncFromSupabase(opts?: {
           wallet_balance: Number(row.wallet_balance) || 0,
           is_active: row.is_active === false ? 0 : 1,
           debt_reminder_opt_out: row.debt_reminder_opt_out === true ? 1 : 0,
+          loyalty_points_balance: 'loyalty_points_balance' in row
+            ? Math.max(0, Math.floor(Number(row.loyalty_points_balance) || 0))
+            : undefined,
+          credit_limit: 'credit_limit' in row
+            ? (row.credit_limit == null || row.credit_limit === '' ? null : Math.max(0, Number(row.credit_limit) || 0))
+            : undefined,
+          credit_terms_days: 'credit_terms_days' in row
+            ? (row.credit_terms_days == null || row.credit_terms_days === ''
+              ? null
+              : Math.max(0, Math.floor(Number(row.credit_terms_days) || 0)))
+            : undefined,
           created_at: String(row.created_at || ''),
           updated_at: String(row.updated_at || row.created_at || ''),
           synced: 1,
@@ -4413,6 +4727,9 @@ export async function syncFromSupabase(opts?: {
                   ? local?.location_id ?? null
                   : remote.location_id,
               address: remote.address === undefined ? local?.address ?? '' : remote.address,
+              loyalty_points_balance: remote.loyalty_points_balance ?? local?.loyalty_points_balance ?? 0,
+              credit_limit: remote.credit_limit === undefined ? (local?.credit_limit ?? null) : remote.credit_limit,
+              credit_terms_days: remote.credit_terms_days === undefined ? (local?.credit_terms_days ?? null) : remote.credit_terms_days,
             };
           }
           return { ...remote, ...local, synced: 0 };
@@ -4443,6 +4760,12 @@ export async function syncFromSupabase(opts?: {
             wholesale_tiers_json: (local.wholesale_tiers_json as string) || '[]',
             sell_online: local.sell_online ? 1 : 0,
             reorder_level: Math.max(0, Math.floor(Number(local.reorder_level) || 0)),
+            unit: 'unit' in local
+              ? (typeof local.unit === 'string' && local.unit ? local.unit : 'pcs')
+              : undefined,
+            allow_decimal: 'allow_decimal' in local
+              ? (local.allow_decimal === true || local.allow_decimal === 1 ? 1 : 0)
+              : undefined,
             created_at: local.created_at as string,
             updated_at: (local.updated_at as string) || (local.created_at as string),
             synced: 1,
@@ -4451,7 +4774,13 @@ export async function syncFromSupabase(opts?: {
         dbTable: db.products,
         merge: async (remote: LocalProduct, local: LocalProduct | undefined) => {
           if (!local) return remote;
-          if (local.synced !== 0) return remote;
+          if (local.synced !== 0) {
+            return {
+              ...remote,
+              unit: remote.unit || local.unit || 'pcs',
+              allow_decimal: remote.allow_decimal ?? local.allow_decimal ?? 0,
+            };
+          }
           // Keep unsynced name/price edits, but stock always follows cloud then batch align
           return {
             ...local,
@@ -4487,6 +4816,23 @@ export async function syncFromSupabase(opts?: {
           customer_id: (row.customer_id as string) || null,
           credit_paid_amount: Number(row.credit_paid_amount) || 0,
           credit_balance: Number(row.credit_balance) || 0,
+          credit_due_date: typeof row.credit_due_date === 'string' ? row.credit_due_date.slice(0, 10) : null,
+          void_status: 'void_status' in row
+            ? (row.void_status === 'voided' || row.void_status === 'requested' ? row.void_status : 'none')
+            : undefined,
+          void_reason: 'void_reason' in row ? String(row.void_reason || '') : undefined,
+          void_requested_by: (row.void_requested_by as string) || null,
+          void_requested_by_name: String(row.void_requested_by_name || ''),
+          void_requested_at: (row.void_requested_at as string) || null,
+          voided_by: (row.voided_by as string) || null,
+          voided_by_name: String(row.voided_by_name || ''),
+          voided_at: (row.voided_at as string) || null,
+          loyalty_points_earned: 'loyalty_points_earned' in row ? Math.max(0, Math.floor(Number(row.loyalty_points_earned) || 0)) : undefined,
+          loyalty_points_redeemed: 'loyalty_points_redeemed' in row ? Math.max(0, Math.floor(Number(row.loyalty_points_redeemed) || 0)) : undefined,
+          loyalty_redeem_amount: 'loyalty_redeem_amount' in row ? Number(row.loyalty_redeem_amount) || 0 : undefined,
+          promotion_discount: 'promotion_discount' in row ? Number(row.promotion_discount) || 0 : undefined,
+          promotion_summary: 'promotion_summary' in row ? String(row.promotion_summary || '') : undefined,
+          coupon_code: 'coupon_code' in row ? String(row.coupon_code || '') : undefined,
           status: row.status as 'completed' | 'pending',
           location_id: (row.location_id as string) || undefined,
           sale_mode:
@@ -4499,7 +4845,24 @@ export async function syncFromSupabase(opts?: {
         }),
         dbTable: db.transactions,
         merge: async (remote: LocalTransaction, local: LocalTransaction | undefined) => {
-          if (!local || local.synced !== 0) return remote;
+          if (!local) return remote;
+          if (local.synced !== 0) {
+            return {
+              ...remote,
+              void_status: remote.void_status ?? local.void_status ?? 'none',
+              void_reason: remote.void_reason ?? local.void_reason ?? '',
+              voided_by: remote.voided_by ?? local.voided_by ?? null,
+              voided_by_name: remote.voided_by_name || local.voided_by_name || '',
+              voided_at: remote.voided_at ?? local.voided_at ?? null,
+              loyalty_points_earned: remote.loyalty_points_earned ?? local.loyalty_points_earned ?? 0,
+              loyalty_points_redeemed: remote.loyalty_points_redeemed ?? local.loyalty_points_redeemed ?? 0,
+              loyalty_redeem_amount: remote.loyalty_redeem_amount ?? local.loyalty_redeem_amount ?? 0,
+              promotion_discount: remote.promotion_discount ?? local.promotion_discount ?? 0,
+              promotion_summary: remote.promotion_summary ?? local.promotion_summary ?? '',
+              coupon_code: remote.coupon_code ?? local.coupon_code ?? '',
+              credit_due_date: remote.credit_due_date ?? local.credit_due_date ?? null,
+            };
+          }
           return {
             ...remote,
             ...local,
@@ -4612,6 +4975,10 @@ export async function syncFromSupabase(opts?: {
           pack_size: Number(row.pack_size) || 1,
           base_quantity: Number(row.base_quantity) || Number(row.quantity) || 0,
           batch_id: (row.batch_id as string) || undefined,
+          variant_id: (row.variant_id as string) || null,
+          measure_unit: String(row.measure_unit || ''),
+          list_unit_price: Number(row.list_unit_price) || Number(row.unit_price) || 0,
+          promotion_label: String(row.promotion_label || ''),
           synced: 1,
         }),
         dbTable: db.transaction_items,
@@ -4694,6 +5061,10 @@ export async function syncFromSupabase(opts?: {
           receipt_image_data_url: (row.receipt_image_data_url as string) || undefined,
           recurring_expense_id: (row.recurring_expense_id as string) || null,
           recurrence_month: (row.recurrence_month as string) || null,
+          expense_date: 'expense_date' in row && typeof row.expense_date === 'string' ? row.expense_date.slice(0, 10) : undefined,
+          payment_method: 'payment_method' in row
+            ? (row.payment_method === 'cash' || row.payment_method === 'momo' || row.payment_method === 'bank' ? row.payment_method : '')
+            : undefined,
           created_at: row.created_at as string,
           updated_at: (row.updated_at as string) || (row.created_at as string),
           synced: 1,
@@ -4701,6 +5072,13 @@ export async function syncFromSupabase(opts?: {
         dbTable: db.expenses,
         merge: async (remote: LocalExpense, local: LocalExpense | undefined) => {
           if (!local) return remote;
+          if (local.synced !== 0) {
+            return {
+              ...remote,
+              expense_date: remote.expense_date ?? local.expense_date ?? null,
+              payment_method: remote.payment_method ?? local.payment_method ?? '',
+            };
+          }
           if (local.synced === 0) {
             const remoteTime = new Date(remote.updated_at).getTime();
             const localTime = new Date(local.updated_at).getTime();
@@ -4815,6 +5193,7 @@ export async function syncFromSupabase(opts?: {
           batch_code: (row.batch_code as string) || '',
           expiry_date: (row.expiry_date as string) || null,
           quantity: asQty(row.quantity),
+          variant_id: (row.variant_id as string) || null,
           cost_price: Number(row.cost_price) || 0,
           created_at: row.created_at as string,
           updated_at: (row.updated_at as string) || (row.created_at as string),
@@ -4933,6 +5312,8 @@ export async function syncFromSupabase(opts?: {
           items_json: String(row.items_json || '[]'),
           total_amount: Number(row.total_amount) || 0,
           notes: String(row.notes || ''),
+          amount_paid: Number(row.amount_paid) || 0,
+          due_date: typeof row.due_date === 'string' ? row.due_date.slice(0, 10) : null,
           created_at: String(row.created_at || ''),
           updated_at: String(row.updated_at || row.created_at || ''),
           received_at: typeof row.received_at === 'string' ? row.received_at : undefined,
@@ -4999,6 +5380,126 @@ export async function syncFromSupabase(opts?: {
           return local;
         },
       },
+      {
+        label: 'Product variants',
+        table: 'product_variants',
+        map: (row: Record<string, unknown>) => ({
+          id: String(row.id),
+          store_id: String(row.store_id),
+          product_id: String(row.product_id),
+          variant_name: String(row.variant_name || ''),
+          variant_value: String(row.variant_value || ''),
+          sku: String(row.sku || ''),
+          barcode: String(row.barcode || ''),
+          price_adjustment: Number(row.price_adjustment) || 0,
+          stock_level: Number(row.stock_level) || 0,
+          is_active: row.is_active === false ? 0 : 1,
+          created_at: String(row.created_at || ''),
+          updated_at: String(row.updated_at || row.created_at || ''),
+          synced: 1,
+        }),
+        dbTable: db.product_variants,
+        merge: async (remote: LocalProductVariant, local: LocalProductVariant | undefined) => {
+          if (!local || local.synced !== 0) return remote;
+          return local;
+        },
+      },
+      {
+        label: 'Loyalty points',
+        table: 'customer_loyalty_transactions',
+        map: (row: Record<string, unknown>) => ({
+          id: String(row.id),
+          store_id: String(row.store_id),
+          customer_id: String(row.customer_id),
+          transaction_id: (row.transaction_id as string) || null,
+          type: row.type === 'redeem' ? 'redeem' : 'earn',
+          points: Math.max(0, Math.floor(Number(row.points) || 0)),
+          balance_after: Math.max(0, Math.floor(Number(row.balance_after) || 0)),
+          reason: String(row.reason || ''),
+          created_at: String(row.created_at || ''),
+          synced: 1,
+        }),
+        dbTable: db.customer_loyalty_transactions,
+        merge: async (remote: LocalLoyaltyTransaction, local: LocalLoyaltyTransaction | undefined) => {
+          if (!local || local.synced !== 0) return remote;
+          return local;
+        },
+      },
+      {
+        label: 'Supplier payments',
+        table: 'supplier_payments',
+        map: (row: Record<string, unknown>) => ({
+          id: String(row.id),
+          store_id: String(row.store_id),
+          supplier_id: String(row.supplier_id),
+          purchase_order_id: (row.purchase_order_id as string) || null,
+          amount: Number(row.amount) || 0,
+          method: row.method === 'momo' || row.method === 'bank' ? row.method : 'cash',
+          note: String(row.note || ''),
+          paid_at: String(row.paid_at || row.created_at || ''),
+          created_by: (row.created_by as string) || null,
+          created_by_name: String(row.created_by_name || ''),
+          created_at: String(row.created_at || ''),
+          synced: 1,
+        }),
+        dbTable: db.supplier_payments,
+        merge: async (remote: LocalSupplierPayment, local: LocalSupplierPayment | undefined) => {
+          if (!local || local.synced !== 0) return remote;
+          return local;
+        },
+      },
+      {
+        label: 'Store deals',
+        table: 'store_promotions',
+        map: (row: Record<string, unknown>) => ({
+          id: String(row.id),
+          store_id: String(row.store_id),
+          name: String(row.name || ''),
+          promo_type: (['sale_price', 'percent', 'fixed', 'multibuy', 'coupon'].includes(String(row.promo_type))
+            ? row.promo_type
+            : 'percent') as LocalStorePromotion['promo_type'],
+          product_id: (row.product_id as string) || null,
+          category: String(row.category || ''),
+          sale_price: Number(row.sale_price) || 0,
+          percent_off: Number(row.percent_off) || 0,
+          amount_off: Number(row.amount_off) || 0,
+          buy_quantity: Math.max(0, Math.floor(Number(row.buy_quantity) || 0)),
+          free_quantity: Math.max(0, Math.floor(Number(row.free_quantity) || 0)),
+          coupon_code: String(row.coupon_code || ''),
+          starts_at: (row.starts_at as string) || null,
+          ends_at: (row.ends_at as string) || null,
+          is_active: row.is_active === false ? 0 : 1,
+          created_at: String(row.created_at || ''),
+          updated_at: String(row.updated_at || row.created_at || ''),
+          synced: 1,
+        }),
+        dbTable: db.store_promotions,
+        merge: async (remote: LocalStorePromotion, local: LocalStorePromotion | undefined) => {
+          if (!local || local.synced !== 0) return remote;
+          return new Date(remote.updated_at).getTime() >= new Date(local.updated_at).getTime() ? remote : local;
+        },
+      },
+      {
+        label: 'SMS outbox',
+        table: 'sms_outbox',
+        map: (row: Record<string, unknown>) => ({
+          id: String(row.id),
+          store_id: String(row.store_id),
+          kind: row.kind === 'closing' ? 'closing' : 'receipt',
+          recipient: String(row.recipient || ''),
+          message: String(row.message || ''),
+          status: row.status === 'sent' || row.status === 'failed' ? row.status : 'queued',
+          error_message: String(row.error_message || ''),
+          created_at: String(row.created_at || ''),
+          sent_at: typeof row.sent_at === 'string' ? row.sent_at : null,
+          synced: 1,
+        }),
+        dbTable: db.sms_outbox,
+        merge: async (remote: LocalSmsOutbox, local: LocalSmsOutbox | undefined) => {
+          if (!local || local.synced !== 0) return remote;
+          return local;
+        },
+      },
     ] as const;
     const fullyPulledTables = new Set<string>();
 
@@ -5022,7 +5523,7 @@ export async function syncFromSupabase(opts?: {
         // supabase-migrate-debt-reminders-dashboard.sql has been run. Skip it
         // quietly until then instead of failing the whole pull.
         if (
-          config.table === 'debt_reminders' &&
+          OPTIONAL_CLOUD_TABLES.has(config.table) &&
           /does not exist|PGRST205|schema cache/i.test(error.message || '')
         ) {
           continue;

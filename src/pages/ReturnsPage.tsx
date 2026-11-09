@@ -53,7 +53,7 @@ export default function ReturnsPage() {
         db.customers.where('store_id').equals(storeId).toArray(),
       ]);
       const completedTransactions = allTransactions
-        .filter((transaction) => transaction.status === 'completed')
+        .filter((transaction) => transaction.status === 'completed' && transaction.void_status !== 'voided')
         .sort((a, b) => b.created_at.localeCompare(a.created_at));
       const transactionIds = new Set(completedTransactions.map((transaction) => transaction.id));
       setTransactions(completedTransactions);

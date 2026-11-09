@@ -15,6 +15,7 @@ import { queueStockReceipt, type StockReceiptKind } from '@/lib/stockApprovals';
 import { emitStockChanged, type StockChange } from '@/lib/stockEvents';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { canonicalShopId, openingBatchId, legacyShopId, isUuid, stableUuid } from '@/lib/ids';
+import { roundStockQty, roundStockQtyAllowZero } from '@/lib/measure';
 
 /** Beyond this, qty is treated as corrupt (e.g. string-concat / scientific junk). */
 const MAX_REASONABLE_QTY = 50_000_000;
@@ -30,11 +31,7 @@ function nowIso(): string {
  * Also: `"0" || 0` is `"0"` (truthy), which spreads the string-concat bug.
  */
 export function toQty(value: unknown): number {
-  const n = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(n) || n <= 0) return 0;
-  const floored = Math.floor(n);
-  if (floored > MAX_REASONABLE_QTY) return 0;
-  return floored;
+  return roundStockQty(value);
 }
 
 /** Coerce money fields; drop non-finite / absurd unit prices. */
@@ -716,7 +713,7 @@ export async function repairCorruptStockQuantities(storeId: string): Promise<num
     const costNeedsFix = !isSaneMoney(batch.cost_price) || typeof batch.cost_price === 'string';
     if (!qtyNeedsFix && !costNeedsFix) continue;
 
-    const safe = isSaneQty(batch.quantity) ? Math.floor(Number(batch.quantity)) : toQty(batch.quantity);
+    const safe = isSaneQty(batch.quantity) ? roundStockQtyAllowZero(batch.quantity) : toQty(batch.quantity);
     const cost = isSaneMoney(batch.cost_price) ? Number(batch.cost_price) : toMoney(batch.cost_price);
     if (batch.quantity === safe && batch.cost_price === cost) continue;
 
@@ -739,7 +736,7 @@ export async function repairCorruptStockQuantities(storeId: string): Promise<num
   for (const product of products) {
     const hasBatches = Object.prototype.hasOwnProperty.call(batchMap, product.id);
     const catalogStock = isSaneQty(product.stock_level)
-      ? Math.floor(Number(product.stock_level))
+      ? roundStockQtyAllowZero(product.stock_level)
       : toQty(product.stock_level);
 
     // If batch rows exist, catalog must equal batch sum (including 0)
@@ -810,7 +807,7 @@ export async function alignProductsWithBatchStock(
       ? Number(product.selling_price)
       : toMoney(product.selling_price);
     const catalogStock = isSaneQty(product.stock_level)
-      ? Math.floor(Number(product.stock_level))
+      ? roundStockQtyAllowZero(product.stock_level)
       : toQty(product.stock_level);
 
     const hasShopBatches = Object.prototype.hasOwnProperty.call(batchMap, product.id);
@@ -940,7 +937,7 @@ export async function reconcileProductStockBatches(
   }
 
   const target = isSaneQty(product.stock_level)
-    ? Math.floor(Number(product.stock_level))
+    ? roundStockQtyAllowZero(product.stock_level)
     : toQty(product.stock_level);
   if (target <= 0) return 0;
 
@@ -1008,7 +1005,7 @@ export async function setProductStockLevel(params: {
   userId?: string | null;
 }): Promise<{ totalQty: number; pending: boolean; requestId?: string }> {
   await ensureStoreLocations(params.storeId);
-  const target = Math.max(0, Math.floor(Number(params.targetQty) || 0));
+  const target = roundStockQtyAllowZero(params.targetQty);
   const current = await getProductTotalStock(params.productId);
   const delta = target - current;
   if (delta === 0) {
@@ -1054,7 +1051,7 @@ export async function receiveStock(params: {
   /** Set only by cashier approval. Unapproved receipts wait in the arrival queue. */
   approved?: boolean;
 }): Promise<LocalStockBatch | { pending: true; requestId: string }> {
-  const quantity = Math.floor(Number(params.quantity) || 0);
+  const quantity = toQty(params.quantity);
   if (quantity <= 0) throw new Error('Quantity must be greater than zero');
 
   await ensureStoreLocations(params.storeId);
@@ -1126,7 +1123,7 @@ export async function allocateFefo(
   locationId: string,
   baseQty: number
 ): Promise<{ batchId: string; qty: number }[]> {
-  const needed = Math.floor(Number(baseQty) || 0);
+  const needed = toQty(baseQty);
   if (needed <= 0) return [];
 
   const batches = sortBatchesFefo(
@@ -1181,7 +1178,7 @@ export async function transferStockBetweenStores(params: {
   sourceStoreName?: string;
   destinationStoreName?: string;
 }): Promise<BranchTransferResult> {
-  const quantity = Math.floor(Number(params.quantity) || 0);
+  const quantity = toQty(params.quantity);
   if (quantity <= 0) throw new Error('Quantity must be greater than zero');
   if (params.sourceStoreId === params.destinationStoreId) {
     throw new Error('Choose two different stores');
@@ -1311,7 +1308,7 @@ export async function transferStock(params: {
   userId?: string | null;
   note?: string;
 }): Promise<void> {
-  const quantity = Math.floor(Number(params.quantity) || 0);
+  const quantity = toQty(params.quantity);
   if (quantity <= 0) throw new Error('Quantity must be greater than zero');
   if (params.fromLocationId === params.toLocationId) {
     throw new Error('Source and destination locations must differ');
@@ -1384,7 +1381,7 @@ export async function deductSaleStock(params: {
   userId?: string | null;
   transactionId?: string | null;
 }): Promise<{ batchId: string; qty: number }[]> {
-  const quantity = Math.floor(Number(params.baseQty) || 0);
+  const quantity = toQty(params.baseQty);
   if (quantity <= 0) return [];
 
   const liveBatches = sortBatchesFefo(
@@ -1502,7 +1499,7 @@ export async function deductSaleStockForItems(params: {
   // Aggregate qty needed per product (multiple cart lines can share a SKU)
   const needByProduct = new Map<string, { qty: number; name?: string }>();
   for (const item of params.items) {
-    const qty = Math.floor(Number(item.baseQty) || 0);
+    const qty = toQty(item.baseQty);
     if (qty <= 0) continue;
     const prev = needByProduct.get(item.productId);
     needByProduct.set(item.productId, {
@@ -1909,7 +1906,7 @@ export async function recordStockCount(params: {
     if (!product || product.store_id !== params.storeId) {
       throw new Error('A counted product is no longer in this store.');
     }
-    const counted = Math.max(0, Math.floor(Number(line.countedQty) || 0));
+    const counted = roundStockQtyAllowZero(line.countedQty);
     const current = await getLocationStock(line.productId, params.locationId);
     const delta = counted - current;
     if (delta === 0) {
@@ -2145,7 +2142,7 @@ export async function processSaleReturn(params: {
 
       const packSize = Math.max(1, Number(item.pack_size) || 1);
       const unitsPerSoldUnit = item.unit_type === 'pack' ? packSize : 1;
-      const stockQuantity = Math.round(quantity * unitsPerSoldUnit);
+      const stockQuantity = roundStockQty(quantity * unitsPerSoldUnit);
       const batch: LocalStockBatch = {
         id: generateId(),
         store_id: params.storeId,

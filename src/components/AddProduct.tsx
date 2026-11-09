@@ -19,6 +19,8 @@ import { toMoneyAmount } from '@/lib/money';
 import { getStoreCurrency } from '@/lib/currency';
 import { useAuthStore } from '@/store/useAuthStore';
 import { recordActivity } from '@/lib/activityLog';
+import { MEASURE_UNITS, productAllowsDecimal, roundStockQtyAllowZero } from '@/lib/measure';
+import ProductVariantsEditor from '@/components/ProductVariantsEditor';
 
 interface AddProductProps {
   isOpen: boolean;
@@ -63,6 +65,8 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
   const [scanPulse, setScanPulse] = useState(false);
   const [hardwareHint, setHardwareHint] = useState('');
   const [imageUrl, setImageUrl] = useState('');
+  const [unit, setUnit] = useState('pcs');
+  const [allowDecimal, setAllowDecimal] = useState(false);
   const [imageBusy, setImageBusy] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -104,6 +108,8 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         setPackSize(String(editProduct.pack_size ?? 1));
         setTrackExpiry((editProduct.track_expiry ?? 0) === 1);
         setSellOnline((editProduct.sell_online ?? 0) === 1);
+        setUnit(editProduct.unit || 'pcs');
+        setAllowDecimal(productAllowsDecimal(editProduct));
         const mode = (editProduct.wholesale_mode || 'none') as WholesaleMode;
         setWholesaleMode(
           mode === 'pack' || mode === 'unit_discount' || mode === 'tiers' ? mode : 'none'
@@ -117,6 +123,8 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         const existingTiers = parseTiers(editProduct.wholesale_tiers_json);
         setTiers(existingTiers.length > 0 ? existingTiers : [{ min_qty: 10, unit_price: 0 }]);
       } else {
+        setUnit('pcs');
+        setAllowDecimal(false);
         setName('');
         setCategory(categories.includes('Food') ? 'Food' : categories[0] || 'Other');
         setBarcode(initialBarcode?.trim() || '');
@@ -254,7 +262,8 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
       setError('Enter a valid selling price');
       return;
     }
-    if (!stockLevel || parseInt(stockLevel) < 0) {
+    const stockQty = allowDecimal ? roundStockQtyAllowZero(stockLevel) : Math.max(0, Math.floor(Number(stockLevel) || 0));
+    if (stockLevel === '' || !Number.isFinite(Number(stockLevel)) || Number(stockLevel) < 0) {
       setError('Enter a valid stock level');
       return;
     }
@@ -289,6 +298,8 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         pack_size: packSizeNum,
         track_expiry: trackExpiry ? 1 : 0,
         sell_online: sellOnline ? 1 : 0,
+        unit,
+        allow_decimal: allowDecimal ? 1 : 0,
         wholesale_mode: wholesaleMode,
         wholesale_pack_price:
           wholesaleMode === 'pack' ? toMoneyAmount(wholesalePackPrice) : 0,
@@ -322,7 +333,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         await setProductStockLevel({
           storeId,
           productId: editProduct.id,
-          targetQty: parseInt(stockLevel) || 0,
+          targetQty: stockQty,
           note: 'Product edit stock',
           userId: currentUserId,
         });
@@ -346,7 +357,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           updated_at: now,
           synced: 0,
         });
-        const openingQty = parseInt(stockLevel) || 0;
+        const openingQty = stockQty;
         if (openingQty > 0) {
           await setProductStockLevel({
             storeId,
@@ -369,6 +380,30 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           activityType: 'product',
           summary: `${editProduct ? 'Updated' : 'Added'} product ${name.trim()}`,
         });
+        if (editProduct && Math.abs(editProduct.selling_price - sell) > 0.001) {
+          recordActivity({
+            storeId,
+            storeName: useAuthStore.getState().currentStore?.name,
+            userId: currentUser.id,
+            username: currentUser.name,
+            role: currentUser.role,
+            activityType: 'price_change',
+            summary: `${currentUser.name} changed the selling price of ${name.trim()}`,
+            details: `Old price ${editProduct.selling_price.toFixed(2)} → new price ${sell.toFixed(2)}`,
+          });
+        }
+        if (editProduct && Math.abs(editProduct.cost_price - cost) > 0.001) {
+          recordActivity({
+            storeId,
+            storeName: useAuthStore.getState().currentStore?.name,
+            userId: currentUser.id,
+            username: currentUser.name,
+            role: currentUser.role,
+            activityType: 'cost_change',
+            summary: `${currentUser.name} changed the cost of ${name.trim()}`,
+            details: `Old cost ${editProduct.cost_price.toFixed(2)} → new cost ${cost.toFixed(2)}`,
+          });
+        }
       }
       onSaved();
       onClose();
@@ -653,6 +688,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
                 onChange={e => setStockLevel(e.target.value)}
                 placeholder="0"
                 min="0"
+                step={allowDecimal ? '0.001' : '1'}
                 className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
               />
             </div>
@@ -669,6 +705,24 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
               />
             </div>
           </div>
+
+          <div className="ios-glass rounded-2xl p-3 space-y-3">
+            <div>
+              <label className="text-sm font-medium text-gray-700 mb-1.5 block">Sell by</label>
+              <select value={unit} onChange={(event) => setUnit(event.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm bg-white">
+                {MEASURE_UNITS.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+              <p className="mt-1 text-[11px] text-gray-500">Price is per {unit}. Whole items stay on pcs unless you allow decimals.</p>
+            </div>
+            <label className="flex items-center justify-between gap-3 text-sm">
+              <span>Allow quantities like 2.5 {unit}</span>
+              <input type="checkbox" checked={allowDecimal} onChange={(event) => setAllowDecimal(event.target.checked)} />
+            </label>
+          </div>
+
+          {editProduct && <ProductVariantsEditor product={{ ...editProduct, unit, allow_decimal: allowDecimal ? 1 : 0 }} />}
 
           <div className="rounded-xl border border-gray-200 px-4 py-3 flex items-center justify-between gap-3">
             <div className="min-w-0">

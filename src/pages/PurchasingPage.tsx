@@ -8,6 +8,7 @@ import { addSupplier, cancelPurchaseOrder, createPurchaseOrder, parsePurchaseOrd
 import { triggerPushSync } from '@/lib/sync';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { syncBidirectional } from '@/lib/dexie';
+import SupplierPayablesPanel from '@/components/SupplierPayablesPanel';
 
 type OrderLineDraft = { productId: string; quantity: string; unitCost: string };
 
@@ -25,6 +26,7 @@ export default function PurchasingPage() {
   const [locationId, setLocationId] = useState('');
   const [lines, setLines] = useState<OrderLineDraft[]>([{ productId: '', quantity: '1', unitCost: '' }]);
   const [notes, setNotes] = useState('');
+  const [dueDate, setDueDate] = useState('');
   const [busy, setBusy] = useState(false);
   const [receivingId, setReceivingId] = useState<string | null>(null);
   const [receiptQuantities, setReceiptQuantities] = useState<Record<string, string>>({});
@@ -93,9 +95,10 @@ export default function PurchasingPage() {
     setBusy(true);
     setMessage('');
     try {
-      await createPurchaseOrder({ storeId: currentStore.id, supplierId, items: orderLines, notes });
+      await createPurchaseOrder({ storeId: currentStore.id, supplierId, items: orderLines, notes, dueDate });
       setLines([{ productId: '', quantity: '1', unitCost: '' }]);
       setNotes('');
+      setDueDate('');
       setOrderForm(false);
       await load();
       void triggerPushSync('purchase-order-save');
@@ -208,6 +211,8 @@ export default function PurchasingPage() {
           )}
         </section>
 
+        <SupplierPayablesPanel />
+
         <section className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2"><ClipboardList className="h-5 w-5 text-primary" /><h2 className="font-bold">Purchase orders</h2></div>
@@ -227,12 +232,16 @@ export default function PurchasingPage() {
                     <option value="">Choose product</option>
                     {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
                   </select>
-                  <input aria-label={`Quantity ${index + 1}`} type="number" min="1" step="1" value={line.quantity} onChange={(e) => setLines((current) => current.map((item, i) => i === index ? { ...item, quantity: e.target.value } : item))} placeholder="Qty" className="rounded-lg border border-gray-200 px-2 py-2 text-sm" />
+                  <input aria-label={`Quantity ${index + 1}`} type="number" min="0.001" step="0.001" value={line.quantity} onChange={(e) => setLines((current) => current.map((item, i) => i === index ? { ...item, quantity: e.target.value } : item))} placeholder="Qty" className="rounded-lg border border-gray-200 px-2 py-2 text-sm" />
                   <input aria-label={`Unit cost ${index + 1}`} type="number" min="0" step="0.01" value={line.unitCost} onChange={(e) => setLines((current) => current.map((item, i) => i === index ? { ...item, unitCost: e.target.value } : item))} placeholder="Unit cost" className="rounded-lg border border-gray-200 px-2 py-2 text-sm" />
                   {lines.length > 1 && <button type="button" onClick={() => setLines((current) => current.filter((_, i) => i !== index))} className="text-xs text-red-600 sm:col-span-4">Remove line</button>}
                 </div>
               ))}
               <button type="button" onClick={() => setLines((current) => [...current, { productId: '', quantity: '1', unitCost: '' }])} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700">Add another product</button>
+              <label className="block text-xs text-gray-600">
+                Payment due date
+                <input aria-label="Payment due date" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm" />
+              </label>
               <select aria-label="Receive into location" value={locationId} onChange={(e) => setLocationId(e.target.value)} className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
                 <option value="">Choose receiving location</option>
                 {locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}

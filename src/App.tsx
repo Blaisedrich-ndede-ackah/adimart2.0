@@ -39,6 +39,7 @@ const OwnerHomePage = lazy(() => import('@/pages/OwnerHomePage'));
 const MultiStorePage = lazy(() => import('@/pages/MultiStorePage'));
 const LearnAdimatPage = lazy(() => import('@/pages/LearnAdimatPage'));
 const CampaignsPage = lazy(() => import('@/pages/CampaignsPage'));
+const StoreDealsPage = lazy(() => import('@/pages/StoreDealsPage'));
 const PublicShopPage = lazy(() => import('@/pages/PublicShopPage'));
 const TermsPage = lazy(() => import('@/pages/TermsPage'));
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
@@ -50,6 +51,7 @@ import { useAgentAuthStore } from '@/store/useAgentAuthStore';
 import { isStoreAccessBlocked } from '@/lib/subscription';
 import { checkAndSendSubscriptionExpirySms } from '@/lib/subscriptionReminders';
 import { checkAndSendDebtReminders } from '@/lib/debtReminders';
+import { flushSmsOutbox, sendClosingSummary } from '@/lib/smsOutbox';
 import { canAccessCashbook } from '@/lib/staffAccess';
 import { createAutomaticStoreBackup, recordBackupIssue } from '@/lib/storeBackup';
 import { createDueRecurringExpenses } from '@/lib/dexie';
@@ -253,7 +255,7 @@ export default function App() {
   useEffect(() => {
     // Cashiers cannot stay on owner-only pages after switch/login
     if (currentUser?.role !== 'cashier') return;
-    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'customers', 'returns', 'multistore', 'adimat-ai'];
+    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'customers', 'returns', 'multistore', 'adimat-ai', 'store-deals'];
     const ecommerceOk = (currentUser.can_manage_ecommerce ?? 0) === 1;
     const cashbookOk = canAccessCashbook(currentUser);
     if (
@@ -291,6 +293,21 @@ export default function App() {
     const timer = window.setInterval(() => void checkAndSendDebtReminders(), 6 * 60 * 60 * 1000);
     return () => window.clearInterval(timer);
   }, [isAuthenticated, currentStore?.id, currentUser?.role]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentStore?.id) return;
+    const run = () => {
+      void flushSmsOutbox(currentStore.id);
+      if (currentUser?.role === 'owner') void sendClosingSummary(currentStore);
+    };
+    run();
+    const timer = window.setInterval(run, 60_000);
+    window.addEventListener('online', run);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('online', run);
+    };
+  }, [isAuthenticated, currentStore, currentUser?.role]);
 
   if (publicShopSlug) {
     return <PublicShopPage slug={publicShopSlug} />;
@@ -472,6 +489,8 @@ export default function App() {
         return currentUser ? <LearnAdimatPage onNavigate={setCurrentPage} /> : <POSPage />;
       case 'campaigns':
         return currentUser ? <CampaignsPage /> : <POSPage />;
+      case 'store-deals':
+        return role === 'owner' ? <StoreDealsPage /> : <POSPage />;
       case 'subscription':
         return role === 'owner' ? <SubscriptionPage /> : <POSPage />;
       case 'inventory':

@@ -56,7 +56,7 @@ export async function loadAiSnapshot(input: {
   ]);
 
   const keptSales = sales.filter(
-    (sale) => sale.created_at >= sinceIso || (sale.credit_balance || 0) > 0
+    (sale) => sale.void_status !== 'voided' && (sale.created_at >= sinceIso || (sale.credit_balance || 0) > 0)
   );
   const saleIds = new Set(keptSales.map((sale) => sale.id));
   const template = resolveDebtReminderSettings(store as LocalStore | undefined).messageTemplate;

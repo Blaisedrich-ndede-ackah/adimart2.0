@@ -15,6 +15,7 @@ import {
   History,
   Clock,
   BellRing,
+  MapPin,
 } from 'lucide-react';
 import {
   createCustomer,
@@ -38,6 +39,8 @@ import {
 } from '@/lib/dexie';
 import { listLocations } from '@/lib/warehouse';
 import { useAuthStore } from '@/store/useAuthStore';
+import { isOverdueCreditSale } from '@/lib/creditMath';
+import CustomerStatementPanel from '@/components/CustomerStatementPanel';
 import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
 import { triggerPushSync } from '@/lib/sync';
@@ -92,6 +95,8 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
   const [city, setCity] = useState('');
   const [region, setRegion] = useState('');
   const [openingBalance, setOpeningBalance] = useState('');
+  const [creditLimit, setCreditLimit] = useState('');
+  const [creditTermsDays, setCreditTermsDays] = useState('');
   const [locationId, setLocationId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [locations, setLocations] = useState<LocalLocation[]>([]);
@@ -230,6 +235,8 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
     setCity('');
     setRegion('');
     setOpeningBalance('');
+    setCreditLimit('');
+    setCreditTermsDays('');
     setLocationId(null);
     setError('');
   };
@@ -244,6 +251,8 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
     setCity(parts.city);
     setRegion(parts.region);
     setOpeningBalance('');
+    setCreditLimit(customer.credit_limit ? String(customer.credit_limit) : '');
+    setCreditTermsDays(customer.credit_terms_days == null ? '' : String(customer.credit_terms_days));
     setLocationId(customer.location_id ?? null);
     setError('');
   };
@@ -254,14 +263,24 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
     setSaving(true);
     try {
       const address = joinCustomerAddress({ street, city, region });
+      const credit = {
+        creditLimit: creditLimit.trim() ? Number(creditLimit) : null,
+        creditTermsDays: creditTermsDays.trim() ? Number(creditTermsDays) : null,
+      };
+      if (credit.creditLimit != null && (!Number.isFinite(credit.creditLimit) || credit.creditLimit < 0)) {
+        throw new Error('Enter a valid credit limit, or leave it blank.');
+      }
+      if (credit.creditTermsDays != null && (!Number.isFinite(credit.creditTermsDays) || credit.creditTermsDays < 0)) {
+        throw new Error('Enter payment terms in days, or leave them blank.');
+      }
       if (editing) {
-        await updateCustomer(editing.id, name, phone, locationId, address);
+        await updateCustomer(editing.id, name, phone, locationId, address, credit);
       } else {
         const amount = openingBalance.trim() ? Number(openingBalance) : 0;
         if (!Number.isFinite(amount) || amount < 0) {
           throw new Error('Enter a valid opening balance.');
         }
-        await createCustomer(name, phone, amount, locationId, address);
+        await createCustomer(name, phone, amount, locationId, address, credit);
       }
       resetForm();
       setStatus(editing ? 'Customer details updated.' : 'Customer registered.');
@@ -691,6 +710,32 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                 </p>
               </label>
             )}
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block text-sm font-medium text-gray-700">
+                Credit limit <span className="text-gray-400 text-xs">(optional)</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={creditLimit}
+                  onChange={(event) => setCreditLimit(event.target.value)}
+                  placeholder="No limit"
+                  className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5"
+                />
+              </label>
+              <label className="block text-sm font-medium text-gray-700">
+                Payment terms (days)
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={creditTermsDays}
+                  onChange={(event) => setCreditTermsDays(event.target.value)}
+                  placeholder="No due date"
+                  className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5"
+                />
+              </label>
+            </div>
             {!editing && (
               <>
                 <label className="block text-sm font-medium text-gray-700">
@@ -825,6 +870,13 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                             <span className="mt-1 block text-xs text-teal-700 font-medium">
                               <Wallet className="h-3 w-3 mr-1" /> Wallet {money(customer.wallet_balance || 0)}
                             </span>
+                            <span className="mt-0.5 block text-xs text-gray-600">
+                              Loyalty points {Math.max(0, Math.floor(Number(customer.loyalty_points_balance) || 0))}
+                              {customer.credit_limit ? ` · limit ${money(customer.credit_limit)}` : ''}
+                            </span>
+                            {customerSales.some((sale) => isOverdueCreditSale(sale)) && (
+                              <span className="mt-0.5 block text-xs font-semibold text-amber-800">Overdue debt</span>
+                            )}
                             <span className="mt-0.5 block text-xs text-gray-500">
                               <Phone className="h-3 w-3 mr-1" /> {customer.phone || 'No phone number'}
                             </span>
@@ -880,6 +932,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
 
                   {expanded && (
                     <div className="space-y-3 border-t border-gray-100 bg-gray-50/50 p-4 backdrop-blur-sm">
+                      {currentStore && <CustomerStatementPanel customer={customer} store={currentStore} />}
                       {customer.is_active === 1 && balance > 0 && (
                         <div className="space-y-3 rounded-xl border border-amber-100 bg-amber-50 p-4 shadow-sm">
                           <div className="flex items-center gap-2">

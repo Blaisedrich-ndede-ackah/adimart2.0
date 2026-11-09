@@ -68,6 +68,7 @@ export default function ReportsPage() {
   const [rangeError, setRangeError] = useState('');
   const [tab, setTab] = useState<ReportTab>('overview');
   const [transactions, setTransactions] = useState<LocalTransaction[]>([]);
+  const [voidedSales, setVoidedSales] = useState<LocalTransaction[]>([]);
   const [periodReturns, setPeriodReturns] = useState<LocalSaleReturn[]>([]);
   const [creditPayments, setCreditPayments] = useState<LocalCreditPayment[]>([]);
   const [customerOpeningPayments, setCustomerOpeningPayments] = useState<LocalCustomerOpeningPayment[]>([]);
@@ -111,7 +112,10 @@ export default function ReportsPage() {
     setLoadError('');
     try {
       const { start, end } = range;
-      const allTxns = (await getCurrentStoreTransactions()).filter(t => t.status === 'completed');
+      const loadedTxns = await getCurrentStoreTransactions();
+      const voidedInPeriod = loadedTxns.filter((sale) => sale.void_status === 'voided');
+      setVoidedSales(voidedInPeriod);
+      const allTxns = loadedTxns.filter((sale) => sale.status === 'completed' && sale.void_status !== 'voided');
       const allReturns = await db.sales_returns.where('store_id').equals(storeId).toArray();
       setPeriodReturns(allReturns.filter((record) => {
         const returnedAt = new Date(record.created_at);
@@ -475,14 +479,33 @@ export default function ReportsPage() {
                 </div>
                 <p className="text-2xl font-bold text-gray-900">{money(totalRevenue)}</p>
                 <p className="text-xs text-gray-500">{transactions.length} transactions</p>
+                {transactions.some((sale) => (sale.promotion_discount || 0) > 0) && (
+                  <p className="text-xs text-emerald-700 mt-1">
+                    Store deals saved customers {money(transactions.reduce((sum, sale) => sum + (Number(sale.promotion_discount) || 0), 0))}
+                  </p>
+                )}
               </div>
+              {voidedSales.length > 0 && (
+                <div className="ios-glass rounded-xl p-3 col-span-2 md:col-span-4">
+                  <p className="text-xs font-semibold text-gray-700">Voided sales are excluded from these totals</p>
+                  <ul className="mt-2 space-y-1">
+                    {voidedSales.slice(0, 8).map((sale) => (
+                      <li key={sale.id} className="flex justify-between gap-2 text-xs text-gray-600">
+                        <span className="truncate">{sale.receipt_number} · {sale.void_reason || 'Voided'}</span>
+                        <span>{money(sale.total_amount)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100">
                 <p className="text-xs text-gray-500">Gross Profit</p>
                 <p className="text-lg font-bold text-green-600">{money(summary.grossProfit)}</p>
               </div>
               <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100">
-                <p className="text-xs text-gray-500">Net Profit</p>
+                <p className="text-xs text-gray-500">Net profit</p>
+                <p className="text-[10px] text-gray-400">Gross profit minus expenses</p>
                 <p className={`text-lg font-bold ${summary.netProfit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                   {money(summary.netProfit)}
                 </p>

@@ -3,6 +3,7 @@
  * These are management statements for SMEs — not a full double-entry ledger.
  */
 
+import { isCountedSale } from './saleStatus';
 import {
   db,
   getCurrentStoreCashBookEntries,
@@ -124,7 +125,7 @@ export async function buildStoreFinancialStatements(
   const storeName = store?.name?.trim() || 'Store';
   const productMap = new Map(products.map((p) => [p.id, p]));
 
-  const completed = transactions.filter((t) => t.status === 'completed');
+  const completed = transactions.filter((t) => isCountedSale(t));
   const periodTxns = completed.filter((t) => inRange(dateOnlyFromIso(t.created_at), fromDate, toDate));
   const toDateTxns = completed.filter((t) => dateOnlyFromIso(t.created_at) <= toDate);
 
@@ -151,8 +152,8 @@ export async function buildStoreFinancialStatements(
   const costOfGoods = roundMoney(Math.max(0, grossCostOfGoods - returnedCost));
   const grossProfit = roundMoney(sales - costOfGoods);
 
-  const periodExpenses = expenses.filter((e) => inRange(dateOnlyFromIso(e.created_at), fromDate, toDate));
-  const toDateExpenses = expenses.filter((e) => dateOnlyFromIso(e.created_at) <= toDate);
+  const periodExpenses = expenses.filter((e) => inRange((e.expense_date || dateOnlyFromIso(e.created_at)), fromDate, toDate));
+  const toDateExpenses = expenses.filter((e) => (e.expense_date || dateOnlyFromIso(e.created_at)) <= toDate);
   const operatingExpenses = roundMoney(
     periodExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0)
   );
@@ -439,10 +440,17 @@ function buildPosition(params: {
   }
 
   const expensePage = params.toDateExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  const cashExpensePayments = params.toDateExpenses.reduce((sum, expense) => (
+    expense.payment_method === 'cash' ? sum + (Number(expense.amount) || 0) : sum
+  ), 0);
+  const bankExpensePayments = params.toDateExpenses.reduce((sum, expense) => (
+    expense.payment_method === 'bank' ? sum + (Number(expense.amount) || 0) : sum
+  ), 0);
 
   // POS cash sales plus cash-book cash movements, without double-counting "Cash sales".
-  const cash = roundMoney(posCash + cashBookCashIncomeExSales - cashBookCashExpenses);
-  const bank = roundMoney(cashBookBankIncome - cashBookBankExpenses);
+  // Cash and bank shop expenses reduce the cash and bank balances.
+  const cash = roundMoney(posCash + cashBookCashIncomeExSales - cashBookCashExpenses - cashExpensePayments);
+  const bank = roundMoney(cashBookBankIncome - cashBookBankExpenses - bankExpensePayments);
   const receivables = calculateReceivablesAsOf({
     customers: params.toDateCustomers,
     transactions: params.toDateTxns,
