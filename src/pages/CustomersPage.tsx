@@ -40,6 +40,7 @@ import {
 import { listLocations } from '@/lib/warehouse';
 import { useAuthStore } from '@/store/useAuthStore';
 import { isOverdueCreditSale } from '@/lib/creditMath';
+import CustomerStatementPanel from '@/components/CustomerStatementPanel';
 import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
 import { triggerPushSync } from '@/lib/sync';
@@ -931,6 +932,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
 
                   {expanded && (
                     <div className="space-y-3 border-t border-gray-100 bg-gray-50/50 p-4 backdrop-blur-sm">
+                      {currentStore && <CustomerStatementPanel customer={customer} store={currentStore} />}
                       {customer.is_active === 1 && balance > 0 && (
                         <div className="space-y-3 rounded-xl border border-amber-100 bg-amber-50 p-4 shadow-sm">
                           <div className="flex items-center gap-2">
