@@ -21,6 +21,7 @@ import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
 import CloudSyncPanel from '@/components/CloudSyncPanel';
 import { filterSalesByPeriod, type SalesPeriod } from '@/lib/salesRange';
+import { rejectSaleVoid, requestOrVoidSale } from '@/lib/saleVoids';
 
 const PERIODS: SalesPeriod[] = ['all', 'today', 'week', 'custom'];
 
@@ -42,6 +43,7 @@ export default function TransactionsPage() {
   const [statusTone, setStatusTone] = useState<'ok' | 'error'>('ok');
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [voidReason, setVoidReason] = useState('');
 
   const load = useCallback(async () => {
     if (!currentUser) return;
@@ -125,7 +127,9 @@ export default function TransactionsPage() {
   }, [periodFiltered, search]);
 
   const periodTotal = useMemo(
-    () => periodFiltered.reduce((sum, txn) => sum + (txn.total_amount || 0), 0),
+    () => periodFiltered.reduce((sum, txn) => (
+      txn.void_status === 'voided' ? sum : sum + (txn.total_amount || 0)
+    ), 0),
     [periodFiltered]
   );
 
@@ -284,6 +288,7 @@ export default function TransactionsPage() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-gray-900 font-mono truncate">
                       {txn.receipt_number}
+                      {txn.void_status === 'voided' ? ' · voided' : txn.void_status === 'requested' ? ' · void requested' : ''}
                     </p>
                     <p className="text-[11px] text-gray-500 truncate">
                       {new Date(txn.created_at).toLocaleString('en-GH')}
@@ -453,6 +458,65 @@ export default function TransactionsPage() {
                 </div>
               )}
 
+              {previewTxn.void_status === 'voided' && (
+                <p className="rounded-xl bg-gray-100 px-3 py-2 text-xs text-gray-700">
+                  Voided by {previewTxn.voided_by_name || 'owner'}. {previewTxn.void_reason}
+                </p>
+              )}
+              {previewTxn.void_status !== 'voided' && currentUser && (
+                <div className="ios-glass rounded-2xl p-3 space-y-2">
+                  <p className="text-xs font-semibold text-gray-800">
+                    {isOwner ? 'Void this sale' : 'Ask the owner to void this sale'}
+                  </p>
+                  <textarea
+                    value={voidReason}
+                    onChange={(event) => setVoidReason(event.target.value)}
+                    placeholder="Reason (required)"
+                    className="w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      className="flex-1 rounded-xl bg-red-600 py-2 text-xs font-semibold text-white"
+                      onClick={() => {
+                        void requestOrVoidSale({
+                          storeId: currentStore?.id || previewTxn.store_id,
+                          transactionId: previewTxn.id,
+                          reason: voidReason,
+                          actor: currentUser,
+                          storeName: currentStore?.name,
+                        }).then(async (result) => {
+                          setStatus(result === 'voided' ? 'Sale voided. Stock was restored.' : 'Void request sent to the owner.');
+                          setStatusTone('ok');
+                          setVoidReason('');
+                          await load();
+                        }).catch((error: unknown) => {
+                          setStatus(error instanceof Error ? error.message : 'Could not void the sale.');
+                          setStatusTone('error');
+                        });
+                      }}
+                    >
+                      {isOwner ? 'Void sale' : 'Request void'}
+                    </button>
+                    {isOwner && previewTxn.void_status === 'requested' && (
+                      <button
+                        type="button"
+                        className="rounded-xl bg-white px-3 py-2 text-xs font-semibold"
+                        onClick={() => {
+                          void rejectSaleVoid({
+                            storeId: currentStore?.id || previewTxn.store_id,
+                            transactionId: previewTxn.id,
+                            actor: currentUser,
+                            storeName: currentStore?.name,
+                          }).then(load);
+                        }}
+                      >
+                        Reject
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
               {(previewTxn.payment_reference || previewTxn.paystack_reference) && (
                 <p className="text-xs text-gray-600">
                   Payment reference:{' '}

@@ -21,6 +21,7 @@ const COMPANY_SERVICES_CONTACT = 'Need our services? Contact: +233-555-857-224';
 export interface EscPosReceiptItem {
   name: string;
   quantity: number;
+  unit?: string;
   unitPrice: number;
   subtotal: number;
 }
@@ -53,6 +54,10 @@ export interface EscPosReceiptData {
   balanceAfterPayment?: number;
   receiptPurpose?: 'sale' | 'credit-payment';
   currencyCode?: string;
+  promotionSummary?: string;
+  loyaltyPointsEarned?: number;
+  loyaltyPointsRedeemed?: number;
+  loyaltyRedeemAmount?: number;
 }
 
 /** Alias used by checkout / existing call sites */

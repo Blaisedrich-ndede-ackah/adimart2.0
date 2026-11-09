@@ -70,6 +70,9 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [allowFixed, setAllowFixed] = useState(true);
   const [cashierCanDiscount, setCashierCanDiscount] = useState(true);
   const [cashiersCanViewStock, setCashiersCanViewStock] = useState(true);
+  const [loyaltyEarnRate, setLoyaltyEarnRate] = useState('0');
+  const [loyaltyRedeemValue, setLoyaltyRedeemValue] = useState('0');
+  const [creditLimitAction, setCreditLimitAction] = useState<'warn' | 'block'>('warn');
   const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState(DEFAULT_SESSION_TIMEOUT_MINUTES);
   const [momoAccountName, setMomoAccountName] = useState('');
   const [momoNumber, setMomoNumber] = useState('');
@@ -116,6 +119,9 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
       setAllowFixed((currentStore.discount_allow_fixed ?? 1) === 1);
       setCashierCanDiscount((currentStore.cashier_can_discount ?? 1) === 1);
       setCashiersCanViewStock((currentStore.cashiers_can_view_stock ?? 1) === 1);
+      setLoyaltyEarnRate(String(Math.max(0, Math.floor(Number(currentStore.loyalty_earn_rate) || 0))));
+      setLoyaltyRedeemValue(String(Number(currentStore.loyalty_redeem_value) || 0));
+      setCreditLimitAction(currentStore.credit_limit_action === 'block' ? 'block' : 'warn');
       setSessionTimeoutMinutes(normalizeSessionTimeoutMinutes(currentStore.session_timeout_minutes));
       setMomoAccountName(currentStore.momo_account_name || '');
       setMomoNumber(currentStore.momo_number || '');
@@ -200,6 +206,9 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         discount_allow_fixed: allowFixed ? 1 : 0,
         cashier_can_discount: cashierCanDiscount ? 1 : 0,
         cashiers_can_view_stock: cashiersCanViewStock ? 1 : 0,
+        loyalty_earn_rate: Math.max(0, Math.floor(Number(loyaltyEarnRate) || 0)),
+        loyalty_redeem_value: Math.max(0, Number(loyaltyRedeemValue) || 0),
+        credit_limit_action: creditLimitAction,
         session_timeout_minutes: normalizeSessionTimeoutMinutes(sessionTimeoutMinutes),
         momo_account_name: momoAccountName.trim(),
         momo_number: momoNumber.trim(),
@@ -539,6 +548,26 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
               <div className="w-6 h-6 bg-white rounded-full shadow" />
             </button>
           </div>
+        </div>
+
+        <div className="ios-glass rounded-2xl p-4 mb-3 space-y-3">
+          <h3 className="font-bold text-gray-900">Loyalty points</h3>
+          <p className="text-xs text-gray-600">Points are earned on sales to a known customer and can be redeemed at checkout. Leave both at 0 to keep loyalty off.</p>
+          <label className="block text-sm">
+            Points earned per 1 {currentStore?.currency_code || 'GHS'}
+            <input type="number" min="0" step="1" value={loyaltyEarnRate} onChange={(event) => setLoyaltyEarnRate(event.target.value)} className="mt-1 w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2" />
+          </label>
+          <label className="block text-sm">
+            Value of 1 point
+            <input type="number" min="0" step="0.01" value={loyaltyRedeemValue} onChange={(event) => setLoyaltyRedeemValue(event.target.value)} className="mt-1 w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2" />
+          </label>
+          <label className="block text-sm">
+            When a credit sale would pass the customer's limit
+            <select value={creditLimitAction} onChange={(event) => setCreditLimitAction(event.target.value === 'block' ? 'block' : 'warn')} className="mt-1 w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2">
+              <option value="warn">Warn and allow the sale</option>
+              <option value="block">Block the sale</option>
+            </select>
+          </label>
         </div>
 
         {/* Discount Settings */}

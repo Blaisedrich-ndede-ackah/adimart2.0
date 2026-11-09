@@ -100,7 +100,7 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
         listLocalStores(),
       ]);
 
-      const completed = allTransactions.filter((transaction) => transaction.status === 'completed');
+      const completed = allTransactions.filter((transaction) => transaction.status === 'completed' && transaction.void_status !== 'voided');
       setTransactions(
         completed.filter((transaction) =>
           new Date(transaction.created_at).getTime() >= start

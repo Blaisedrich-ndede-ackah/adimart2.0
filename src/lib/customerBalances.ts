@@ -9,6 +9,7 @@
  */
 
 import { db } from './dexie';
+import { isCountedSale } from './saleStatus';
 
 export interface CustomerBalance {
   customerId: string;
@@ -50,7 +51,7 @@ export async function buildCustomerBalances(storeId: string): Promise<Map<string
 
   for (const transaction of transactions) {
     if (transaction.payment_method !== 'credit') continue;
-    if (transaction.status !== 'completed') continue;
+    if (!isCountedSale(transaction)) continue;
     const customerId = transaction.customer_id;
     if (!customerId) continue;
     const entry = balances.get(customerId);

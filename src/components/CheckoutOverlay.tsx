@@ -6,7 +6,9 @@ import {
 } from 'lucide-react';
 import { useCartStore, CartItem } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
-import { getCurrentStoreCustomers, LocalCustomer } from '@/lib/dexie';
+import { db, getCurrentStoreCustomers, LocalCustomer } from '@/lib/dexie';
+import { evaluateCreditLimit, normalizeCreditLimitAction } from '@/lib/creditMath';
+import { isCountedSale } from '@/lib/saleStatus';
 import { generatePaystackReference, initializePaystack, isPaystackConfigured, isValidPaystackEmail, resolvePaystackEmail } from '@/lib/paystack';
 import { printReceipt, type ReceiptData } from '@/lib/printService';
 import { shareReceipt, downloadReceipt, shareViaWhatsApp, PDFReceiptData } from '@/lib/receiptGenerator';
@@ -54,6 +56,10 @@ interface SaleResult {
   customerPhone?: string;
   creditBalance?: number;
   customerBalance?: number;
+  promotionSummary?: string;
+  loyaltyPointsEarned?: number;
+  loyaltyPointsRedeemed?: number;
+  loyaltyRedeemAmount?: number;
 }
 
 export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnectPrinter }: CheckoutOverlayProps) {
@@ -151,8 +157,9 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       cashierName: currentUser?.name || '',
       dateTime: new Date().toLocaleString('en-GH'),
       items: result.items.map(i => ({
-        name: i.name,
+        name: i.promotion_label ? `${i.name} (${i.promotion_label})` : i.name,
         quantity: i.quantity,
+        unit: i.measure_unit,
         unitPrice: i.unit_price,
         subtotal: i.subtotal,
       })),
@@ -171,6 +178,10 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       outstandingBalance: method === 'credit' ? undefined : result.creditBalance,
       amountPaid: method === 'credit' ? 0 : result.total,
       balanceAfterPayment: result.customerBalance ?? result.creditBalance,
+      promotionSummary: result.promotionSummary,
+      loyaltyPointsEarned: result.loyaltyPointsEarned,
+      loyaltyPointsRedeemed: result.loyaltyPointsRedeemed,
+      loyaltyRedeemAmount: result.loyaltyRedeemAmount,
     };
   }
 
@@ -320,10 +331,14 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         walletAmount: walletAmt,
         paystackReference: paystackRef,
         paymentReference: paymentRef || paystackRef,
-        customerName,
+        customerName: customerName || creditCustomers.find((customer) => customer.id === cart.loyaltyCustomerId)?.name,
         customerPhone,
         creditBalance: method === 'credit' ? result.total : 0,
         customerBalance: method === 'credit' ? result.customerBalance : undefined,
+        promotionSummary: result.promotionSummary,
+        loyaltyPointsEarned: result.loyaltyPointsEarned,
+        loyaltyPointsRedeemed: result.loyaltyPointsRedeemed,
+        loyaltyRedeemAmount: result.loyaltyRedeemAmount,
       };
       setSaleResult(completed);
       setStep('success');
@@ -430,12 +445,31 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
     processSale(manualMethod, 0, cart.total, '', reference);
   }
 
-  function handleCreditSaleConfirm() {
+  async function handleCreditSaleConfirm() {
     const customer = creditCustomers.find((item) => item.id === creditCustomerId && item.is_active === 1);
     if (!customer) {
       setError('Select a registered customer for this credit sale.');
       return;
     }
+    const sales = await db.transactions.where('customer_id').equals(customer.id).toArray();
+    const currentDebt = (Number(customer.opening_balance_remaining) || 0) + sales.reduce((sum, sale) => (
+      sale.payment_method === 'credit' && isCountedSale(sale) ? sum + (Number(sale.credit_balance) || 0) : sum
+    ), 0);
+    const decision = evaluateCreditLimit({
+      currentDebt,
+      saleAmount: cart.total,
+      creditLimit: customer.credit_limit,
+      action: normalizeCreditLimitAction(currentStore?.credit_limit_action),
+    });
+    if (decision.blocked) {
+      setError(decision.message);
+      return;
+    }
+    if (decision.overLimit && error !== decision.message) {
+      setError(`${decision.message} Tap Record Credit Sale again to continue.`);
+      return;
+    }
+    await cart.setLoyaltySelection(customer.id, cart.pointsToRedeem);
     processSale('credit', 0, 0, '', '', customer.name, customer.phone, customer.id);
   }
 
@@ -635,6 +669,48 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
 
           {step === 'method' && (
             <div className="space-y-3">
+              <div className="ios-glass rounded-2xl p-3 space-y-2">
+                <label className="block text-xs font-semibold text-gray-700">
+                  Coupon code
+                  <input
+                    value={cart.couponCode}
+                    onChange={(event) => { void cart.setCouponCode(event.target.value); }}
+                    placeholder="Leave blank if the deal applies itself"
+                    className="mt-1 w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm"
+                  />
+                </label>
+                {cart.promotionSummary && (
+                  <p className="text-xs text-emerald-800">Applied: {cart.promotionSummary}</p>
+                )}
+                <label className="block text-xs font-semibold text-gray-700">
+                  Customer for loyalty
+                  <select
+                    value={cart.loyaltyCustomerId}
+                    onChange={(event) => { void cart.setLoyaltySelection(event.target.value, cart.pointsToRedeem); }}
+                    className="mt-1 w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm"
+                  >
+                    <option value="">No customer</option>
+                    {creditCustomers.filter((customer) => customer.is_active === 1).map((customer) => (
+                      <option key={customer.id} value={customer.id}>
+                        {customer.name} · {Math.floor(Number(customer.loyalty_points_balance) || 0)} pts
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {cart.loyaltyCustomerId && (
+                  <label className="block text-xs font-semibold text-gray-700">
+                    Points to redeem
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={cart.pointsToRedeem || ''}
+                      onChange={(event) => { void cart.setLoyaltySelection(cart.loyaltyCustomerId, Number(event.target.value) || 0); }}
+                      className="mt-1 w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm"
+                    />
+                  </label>
+                )}
+              </div>
               {discountsEnabled && canApplyDiscount && (
                 <button
                   type="button"

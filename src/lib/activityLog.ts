@@ -12,7 +12,15 @@ export type ActivityType =
   | 'stock_rejection'
   | 'settings'
   | 'product'
-  | 'user';
+  | 'user'
+  | 'void'
+  | 'void_request'
+  | 'price_change'
+  | 'cost_change'
+  | 'discount'
+  | 'supplier_payment'
+  | 'loyalty'
+  | 'credit';
 
 export const ACTIVITY_TYPE_OPTIONS: Array<{ value: ActivityType | 'all'; label: string }> = [
   { value: 'all', label: 'All activities' },
@@ -25,6 +33,14 @@ export const ACTIVITY_TYPE_OPTIONS: Array<{ value: ActivityType | 'all'; label: 
   { value: 'settings', label: 'Settings' },
   { value: 'product', label: 'Products' },
   { value: 'user', label: 'Users' },
+  { value: 'void', label: 'Voids' },
+  { value: 'void_request', label: 'Void requests' },
+  { value: 'price_change', label: 'Price changes' },
+  { value: 'cost_change', label: 'Cost changes' },
+  { value: 'discount', label: 'Discounts' },
+  { value: 'supplier_payment', label: 'Supplier payments' },
+  { value: 'loyalty', label: 'Loyalty' },
+  { value: 'credit', label: 'Credit limits' },
 ];
 
 interface ActivityInput {

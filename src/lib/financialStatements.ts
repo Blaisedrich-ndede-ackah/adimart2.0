@@ -3,6 +3,7 @@
  * These are management statements for SMEs — not a full double-entry ledger.
  */
 
+import { isCountedSale } from './saleStatus';
 import {
   db,
   getCurrentStoreCashBookEntries,
@@ -124,7 +125,7 @@ export async function buildStoreFinancialStatements(
   const storeName = store?.name?.trim() || 'Store';
   const productMap = new Map(products.map((p) => [p.id, p]));
 
-  const completed = transactions.filter((t) => t.status === 'completed');
+  const completed = transactions.filter((t) => isCountedSale(t));
   const periodTxns = completed.filter((t) => inRange(dateOnlyFromIso(t.created_at), fromDate, toDate));
   const toDateTxns = completed.filter((t) => dateOnlyFromIso(t.created_at) <= toDate);
 

@@ -36,7 +36,7 @@ export default function FrequentItems({ onAddProduct }: { onAddProduct?: (produc
         const transactions = await db.transactions
           .where('store_id')
           .equals(storeId)
-          .filter((t) => Boolean(t.created_at && t.created_at > thirtyDaysAgo && t.status === 'completed'))
+          .filter((t) => Boolean(t.created_at && t.created_at > thirtyDaysAgo && t.status === 'completed' && t.void_status !== 'voided'))
           .toArray();
 
         // Count product frequency

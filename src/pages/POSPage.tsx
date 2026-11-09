@@ -11,7 +11,9 @@ import { useCartStore } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { canViewStockQuantities } from '@/lib/stockVisibility';
 import { useAccessibilityStore } from '@/lib/accessibility';
-import { db, LocalProduct, LocalLocation, getActiveStoreOwner, getCurrentStoreActiveProducts, getCurrentStoreId } from '@/lib/dexie';
+import { db, LocalProduct, LocalLocation, LocalProductVariant, getActiveStoreOwner, getCurrentStoreActiveProducts, getCurrentStoreId } from '@/lib/dexie';
+import { formatQty } from '@/lib/measure';
+import { variantLabel, variantSellingPrice } from '@/lib/variants';
 import { playScanBeep, primeScanBeep } from '@/lib/scanBeep';
 import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 import { getBluetoothHardwareStatus, subscribeBluetoothStatus } from '@/lib/bluetoothPeripherals';
@@ -128,6 +130,8 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   const [scannerActive, setScannerActive] = useState(true);
   const [showCameraScanner, setShowCameraScanner] = useState(false);
   const [showCheckout, setShowCheckout] = useState(false);
+  const [optionProduct, setOptionProduct] = useState<LocalProduct | null>(null);
+  const [productOptions, setProductOptions] = useState<LocalProductVariant[]>([]);
   const [scanFeedback, setScanFeedback] = useState<{ type: 'success' | 'error' | 'warning'; message: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -393,7 +397,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
       const since = Date.now() - 30 * 24 * 60 * 60 * 1000;
       const [transactions, items] = await Promise.all([
         db.transactions.where('store_id').equals(storeId).filter((transaction) =>
-          transaction.status === 'completed' && new Date(transaction.created_at).getTime() >= since
+          transaction.status === 'completed' && transaction.void_status !== 'voided' && new Date(transaction.created_at).getTime() >= since
         ).toArray(),
         db.transaction_items.where('store_id').equals(storeId).toArray(),
       ]);
@@ -478,14 +482,22 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   // Handheld Bluetooth / HID scanner → cart (active while not in checkout)
   useBluetoothBarcodeInput(handleScan, scannerActive && !showCheckout);
 
-  const handleAddProduct = async (product: LocalProduct, overrideSaleMode?: SaleMode) => {
+  const handleAddProduct = async (product: LocalProduct, overrideSaleMode?: SaleMode, variant?: LocalProductVariant) => {
+    if (!variant) {
+      const variants = await db.product_variants.where('product_id').equals(product.id).and((row) => row.is_active === 1).toArray();
+      if (variants.length > 0) {
+        setOptionProduct(product);
+        setProductOptions(variants);
+        return false;
+      }
+    }
     const modes = getAvailableSaleModes(product);
     const defaultMode = saleMode === 'wholesale' && modes.includes('wholesale') ? 'wholesale' : 'retail';
     const mode = overrideSaleMode ?? defaultMode;
 
     const packSize = Math.max(1, Number(product.pack_size) || 1);
     const usePack = unitType === 'pack' && packSize > 1;
-    const result = await cart.addItem(product, { unitType: usePack ? 'pack' : 'base', saleMode: mode });
+    const result = await cart.addItem(product, { unitType: usePack ? 'pack' : 'base', saleMode: mode, variant });
 
     if (result.success) {
       flashFeedback({ type: 'success', message: `Added: ${product.name}` }, 2000);
@@ -579,7 +591,10 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   };
 
   const handleUpdateQuantity = async (itemId: string, newQty: number) => {
-    const qty = Math.floor(newQty);
+    const line = cart.items.find((item) => item.id === itemId);
+    const qty = line?.allow_decimal === 1
+      ? Math.round((Number(newQty) || 0) * 1000) / 1000
+      : Math.floor(newQty);
     if (qty <= 0) {
       const item = cart.items.find((i) => i.id === itemId);
       if (item && window.confirm(`Remove ${item.name} from the cart?`)) {
@@ -1018,7 +1033,9 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                     unitType: displayUnitType,
                   });
                   const isWholesalePrice = pricePreview.label.startsWith('Wholesale');
-                  const unitLabel = displayUnitType === 'pack' ? 'pack' : 'unit';
+                  const unitLabel = displayUnitType === 'pack'
+                    ? 'pack'
+                    : (product.unit && product.unit !== 'pcs' ? product.unit : 'unit');
                   return (
                     <button
                       key={product.id}
@@ -1268,12 +1285,16 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                             <input
                               type="number"
                               value={item.quantity}
-                              onChange={(e) => void handleUpdateQuantity(item.id, parseInt(e.target.value) || 1)}
+                              onChange={(e) => void handleUpdateQuantity(item.id, Number(e.target.value))}
                               aria-label={`Quantity of ${item.name}`}
-                              inputMode="numeric"
-                              className="w-10 text-sm font-bold text-center bg-transparent border-b border-border focus:border-primary outline-none"
-                              min="1"
+                              inputMode={item.allow_decimal === 1 ? 'decimal' : 'numeric'}
+                              className="w-16 text-sm font-bold text-center bg-transparent border-b border-border focus:border-primary outline-none"
+                              min={item.allow_decimal === 1 ? '0.001' : '1'}
+                              step={item.allow_decimal === 1 ? '0.001' : '1'}
                             />
+                            {item.measure_unit && item.measure_unit !== 'pcs' && (
+                              <span className="text-[10px] font-semibold text-gray-500">{formatQty(item.quantity, item.measure_unit).split(' ').slice(1).join(' ')}</span>
+                            )}
                             <button
                               type="button"
                               onClick={() => void handleIncrement(item.id)}
@@ -1351,6 +1372,36 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
       )}
 
       {/* Checkout Overlay */}
+      {optionProduct && (
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/30 p-4 sm:items-center">
+          <div className="ios-glass w-full max-w-md rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="font-bold">Choose {optionProduct.name}</h2>
+              <button type="button" onClick={() => setOptionProduct(null)} aria-label="Close options" className="rounded-lg p-1"><X className="h-4 w-4" /></button>
+            </div>
+            {productOptions.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => {
+                  const chosen = optionProduct;
+                  setOptionProduct(null);
+                  void handleAddProduct(chosen, undefined, option);
+                }}
+                className="flex w-full items-center justify-between rounded-xl bg-white/80 px-3 py-3 text-left"
+              >
+                <span>
+                  <span className="block text-sm font-semibold">{variantLabel(option)}</span>
+                  <span className="block text-xs text-gray-500">
+                    {money(variantSellingPrice(optionProduct, option))}
+                    {showStockQty ? ` · ${formatQty(option.stock_level, optionProduct.unit)}` : ''}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <CheckoutOverlay
         isOpen={showCheckout}
         onClose={() => {

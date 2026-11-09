@@ -6,6 +6,7 @@ import {
 } from '@/lib/dexie';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { recordActivity } from '@/lib/activityLog';
+import { roundStockQty, roundStockQtyAllowZero } from '@/lib/measure';
 
 export type StockReceiptKind = 'receive' | 'adjust_in' | 'purchase' | 'opening' | 'count';
 
@@ -84,7 +85,7 @@ function logPayload(row: LocalStockApprovalLog): Record<string, unknown> {
 }
 
 export async function queueStockReceipt(input: QueueStockReceiptInput): Promise<string> {
-  const quantity = Math.floor(Number(input.quantity) || 0);
+  const quantity = roundStockQty(input.quantity);
   if (quantity <= 0) throw new Error('Quantity must be greater than zero');
   const now = new Date().toISOString();
   const id = generateId();
@@ -204,7 +205,11 @@ export async function approveStockReceipt(params: {
   }
   if (request.kind === 'purchase') {
     const { settlePurchaseReceipt } = await import('@/lib/purchasing');
-    await settlePurchaseReceipt(request, 'approved');
+    await settlePurchaseReceipt(request, 'approved', {
+      userId: params.userId,
+      userName: params.userName,
+      role: 'cashier',
+    });
   }
   const log: LocalStockApprovalLog = {
     id: generateId(),
@@ -358,7 +363,7 @@ export async function pullStockApprovalRecords(storeId: string): Promise<number>
       product_name: String(row.product_name || ''),
       location_id: String(row.location_id || ''),
       location_name: String(row.location_name || ''),
-      quantity: Math.floor(Number(row.quantity) || 0),
+      quantity: roundStockQtyAllowZero(row.quantity),
       kind: asKind(row.kind),
       note: String(row.note || ''),
       batch_code: String(row.batch_code || ''),
@@ -393,7 +398,7 @@ export async function pullStockApprovalRecords(storeId: string): Promise<number>
       request_id: String(row.request_id),
       product_id: String(row.product_id || ''),
       product_name: String(row.product_name || ''),
-      quantity: Math.floor(Number(row.quantity) || 0),
+      quantity: roundStockQtyAllowZero(row.quantity),
       kind: String(row.kind || ''),
       decision: row.decision === 'rejected' ? 'rejected' : 'approved',
       note: String(row.note || ''),

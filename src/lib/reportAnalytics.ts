@@ -9,6 +9,7 @@ import { formatGhsOfficial, orgFromStore, type FormalOrg } from './formalPdfMeta
 import { getLocationInventory, listLocations, toMoney, toQty } from './warehouse';
 import { lineBaseQty, roundMoney } from './money';
 import { getPaymentMethodLabel } from './paymentMethods';
+import { isCountedSale } from './saleStatus';
 
 export interface PeriodRange {
   start: Date;
@@ -136,7 +137,7 @@ export async function buildReportSummary(
 
   const periodTxns = transactions.filter(t => {
     const d = new Date(t.created_at);
-    return t.status === 'completed' && d >= start && d <= end;
+    return isCountedSale(t) && d >= start && d <= end;
   });
 
   const txnIds = new Set(periodTxns.map(t => t.id));
@@ -149,7 +150,8 @@ export async function buildReportSummary(
     const product = productMap.get(item.product_id);
     const unitCost = product?.cost_price ?? 0;
     const baseQty = lineBaseQty(item);
-    const existing = productStats.get(item.product_id) || {
+    const statKey = `${item.product_id}:${item.variant_id || ''}`;
+    const existing = productStats.get(statKey) || {
       product_id: item.product_id,
       product_name: item.product_name,
       quantity: 0,
@@ -162,7 +164,7 @@ export async function buildReportSummary(
     existing.revenue += roundMoney(item.subtotal);
     existing.cost += roundMoney(unitCost * baseQty);
     existing.profit = roundMoney(existing.revenue - existing.cost);
-    productStats.set(item.product_id, existing);
+    productStats.set(statKey, existing);
   }
 
   const allProductStats = [...productStats.values()].sort((a, b) => b.revenue - a.revenue);
@@ -520,7 +522,7 @@ export async function buildLocationReportSummary(
 
   const productMap = new Map(products.map((p) => [p.id, p]));
   let periodTxns = transactions.filter(
-    (t) => t.status === 'completed' && t.location_id === locationId
+    (t) => isCountedSale(t) && t.location_id === locationId
   );
 
   if (range) {
@@ -538,7 +540,8 @@ export async function buildLocationReportSummary(
   for (const item of periodItems) {
     const product = productMap.get(item.product_id);
     const unitCost = product?.cost_price ?? 0;
-    const existing = productStats.get(item.product_id) || {
+    const statKey = `${item.product_id}:${item.variant_id || ''}`;
+    const existing = productStats.get(statKey) || {
       product_id: item.product_id,
       product_name: item.product_name,
       quantity: 0,
@@ -550,7 +553,7 @@ export async function buildLocationReportSummary(
     existing.revenue += roundMoney(item.subtotal);
     existing.cost += roundMoney(unitCost * lineBaseQty(item));
     existing.profit = roundMoney(existing.revenue - existing.cost);
-    productStats.set(item.product_id, existing);
+    productStats.set(statKey, existing);
   }
 
   const sellingPrice = roundMoney(periodItems.reduce((sum, i) => sum + i.subtotal, 0));

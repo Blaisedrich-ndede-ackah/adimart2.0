@@ -31,6 +31,14 @@ import {
   type OtherChargeCategoryId,
 } from '@/lib/otherCharges';
 import { isManualPaymentMethod, type PaymentMethod } from '@/lib/paymentMethods';
+import { productAllowsDecimal, quantityForProduct, roundStockQtyAllowZero } from '@/lib/measure';
+import { applyPromotionPricing } from '@/lib/promotions';
+import { capRedeemPoints, pointsEarned, pointsValue } from '@/lib/loyaltyMath';
+import { creditDueDate, evaluateCreditLimit, normalizeCreditLimitAction } from '@/lib/creditMath';
+import { isCountedSale } from '@/lib/saleStatus';
+import { findVariantByCode, variantLabel, variantSellingPrice } from '@/lib/variants';
+import type { LocalProductVariant } from '@/lib/dexie';
+import { recordActivity } from '@/lib/activityLog';
 
 export interface CartItem {
   id: string;
@@ -46,6 +54,13 @@ export interface CartItem {
   subtotal: number;
   image_url?: string;
   price_label?: string;
+  variant_id?: string;
+  measure_unit?: string;
+  allow_decimal?: number;
+  category?: string;
+  list_unit_price?: number;
+  promotion_label?: string;
+  promotion_discount?: number;
 }
 
 export type CartDiscountKind = 'none' | 'percentage' | 'fixed';
@@ -83,15 +98,23 @@ interface CartState {
   otherChargesTotal: number;
   subtotal: number;
   total: number;
+  couponCode: string;
+  pointsToRedeem: number;
+  loyaltyCustomerId: string;
+  loyaltyRedeemValue: number;
+  promotionDiscount: number;
+  promotionSummary: string;
 
   setSaleContext: (locationId: string | null, saleMode: SaleMode, unitType?: UnitType) => void;
+  setCouponCode: (code: string) => Promise<string | null>;
+  setLoyaltySelection: (customerId: string, points: number) => Promise<void>;
   addItemByBarcode: (
     barcode: string,
     opts?: { unitType?: UnitType; saleMode?: SaleMode }
   ) => Promise<{ success: boolean; product?: LocalProduct; error?: string }>;
   addItem: (
     product: LocalProduct,
-    opts?: { unitType?: UnitType; quantity?: number; saleMode?: SaleMode }
+    opts?: { unitType?: UnitType; quantity?: number; saleMode?: SaleMode; variant?: LocalProductVariant }
   ) => Promise<{ success: boolean; error?: string }>;
   removeItem: (itemId: string) => void;
   updateQuantity: (itemId: string, quantity: number) => Promise<{ success: boolean; error?: string }>;
@@ -133,6 +156,12 @@ interface CartState {
     customerBalance: number;
     stockChanges: StockChange[];
     locationId: string;
+    promotionDiscount?: number;
+    promotionSummary?: string;
+    couponCode?: string;
+    loyaltyPointsEarned?: number;
+    loyaltyPointsRedeemed?: number;
+    loyaltyRedeemAmount?: number;
   }>;
 }
 
@@ -141,7 +170,8 @@ function recalculate(
   discountKind: CartDiscountKind,
   discountPercent: number,
   discountFixed: number,
-  otherCharges: OtherCharge[]
+  otherCharges: OtherCharge[],
+  loyaltyDiscount = 0
 ) {
   const subtotal = roundMoney(items.reduce((sum, i) => sum + i.subtotal, 0));
   let kind = discountKind;
@@ -162,10 +192,13 @@ function recalculate(
   }
 
   const chargesTotal = otherChargesTotal(otherCharges);
-  const total = roundMoney(subtotal - discountAmount + chargesTotal);
+  const beforeLoyalty = roundMoney(subtotal - discountAmount);
+  const loyalty = Math.min(roundMoney(Math.max(0, loyaltyDiscount)), Math.max(0, beforeLoyalty));
+  const total = roundMoney(subtotal - discountAmount - loyalty + chargesTotal);
   return {
     subtotal,
     discountAmount,
+    loyaltyDiscount: loyalty,
     otherCharges,
     otherChargesTotal: chargesTotal,
     total,
@@ -181,8 +214,49 @@ function withDiscount(state: CartState, items: CartItem[]) {
     state.discountKind,
     state.discountPercent,
     state.discountFixed,
-    state.otherCharges
+    state.otherCharges,
+    pointsValue(state.pointsToRedeem || 0, state.loyaltyRedeemValue || 0)
   );
+}
+
+async function applyDeals(items: CartItem[], couponCode: string): Promise<{
+  items: CartItem[];
+  promotionDiscount: number;
+  promotionSummary: string;
+}> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId || items.length === 0) {
+    return { items, promotionDiscount: 0, promotionSummary: '' };
+  }
+  const promos = await db.store_promotions.where('store_id').equals(storeId).and((row) => row.is_active === 1).toArray();
+  const applied = applyPromotionPricing(
+    items.map((item) => ({
+      id: item.id,
+      product_id: item.product_id,
+      category: item.category,
+      quantity: item.quantity,
+      list_unit_price: item.list_unit_price ?? item.unit_price,
+    })),
+    promos,
+    couponCode
+  );
+  const byId = new Map(applied.lines.map((line) => [line.id, line]));
+  return {
+    promotionDiscount: applied.promotionDiscount,
+    promotionSummary: applied.promotionSummary,
+    items: items.map((item) => {
+      const priced = byId.get(item.id);
+      if (!priced) return item;
+      return {
+        ...item,
+        list_unit_price: priced.list_unit_price,
+        unit_price: priced.unit_price,
+        subtotal: priced.subtotal,
+        promotion_discount: priced.promotion_discount,
+        promotion_label: priced.promotion_label,
+      };
+    }),
+  };
 }
 
 function buildCartLine(
@@ -207,6 +281,12 @@ function buildCartLine(
     subtotal: roundMoney(unitPrice * quantity),
     image_url: product.image_url,
     price_label: priced.label,
+    measure_unit: product.unit || 'pcs',
+    allow_decimal: productAllowsDecimal(product) ? 1 : 0,
+    category: product.category || '',
+    list_unit_price: unitPrice,
+    promotion_discount: 0,
+    promotion_label: '',
   };
 }
 
@@ -320,6 +400,49 @@ export const useCartStore = create<CartState>((set, get) => ({
   otherChargesTotal: 0,
   subtotal: 0,
   total: 0,
+  couponCode: '',
+  pointsToRedeem: 0,
+  loyaltyCustomerId: '',
+  loyaltyRedeemValue: 0,
+  promotionDiscount: 0,
+  promotionSummary: '',
+
+  setCouponCode: async (code) => {
+    const couponCode = code.trim();
+    const state = get();
+    const dealt = await applyDeals(state.items, couponCode);
+    const storeId = await getCurrentStoreId();
+    const promos = storeId
+      ? await db.store_promotions.where('store_id').equals(storeId).and((row) => row.is_active === 1).toArray()
+      : [];
+    const known = !couponCode || promos.some((promo) => (promo.coupon_code || '').trim().toLowerCase() === couponCode.toLowerCase());
+    set((current) => ({
+      couponCode,
+      items: dealt.items,
+      promotionDiscount: dealt.promotionDiscount,
+      promotionSummary: dealt.promotionSummary,
+      ...withDiscount({ ...current, couponCode }, dealt.items),
+    }));
+    return known ? null : 'That coupon code is not active.';
+  },
+
+  setLoyaltySelection: async (customerId, points) => {
+    const storeId = await getCurrentStoreId();
+    const store = storeId ? await db.stores.get(storeId) : undefined;
+    const customer = customerId ? await db.customers.get(customerId) : undefined;
+    const redeemValue = Number(store?.loyalty_redeem_value) || 0;
+    const state = get();
+    const payable = roundMoney(state.subtotal - state.discountAmount);
+    const capped = customer
+      ? capRedeemPoints(points, customer.loyalty_points_balance || 0, redeemValue, payable)
+      : 0;
+    set((current) => ({
+      loyaltyCustomerId: customer && customer.is_active === 1 ? customer.id : '',
+      pointsToRedeem: capped,
+      loyaltyRedeemValue: redeemValue,
+      ...withDiscount({ ...current, pointsToRedeem: capped, loyaltyRedeemValue: redeemValue }, current.items),
+    }));
+  },
 
   setSaleContext: (locationId, saleMode, unitType) => {
     const state = get();
@@ -330,14 +453,19 @@ export const useCartStore = create<CartState>((set, get) => ({
   },
 
   addItemByBarcode: async (barcode, opts) => {
-    const product = await getProductByBarcode(barcode);
-    if (!product) {
+    const storeId = await getCurrentStoreId();
+    const variant = storeId ? await findVariantByCode(storeId, barcode) : null;
+    const product = variant
+      ? await db.products.get(variant.product_id)
+      : await getProductByBarcode(barcode);
+    if (!product || product.is_active !== 1) {
       return { success: false, error: `No product found with barcode: ${barcode}` };
     }
     const state = get();
     const result = await get().addItem(product, {
       unitType: opts?.unitType || state.unitType,
       saleMode: opts?.saleMode || state.saleMode,
+      variant: variant || undefined,
     });
     if (result.success) return { success: true, product };
     return { success: false, error: result.error, product };
@@ -346,14 +474,29 @@ export const useCartStore = create<CartState>((set, get) => ({
   addItem: async (product, opts = {}) => {
     const state = get();
     const unitType = unitTypeForProduct(product, opts.unitType || state.unitType || 'base');
-    const addQty = Math.max(1, Math.floor(opts.quantity || 1));
+    const activeVariants = await db.product_variants
+      .where('product_id')
+      .equals(product.id)
+      .and((row) => row.is_active === 1)
+      .toArray();
+    if (activeVariants.length > 0 && !opts.variant) {
+      return { success: false, error: `Choose an option for ${product.name}.` };
+    }
+    const allowDecimal = productAllowsDecimal(product) && unitType !== 'pack';
+    const addQty = quantityForProduct(opts.quantity || 1, allowDecimal);
+    if (addQty <= 0) return { success: false, error: 'Enter a quantity greater than zero.' };
     const packSize = Math.max(1, Number(product.pack_size) || 1);
     const itemSaleMode = saleModeForProduct(product, opts.saleMode || state.saleMode);
-    const available = await stockAtContext(product.id, state.locationId);
+    let available = await stockAtContext(product.id, state.locationId);
+    if (opts.variant) {
+      available = Math.min(available, roundStockQtyAllowZero(opts.variant.stock_level));
+    }
 
+    const variantId = opts.variant?.id || '';
     const existing = state.items.find(
       (i) =>
         i.product_id === product.id &&
+        (i.variant_id || '') === variantId &&
         i.unit_type === unitType &&
         i.sale_mode === itemSaleMode
     );
@@ -371,37 +514,52 @@ export const useCartStore = create<CartState>((set, get) => ({
       };
     }
 
-    set((s) => {
-      let items: CartItem[];
-      if (existing) {
-        const line = buildCartLine(
-          product,
-          itemSaleMode,
-          unitType,
-          nextQty,
-          existing.id
-        );
-        items = s.items.map((i) => (i.id === existing.id ? line : i));
-      } else {
-        items = [
-          ...s.items,
-          buildCartLine(product, itemSaleMode, unitType, addQty),
-        ];
-      }
-      return { ...withDiscount(s, items), items };
-    });
+    const draft = (existingItem?: CartItem): CartItem => {
+      const line = buildCartLine(product, itemSaleMode, unitType, existingItem ? nextQty : addQty, existingItem?.id);
+      if (!opts.variant) return line;
+      const price = variantSellingPrice(product, opts.variant);
+      const qty = line.quantity;
+      return {
+        ...line,
+        name: `${product.name} (${variantLabel(opts.variant)})`,
+        variant_id: opts.variant.id,
+        unit_price: price,
+        list_unit_price: price,
+        subtotal: roundMoney(price * qty),
+      };
+    };
+    let items: CartItem[];
+    if (existing) {
+      items = state.items.map((item) => (item.id === existing.id ? draft(existing) : item));
+    } else {
+      items = [...state.items, draft()];
+    }
+    const dealt = await applyDeals(items, state.couponCode);
+    set((current) => ({
+      ...withDiscount(current, dealt.items),
+      items: dealt.items,
+      promotionDiscount: dealt.promotionDiscount,
+      promotionSummary: dealt.promotionSummary,
+    }));
     return { success: true };
   },
 
   removeItem: (itemId) => {
-    set((state) => {
-      const items = state.items.filter((i) => i.id !== itemId);
-      return { ...withDiscount(state, items), items };
+    const state = get();
+    const items = state.items.filter((item) => item.id !== itemId);
+    void applyDeals(items, state.couponCode).then((dealt) => {
+      set((current) => ({
+        ...withDiscount(current, dealt.items),
+        items: dealt.items,
+        promotionDiscount: dealt.promotionDiscount,
+        promotionSummary: dealt.promotionSummary,
+      }));
     });
   },
 
   updateQuantity: async (itemId, quantity) => {
-    const qty = Math.floor(quantity);
+    const currentItem = get().items.find((item) => item.id === itemId);
+    const qty = quantityForProduct(quantity, currentItem?.allow_decimal === 1);
     if (qty <= 0) {
       get().removeItem(itemId);
       return { success: true };
@@ -419,14 +577,30 @@ export const useCartStore = create<CartState>((set, get) => ({
       return { success: false, error: 'Not enough stock to add more of this item' };
     }
 
-    set((s) => {
-      const items = s.items.map((i) =>
-        i.id === itemId
-          ? buildCartLine(product, i.sale_mode, i.unit_type, qty, i.id)
-          : i
-      );
-      return { ...withDiscount(s, items), items };
+    const draft = state.items.map((item) => {
+      if (item.id !== itemId) return item;
+      const line = buildCartLine(product, item.sale_mode, item.unit_type, qty, item.id);
+      if (!item.variant_id) return { ...line, variant_id: item.variant_id };
+      return {
+        ...line,
+        name: item.name,
+        variant_id: item.variant_id,
+        unit_price: item.list_unit_price || item.unit_price,
+        list_unit_price: item.list_unit_price || item.unit_price,
+        subtotal: roundMoney((item.list_unit_price || item.unit_price) * qty),
+      };
     });
+    const variant = item.variant_id ? await db.product_variants.get(item.variant_id) : undefined;
+    if (variant && roundStockQtyAllowZero(variant.stock_level) < (item.unit_type === 'pack' ? qty * packSize : qty)) {
+      return { success: false, error: 'Not enough of that option in stock.' };
+    }
+    const dealt = await applyDeals(draft, state.couponCode);
+    set((current) => ({
+      ...withDiscount(current, dealt.items),
+      items: dealt.items,
+      promotionDiscount: dealt.promotionDiscount,
+      promotionSummary: dealt.promotionSummary,
+    }));
     return { success: true };
   },
 
@@ -439,6 +613,16 @@ export const useCartStore = create<CartState>((set, get) => ({
   decrementItem: (itemId) => {
     const item = get().items.find((i) => i.id === itemId);
     if (!item) return;
+    if (item.allow_decimal === 1) {
+      const step = item.quantity > 1 ? 1 : 0.1;
+      const next = Math.round((item.quantity - step) * 1000) / 1000;
+      if (next <= 0) {
+        get().removeItem(itemId);
+        return;
+      }
+      void get().updateQuantity(itemId, next);
+      return;
+    }
     if (item.quantity <= 1) {
       get().removeItem(itemId);
       return;
@@ -541,6 +725,12 @@ export const useCartStore = create<CartState>((set, get) => ({
       otherChargesTotal: 0,
       subtotal: 0,
       total: 0,
+      couponCode: '',
+      pointsToRedeem: 0,
+      loyaltyCustomerId: '',
+      loyaltyRedeemValue: 0,
+      promotionDiscount: 0,
+      promotionSummary: '',
     });
   },
 
@@ -643,12 +833,13 @@ export const useCartStore = create<CartState>((set, get) => ({
     const isOwner = cashier?.role === 'owner';
 
     // Recompute totals from lines so persisted sale matches cart math
-    const priced = recalculate(
+    let priced = recalculate(
       state.items,
       state.discountKind,
       state.discountPercent,
       state.discountFixed,
-      state.otherCharges
+      state.otherCharges,
+      0
     );
 
     if (!isOwner && !cashierCanDiscount && priced.discountAmount > 0) {
@@ -662,6 +853,32 @@ export const useCartStore = create<CartState>((set, get) => ({
         );
       }
     }
+
+    const attachedCustomerId = customerId || state.loyaltyCustomerId;
+    const redeemValue = Number(store?.loyalty_redeem_value) || 0;
+    let redeemPoints = 0;
+    let redeemAmount = 0;
+    if (attachedCustomerId && state.pointsToRedeem > 0) {
+      const loyaltyCustomer = await db.customers.get(attachedCustomerId);
+      redeemPoints = capRedeemPoints(
+        state.pointsToRedeem,
+        loyaltyCustomer?.loyalty_points_balance || 0,
+        redeemValue,
+        roundMoney(priced.subtotal - priced.discountAmount)
+      );
+      redeemAmount = pointsValue(redeemPoints, redeemValue);
+    }
+    priced = recalculate(
+      state.items,
+      state.discountKind,
+      state.discountPercent,
+      state.discountFixed,
+      state.otherCharges,
+      redeemAmount
+    );
+    const earnedPoints = attachedCustomerId
+      ? pointsEarned(priced.total, Number(store?.loyalty_earn_rate) || 0)
+      : 0;
 
     let cash = toMoneyAmount(cashAmount);
     let paystack = toMoneyAmount(paystackAmount);
@@ -743,22 +960,55 @@ export const useCartStore = create<CartState>((set, get) => ({
     const now = new Date().toISOString();
     let customerBalance = priced.total;
 
+    if (paymentMethod === 'credit' && attachedCustomerId) {
+      const creditCustomer = await db.customers.get(attachedCustomerId);
+      if (creditCustomer && creditCustomer.store_id === storeId) {
+        const existingCredit = await db.transactions.where('customer_id').equals(creditCustomer.id).toArray();
+        const currentDebt = toMoneyAmount(
+          (creditCustomer.opening_balance_remaining || 0) +
+          existingCredit.reduce((sum, sale) => (
+            sale.payment_method === 'credit' && isCountedSale(sale)
+              ? sum + toMoneyAmount(sale.credit_balance || 0)
+              : sum
+          ), 0)
+        );
+        const decision = evaluateCreditLimit({
+          currentDebt,
+          saleAmount: priced.total,
+          creditLimit: creditCustomer.credit_limit,
+          action: normalizeCreditLimitAction(store?.credit_limit_action),
+        });
+        if (decision.blocked) {
+          throw new Error(`${decision.message} The store blocks credit sales over the limit.`);
+        }
+      }
+    }
+
     await db.transaction(
       'rw',
-      db.transactions,
-      db.transaction_items,
-      db.customers,
-      db.customer_wallet_transactions,
+      [
+        db.transactions,
+        db.transaction_items,
+        db.customers,
+        db.customer_wallet_transactions,
+        db.customer_loyalty_transactions,
+        db.product_variants,
+      ],
       async () => {
         let creditCustomer: LocalCustomer | undefined;
         let payingCustomer: LocalCustomer | undefined;
-        if (paymentMethod === 'credit' || wallet > 0) {
-          creditCustomer = await db.customers.get(customerId || '');
-          if (!creditCustomer || creditCustomer.store_id !== storeId || creditCustomer.is_active !== 1) {
+        if (attachedCustomerId && (paymentMethod === 'credit' || wallet > 0 || redeemPoints > 0 || earnedPoints > 0)) {
+          creditCustomer = await db.customers.get(attachedCustomerId);
+          if ((paymentMethod === 'credit' || wallet > 0) && (!creditCustomer || creditCustomer.store_id !== storeId || creditCustomer.is_active !== 1)) {
             throw new Error('Select an active registered customer for this payment.');
           }
-          payingCustomer = creditCustomer;
+          if (creditCustomer && creditCustomer.store_id === storeId && creditCustomer.is_active === 1) {
+            payingCustomer = creditCustomer;
+          }
+        }
+        if (paymentMethod === 'credit' || wallet > 0) {
           if (wallet > 0) {
+            if (!creditCustomer) throw new Error('Select an active registered customer for this payment.');
             const availableWallet = toMoneyAmount(creditCustomer.wallet_balance || 0);
             if (wallet > availableWallet) {
               throw new Error(`Customer store credit is ${formatStoreMoneyNow(availableWallet)}.`);
@@ -806,6 +1056,16 @@ export const useCartStore = create<CartState>((set, get) => ({
           customer_phone: payingCustomer?.phone || '',
           credit_paid_amount: 0,
           credit_balance: paymentMethod === 'credit' ? priced.total : 0,
+          credit_due_date: paymentMethod === 'credit'
+            ? creditDueDate(payingCustomer?.credit_terms_days)
+            : null,
+          void_status: 'none',
+          loyalty_points_earned: payingCustomer ? earnedPoints : 0,
+          loyalty_points_redeemed: payingCustomer ? redeemPoints : 0,
+          loyalty_redeem_amount: payingCustomer ? redeemAmount : 0,
+          promotion_discount: state.promotionDiscount,
+          promotion_summary: state.promotionSummary,
+          coupon_code: state.couponCode,
           status: 'completed',
           location_id: locationId,
           sale_mode:
@@ -832,9 +1092,67 @@ export const useCartStore = create<CartState>((set, get) => ({
             pack_size: item.pack_size,
             base_quantity: item.base_quantity,
             sale_mode: item.sale_mode,
+            variant_id: item.variant_id || null,
+            measure_unit: item.measure_unit || '',
+            list_unit_price: item.list_unit_price ?? item.unit_price,
+            promotion_label: item.promotion_label || '',
             synced: 0,
           }))
         );
+        if (payingCustomer && (redeemPoints > 0 || earnedPoints > 0)) {
+          let pointsBalance = Math.max(0, Math.floor(Number(payingCustomer.loyalty_points_balance) || 0));
+          if (redeemPoints > 0) {
+            if (pointsBalance < redeemPoints) throw new Error('Not enough loyalty points to redeem.');
+            pointsBalance -= redeemPoints;
+            await db.customer_loyalty_transactions.add({
+              id: generateId(),
+              store_id: storeId,
+              customer_id: payingCustomer.id,
+              transaction_id: txnId,
+              type: 'redeem',
+              points: redeemPoints,
+              balance_after: pointsBalance,
+              reason: `Redeemed on ${receiptNumber}`,
+              created_at: now,
+              synced: 0,
+            });
+          }
+          if (earnedPoints > 0) {
+            pointsBalance += earnedPoints;
+            await db.customer_loyalty_transactions.add({
+              id: generateId(),
+              store_id: storeId,
+              customer_id: payingCustomer.id,
+              transaction_id: txnId,
+              type: 'earn',
+              points: earnedPoints,
+              balance_after: pointsBalance,
+              reason: `Earned on ${receiptNumber}`,
+              created_at: now,
+              synced: 0,
+            });
+          }
+          await db.customers.update(payingCustomer.id, {
+            loyalty_points_balance: pointsBalance,
+            updated_at: now,
+            synced: 0,
+          });
+        }
+        for (const item of state.items) {
+          if (!item.variant_id) continue;
+          const variant = await db.product_variants.get(item.variant_id);
+          if (!variant || variant.store_id !== storeId) {
+            throw new Error(`${item.name} is no longer available.`);
+          }
+          if (roundStockQtyAllowZero(variant.stock_level) + 0.0001 < item.base_quantity) {
+            throw new Error(`Not enough stock for "${item.name}".`);
+          }
+          await db.product_variants.update(variant.id, {
+            stock_level: roundStockQtyAllowZero(variant.stock_level - item.base_quantity),
+            updated_at: now,
+            synced: 0,
+          });
+        }
         if (paymentMethod === 'credit' && creditCustomer) {
           const existingCreditSales = await db.transactions
             .where('customer_id')
@@ -870,10 +1188,38 @@ export const useCartStore = create<CartState>((set, get) => ({
       const items = await db.transaction_items.where('transaction_id').equals(txnId).toArray();
       await db.transaction(
         'rw',
-        [db.transaction_items, db.transactions, db.customer_wallet_transactions, db.customers],
+        [db.transaction_items, db.transactions, db.customer_wallet_transactions, db.customers, db.customer_loyalty_transactions, db.product_variants],
         async () => {
           await Promise.all(items.map((item) => db.transaction_items.delete(item.id)));
           await db.transactions.delete(txnId);
+          for (const item of state.items) {
+            if (!item.variant_id) continue;
+            const variant = await db.product_variants.get(item.variant_id);
+            if (!variant) continue;
+            await db.product_variants.update(variant.id, {
+              stock_level: roundStockQtyAllowZero(variant.stock_level + item.base_quantity),
+              updated_at: new Date().toISOString(),
+              synced: 0,
+            });
+          }
+          if (attachedCustomerId) {
+            const loyaltyRows = await db.customer_loyalty_transactions.where('transaction_id').equals(txnId).toArray();
+            const customer = await db.customers.get(attachedCustomerId);
+            if (customer && loyaltyRows.length > 0) {
+              let pointsBalance = Math.max(0, Math.floor(Number(customer.loyalty_points_balance) || 0));
+              for (const row of [...loyaltyRows].reverse()) {
+                pointsBalance = row.type === 'earn'
+                  ? Math.max(0, pointsBalance - row.points)
+                  : pointsBalance + row.points;
+              }
+              await db.customers.update(customer.id, {
+                loyalty_points_balance: pointsBalance,
+                updated_at: new Date().toISOString(),
+                synced: 0,
+              });
+            }
+            await Promise.all(loyaltyRows.map((row) => db.customer_loyalty_transactions.delete(row.id)));
+          }
           if (wallet > 0 && customerId) {
             const walletEntries = await db.customer_wallet_transactions
               .where('transaction_id')
@@ -906,7 +1252,26 @@ export const useCartStore = create<CartState>((set, get) => ({
       customerBalance,
       stockChanges,
       locationId,
+      promotionDiscount: state.promotionDiscount,
+      promotionSummary: state.promotionSummary,
+      couponCode: state.couponCode,
+      loyaltyPointsEarned: attachedCustomerId ? earnedPoints : 0,
+      loyaltyPointsRedeemed: redeemPoints,
+      loyaltyRedeemAmount: redeemAmount,
     };
+
+    if (priced.discountAmount > 0) {
+      recordActivity({
+        storeId,
+        storeName: store?.name,
+        userId: cashierId,
+        username: cashierName,
+        role: isOwner ? 'owner' : 'cashier',
+        activityType: 'discount',
+        summary: `${cashierName} discounted ${receiptNumber} by ${priced.discountAmount.toFixed(2)}`,
+        details: `${state.discountKind} discount. Subtotal ${priced.subtotal.toFixed(2)} → total ${priced.total.toFixed(2)}.`,
+      });
+    }
 
     set({
       items: [],
@@ -918,6 +1283,12 @@ export const useCartStore = create<CartState>((set, get) => ({
       otherChargesTotal: 0,
       subtotal: 0,
       total: 0,
+      couponCode: '',
+      pointsToRedeem: 0,
+      loyaltyCustomerId: '',
+      loyaltyRedeemValue: 0,
+      promotionDiscount: 0,
+      promotionSummary: '',
     });
 
     // Push-only sync (no cloud pull) so checkout stays snappy
