@@ -1,4 +1,4 @@
-import { lazy, useState, useEffect, type ReactNode } from 'react';
+import { lazy, Suspense, useState, useEffect, type ReactNode } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { initAutoSync, startLiveStockSync, stopAutoSync, triggerPushSync } from '@/lib/sync';
 import { sendDeviceHeartbeat } from '@/lib/devicePresence';
@@ -6,7 +6,6 @@ import { autoReconnectPeripherals } from '@/lib/bluetoothPeripherals';
 import { clearAdminSession, restoreAdminSession } from '@/lib/adminAuth';
 import { isValidGhanaPhone } from '@/lib/platformSettings';
 import { getUnlockedWarehouseLocationId } from '@/lib/warehouseAccess';
-import PWAInstallBanner from '@/components/PWAInstallBanner';
 import SubscriptionWarningBanner from '@/components/SubscriptionWarningBanner';
 import StoreBrandingBar from '@/components/StoreBrandingBar';
 import { SyncStatusBanner } from '@/components/ui/SyncStatusBanner';
@@ -349,7 +348,6 @@ export default function App() {
   if (appMode === 'agent-login') {
     return (
       <div className="h-full flex flex-col">
-        <PWAInstallBanner />
         <div className="flex-1 min-h-0 overflow-y-auto">
           <AgentLoginPage
             onOpenStore={() => {
@@ -366,7 +364,6 @@ export default function App() {
   if (appMode === 'agent') {
     return (
       <div className="h-full flex flex-col">
-        <PWAInstallBanner />
         <div className="flex-1 min-h-0 overflow-hidden">
           <AgentShell
             onLogout={() => {
@@ -395,7 +392,6 @@ export default function App() {
   if (!isStoreSetup) {
     return (
       <div className="h-full flex flex-col">
-        <PWAInstallBanner />
         <div className="flex-1 min-h-0 overflow-y-auto">
           <StoreSetupPage
             onOpenAdmin={() => setAppMode('admin-login')}
@@ -412,7 +408,6 @@ export default function App() {
   if (!isAuthenticated) {
     return (
       <div className="h-full flex flex-col">
-        <PWAInstallBanner />
         <div className="flex-1 min-h-0 overflow-y-auto">
           <LoginPage
             onOpenAdmin={() => setAppMode('admin-login')}
@@ -437,7 +432,6 @@ export default function App() {
   if (isStoreAccessBlocked(currentStore)) {
     return authenticatedChrome(
       <div className="h-full flex flex-col">
-        <PWAInstallBanner />
         <div className="flex-1 min-h-0 overflow-y-auto">
           <StoreAccessBlockedPage />
         </div>
@@ -448,7 +442,6 @@ export default function App() {
   if (currentUser?.role === 'cashier' && currentUser.is_active === 0) {
     return authenticatedChrome(
       <div className="h-full flex flex-col">
-        <PWAInstallBanner />
         <div className="flex-1 min-h-0 overflow-y-auto">
           <CashierBlockedPage />
         </div>
@@ -539,7 +532,6 @@ export default function App() {
     >
       <AppNav currentPage={currentPage} onNavigate={setCurrentPage} />
       <div className={`flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden ${leftHanded ? 'lg:order-1' : ''}`}>
-        <PWAInstallBanner />
         <SyncStatusBanner />
         <SyncToast />
         <SubscriptionWarningBanner
@@ -547,9 +539,17 @@ export default function App() {
             currentUser?.role === 'owner' ? () => setCurrentPage('subscription') : undefined
           }
         />
-        <StoreBrandingBar />
+        {currentPage !== 'pos' && <StoreBrandingBar />}
         <div className="flex-1 min-h-0 overflow-hidden pb-[calc(4.75rem+env(safe-area-inset-bottom))] lg:pb-0">
-          {renderPage()}
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center" role="status">
+                <p className="text-sm font-medium text-muted">Loading…</p>
+              </div>
+            }
+          >
+            {renderPage()}
+          </Suspense>
         </div>
       </div>
       {needsPhone && <AddPhonePrompt />}

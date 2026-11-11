@@ -37,9 +37,8 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const [moreOpen, setMoreOpen] = useState(false);
   const [storeCount, setStoreCount] = useState(1);
   const [darkMode, setDarkMode] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    return window.localStorage.getItem('adimat-theme') === 'dark' ||
-      (!window.localStorage.getItem('adimat-theme') && window.matchMedia?.('(prefers-color-scheme: dark)').matches);
+    if (typeof window === 'undefined') return true;
+    return window.localStorage.getItem('adimat-theme') !== 'light';
   });
   const leftHanded = useAccessibilityStore((state) => state.leftHanded);
   const isOwner = currentUser?.role === 'owner';
@@ -154,16 +153,17 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className={`ios-pane hidden lg:flex w-60 xl:w-72 shrink-0 flex-col self-stretch text-ink border-white/50 ${
-        leftHanded ? 'lg:order-2 border-l' : 'border-r'
+      <aside className={`food-rail ios-pane hidden lg:flex w-[104px] shrink-0 flex-col self-stretch text-ink ${
+        leftHanded ? 'lg:order-2' : ''
       }`}>
-        <div className="px-4 pt-6 pb-3">
-          <p className="text-[13px] font-semibold text-muted">Adimat</p>
-          <p className="font-bold text-[22px] tracking-tight truncate leading-tight mt-0.5">{currentStore?.name || 'Store'}</p>
-          <p className="text-muted text-[13px] mt-1 truncate capitalize">
-            {currentUser?.name} · {currentUser?.role === 'owner' ? t('role.owner') : t('role.cashier')}
-          </p>
+        <div className="food-rail-logo" aria-hidden="true">
+          {currentUser?.photo_url?.startsWith('data:image/') ? (
+            <img src={currentUser.photo_url} alt="" />
+          ) : (
+            <span>{(currentUser?.name || 'A').slice(0, 1).toUpperCase()}</span>
+          )}
         </div>
+        <p className="sr-only">{currentUser?.name || 'Signed in'} · {currentStore?.name || 'Store'}</p>
         <nav className="flex-1 overflow-y-auto py-1 px-2 space-y-1">
           {navGroups.map((group) => {
             const groupItems = navItems.filter((item) => group.ids.includes(item.id));
@@ -176,11 +176,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
                 {groupItems.map((item) => {
                   const Icon = item.icon;
                   const isActive = !item.href && currentPage === item.id;
-                  const className = `w-full flex items-center gap-3 px-3 py-2.5 rounded-[12px] text-[15px] font-medium transition-colors touch-target ${
-                    isActive
-                      ? 'bg-white text-primary shadow-[0_1px_2px_rgba(0,0,0,0.05),0_0_0_0.5px_rgba(60,60,67,0.12)]'
-                      : 'text-ink hover:bg-black/[0.04] active:bg-black/[0.06]'
-                  }`;
+                  const className = `food-rail-item touch-target ${isActive ? 'is-active' : ''}`;
                   const content = (
                     <>
                       <Icon className="w-5 h-5 flex-shrink-0" />
@@ -216,13 +212,14 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
             );
           })}
         </nav>
-        <div className="p-2 border-t border-black/10 space-y-1">
+        <div className="food-rail-foot p-2 border-t border-white/10 space-y-1">
           <AccessibilityControls variant="sidebar" />
           <LanguageSwitcher variant="light" compact />
           <button
             type="button"
             onClick={() => setDarkMode((enabled) => !enabled)}
             aria-pressed={darkMode}
+            aria-label={darkMode ? 'Light mode' : 'Dark mode'}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-emerald-50 hover:bg-white/10 touch-target"
           >
             {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}

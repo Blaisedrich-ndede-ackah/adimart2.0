@@ -181,6 +181,8 @@ export interface LocalUser {
   can_access_cashbook?: number;
   /** Owner-configured POS section order, shared across their signed-in devices. */
   pos_layout_json?: string;
+  /** Compressed JPEG data URL. Each person sets their own; missing stays empty. */
+  photo_url?: string;
   created_at: string;
   synced: number;
   /** Local only: 1 while a PIN change on this device still has to reach the cloud. */
@@ -1982,6 +1984,14 @@ export async function updateUserPhone(userId: string, phoneRaw: string): Promise
   return display;
 }
 
+/** Save this person's profile photo on this device, then let the next sync carry it. */
+export async function updateUserPhoto(userId: string, photoUrl: string): Promise<void> {
+  const existing = await db.users.get(userId);
+  if (!existing) throw new Error('This account could not be found on this device.');
+  const next = photoUrl.startsWith('data:image/') ? photoUrl : '';
+  await db.users.update(userId, { photo_url: next, synced: 0 });
+}
+
 /** Active owner for the current (or given) store — used after warehouse PIN login. */
 export async function getActiveStoreOwner(storeId?: string): Promise<LocalUser | null> {
   const id = storeId || (await getCurrentStoreId());
@@ -3026,6 +3036,7 @@ const OPTIONAL_PUSH_COLUMNS: Record<string, string[]> = {
   transaction_items: ['variant_id', 'measure_unit', 'list_unit_price', 'promotion_label'],
   purchase_orders: ['amount_paid', 'due_date'],
   stock_batches: ['variant_id'],
+  users: ['photo_url'],
 };
 export const FAST_SYNC_TABLES = Object.keys(INCREMENTAL_PULL_FIELDS)
   .filter((table) => table !== 'debt_reminders');
@@ -3588,6 +3599,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
         can_manage_ecommerce: (u.can_manage_ecommerce ?? (u.role === 'owner' ? 1 : 0)) === 1,
         can_access_cashbook: u.role === 'owner' ? true : (u.can_access_cashbook ?? 1) === 1,
         pos_layout_json: u.role === 'owner' ? u.pos_layout_json || null : null,
+        photo_url: u.photo_url || '',
         created_at: u.created_at,
       })),
       async () => {
@@ -4642,6 +4654,7 @@ export async function syncFromSupabase(opts?: {
           pos_layout_json: row.role === 'owner' && typeof row.pos_layout_json === 'string'
             ? row.pos_layout_json
             : undefined,
+          photo_url: typeof row.photo_url === 'string' ? row.photo_url : undefined,
           created_at: row.created_at as string,
           synced: 1,
         }),
@@ -4669,6 +4682,7 @@ export async function syncFromSupabase(opts?: {
               can_manage_ecommerce: local.can_manage_ecommerce ?? remote.can_manage_ecommerce,
               can_access_cashbook: local.can_access_cashbook ?? remote.can_access_cashbook,
               pos_layout_json: local.pos_layout_json ?? remote.pos_layout_json,
+              photo_url: local.photo_url ?? remote.photo_url,
               synced: 0,
             };
           }
@@ -4676,6 +4690,7 @@ export async function syncFromSupabase(opts?: {
           return {
             ...remote,
             phone: (remote.phone || '').trim() || local.phone || '',
+            photo_url: typeof remote.photo_url === 'string' ? remote.photo_url : (local.photo_url || ''),
           };
         },
       },

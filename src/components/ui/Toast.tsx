@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, AlertCircle, Loader2, X } from 'lucide-react';
+import { AlertCircle, X } from 'lucide-react';
 import { useT } from '@/lib/i18n';
 
 type SyncPhase = 'start' | 'complete' | 'error';
@@ -34,23 +34,11 @@ export function SyncToast() {
   useEffect(() => {
     const onSync = (event: Event) => {
       const detail = (event as CustomEvent<SyncEventDetail>).detail ?? {};
-      if (detail.phase === 'complete' && detail.success) {
-        add({
-          type: 'success',
-          title: t('sync.notify.title'),
-          message: detail.message || t('sync.notify.message'),
-        });
-      } else if (detail.phase === 'error') {
+      if (detail.phase === 'error') {
         add({
           type: 'error',
           title: t('sync.notify.errorTitle'),
           message: detail.message || t('sync.notify.errorMessage'),
-        });
-      } else if (detail.phase === 'start') {
-        add({
-          type: 'info',
-          title: t('sync.notify.syncingTitle'),
-          message: t('sync.notify.syncingMessage'),
         });
       }
     };
@@ -72,13 +60,7 @@ export function SyncToast() {
           key={toast.id}
           className="pointer-events-auto flex w-full max-w-sm items-start gap-2.5 rounded-2xl border border-black/5 bg-white/90 p-3 text-ink shadow-[0_12px_32px_rgba(0,0,0,0.12)] backdrop-blur-xl animate-fade-in"
         >
-          {toast.type === 'success' ? (
-            <CheckCircle2 className="w-5 h-5 flex-shrink-0 text-success" />
-          ) : toast.type === 'error' ? (
-            <AlertCircle className="w-5 h-5 flex-shrink-0 text-danger" />
-          ) : (
-            <Loader2 className="w-5 h-5 animate-spin flex-shrink-0 text-primary" />
-          )}
+          <AlertCircle className="w-5 h-5 flex-shrink-0 text-danger" />
           <div className="flex-1 min-w-0">
             <p className="text-[15px] font-semibold tracking-tight">{toast.title}</p>
             <p className="text-[13px] mt-0.5 leading-relaxed text-muted">{toast.message}</p>
