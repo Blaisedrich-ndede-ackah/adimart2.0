@@ -451,7 +451,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       }
       setSmsNote(row.status === 'failed'
         ? (row.error_message || 'Receipt SMS was not sent.')
-        : 'Receipt SMS is queued and will send when this device is online.');
+        : 'This device is offline. The receipt SMS will send when it reconnects.');
     } catch (err) {
       setSmsNote(err instanceof Error ? err.message : 'Could not send the receipt SMS.');
     } finally {

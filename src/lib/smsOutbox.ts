@@ -100,7 +100,7 @@ export async function flushSmsOutbox(storeId: string): Promise<number> {
       if (result.ok) {
         await db.sms_outbox.update(row.id, { status: 'sent', sent_at: now, error_message: '', synced: 0 });
         sent += 1;
-      } else if (!result.retryable) {
+      } else if (!(result.retryable && typeof navigator !== 'undefined' && navigator.onLine === false)) {
         await db.sms_outbox.update(row.id, {
           status: 'failed',
           error_message: (result.error || 'SMS failed').slice(0, 300),
