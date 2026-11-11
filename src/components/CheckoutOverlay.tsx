@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   X, Banknote, CreditCard, Split, Percent, Shield,
   CheckCircle2, Loader2, Printer, AlertTriangle, Share2, Download,
@@ -88,6 +88,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
   const [isSharing, setIsSharing] = useState(false);
   const [smsPhone, setSmsPhone] = useState('');
   const [smsNote, setSmsNote] = useState('');
+  const [smsSending, setSmsSending] = useState(false);
+  const smsSendingRef = useRef(false);
   const [printError, setPrintError] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
   const [paystackError, setPaystackError] = useState('');
@@ -415,12 +417,15 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
   }
 
   async function handleSmsReceipt() {
-    if (!currentStore || !saleResult) return;
+    if (!currentStore || !saleResult || smsSendingRef.current) return;
     if (!smsPhone.trim()) {
       setSmsNote('Enter the customer phone number.');
       return;
     }
+    smsSendingRef.current = true;
+    setSmsSending(true);
     setSmsNote('');
+    const receiptNumber = saleResult.receiptNumber;
     try {
       const row = await queueSms({
         storeId: currentStore.id,
@@ -428,7 +433,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         recipient: smsPhone,
         message: receiptSmsText({
           storeName: currentStore.name,
-          receiptNumber: saleResult.receiptNumber,
+          receiptNumber,
           lines: saleResult.items.map((item) => ({
             name: item.name,
             quantity: item.quantity,
@@ -440,9 +445,18 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
           currency: currentStore.currency_code || 'GHS',
         }),
       });
-      setSmsNote(row.status === 'sent' ? 'Receipt SMS sent.' : 'Receipt SMS is queued and will send when this device is online.');
+      if (row.status === 'sent') {
+        onComplete(receiptNumber);
+        return;
+      }
+      setSmsNote(row.status === 'failed'
+        ? (row.error_message || 'Receipt SMS was not sent.')
+        : 'Receipt SMS is queued and will send when this device is online.');
     } catch (err) {
-      setSmsNote(err instanceof Error ? err.message : 'Could not queue the receipt SMS.');
+      setSmsNote(err instanceof Error ? err.message : 'Could not send the receipt SMS.');
+    } finally {
+      smsSendingRef.current = false;
+      setSmsSending(false);
     }
   }
 
@@ -1563,10 +1577,11 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                 <button
                   type="button"
                   onClick={() => void handleSmsReceipt()}
-                  className="flex w-full items-center justify-center gap-1 rounded-xl bg-emerald-700 py-2.5 text-xs font-semibold text-white"
+                  disabled={smsSending}
+                  className="flex w-full items-center justify-center gap-1 rounded-xl bg-emerald-700 py-2.5 text-xs font-semibold text-white disabled:opacity-50"
                 >
                   <MessageCircle className="h-4 w-4" />
-                  Send SMS
+                  {smsSending ? 'Sending SMS…' : 'Send SMS'}
                 </button>
                 {smsNote && <p className="text-center text-[11px] text-gray-600">{smsNote}</p>}
               </div>

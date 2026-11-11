@@ -29,6 +29,7 @@ import { toQty } from '@/lib/warehouse';
 import { buildCustomerBalances } from '@/lib/customerBalances';
 import { useLiveStoreSales } from '@/hooks/useLiveStoreSales';
 import DailyBriefCard from '@/components/DailyBriefCard';
+import SmsWalletCard from '@/components/SmsWalletCard';
 
 interface OwnerHomePageProps {
   onNavigate: (page: string, quickAdd?: boolean) => void;
@@ -71,7 +72,7 @@ function timeAgo(iso: string): string {
 }
 
 export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
-  const { currentStore } = useAuthStore();
+  const { currentStore, currentUser } = useAuthStore();
   const money = useFormatMoney();
   const t = useT();
   const [transactions, setTransactions] = useState<LocalTransaction[]>([]);
@@ -298,6 +299,14 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
             {loading ? <div className="mt-2 h-6 w-24 animate-pulse rounded bg-gray-100" /> : <p className="mt-2 text-lg font-bold">{money(todayNet)}</p>}
           </article>
         </section>
+
+        {currentStore && currentUser && (
+          <SmsWalletCard
+            storeId={currentStore.id}
+            userId={currentUser.id}
+            localBalancePesewas={Number(currentStore.sms_balance_pesewas) || 0}
+          />
+        )}
 
         <DailyBriefCard onNavigate={onNavigate} />
 

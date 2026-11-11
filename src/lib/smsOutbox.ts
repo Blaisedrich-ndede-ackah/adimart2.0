@@ -1,5 +1,5 @@
 import { db, generateId, type LocalSmsOutbox, type LocalStore } from '@/lib/dexie';
-import { sendSmsViaMnotify } from '@/lib/mnotify';
+import { sendStoreSms } from '@/lib/smsWallet';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { isCountedSale } from '@/lib/saleStatus';
 import { roundMoney } from '@/lib/money';
@@ -80,22 +80,35 @@ export async function queueSms(input: {
   return (await db.sms_outbox.get(row.id)) || row;
 }
 
+const smsSendInFlight = new Set<string>();
+
 export async function flushSmsOutbox(storeId: string): Promise<number> {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return 0;
   const queued = await db.sms_outbox.where('store_id').equals(storeId).and((row) => row.status === 'queued').toArray();
   let sent = 0;
   for (const row of queued) {
-    const result = await sendSmsViaMnotify(row.recipient, row.message);
-    const now = new Date().toISOString();
-    if (result.success) {
-      await db.sms_outbox.update(row.id, { status: 'sent', sent_at: now, error_message: '', synced: 0 });
-      sent += 1;
-    } else if (!result.skipped) {
-      await db.sms_outbox.update(row.id, {
-        status: 'failed',
-        error_message: (result.error || 'SMS failed').slice(0, 300),
-        synced: 0,
+    if (smsSendInFlight.has(row.id)) continue;
+    smsSendInFlight.add(row.id);
+    try {
+      const result = await sendStoreSms({
+        storeId,
+        kind: row.kind === 'closing' ? 'closing' : 'receipt',
+        recipients: [row.recipient],
+        message: row.message,
       });
+      const now = new Date().toISOString();
+      if (result.ok) {
+        await db.sms_outbox.update(row.id, { status: 'sent', sent_at: now, error_message: '', synced: 0 });
+        sent += 1;
+      } else if (!result.retryable) {
+        await db.sms_outbox.update(row.id, {
+          status: 'failed',
+          error_message: (result.error || 'SMS failed').slice(0, 300),
+          synced: 0,
+        });
+      }
+    } finally {
+      smsSendInFlight.delete(row.id);
     }
   }
   return sent;
