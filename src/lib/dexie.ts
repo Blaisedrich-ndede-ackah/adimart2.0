@@ -3,7 +3,7 @@ import { v4 as uuidv4, v5 as uuidv5 } from 'uuid';
 import { isSupabaseConfigured, supabase, testSupabaseConnection } from './supabase';
 import { isAdminSuperPin } from './superPin';
 import { toMoneyAmount } from './money';
-import { formatUnknownError, isUuid, uuidOrNull } from './ids';
+import { formatUnknownError, isUuid, openingBatchId, uuidOrNull } from './ids';
 import { cashbookAccessFromCloud } from './staffAccess';
 import { normalizeSessionTimeoutMinutes } from './sessionTimeout';
 import {
@@ -3149,6 +3149,11 @@ export async function adoptCloudStockLedger(
 
   const localBatches = await db.stock_batches.where('store_id').equals(storeId).toArray();
   const localById = new Map(localBatches.map((b) => [b.id, b]));
+  const pendingMovementBatchIds = new Set(
+    (await db.stock_movements.where('store_id').equals(storeId).and((movement) => movement.synced === 0).toArray())
+      .map((movement) => movement.batch_id)
+      .filter((id): id is string => isUuid(id))
+  );
   const remoteBatches = remoteRows.map(mapCloudBatch);
   const remoteIds = new Set(remoteBatches.map((b) => b.id));
 
@@ -3168,7 +3173,8 @@ export async function adoptCloudStockLedger(
   for (const local of localBatches) {
     if (remoteIds.has(local.id)) continue;
     if (local.synced !== 0) continue;
-    if ((local.batch_code || '').trim().toUpperCase() === 'OPENING') continue;
+    const referencedByPendingSale = pendingMovementBatchIds.has(local.id);
+    if ((local.batch_code || '').trim().toUpperCase() === 'OPENING' && !referencedByPendingSale) continue;
     if (!isUuid(local.id) || !isUuid(local.product_id) || !isUuid(local.location_id)) continue;
     nextBatches.push({ ...local, quantity: asQty(local.quantity) });
   }
@@ -3476,6 +3482,26 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
 }
 
 // Sync to Supabase
+async function fetchCloudIds(
+  table: 'stock_batches' | 'locations' | 'products',
+  storeId: string,
+  ids: string[],
+): Promise<{ present: Set<string>; failed: boolean }> {
+  const present = new Set<string>();
+  const unique = [...new Set(ids.filter((id) => isUuid(id)))];
+  for (let offset = 0; offset < unique.length; offset += 200) {
+    const slice = unique.slice(offset, offset + 200);
+    const { data, error } = await supabase
+      .from(table)
+      .select('id')
+      .eq('store_id', storeId)
+      .in('id', slice);
+    if (error) return { present, failed: true };
+    for (const row of data || []) present.add(String(row.id));
+  }
+  return { present, failed: false };
+}
+
 export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicalize?: boolean }): Promise<{ success: boolean; message: string }> {
   if (!isSupabaseConfigured()) {
     return { success: false, message: 'Supabase not configured. Add environment variables to enable cloud sync.' };
@@ -3775,21 +3801,11 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
           .map((movement) => movement.batch_id)
           .filter((id): id is string => isUuid(id))
       )];
-      const cloudBatchIds = new Set<string>();
-      let batchLookupFailed = false;
-      for (let offset = 0; offset < movementBatchIds.length; offset += 200) {
-        const batchIds = movementBatchIds.slice(offset, offset + 200);
-        const { data, error } = await supabase
-          .from('stock_batches')
-          .select('id')
-          .eq('store_id', storeId)
-          .in('id', batchIds);
-        if (error) {
-          errors.push(formatSyncError('Stock batch references', error));
-          batchLookupFailed = true;
-          break;
-        }
-        for (const row of data || []) cloudBatchIds.add(String(row.id));
+      const cloudBatches = await fetchCloudIds('stock_batches', storeId, movementBatchIds);
+      const cloudBatchIds = cloudBatches.present;
+      const batchLookupFailed = cloudBatches.failed;
+      if (batchLookupFailed) {
+        errors.push('Stock batch references: could not check which batches are already in the cloud.');
       }
 
       if (!batchLookupFailed) {
@@ -3816,8 +3832,15 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
             },
             errors
           );
-          if (repairCount === batchesToRepair.length) {
-            for (const batch of batchesToRepair) cloudBatchIds.add(batch.id);
+          if (repairCount > 0) {
+            const confirmed = await fetchCloudIds(
+              'stock_batches',
+              storeId,
+              batchesToRepair.map((batch) => batch.id),
+            );
+            if (!confirmed.failed) {
+              for (const id of confirmed.present) cloudBatchIds.add(id);
+            }
           }
         }
       }
@@ -3860,26 +3883,89 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
           errors
         );
       }
-      let blockedBatchReferences = 0;
+      const resolvedMovements: LocalStockMovement[] = [];
+      const stockToApply = new Map<string, LocalStockBatch>();
       for (const movement of unsyncedMovements) {
         if (!isUuid(movement.id) || !isUuid(movement.store_id) || !isUuid(movement.product_id)) {
           await db.stock_movements.delete(movement.id);
           continue;
         }
-        if (
-          movement.batch_id !== null &&
-          isUuid(movement.batch_id) &&
-          (batchLookupFailed || !cloudBatchIds.has(movement.batch_id))
-        ) {
-          blockedBatchReferences += 1;
+        const batchMissing = isUuid(movement.batch_id) && !batchLookupFailed && !cloudBatchIds.has(movement.batch_id!);
+        if (!batchMissing) {
+          resolvedMovements.push(movement);
           continue;
         }
+        const localBatches = await db.stock_batches.where('product_id').equals(movement.product_id).toArray();
+        const preferredId = openingBatchId(storeId, movement.product_id);
+        const target = localBatches.find((batch) => batch.id === preferredId && batch.store_id === storeId)
+          || localBatches.find((batch) => batch.store_id === storeId && batch.location_id === movement.from_location_id)
+          || localBatches.find((batch) => batch.store_id === storeId);
+        let nextBatchId: string | null = null;
+        if (target) {
+          nextBatchId = target.id;
+          if (movement.movement_type === 'sale' && target.id !== movement.batch_id) {
+            const current = stockToApply.get(target.id) || target;
+            stockToApply.set(target.id, {
+              ...current,
+              quantity: Math.max(0, asQty(current.quantity) - asQty(movement.quantity)),
+              updated_at: new Date().toISOString(),
+              synced: 0,
+            });
+          }
+        }
+        const resolved = { ...movement, batch_id: nextBatchId };
+        await db.stock_movements.update(movement.id, { batch_id: nextBatchId });
+        resolvedMovements.push(resolved);
+      }
+      if (stockToApply.size > 0) {
+        const applied = [...stockToApply.values()];
+        await db.stock_batches.bulkPut(applied);
+        const pushed = await upsertToSupabase(
+          'Stock batches (sold quantities)',
+          'stock_batches',
+          applied.map(mapLocalBatchToCloud),
+          async () => {
+            await Promise.all(applied.map((batch) => db.stock_batches.update(batch.id, { synced: 1 })));
+          },
+          errors,
+        );
+        if (pushed > 0) {
+          const confirmed = await fetchCloudIds('stock_batches', storeId, applied.map((batch) => batch.id));
+          if (!confirmed.failed) {
+            for (const id of confirmed.present) cloudBatchIds.add(id);
+          }
+        }
+      }
+      for (const movement of resolvedMovements) {
+        const batchId = movement.batch_id;
+        const batchUnconfirmed = typeof batchId === 'string' && isUuid(batchId) && !cloudBatchIds.has(batchId);
+        if (batchUnconfirmed && !batchLookupFailed) {
+          await db.stock_movements.update(movement.id, { batch_id: null });
+          movementsToPush.push({ ...movement, batch_id: null });
+          continue;
+        }
+        if (batchUnconfirmed && batchLookupFailed) continue;
         movementsToPush.push(movement);
       }
-      if (blockedBatchReferences > 0) {
-        errors.push(
-          `Stock movements: skipped ${blockedBatchReferences} movement(s) because their referenced stock batch is missing from cloud. The movement will remain pending for retry.`
-        );
+      const locationIds = movementsToPush.flatMap((movement) => [movement.from_location_id, movement.to_location_id]);
+      const cloudLocations = await fetchCloudIds('locations', storeId, locationIds.filter((id): id is string => isUuid(id)));
+      if (!cloudLocations.failed) {
+        for (let index = 0; index < movementsToPush.length; index += 1) {
+          const movement = movementsToPush[index];
+          const fromOk = !isUuid(movement.from_location_id) || cloudLocations.present.has(movement.from_location_id!);
+          const toOk = !isUuid(movement.to_location_id) || cloudLocations.present.has(movement.to_location_id!);
+          if (fromOk && toOk) continue;
+          const next = {
+            ...movement,
+            from_location_id: fromOk ? movement.from_location_id : null,
+            to_location_id: toOk ? movement.to_location_id : null,
+          };
+          movementsToPush[index] = next;
+          await db.stock_movements.update(movement.id, {
+            from_location_id: next.from_location_id,
+            to_location_id: next.to_location_id,
+          });
+        }
       }
       syncedCount += await upsertToSupabase(
         'Stock movements',
