@@ -1,4 +1,10 @@
 {
+  "rewrites": [
+    {
+      "source": "/api/store-momo-payout",
+      "destination": "/api/shop-checkout?action=store-momo-payout"
+    }
+  ],
   "crons": [
     {
       "path": "/api/send-cloud-sync-reminders",

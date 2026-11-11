@@ -60,6 +60,7 @@ export default function AdminPaystackApprovals() {
       const result = await approvePaystackPayment(row);
       setMessage(result);
       setRows((current) => current.filter((item) => item.id !== row.id));
+      await load();
     } catch (approveError) {
       setError(approveError instanceof Error ? approveError.message : 'Could not approve this payment.');
     } finally {
