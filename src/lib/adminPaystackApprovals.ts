@@ -6,6 +6,7 @@ import { generateId } from '@/lib/dexie';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { applySubscriptionGrant } from '@/lib/subscriptionPayments';
 import { creditStoreSms } from '@/lib/smsWallet';
+import { routeGoodsPaymentToStoreMomo } from '@/lib/storeMomoPayout';
 
 export type PaystackApprovalKind = 'subscription' | 'sms' | 'shop' | 'sale';
 
@@ -20,6 +21,7 @@ export interface PendingPaystackPayment {
   createdAt: string;
   customerId?: string;
   months?: number;
+  purpose?: string;
 }
 
 function missingTable(message: string): boolean {
@@ -105,6 +107,7 @@ export async function loadPendingPaystackPayments(): Promise<{ rows: PendingPays
         detail: row.purpose === 'checkout' ? 'Online shop checkout' : 'Customer wallet top-up',
         createdAt: String(row.created_at || ''),
         customerId: row.customer_id ? String(row.customer_id) : undefined,
+        purpose: String(row.purpose || ''),
       });
     }
   }
@@ -159,20 +162,14 @@ async function approveSubscription(row: PendingPaystackPayment): Promise<string>
     currentMonthsGranted: Number(store.subscription_months_granted) || 0,
   });
   if (!grant.success) throw new Error(grant.error || 'Could not activate the subscription.');
-  await supabase
-    .from('subscription_payments')
-    .update({ status: 'success', completed_at: new Date().toISOString() })
-    .eq('id', row.id);
+  await supabase.from('subscription_payments').delete().eq('id', row.id);
   return `${row.storeName} subscription extended by ${months} month(s).`;
 }
 
 async function approveSms(row: PendingPaystackPayment): Promise<string> {
   const pesewas = Math.round(row.amountGhs * 100);
   await creditStoreSms(row.storeId, pesewas, row.reference);
-  await supabase
-    .from('sms_topup_intents')
-    .update({ status: 'paid', verified_at: new Date().toISOString() })
-    .eq('id', row.id);
+  await supabase.from('sms_topup_intents').delete().eq('id', row.id);
   return `GH₵ ${row.amountGhs.toFixed(2)} SMS credit added for ${row.storeName}.`;
 }
 
@@ -211,14 +208,30 @@ async function creditShopWallet(row: PendingPaystackPayment): Promise<void> {
   });
 }
 
+async function ownerUserId(storeId: string): Promise<string> {
+  const { data } = await supabase.from('users').select('id, role, is_active').eq('store_id', storeId);
+  const owner = (data || []).find((user) => user.role === 'owner' && user.is_active !== false);
+  return owner ? String(owner.id) : '';
+}
+
 async function approveShop(row: PendingPaystackPayment): Promise<string> {
-  await creditShopWallet(row);
-  const updated = await supabase
-    .from('shop_payment_intents')
-    .update({ status: 'verified', verified_at: new Date().toISOString() })
-    .eq('id', row.id);
-  if (updated.error && !missingTable(updated.error.message)) throw new Error(updated.error.message);
-  return `GH₵ ${row.amountGhs.toFixed(2)} reflected for ${row.storeName}.`;
+  if (row.purpose === 'checkout') {
+    const userId = await ownerUserId(row.storeId);
+    if (userId) {
+      await routeGoodsPaymentToStoreMomo({
+        storeId: row.storeId,
+        userId,
+        reference: row.reference,
+        amountGhs: row.amountGhs,
+        description: `Goods for ${row.storeName}`,
+      });
+    }
+  } else {
+    await creditShopWallet(row);
+  }
+  const removed = await supabase.from('shop_payment_intents').delete().eq('id', row.id);
+  if (removed.error && !missingTable(removed.error.message)) throw new Error(removed.error.message);
+  return `GH₵ ${row.amountGhs.toFixed(2)} cleared for ${row.storeName}.`;
 }
 
 async function approveSale(row: PendingPaystackPayment): Promise<string> {
@@ -228,7 +241,17 @@ async function approveSale(row: PendingPaystackPayment): Promise<string> {
     .eq('id', row.id)
     .eq('status', 'pending');
   if (error) throw new Error(error.message);
-  return `Sale ${row.reference} marked completed for ${row.storeName}.`;
+  const userId = await ownerUserId(row.storeId);
+  if (userId && row.amountGhs > 0 && row.reference) {
+    await routeGoodsPaymentToStoreMomo({
+      storeId: row.storeId,
+      userId,
+      reference: row.reference,
+      amountGhs: row.amountGhs,
+      description: `Goods ${row.reference}`,
+    });
+  }
+  return `Sale ${row.reference} cleared for ${row.storeName}.`;
 }
 
 export async function approvePaystackPayment(row: PendingPaystackPayment): Promise<string> {

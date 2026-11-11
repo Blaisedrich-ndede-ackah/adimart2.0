@@ -29,6 +29,7 @@ import { getBluetoothHardwareStatus } from '@/lib/bluetoothPeripherals';
 import { formatCustomerAddress } from '@/lib/customerAddress';
 import { recordActivity } from '@/lib/activityLog';
 import { queueSms, receiptSmsText } from '@/lib/smsOutbox';
+import { routeGoodsPaymentToStoreMomo } from '@/lib/storeMomoPayout';
 
 interface CheckoutOverlayProps {
   isOpen: boolean;
@@ -347,6 +348,15 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         loyaltyRedeemAmount: result.loyaltyRedeemAmount,
       };
       setSaleResult(completed);
+      if (currentStore?.id && paystackRef && (paystackAmt || 0) > 0) {
+        void routeGoodsPaymentToStoreMomo({
+          storeId: currentStore.id,
+          userId: currentUser.id,
+          reference: paystackRef,
+          amountGhs: paystackAmt || 0,
+          description: `Goods ${result.receiptNumber}`,
+        });
+      }
       setSmsPhone(customerPhone || creditCustomers.find((customer) => customer.id === (customerId || cart.loyaltyCustomerId))?.phone || '');
       setSmsNote('');
       setStep('success');

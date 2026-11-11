@@ -641,6 +641,17 @@ async function finalizeIntent(reference: string, charge: VerifiedCharge): Promis
     verified_at: new Date().toISOString(),
     order_id: order.id,
   }).eq('id', intent.id);
+  try {
+    const { sendStoreMomoPayout } = await import('../../api/store-momo-payout.js');
+    await sendStoreMomoPayout({
+      storeId: String(intent.store_id),
+      reference,
+      amountPesewas: charge.amount,
+      description: `Goods ${order.order_number}`,
+    }, { trusted: true });
+  } catch {
+    // The order is already recorded. A missing payout can be sent again from admin Paystack approvals.
+  }
   return { balance, orderNumber: order.order_number, creditedWallet: false };
 }
 
