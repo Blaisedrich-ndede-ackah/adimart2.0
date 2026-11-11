@@ -51,19 +51,32 @@ export default function AdminSupportAgent() {
   const loadTickets = useCallback(async () => {
     setLoading(true);
     setError('');
-    const { data, error: queryError } = await supabase
+    const ticketColumns = 'id, requester_name, requester_email, store_name, subject, status, priority, last_message_preview, last_message_at, created_at';
+    const withNumber = await supabase
       .from('support_tickets')
-      .select('id, ticket_number, requester_name, requester_email, store_name, subject, status, priority, last_message_preview, last_message_at, created_at')
+      .select(`id, ticket_number, requester_name, requester_email, store_name, subject, status, priority, last_message_preview, last_message_at, created_at`)
       .order('last_message_at', { ascending: false })
       .limit(200);
-    if (queryError) {
-      const denied = /permission denied|42501/i.test(queryError.message);
+    const missingTicketNumber = Boolean(
+      withNumber.error
+      && /ticket_number/i.test(withNumber.error.message)
+      && /does not exist|schema cache|42703/i.test(withNumber.error.message)
+    );
+    const result = missingTicketNumber
+      ? await supabase
+        .from('support_tickets')
+        .select(ticketColumns)
+        .order('last_message_at', { ascending: false })
+        .limit(200)
+      : withNumber;
+    if (result.error) {
+      const denied = /permission denied|42501/i.test(result.error.message);
       setError(denied
         ? 'permission denied for table support_tickets. Run supabase-migrate-stock-approvals-activity.sql in the Supabase SQL editor so the admin portal can read customer queries.'
-        : queryError.message);
+        : result.error.message);
       setTickets([]);
     } else {
-      setTickets((data || []) as SupportTicket[]);
+      setTickets((result.data || []) as SupportTicket[]);
     }
     setLoading(false);
   }, []);

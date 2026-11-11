@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Loader2, RefreshCcw, Search } from 'lucide-react';
+import { CheckCircle2, Loader2, RefreshCcw, Search, XCircle } from 'lucide-react';
 import {
   approvePaystackPayment,
+  cancelPaystackPayment,
   loadPendingPaystackPayments,
   type PendingPaystackPayment,
 } from '@/lib/adminPaystackApprovals';
@@ -53,7 +54,7 @@ export default function AdminPaystackApprovals() {
       `Confirm that Paystack already collected ${row.reference || 'this payment'} for ${row.storeName}? This will apply it in Adimat.`
     );
     if (!ok) return;
-    setBusyId(row.id);
+    setBusyId(`${row.id}:approve`);
     setError('');
     setMessage('');
     try {
@@ -68,10 +69,30 @@ export default function AdminPaystackApprovals() {
     }
   }
 
+  async function cancel(row: PendingPaystackPayment) {
+    const ok = window.confirm(
+      `Cancel ${row.reference || 'this payment'} for ${row.storeName}? It leaves this list and does not add a subscription, SMS credit, shop wallet, or completed sale.`
+    );
+    if (!ok) return;
+    setBusyId(`${row.id}:cancel`);
+    setError('');
+    setMessage('');
+    try {
+      const result = await cancelPaystackPayment(row);
+      setMessage(result);
+      setRows((current) => current.filter((item) => item.id !== row.id));
+      await load();
+    } catch (cancelError) {
+      setError(cancelError instanceof Error ? cancelError.message : 'Could not cancel this payment.');
+    } finally {
+      setBusyId('');
+    }
+  }
+
   return (
     <div className="space-y-3">
       <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
-        Use this when a customer or store has paid on Paystack but Adimat did not update the subscription, SMS units, shop wallet, or sale. Approving applies that payment. Check the Paystack dashboard first.
+        Use this when a customer or store has paid on Paystack but Adimat did not update the subscription, SMS units, shop wallet, or sale. Approving applies that payment. Cancel removes it from this list and does not add anything. Check the Paystack dashboard first.
       </div>
       <div className="flex gap-2">
         <label className="relative min-w-0 flex-1">
@@ -115,15 +136,26 @@ export default function AdminPaystackApprovals() {
                 <p className="truncate font-mono text-xs text-slate-700">{row.reference || 'No reference'}</p>
                 <p className="text-[11px] text-slate-400">{row.createdAt ? new Date(row.createdAt).toLocaleString() : ''}</p>
               </div>
-              <button
-                type="button"
-                disabled={busyId === row.id}
-                onClick={() => void approve(row)}
-                className="inline-flex shrink-0 items-center justify-center gap-1 rounded-xl bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
-              >
-                {busyId === row.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                Approve
-              </button>
+              <div className="flex shrink-0 gap-2">
+                <button
+                  type="button"
+                  disabled={busyId !== ''}
+                  onClick={() => void cancel(row)}
+                  className="inline-flex items-center justify-center gap-1 rounded-xl border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 disabled:opacity-50"
+                >
+                  {busyId === `${row.id}:cancel` ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={busyId !== ''}
+                  onClick={() => void approve(row)}
+                  className="inline-flex items-center justify-center gap-1 rounded-xl bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {busyId === `${row.id}:approve` ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                  Approve
+                </button>
+              </div>
             </article>
           ))}
         </div>

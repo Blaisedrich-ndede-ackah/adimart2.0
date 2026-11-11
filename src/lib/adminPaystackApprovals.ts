@@ -125,7 +125,7 @@ export async function loadPendingPaystackPayments(): Promise<{ rows: PendingPays
       const amount = Number(row.paystack_amount) || 0;
       const method = String(row.payment_method || '');
       const reference = String(row.paystack_reference || '');
-      if (amount <= 0 && method !== 'paystack' && !reference) continue;
+      if (amount <= 0 && !reference) continue;
       rows.push({
         id: String(row.id),
         kind: 'sale',
@@ -259,4 +259,54 @@ export async function approvePaystackPayment(row: PendingPaystackPayment): Promi
   if (row.kind === 'sms') return approveSms(row);
   if (row.kind === 'shop') return approveShop(row);
   return approveSale(row);
+}
+
+async function markIntentCancelled(table: string, id: string, status: 'failed' | 'cancelled'): Promise<void> {
+  const updated = await supabase.from(table).update({ status }).eq('id', id);
+  if (!updated.error) return;
+  const removed = await supabase.from(table).delete().eq('id', id);
+  if (!removed.error) return;
+  const message = updated.error.message || removed.error.message;
+  if (/permission denied|42501/i.test(message)) {
+    throw new Error(`${message} Run supabase-migrate-admin-paystack-cancel.sql in the Supabase SQL editor, then cancel again.`);
+  }
+  throw new Error(message);
+}
+
+async function cancelSale(row: PendingPaystackPayment): Promise<void> {
+  const cleared = {
+    paystack_amount: 0,
+    paystack_reference: '',
+    updated_at: new Date().toISOString(),
+  };
+  const withVoid = await supabase
+    .from('transactions')
+    .update({
+      ...cleared,
+      void_status: 'voided',
+      void_reason: 'Cancelled from Paystack approvals',
+    })
+    .eq('id', row.id)
+    .eq('status', 'pending');
+  if (!withVoid.error) return;
+  if (!/void_status|void_reason|does not exist|schema cache/i.test(withVoid.error.message)) {
+    throw new Error(withVoid.error.message);
+  }
+  const plain = await supabase.from('transactions').update(cleared).eq('id', row.id).eq('status', 'pending');
+  if (plain.error) throw new Error(plain.error.message);
+}
+
+const KIND_FALLBACK: Record<PaystackApprovalKind, string> = {
+  subscription: 'Subscription payment',
+  sms: 'SMS credit',
+  shop: 'Shop payment',
+  sale: 'Sale',
+};
+
+export async function cancelPaystackPayment(row: PendingPaystackPayment): Promise<string> {
+  if (row.kind === 'subscription') await markIntentCancelled('subscription_payments', row.id, 'failed');
+  else if (row.kind === 'sms') await markIntentCancelled('sms_topup_intents', row.id, 'cancelled');
+  else if (row.kind === 'shop') await markIntentCancelled('shop_payment_intents', row.id, 'failed');
+  else await cancelSale(row);
+  return `${row.reference || KIND_FALLBACK[row.kind]} for ${row.storeName} was cancelled. Nothing was added.`;
 }
