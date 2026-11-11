@@ -73,6 +73,7 @@ async function findUserByPhoneForCurrentStore(phoneRaw: string): Promise<LocalUs
 
   for (const row of data || []) {
     if (normalizeGhanaPhone(String(row.phone || '')) !== normalized) continue;
+    const existing = await db.users.get(String(row.id));
     const mapped: LocalUser = {
       id: String(row.id),
       store_id: String(row.store_id),
@@ -86,6 +87,7 @@ async function findUserByPhoneForCurrentStore(phoneRaw: string): Promise<LocalUs
       can_sell_from_warehouse: row.can_sell_from_warehouse ? 1 : 0,
       can_manage_ecommerce: row.can_manage_ecommerce || row.role === 'owner' ? 1 : 0,
       can_access_cashbook: cashbookAccessFromCloud(row.role, row.can_access_cashbook),
+      photo_url: typeof row.photo_url === 'string' ? row.photo_url : (existing?.photo_url || ''),
       created_at: String(row.created_at || new Date().toISOString()),
       synced: 1,
     };

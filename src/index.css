@@ -46,17 +46,34 @@
 
   :root.dark {
     color-scheme: dark;
-    --color-surface: #0b1220;
-    --color-surface-muted: #111b2d;
-    --color-surface-card: #162238;
-    --color-border: #2a3a53;
-    --color-ink: #f1f5f9;
-    --color-muted: #9aabc0;
-    --color-bg: #0b1220;
-    --color-text: #f1f5f9;
-    --color-text-muted: #9aabc0;
-    --color-border-subtle: #223149;
-    --color-primary-subtle: #172554;
+    --color-primary: #E08B78;
+    --color-primary-light: #F0B5A6;
+    --color-primary-dark: #C96B58;
+    --color-primary-subtle: #3A2E2C;
+    --color-accent: #E08B78;
+    --color-surface: #2B2830;
+    --color-surface-muted: #35323C;
+    --color-surface-card: #24222A;
+    --color-border: #4A4654;
+    --color-ink: #F4EFE8;
+    --color-muted: #C9BEB4;
+    --color-bg: #2B2830;
+    --color-text: #F4EFE8;
+    --color-text-muted: #C9BEB4;
+    --color-border-subtle: #4A4654;
+    --ios-label: #F4EFE8;
+    --ios-secondary-label: #C9BEB4;
+    --ios-tertiary-label: #A89C93;
+    --ios-separator: #4A4654;
+    --ios-fill: #35323C;
+    --ios-fill-strong: #4A4654;
+    --ios-grouped: #2B2830;
+    --ios-bar: #2B2830;
+    --ios-glass: #24222A;
+    --ios-glass-strong: #24222A;
+    --ios-blur: none;
+    --ios-highlight: none;
+    --ios-depth: none;
   }
   html {
     -webkit-text-size-adjust: 100%;
@@ -80,6 +97,33 @@
 html {
   height: 100%;
   height: -webkit-fill-available;
+}
+
+html,
+body,
+#root {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+input,
+textarea,
+select,
+[contenteditable='true'] {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+button,
+a,
+[role='button'],
+summary,
+label[for] {
+  cursor: pointer;
+  touch-action: manipulation;
+  pointer-events: auto;
 }
 
 /* Fallbacks keep the app usable in browsers without dynamic viewport units. */
@@ -1197,5 +1241,401 @@ html[data-high-contrast="true"] .page-body :where(.bg-white) {
   .ios-bar {
     min-width: 0;
     max-width: 100%;
+  }
+}
+
+/* Dark tablet POS. Flat surfaces replace the frosted bars so the catalog
+   matches the layout already designed for the shop. */
+html.dark,
+html.dark * {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html.dark .page-header,
+html.dark .ios-bar,
+html.dark .ios-tabbar,
+html.dark .ios-pane,
+html.dark .ios-glass,
+html.dark .surface-card,
+html.dark .sheet-panel {
+  background-color: #24222A;
+  background-image: none;
+  border-color: #4A4654;
+  box-shadow: none;
+  color: #F4EFE8;
+}
+
+html.dark .page-header,
+html.dark .ios-bar {
+  background-color: #2B2830;
+}
+
+html.dark .page-body {
+  background: #2B2830;
+}
+
+html.dark button.bg-primary,
+html.dark a.bg-primary {
+  background-color: #E08B78;
+  color: #2C2420;
+}
+
+html.dark button:focus-visible,
+html.dark a:focus-visible,
+html.dark input:focus-visible,
+html.dark select:focus-visible,
+html.dark textarea:focus-visible {
+  outline-color: #E08B78;
+}
+
+.food-rail {
+  width: 104px;
+  background: #24222A;
+  border: 0;
+  align-items: center;
+  padding: 12px 0 8px;
+}
+
+.food-rail-logo {
+  width: 56px;
+  height: 56px;
+  margin: 8px auto 12px;
+  border-radius: 16px;
+  background: rgba(234, 124, 105, 0.26);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.food-rail-logo span {
+  color: #E08B78;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.food-rail-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.pos-profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.pos-profile-photo {
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  border: 1px dashed #C9BEB4;
+  background: #35323C;
+  color: #E08B78;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.pos-profile-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.pos-profile-photo:disabled {
+  opacity: 0.6;
+}
+
+.pos-profile-label {
+  color: #F4EFE8;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.pos-profile-date {
+  color: #C9BEB4;
+  font-size: 12px;
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+.pos-profile-remove {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  color: #C9BEB4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.food-rail nav {
+  width: 100%;
+}
+
+.food-rail nav p {
+  display: none;
+}
+
+.food-rail-item {
+  width: 76px;
+  margin: 6px auto;
+  min-height: 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-radius: 12px;
+  color: #C9BEB4;
+  background: transparent;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.food-rail-item span {
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.food-rail-item.is-active {
+  background: #E08B78;
+  color: #2C2420;
+  box-shadow: 0 8px 18px rgba(224, 139, 120, 0.22);
+}
+
+.food-rail .p-2 {
+  width: 100%;
+  padding: 8px;
+}
+
+.food-rail-foot {
+  width: 104px;
+  overflow: hidden;
+}
+
+.food-rail-foot [role="group"] {
+  flex-direction: column;
+  width: 88px;
+  margin: 0 auto;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.food-rail-foot [role="group"] button {
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 4px;
+  font-size: 11px;
+}
+
+.food-rail-foot > button {
+  width: 44px;
+  height: 44px;
+  margin: 4px auto;
+  padding: 0;
+  justify-content: center;
+  gap: 0;
+  color: #C9BEB4;
+  font-size: 0;
+}
+
+.food-rail-foot svg {
+  width: 20px;
+  height: 20px;
+}
+
+.pos-topbar {
+  padding: 0.65rem 1rem !important;
+}
+
+.pos-search {
+  height: 44px;
+  border-radius: 8px;
+  border: 1px solid #4A4654;
+  background: #35323C;
+  color: #F4EFE8;
+  font-size: 16px;
+  outline: none;
+}
+
+html.dark .pos-mode button[aria-pressed="true"] {
+  background: #E08B78;
+  color: #2C2420;
+}
+
+.pos-mode {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
+  background: transparent;
+}
+
+.pos-workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pos-catalog-head {
+  flex-shrink: 0;
+  padding: 0.15rem 1rem 0;
+}
+
+.pos-toast {
+  position: absolute;
+  z-index: 30;
+  bottom: 1.25rem;
+  left: 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 2rem);
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  background: #24222A;
+  color: #F4EFE8;
+  border: 1px solid #4A4654;
+  pointer-events: none;
+}
+
+.pos-toast.is-warning {
+  background: #3A2B15;
+  color: #FBBF74;
+}
+
+.pos-toast.is-error {
+  background: #3B1D27;
+  color: #FDA4AF;
+}
+
+@media (min-width: 1024px) {
+  .pos-workspace {
+    flex-direction: row;
+    align-items: stretch;
+  }
+
+  .pos-ticket {
+    width: 42%;
+    min-width: 380px;
+    max-width: 520px;
+    height: auto;
+    align-self: stretch;
+  }
+}
+
+.pos-categories {
+  border-bottom: 1px solid #4A4654;
+}
+
+.pos-category {
+  border: 0;
+  border-bottom: 3px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: #C9BEB4;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 0.7rem 0.1rem 0.55rem;
+  white-space: nowrap;
+}
+
+.pos-category.is-active {
+  color: #E08B78;
+  border-bottom-color: #E08B78;
+}
+
+html.dark .pos-product-grid {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 1rem;
+}
+
+html.dark .pos-product-card,
+html.dark .pos-product-card:hover,
+html.dark .pos-product-card:focus {
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: center;
+  gap: 0.35rem;
+  min-height: 0;
+  padding: 1.1rem 0.85rem 1rem;
+  border: 0;
+  border-radius: 16px;
+  background: #35323C;
+  background-image: none;
+  box-shadow: none;
+  color: #F4EFE8;
+}
+
+html.dark .pos-product-card .product-image,
+html.dark .pos-product-card .bg-gray-100 {
+  width: 108px;
+  height: 108px;
+  border-radius: 999px;
+  object-fit: cover;
+  background: #2B2830;
+  color: #C9BEB4;
+}
+
+html.dark .pos-product-add {
+  display: none;
+}
+
+html.dark .pos-dish-price {
+  color: #FFF7F0;
+}
+
+.pos-ticket {
+  background: #24222A;
+  color: #F4EFE8;
+}
+
+.pos-ticket-footer {
+  border-top: 1px solid #4A4654;
+  background: #24222A;
+}
+
+.pos-pay {
+  width: 100%;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  border: 0;
+  border-radius: 8px;
+  background: #E08B78;
+  color: #2C2420;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.pos-pay:active {
+  transform: scale(0.99);
+}
+
+@media (min-width: 1024px) {
+  html.dark .pos-product-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1.15rem;
   }
 }

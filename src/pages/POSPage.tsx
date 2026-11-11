@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
-  ShoppingCart, Minus, Plus, Trash2, Search, ChevronRight, Package, AlertCircle, Bluetooth,
+  ShoppingCart, Minus, Plus, Trash2, Search, Package, AlertCircle, Bluetooth,
   ScanBarcode, MapPin, X, Settings2, GripVertical, MoveUp, MoveDown, Mic, Pause, Play,
   CircleCheck, CircleX,
 } from 'lucide-react';
@@ -18,6 +18,7 @@ import { playScanBeep, primeScanBeep } from '@/lib/scanBeep';
 import { useBluetoothBarcodeInput } from '@/hooks/useBluetoothBarcodeInput';
 import { getBluetoothHardwareStatus, subscribeBluetoothStatus } from '@/lib/bluetoothPeripherals';
 import ProductImage from '@/components/ProductImage';
+import PosProfilePhoto from '@/components/PosProfilePhoto';
 import { getAvailableSaleModes, resolveSalePrice, type SaleMode, type UnitType } from '@/lib/bulkPricing';
 import { subscribeStockChanges } from '@/lib/stockEvents';
 import {
@@ -677,13 +678,56 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
 
   return (
     <div className="page-shell relative">
-      {/* Header */}
-      <div className="page-header flex items-center justify-between">
-        <div>
-          <h1>POS</h1>
-          <p className="text-emerald-200 text-xs mt-0.5">Hi, {currentUser?.name}</p>
+      {(scanFeedback || stockError) && (
+        <div
+          role="status"
+          className={`pos-toast ${
+            stockError || scanFeedback?.type === 'warning'
+              ? 'is-warning'
+              : scanFeedback?.type === 'error'
+                ? 'is-error'
+                : ''
+          }`}
+        >
+          {(stockError || scanFeedback?.type === 'warning') && <AlertCircle className="w-4 h-4" />}
+          {stockError || scanFeedback?.message}
         </div>
-        <div className="flex items-center gap-2">
+      )}
+      <div className="page-header pos-topbar flex items-center gap-3">
+        <h1 className="sr-only">Point of sale</h1>
+        <PosProfilePhoto />
+        <div className="relative hidden min-w-0 flex-1 lg:block">
+          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
+            placeholder={t('pos.search')}
+            aria-label="Search products by name, barcode, or category"
+            aria-describedby="pos-search-keyboard-hint"
+            data-allow-typing="true"
+            className="pos-search w-full pl-9 pr-24"
+          />
+          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
+            {voiceSearchAvailable && (
+              <button
+                type="button"
+                onClick={startVoiceSearch}
+                aria-label={voiceSearchActive ? 'Listening for product name' : 'Search products by voice'}
+                className={`icon-btn ${voiceSearchActive ? 'text-primary' : ''}`}
+              >
+                <Mic className="h-4 w-4" />
+              </button>
+            )}
+            {searchQuery && (
+              <button type="button" onClick={() => setSearchQuery('')} aria-label="Clear product search" className="icon-btn">
+                <X className="w-4 h-4" aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
           {(btStatus.hidScannerEnabled || btStatus.scannerConnected) && (
             <div
               className="bg-white/15 px-2 py-1 rounded-lg flex items-center gap-1"
@@ -777,112 +821,6 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
         ))}
       </div>
 
-      {/* Sale context: retail/wholesale + unit. One shop per store — no location picker. */}
-      <div className="bg-white border-b border-emerald-50 px-3 py-2.5 md:px-4 flex-shrink-0 space-y-2 md:space-y-0 md:flex md:flex-wrap md:items-center md:gap-3">
-        {saleLocations.length > 1 ? (
-        <div className="flex items-center gap-2 md:flex-1 md:min-w-0">
-          <MapPin className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-          <select
-            value={selectedLocationId}
-            onChange={(e) => {
-              if (cart.items.length > 0 && !confirm('Change location clears the cart. Continue?')) return;
-              cart.clearCart();
-              setSelectedLocationId(e.target.value);
-            }}
-            className="flex-1 text-xs font-semibold bg-emerald-50/60 border border-emerald-100 rounded-lg px-2 py-2 outline-none"
-          >
-            {saleLocations.length === 0 && <option value="">No location</option>}
-            {saleLocations.map((loc) => (
-              <option key={loc.id} value={loc.id}>
-                {loc.name} ({loc.location_type})
-              </option>
-            ))}
-          </select>
-        </div>
-        ) : null}
-        <div className="flex flex-wrap gap-2 md:w-auto md:flex-shrink-0">
-          <button
-            type="button"
-            aria-pressed={saleMode === 'retail'}
-            aria-label="Use retail pricing for newly added items"
-            onClick={() => {
-              setSaleMode('retail');
-            }}
-            className={`flex-1 md:flex-none md:px-4 py-2 rounded-lg text-xs font-semibold touch-target ${
-              saleMode === 'retail' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'
-            }`}
-          >
-            Retail
-          </button>
-          <button
-            type="button"
-            aria-pressed={saleMode === 'wholesale'}
-            aria-label="Use wholesale pricing for newly added items"
-            disabled={!canWholesale}
-            onClick={() => {
-              if (!canWholesale) return;
-              setSaleMode('wholesale');
-            }}
-            className={`flex-1 md:flex-none md:px-4 py-2 rounded-lg text-xs font-semibold touch-target disabled:opacity-40 ${
-              saleMode === 'wholesale' ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-600'
-            }`}
-            title={canWholesale ? 'Wholesale / bulk pricing for newly added items' : 'Wholesale disabled for this cashier'}
-          >
-            Wholesale
-          </button>
-          <button
-            type="button"
-            aria-pressed={unitType === 'base'}
-            aria-label="Add the next items by unit"
-            onClick={() => setUnitType('base')}
-            className={`flex-1 md:flex-none md:px-4 py-2 rounded-lg text-xs font-semibold touch-target whitespace-nowrap ${
-              unitType === 'base' ? 'bg-slate-800 text-white' : 'bg-gray-100 text-gray-600'
-            }`}
-          >
-            By unit
-          </button>
-          <button
-            type="button"
-            aria-pressed={unitType === 'pack'}
-            aria-label="Add the next items by pack"
-            onClick={() => setUnitType('pack')}
-            className={`flex-1 md:flex-none md:px-4 py-2 rounded-lg text-xs font-semibold touch-target whitespace-nowrap ${
-              unitType === 'pack' ? 'bg-slate-800 text-white' : 'bg-gray-100 text-gray-600'
-            }`}
-          >
-            By pack
-          </button>
-        </div>
-        <p className="text-[10px] leading-snug text-gray-500 md:basis-full">
-          Retail, wholesale, and by unit stay in the same sale. Switching only changes the next item
-          {cart.items.length > 0 ? ` — ${cart.items.length} selected item${cart.items.length === 1 ? '' : 's'} stay in the cart.` : '.'}
-        </p>
-      </div>
-
-      {/* Scan Feedback */}
-      {scanFeedback && (
-        <div
-          className={`px-4 py-2.5 text-sm font-medium text-center animate-fade-in flex items-center justify-center gap-2 flex-shrink-0 ${
-            scanFeedback.type === 'success'
-              ? 'bg-green-100 text-green-800'
-              : scanFeedback.type === 'warning'
-              ? 'bg-amber-100 text-amber-800'
-              : 'bg-red-100 text-red-800'
-          }`}
-        >
-          {scanFeedback.type === 'warning' && <AlertCircle className="w-4 h-4" />}
-          {scanFeedback.message}
-        </div>
-      )}
-
-      {/* Stock Error Toast */}
-      {stockError && (
-        <div className="px-4 py-2.5 bg-amber-100 text-amber-800 text-sm font-medium text-center animate-fade-in flex items-center justify-center gap-2 flex-shrink-0">
-          <AlertCircle className="w-4 h-4" />
-          {stockError}
-        </div>
-      )}
-
       {posLayout.topOrder.map((section) =>
         section === 'scanner'
           ? showCameraScanner && (
@@ -898,7 +836,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
             )
       )}
 
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
+      <div className="pos-workspace">
         {/* Products pane */}
         <section
           style={{ order: posLayout.paneOrder.indexOf('products') }}
@@ -906,8 +844,8 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
             posTab === 'products' ? 'flex' : 'hidden'
           } lg:flex flex-col flex-1 min-w-0 min-h-0 lg:border-r lg:border-emerald-100`}
         >
-          <div className="px-3 md:px-4 pt-3 flex-shrink-0 space-y-2">
-            <div className="relative">
+          <div className="pos-catalog-head space-y-2">
+            <div className="relative lg:hidden">
               <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
               <input
                 type="text"
@@ -918,7 +856,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                 aria-label="Search products by name, barcode, or category"
                 aria-describedby="pos-search-keyboard-hint"
                 data-allow-typing="true"
-                className="w-full pl-9 pr-20 py-3 bg-surface-card border border-border rounded-xl text-base outline-none focus:ring-2 focus:ring-primary"
+                className="pos-search w-full pl-9 pr-24"
               />
               <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
                 {voiceSearchAvailable && (
@@ -960,21 +898,48 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
               </span>
             </div>
             {voiceSearchError && <p role="status" className="px-1 text-[11px] text-amber-800">{voiceSearchError}</p>}
-            <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
-              {categories.map((cat) => (
-                <button
-                  key={cat}
-                  type="button"
-                  onClick={() => setSelectedCategory(cat)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap touch-target ${
-                    selectedCategory === cat
-                      ? 'bg-primary text-white'
-                      : 'bg-white text-gray-600 border border-gray-200'
-                  }`}
-                >
-                  {cat === 'All' ? t('common.all') : cat}
-                </button>
-              ))}
+            <div className="flex items-center gap-3">
+              <div className="pos-categories flex min-w-0 flex-1 gap-4 overflow-x-auto no-scrollbar" role="tablist" aria-label="Product categories">
+                {categories.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    role="tab"
+                    aria-selected={selectedCategory === cat}
+                    onClick={() => setSelectedCategory(cat)}
+                    className={`pos-category touch-target ${selectedCategory === cat ? 'is-active' : ''}`}
+                  >
+                    {cat === 'All' ? t('common.all') : cat}
+                  </button>
+                ))}
+              </div>
+              <div className="pos-mode">
+                {saleLocations.length > 1 ? (
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <MapPin className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                    <select
+                      value={selectedLocationId}
+                      onChange={(e) => {
+                        if (cart.items.length > 0 && !confirm('Change location clears the cart. Continue?')) return;
+                        cart.clearCart();
+                        setSelectedLocationId(e.target.value);
+                      }}
+                      aria-label="Sale location"
+                      className="max-w-[9rem] rounded-lg border border-white/20 bg-transparent px-2 py-1.5 text-xs font-semibold outline-none"
+                    >
+                      {saleLocations.map((loc) => (
+                        <option key={loc.id} value={loc.id}>{loc.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+                <div className="flex gap-1.5" role="group" aria-label="How the next item is priced">
+                  <button type="button" aria-pressed={saleMode === 'retail'} onClick={() => setSaleMode('retail')} className="rounded-lg px-3 py-2 text-xs font-semibold touch-target">Retail</button>
+                  <button type="button" aria-pressed={saleMode === 'wholesale'} disabled={!canWholesale} onClick={() => { if (canWholesale) setSaleMode('wholesale'); }} className="rounded-lg px-3 py-2 text-xs font-semibold touch-target disabled:opacity-40">Wholesale</button>
+                  <button type="button" aria-pressed={unitType === 'base'} onClick={() => setUnitType('base')} className="rounded-lg px-3 py-2 text-xs font-semibold touch-target">By unit</button>
+                  <button type="button" aria-pressed={unitType === 'pack'} onClick={() => setUnitType('pack')} className="rounded-lg px-3 py-2 text-xs font-semibold touch-target">By pack</button>
+                </div>
+              </div>
             </div>
             <div className="flex items-center justify-between gap-3 px-0.5 text-[11px] text-gray-500">
               <p role="status" aria-live="polite">
@@ -1053,12 +1018,12 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                       }
                       className="pos-product-card"
                     >
-                      <ProductImage src={product.image_url} alt="" size="md" />
-                      <span className="flex-1 min-w-0 text-left">
-                        <span className="pos-product-name block text-sm font-semibold leading-snug text-gray-900">
+                      <ProductImage src={product.image_url} alt="" size="lg" className="product-image" />
+                      <span className="pos-dish-copy flex-1 min-w-0">
+                        <span className="pos-product-name block text-sm font-medium leading-snug">
                           {product.name}
                         </span>
-                        <span className="mt-1 block text-sm font-bold text-primary">
+                        <span className="pos-dish-price mt-1 block text-sm font-semibold">
                           {money(toMoney(pricePreview.unitPrice))}
                           <span className="text-[10px] text-gray-500 font-medium"> / {unitLabel}</span>
                         </span>
@@ -1092,7 +1057,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
           style={{ order: posLayout.paneOrder.indexOf('cart') }}
           className={`${
             posTab === 'cart' ? 'flex' : 'hidden'
-          } ios-pane lg:flex flex-col w-full lg:w-[420px] 2xl:w-[460px] flex-shrink-0 min-h-0 border-l border-white/50`}
+          } pos-ticket ios-pane lg:flex flex-col w-full flex-shrink-0 min-h-0`}
         >
           <div className="flex items-center justify-between gap-2 px-3 lg:px-4 py-3 border-b border-emerald-100 flex-shrink-0">
             <h3 className="text-sm font-bold text-gray-800">
@@ -1319,12 +1284,14 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
 
           {/* Desktop checkout docked in cart column */}
           {cart.items.length > 0 && (
-            <div className="hidden lg:block flex-shrink-0 border-t border-emerald-100 p-4 bg-white">
-              <div className="mb-2 flex items-center justify-between gap-2 text-xs text-gray-500">
-                <span>{cartCount} item{cartCount === 1 ? '' : 's'} in this sale</span>
-                {cart.discountAmount > 0 && (
-                  <span className="font-semibold text-emerald-700">Saved {money(cart.discountAmount)}</span>
-                )}
+            <div className="pos-ticket-footer hidden lg:block flex-shrink-0 p-4">
+              <div className="mb-1 flex items-center justify-between gap-2 text-sm text-gray-400">
+                <span>Discount</span>
+                <span>{money(cart.discountAmount || 0)}</span>
+              </div>
+              <div className="mb-4 flex items-center justify-between gap-2 text-sm">
+                <span>Sub total</span>
+                <span className="font-semibold">{money(cart.total)}</span>
               </div>
               <button
                 type="button"
@@ -1332,16 +1299,9 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                   setScannerActive(false);
                   setShowCheckout(true);
                 }}
-                className="w-full bg-primary text-white py-3.5 rounded-2xl flex items-center justify-between px-5 shadow-md active:bg-primary-dark transition touch-target"
+                className="pos-pay touch-target"
               >
-                <div className="flex items-center gap-2">
-                  <ShoppingCart className="w-5 h-5" />
-                  <span className="font-bold text-base">{t('pos.checkout')}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-lg font-bold">{money(cart.total)}</span>
-                  <ChevronRight className="w-5 h-5" />
-                </div>
+                Continue to Payment
               </button>
             </div>
           )}
@@ -1357,16 +1317,10 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
               setScannerActive(false);
               setShowCheckout(true);
             }}
-            className="pointer-events-auto w-full bg-primary text-white py-4 rounded-2xl flex items-center justify-between px-5 shadow-lg active:bg-primary-dark transition touch-target"
+            className="pos-pay pointer-events-auto touch-target"
           >
-            <div className="flex items-center gap-2">
-              <ShoppingCart className="w-5 h-5" />
-              <span className="font-bold text-lg">{t('pos.checkout')}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xl font-bold">{money(cart.total)}</span>
-              <ChevronRight className="w-5 h-5" />
-            </div>
+            <span>Continue to Payment</span>
+            <span>{money(cart.total)}</span>
           </button>
         </div>
       )}

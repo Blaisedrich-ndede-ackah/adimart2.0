@@ -90,6 +90,8 @@ export interface LocalStore {
   closing_sms_time?: string;
   /** Cashiers may record shop expenses when 1. Default on so existing floor recording stays. */
   cashiers_can_record_expenses?: number;
+  /** VAT percent folded into selling prices. 0 leaves prices unchanged. */
+  vat_rate?: number;
   created_at: string;
   synced: number;
 }
@@ -179,6 +181,8 @@ export interface LocalUser {
   can_access_cashbook?: number;
   /** Owner-configured POS section order, shared across their signed-in devices. */
   pos_layout_json?: string;
+  /** Compressed JPEG data URL. Each person sets their own; missing stays empty. */
+  photo_url?: string;
   created_at: string;
   synced: number;
   /** Local only: 1 while a PIN change on this device still has to reach the cloud. */
@@ -1255,6 +1259,13 @@ class AdimatDB extends Dexie {
           }
         });
       });
+      this.version(27).stores({
+        stores: 'id, synced',
+      }).upgrade(async (tx) => {
+        await tx.table('stores').toCollection().modify((store: LocalStore) => {
+          if (typeof store.vat_rate !== 'number') store.vat_rate = 0;
+        });
+      });
   }
 }
 
@@ -1534,6 +1545,7 @@ export async function createStoreWithOwner(
     closing_sms_enabled: 0,
     closing_sms_time: '20:00',
     cashiers_can_record_expenses: 1,
+    vat_rate: 0,
     session_timeout_minutes: 5,
     momo_account_name: '',
     momo_number: '',
@@ -1970,6 +1982,14 @@ export async function updateUserPhone(userId: string, phoneRaw: string): Promise
   }
 
   return display;
+}
+
+/** Save this person's profile photo on this device, then let the next sync carry it. */
+export async function updateUserPhoto(userId: string, photoUrl: string): Promise<void> {
+  const existing = await db.users.get(userId);
+  if (!existing) throw new Error('This account could not be found on this device.');
+  const next = photoUrl.startsWith('data:image/') ? photoUrl : '';
+  await db.users.update(userId, { photo_url: next, synced: 0 });
 }
 
 /** Active owner for the current (or given) store — used after warehouse PIN login. */
@@ -3004,7 +3024,7 @@ const OPTIONAL_CLOUD_TABLES = new Set([
 ]);
 
 const OPTIONAL_PUSH_COLUMNS: Record<string, string[]> = {
-  stores: ['loyalty_earn_rate', 'loyalty_redeem_value', 'credit_limit_action', 'closing_sms_enabled', 'closing_sms_time', 'cashiers_can_record_expenses'],
+  stores: ['loyalty_earn_rate', 'loyalty_redeem_value', 'credit_limit_action', 'closing_sms_enabled', 'closing_sms_time', 'cashiers_can_record_expenses', 'vat_rate'],
   expenses: ['expense_date', 'payment_method'],
   products: ['unit', 'allow_decimal'],
   customers: ['loyalty_points_balance', 'credit_limit', 'credit_terms_days'],
@@ -3016,6 +3036,7 @@ const OPTIONAL_PUSH_COLUMNS: Record<string, string[]> = {
   transaction_items: ['variant_id', 'measure_unit', 'list_unit_price', 'promotion_label'],
   purchase_orders: ['amount_paid', 'due_date'],
   stock_batches: ['variant_id'],
+  users: ['photo_url'],
 };
 export const FAST_SYNC_TABLES = Object.keys(INCREMENTAL_PULL_FIELDS)
   .filter((table) => table !== 'debt_reminders');
@@ -3548,6 +3569,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
           closing_sms_enabled: (store.closing_sms_enabled ?? 0) === 1,
           closing_sms_time: store.closing_sms_time || '20:00',
           cashiers_can_record_expenses: (store.cashiers_can_record_expenses ?? 1) === 1,
+          vat_rate: Math.max(0, Math.min(100, Number(store.vat_rate) || 0)),
           created_at: store.created_at,
         }],
         async () => { await db.stores.update(storeId, { synced: 1 }); },
@@ -3577,6 +3599,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
         can_manage_ecommerce: (u.can_manage_ecommerce ?? (u.role === 'owner' ? 1 : 0)) === 1,
         can_access_cashbook: u.role === 'owner' ? true : (u.can_access_cashbook ?? 1) === 1,
         pos_layout_json: u.role === 'owner' ? u.pos_layout_json || null : null,
+        photo_url: u.photo_url || '',
         created_at: u.created_at,
       })),
       async () => {
@@ -4596,6 +4619,10 @@ export async function syncFromSupabase(opts?: {
           remoteStore.cashiers_can_record_expenses == null
             ? (localStore?.cashiers_can_record_expenses ?? 1)
             : remoteStore.cashiers_can_record_expenses ? 1 : 0,
+        vat_rate:
+          remoteStore.vat_rate == null
+            ? (localStore?.vat_rate ?? 0)
+            : Math.max(0, Math.min(100, Number(remoteStore.vat_rate) || 0)),
         created_at: remoteStore.created_at,
         synced: localStore?.synced === 0 ? 0 : 1,
       });
@@ -4627,6 +4654,7 @@ export async function syncFromSupabase(opts?: {
           pos_layout_json: row.role === 'owner' && typeof row.pos_layout_json === 'string'
             ? row.pos_layout_json
             : undefined,
+          photo_url: typeof row.photo_url === 'string' ? row.photo_url : undefined,
           created_at: row.created_at as string,
           synced: 1,
         }),
@@ -4654,6 +4682,7 @@ export async function syncFromSupabase(opts?: {
               can_manage_ecommerce: local.can_manage_ecommerce ?? remote.can_manage_ecommerce,
               can_access_cashbook: local.can_access_cashbook ?? remote.can_access_cashbook,
               pos_layout_json: local.pos_layout_json ?? remote.pos_layout_json,
+              photo_url: local.photo_url ?? remote.photo_url,
               synced: 0,
             };
           }
@@ -4661,6 +4690,7 @@ export async function syncFromSupabase(opts?: {
           return {
             ...remote,
             phone: (remote.phone || '').trim() || local.phone || '',
+            photo_url: typeof remote.photo_url === 'string' ? remote.photo_url : (local.photo_url || ''),
           };
         },
       },

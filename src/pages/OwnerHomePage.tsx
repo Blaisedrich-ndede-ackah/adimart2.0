@@ -259,15 +259,6 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
             )}
           </article>
           <article className="rounded-2xl bg-white p-4 shadow-sm border border-gray-100">
-            <span className="text-xs font-medium text-gray-500">Today’s expenses</span>
-            {loading ? <div className="mt-2 h-6 w-24 animate-pulse rounded bg-gray-100" /> : <p className="mt-2 text-lg font-bold text-red-600">{money(todayExpenses)}</p>}
-          </article>
-          <article className="rounded-2xl bg-white p-4 shadow-sm border border-gray-100">
-            <span className="text-xs font-medium text-gray-500">Net profit</span>
-            <p className="mt-1 text-[10px] text-gray-400">Gross profit minus expenses</p>
-            {loading ? <div className="mt-2 h-6 w-24 animate-pulse rounded bg-gray-100" /> : <p className="mt-2 text-lg font-bold">{money(todayNet)}</p>}
-          </article>
-          <article className="rounded-2xl bg-white p-4 shadow-sm border border-gray-100">
             <div className="flex items-center gap-2 text-gray-500">
               <CreditCard className="h-4 w-4 text-blue-600" />
               <span className="text-xs font-medium">Non-cash received</span>
@@ -297,6 +288,15 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
             </span>
             <p className="mt-2 text-lg font-bold text-red-950">{loading ? '…' : outOfStockCount}</p>
           </button>
+          <article className="rounded-2xl bg-white p-4 shadow-sm border border-gray-100">
+            <span className="text-xs font-medium text-gray-500">Today’s expenses</span>
+            {loading ? <div className="mt-2 h-6 w-24 animate-pulse rounded bg-gray-100" /> : <p className="mt-2 text-lg font-bold text-red-600">{money(todayExpenses)}</p>}
+          </article>
+          <article className="rounded-2xl bg-white p-4 shadow-sm border border-gray-100">
+            <span className="text-xs font-medium text-gray-500">Net profit</span>
+            <p className="mt-1 text-[10px] text-gray-400">Gross profit minus expenses</p>
+            {loading ? <div className="mt-2 h-6 w-24 animate-pulse rounded bg-gray-100" /> : <p className="mt-2 text-lg font-bold">{money(todayNet)}</p>}
+          </article>
         </section>
 
         <DailyBriefCard onNavigate={onNavigate} />

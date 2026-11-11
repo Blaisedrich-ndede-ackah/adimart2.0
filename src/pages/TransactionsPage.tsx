@@ -464,7 +464,7 @@ export default function TransactionsPage() {
                 </p>
               )}
               {previewTxn.void_status !== 'voided' && currentUser && (
-                <div className="ios-glass rounded-2xl p-3 space-y-2">
+                <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
                   <p className="text-xs font-semibold text-gray-800">
                     {isOwner ? 'Void this sale' : 'Ask the owner to void this sale'}
                   </p>

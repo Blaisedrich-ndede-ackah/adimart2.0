@@ -707,14 +707,14 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
 
           {step === 'method' && (
             <div className="space-y-3">
-              <div className="ios-glass rounded-2xl p-3 space-y-2">
+              <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
                 <label className="block text-xs font-semibold text-gray-700">
                   Coupon code
                   <input
                     value={cart.couponCode}
                     onChange={(event) => { void cart.setCouponCode(event.target.value); }}
                     placeholder="Leave blank if the deal applies itself"
-                    className="mt-1 w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
                   />
                 </label>
                 {cart.promotionSummary && (
@@ -725,7 +725,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                   <select
                     value={cart.loyaltyCustomerId}
                     onChange={(event) => { void cart.setLoyaltySelection(event.target.value, cart.pointsToRedeem); }}
-                    className="mt-1 w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
                   >
                     <option value="">No customer</option>
                     {creditCustomers.filter((customer) => customer.is_active === 1).map((customer) => (
@@ -744,7 +744,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                       step="1"
                       value={cart.pointsToRedeem || ''}
                       onChange={(event) => { void cart.setLoyaltySelection(cart.loyaltyCustomerId, Number(event.target.value) || 0); }}
-                      className="mt-1 w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm"
+                      className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
                     />
                   </label>
                 )}
@@ -1549,7 +1549,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                 </button>
               </div>
 
-              <div className="ios-glass mb-3 w-full space-y-2 rounded-2xl p-3">
+              <div className="mb-3 w-full space-y-2 rounded-xl border border-gray-200 bg-white p-3">
                 <label className="block text-xs font-semibold text-gray-700">
                   SMS receipt
                   <input
@@ -1557,7 +1557,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                     onChange={(event) => setSmsPhone(event.target.value)}
                     placeholder="Customer phone"
                     inputMode="tel"
-                    className="mt-1 w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
                   />
                 </label>
                 <button

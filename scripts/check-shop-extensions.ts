@@ -5,6 +5,7 @@ import { pointsEarned, pointsValue, capRedeemPoints } from '../src/lib/loyaltyMa
 import { evaluateCreditLimit, isOverdueCreditSale, creditDueDate } from '../src/lib/creditMath';
 import { payableBalance, receivedPayableValue, isOverduePayable } from '../src/lib/payablesMath';
 import { applyPromotionPricing, type PromoDefinition } from '../src/lib/promotions';
+import { vatInclusivePrice } from '../src/lib/money';
 
 assert.equal(roundStockQty(5), 5);
 assert.equal(roundStockQty(2.5), 2.5);
@@ -89,5 +90,9 @@ const sale: PromoDefinition = {
 const timed = applyPromotionPricing([{ ...rice, quantity: 1 }], [sale], '', new Date('2026-11-09T12:00:00Z'));
 assert.equal(timed.lines[0]?.unit_price, 8);
 assert.equal(timed.lines[0]?.subtotal, 8);
+
+assert.equal(vatInclusivePrice(10, 0), 10);
+assert.equal(vatInclusivePrice(10, 15), 11.5);
+assert.equal(vatInclusivePrice(1.11, 15), 1.28);
 
 console.log('shop extension checks passed');

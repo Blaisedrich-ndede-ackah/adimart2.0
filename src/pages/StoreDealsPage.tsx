@@ -107,7 +107,7 @@ export default function StoreDealsPage() {
       </div>
       <div className="p-4 space-y-4">
         <form
-          className="ios-glass rounded-2xl p-4 space-y-3"
+          className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm space-y-3"
           onSubmit={(event) => {
             event.preventDefault();
             void save();
@@ -117,34 +117,34 @@ export default function StoreDealsPage() {
             <Megaphone className="h-5 w-5 text-primary" />
             <h2 className="font-bold">New deal</h2>
           </div>
-          <input aria-label="Deal name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Deal name" className="w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm" />
-          <select aria-label="Deal type" value={form.promoType} onChange={(event) => setForm({ ...form, promoType: event.target.value as StorePromoType })} className="w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm">
+          <input aria-label="Deal name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Deal name" className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary" />
+          <select aria-label="Deal type" value={form.promoType} onChange={(event) => setForm({ ...form, promoType: event.target.value as StorePromoType })} className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary">
             {TYPES.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}
           </select>
-          <select aria-label="Product" value={form.productId} onChange={(event) => setForm({ ...form, productId: event.target.value })} className="w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm">
+          <select aria-label="Product" value={form.productId} onChange={(event) => setForm({ ...form, productId: event.target.value })} className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary">
             <option value="">All products, or pick one</option>
             {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
           </select>
-          <input aria-label="Category" value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })} placeholder="Or a category name" className="w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm" />
+          <input aria-label="Category" value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })} placeholder="Or a category name" className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary" />
           {(form.promoType === 'sale_price') && (
-            <input aria-label="Sale price" type="number" min="0" step="0.01" value={form.salePrice} onChange={(event) => setForm({ ...form, salePrice: event.target.value })} placeholder="Sale price" className="w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm" />
+            <input aria-label="Sale price" type="number" min="0" step="0.01" value={form.salePrice} onChange={(event) => setForm({ ...form, salePrice: event.target.value })} placeholder="Sale price" className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary" />
           )}
           {(form.promoType === 'percent' || form.promoType === 'coupon') && (
-            <input aria-label="Percent off" type="number" min="0" max="100" step="0.01" value={form.percentOff} onChange={(event) => setForm({ ...form, percentOff: event.target.value })} placeholder="Percent off" className="w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm" />
+            <input aria-label="Percent off" type="number" min="0" max="100" step="0.01" value={form.percentOff} onChange={(event) => setForm({ ...form, percentOff: event.target.value })} placeholder="Percent off" className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary" />
           )}
           {(form.promoType === 'fixed' || form.promoType === 'coupon') && (
-            <input aria-label="Amount off" type="number" min="0" step="0.01" value={form.amountOff} onChange={(event) => setForm({ ...form, amountOff: event.target.value })} placeholder="Amount off" className="w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm" />
+            <input aria-label="Amount off" type="number" min="0" step="0.01" value={form.amountOff} onChange={(event) => setForm({ ...form, amountOff: event.target.value })} placeholder="Amount off" className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary" />
           )}
           {form.promoType === 'multibuy' && (
             <div className="grid grid-cols-2 gap-2">
-              <input aria-label="Buy quantity" type="number" min="1" step="1" value={form.buyQuantity} onChange={(event) => setForm({ ...form, buyQuantity: event.target.value })} placeholder="Buy" className="rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm" />
-              <input aria-label="Free quantity" type="number" min="1" step="1" value={form.freeQuantity} onChange={(event) => setForm({ ...form, freeQuantity: event.target.value })} placeholder="Free" className="rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm" />
+              <input aria-label="Buy quantity" type="number" min="1" step="1" value={form.buyQuantity} onChange={(event) => setForm({ ...form, buyQuantity: event.target.value })} placeholder="Buy" className="rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary" />
+              <input aria-label="Free quantity" type="number" min="1" step="1" value={form.freeQuantity} onChange={(event) => setForm({ ...form, freeQuantity: event.target.value })} placeholder="Free" className="rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary" />
             </div>
           )}
-          <input aria-label="Coupon code" value={form.couponCode} onChange={(event) => setForm({ ...form, couponCode: event.target.value })} placeholder="Coupon code (leave empty to apply automatically)" className="w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm" />
+          <input aria-label="Coupon code" value={form.couponCode} onChange={(event) => setForm({ ...form, couponCode: event.target.value })} placeholder="Coupon code (leave empty to apply automatically)" className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary" />
           <div className="grid grid-cols-2 gap-2">
-            <input aria-label="Starts" type="datetime-local" value={form.startsAt} onChange={(event) => setForm({ ...form, startsAt: event.target.value })} className="rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm" />
-            <input aria-label="Ends" type="datetime-local" value={form.endsAt} onChange={(event) => setForm({ ...form, endsAt: event.target.value })} className="rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm" />
+            <input aria-label="Starts" type="datetime-local" value={form.startsAt} onChange={(event) => setForm({ ...form, startsAt: event.target.value })} className="rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary" />
+            <input aria-label="Ends" type="datetime-local" value={form.endsAt} onChange={(event) => setForm({ ...form, endsAt: event.target.value })} className="rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary" />
           </div>
           {error && <p className="text-sm text-red-700">{error}</p>}
           <button type="submit" className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white">
@@ -155,7 +155,7 @@ export default function StoreDealsPage() {
         <div className="space-y-2">
           {deals.length === 0 && <p className="text-sm text-gray-500">No store deals yet. Checkout prices stay as they are.</p>}
           {deals.map((deal) => (
-            <article key={deal.id} className="ios-glass rounded-2xl p-4">
+            <article key={deal.id} className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="font-semibold text-gray-900">{deal.name}</p>
@@ -166,10 +166,10 @@ export default function StoreDealsPage() {
                   </p>
                 </div>
                 <div className="flex gap-2">
-                  <button type="button" onClick={() => void toggle(deal)} className="rounded-lg bg-white/80 px-2 py-1 text-xs font-semibold">
+                  <button type="button" onClick={() => void toggle(deal)} className="rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-xs font-semibold">
                     {deal.is_active === 1 ? 'Pause' : 'Resume'}
                   </button>
-                  <button type="button" onClick={() => void remove(deal)} aria-label={`Delete ${deal.name}`} className="rounded-lg bg-white/80 p-1 text-red-600">
+                  <button type="button" onClick={() => void remove(deal)} aria-label={`Delete ${deal.name}`} className="rounded-lg border border-gray-200 bg-gray-50 p-1 text-red-600">
                     <Trash2 className="h-4 w-4" />
                   </button>
                 </div>

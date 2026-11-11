@@ -76,6 +76,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [closingSmsEnabled, setClosingSmsEnabled] = useState(false);
   const [closingSmsTime, setClosingSmsTime] = useState('20:00');
   const [cashiersCanRecordExpenses, setCashiersCanRecordExpenses] = useState(true);
+  const [vatRate, setVatRate] = useState('0');
   const [closingSmsNote, setClosingSmsNote] = useState('');
   const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState(DEFAULT_SESSION_TIMEOUT_MINUTES);
   const [momoAccountName, setMomoAccountName] = useState('');
@@ -129,6 +130,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
       setClosingSmsEnabled((currentStore.closing_sms_enabled ?? 0) === 1);
       setClosingSmsTime(currentStore.closing_sms_time || '20:00');
       setCashiersCanRecordExpenses((currentStore.cashiers_can_record_expenses ?? 1) === 1);
+      setVatRate(String(Number(currentStore.vat_rate) || 0));
       setSessionTimeoutMinutes(normalizeSessionTimeoutMinutes(currentStore.session_timeout_minutes));
       setMomoAccountName(currentStore.momo_account_name || '');
       setMomoNumber(currentStore.momo_number || '');
@@ -219,6 +221,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         closing_sms_enabled: closingSmsEnabled ? 1 : 0,
         closing_sms_time: closingSmsTime || '20:00',
         cashiers_can_record_expenses: cashiersCanRecordExpenses ? 1 : 0,
+        vat_rate: Math.max(0, Math.min(100, Number(vatRate) || 0)),
         session_timeout_minutes: normalizeSessionTimeoutMinutes(sessionTimeoutMinutes),
         momo_account_name: momoAccountName.trim(),
         momo_number: momoNumber.trim(),
@@ -560,27 +563,42 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
           </div>
         </div>
 
-        <div className="ios-glass rounded-2xl p-4 mb-3 space-y-3">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">
+          <h3 className="font-bold text-gray-900 mb-1">VAT in the selling price</h3>
+          <p className="text-xs text-gray-500 mb-3">When you change a product’s selling price, this percent is rounded into that price. Receipts charge the selling price and do not print a VAT line. Leave it at 0 to keep prices as you type them.</p>
+          <label className="text-xs font-medium text-gray-600 mb-1 block">VAT percent</label>
+          <input
+            type="number"
+            min="0"
+            max="100"
+            step="0.01"
+            value={vatRate}
+            onChange={(event) => setVatRate(event.target.value)}
+            className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+          />
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3 space-y-3">
           <h3 className="font-bold text-gray-900">Loyalty points</h3>
           <p className="text-xs text-gray-600">Points are earned on sales to a known customer and can be redeemed at checkout. Leave both at 0 to keep loyalty off.</p>
           <label className="block text-sm">
             Points earned per 1 {currentStore?.currency_code || 'GHS'}
-            <input type="number" min="0" step="1" value={loyaltyEarnRate} onChange={(event) => setLoyaltyEarnRate(event.target.value)} className="mt-1 w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2" />
+            <input type="number" min="0" step="1" value={loyaltyEarnRate} onChange={(event) => setLoyaltyEarnRate(event.target.value)} className="mt-1 w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary focus:border-primary" />
           </label>
           <label className="block text-sm">
             Value of 1 point
-            <input type="number" min="0" step="0.01" value={loyaltyRedeemValue} onChange={(event) => setLoyaltyRedeemValue(event.target.value)} className="mt-1 w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2" />
+            <input type="number" min="0" step="0.01" value={loyaltyRedeemValue} onChange={(event) => setLoyaltyRedeemValue(event.target.value)} className="mt-1 w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary focus:border-primary" />
           </label>
           <label className="block text-sm">
             When a credit sale would pass the customer's limit
-            <select value={creditLimitAction} onChange={(event) => setCreditLimitAction(event.target.value === 'block' ? 'block' : 'warn')} className="mt-1 w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2">
+            <select value={creditLimitAction} onChange={(event) => setCreditLimitAction(event.target.value === 'block' ? 'block' : 'warn')} className="mt-1 w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none bg-white focus:ring-2 focus:ring-primary focus:border-primary">
               <option value="warn">Warn and allow the sale</option>
               <option value="block">Block the sale</option>
             </select>
           </label>
         </div>
 
-        <div className="ios-glass mb-3 space-y-3 rounded-2xl p-4">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3 space-y-3">
           <h3 className="font-bold text-gray-900">Closing SMS</h3>
           <p className="text-xs text-gray-600">
             Sends today’s sales, cash, MoMo, credit, voids, expenses, and net to the store phone. If the device is offline, the message waits until it reconnects.
@@ -599,7 +617,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
           </label>
           <label className="block text-sm">
             Closing time
-            <input type="time" value={closingSmsTime} onChange={(event) => setClosingSmsTime(event.target.value)} className="mt-1 w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2" />
+            <input type="time" value={closingSmsTime} onChange={(event) => setClosingSmsTime(event.target.value)} className="mt-1 w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary focus:border-primary" />
           </label>
           <label className="flex items-center justify-between gap-3 text-sm">
             <span>Cashiers can record expenses</span>

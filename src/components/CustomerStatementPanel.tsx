@@ -112,16 +112,16 @@ export default function CustomerStatementPanel({
   };
 
   return (
-    <section className="ios-glass space-y-3 rounded-2xl p-4">
+    <section className="space-y-3 rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
       <h3 className="font-bold text-gray-900">Account statement</h3>
       <div className="grid grid-cols-2 gap-2">
         <label className="text-xs text-gray-600">
           From
-          <input type="date" value={from} onChange={(event) => setFrom(event.target.value)} className="mt-1 w-full rounded-lg border border-white/70 bg-white/80 px-2 py-2 text-sm" />
+          <input type="date" value={from} onChange={(event) => setFrom(event.target.value)} className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
         </label>
         <label className="text-xs text-gray-600">
           To
-          <input type="date" value={to} onChange={(event) => setTo(event.target.value)} className="mt-1 w-full rounded-lg border border-white/70 bg-white/80 px-2 py-2 text-sm" />
+          <input type="date" value={to} onChange={(event) => setTo(event.target.value)} className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
         </label>
       </div>
       <button type="button" onClick={() => void load()} disabled={busy} className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">
@@ -133,7 +133,7 @@ export default function CustomerStatementPanel({
           <p className="flex justify-between"><span>Opening balance</span><strong>{money(opening)}</strong></p>
           {lines.length === 0 && <p className="text-xs text-gray-500">No account activity in this range.</p>}
           {lines.map((line, index) => (
-            <div key={`${line.at}-${index}`} className="rounded-xl bg-white/70 px-3 py-2">
+            <div key={`${line.at}-${index}`} className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
               <p className="font-medium">{line.label}</p>
               <p className="text-xs text-gray-500">
                 {line.at.slice(0, 10)}
