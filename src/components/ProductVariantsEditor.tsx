@@ -53,7 +53,7 @@ export default function ProductVariantsEditor({ product }: { product: LocalProdu
   };
 
   return (
-    <div className="ios-glass rounded-2xl p-3 space-y-3">
+    <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
       <div>
         <p className="text-sm font-semibold text-gray-900">Options</p>
         <p className="text-xs text-gray-600">Size, colour, flavour, or any other option. Each one has its own barcode, price, and stock.</p>

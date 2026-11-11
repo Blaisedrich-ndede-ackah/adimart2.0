@@ -90,6 +90,8 @@ export interface LocalStore {
   closing_sms_time?: string;
   /** Cashiers may record shop expenses when 1. Default on so existing floor recording stays. */
   cashiers_can_record_expenses?: number;
+  /** VAT percent folded into selling prices. 0 leaves prices unchanged. */
+  vat_rate?: number;
   created_at: string;
   synced: number;
 }
@@ -1255,6 +1257,13 @@ class AdimatDB extends Dexie {
           }
         });
       });
+      this.version(27).stores({
+        stores: 'id, synced',
+      }).upgrade(async (tx) => {
+        await tx.table('stores').toCollection().modify((store: LocalStore) => {
+          if (typeof store.vat_rate !== 'number') store.vat_rate = 0;
+        });
+      });
   }
 }
 
@@ -1534,6 +1543,7 @@ export async function createStoreWithOwner(
     closing_sms_enabled: 0,
     closing_sms_time: '20:00',
     cashiers_can_record_expenses: 1,
+    vat_rate: 0,
     session_timeout_minutes: 5,
     momo_account_name: '',
     momo_number: '',
@@ -3004,7 +3014,7 @@ const OPTIONAL_CLOUD_TABLES = new Set([
 ]);
 
 const OPTIONAL_PUSH_COLUMNS: Record<string, string[]> = {
-  stores: ['loyalty_earn_rate', 'loyalty_redeem_value', 'credit_limit_action', 'closing_sms_enabled', 'closing_sms_time', 'cashiers_can_record_expenses'],
+  stores: ['loyalty_earn_rate', 'loyalty_redeem_value', 'credit_limit_action', 'closing_sms_enabled', 'closing_sms_time', 'cashiers_can_record_expenses', 'vat_rate'],
   expenses: ['expense_date', 'payment_method'],
   products: ['unit', 'allow_decimal'],
   customers: ['loyalty_points_balance', 'credit_limit', 'credit_terms_days'],
@@ -3548,6 +3558,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
           closing_sms_enabled: (store.closing_sms_enabled ?? 0) === 1,
           closing_sms_time: store.closing_sms_time || '20:00',
           cashiers_can_record_expenses: (store.cashiers_can_record_expenses ?? 1) === 1,
+          vat_rate: Math.max(0, Math.min(100, Number(store.vat_rate) || 0)),
           created_at: store.created_at,
         }],
         async () => { await db.stores.update(storeId, { synced: 1 }); },
@@ -4596,6 +4607,10 @@ export async function syncFromSupabase(opts?: {
           remoteStore.cashiers_can_record_expenses == null
             ? (localStore?.cashiers_can_record_expenses ?? 1)
             : remoteStore.cashiers_can_record_expenses ? 1 : 0,
+        vat_rate:
+          remoteStore.vat_rate == null
+            ? (localStore?.vat_rate ?? 0)
+            : Math.max(0, Math.min(100, Number(remoteStore.vat_rate) || 0)),
         created_at: remoteStore.created_at,
         synced: localStore?.synced === 0 ? 0 : 1,
       });

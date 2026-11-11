@@ -83,7 +83,7 @@ export default function SupplierPayablesPanel() {
   };
 
   return (
-    <section className="ios-glass rounded-2xl p-4 space-y-4">
+    <section className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm space-y-4">
       <div className="flex items-center gap-2">
         <Wallet className="h-5 w-5 text-primary" />
         <h2 className="font-bold">Supplier payments</h2>

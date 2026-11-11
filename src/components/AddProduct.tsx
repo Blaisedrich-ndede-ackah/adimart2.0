@@ -15,7 +15,7 @@ import {
   type WholesaleMode,
   type WholesaleTier,
 } from '@/lib/bulkPricing';
-import { toMoneyAmount } from '@/lib/money';
+import { toMoneyAmount, vatInclusivePrice } from '@/lib/money';
 import { getStoreCurrency } from '@/lib/currency';
 import { useAuthStore } from '@/store/useAuthStore';
 import { recordActivity } from '@/lib/activityLog';
@@ -41,6 +41,7 @@ const WHOLESALE_MODES: { value: WholesaleMode; label: string }[] = [
 
 export default function AddProduct({ isOpen, onClose, onSaved, editProduct, initialBarcode, categories }: AddProductProps) {
   const currencySymbol = getStoreCurrency(useAuthStore((s) => s.currentStore?.currency_code)).symbol;
+  const vatRate = Number(useAuthStore((s) => s.currentStore?.vat_rate) || 0);
   const currentUser = useAuthStore((s) => s.currentUser);
   const currentUserId = currentUser?.id;
   const [name, setName] = useState('');
@@ -48,6 +49,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
   const [barcode, setBarcode] = useState('');
   const [costPrice, setCostPrice] = useState('');
   const [sellingPrice, setSellingPrice] = useState('');
+  const [sellingPriceTouched, setSellingPriceTouched] = useState(false);
   const [stockLevel, setStockLevel] = useState('');
   const [reorderLevel, setReorderLevel] = useState('0');
   const [skuType, setSkuType] = useState('unit');
@@ -101,6 +103,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         setBarcode(editProduct.barcode);
         setCostPrice(editProduct.cost_price.toString());
         setSellingPrice(editProduct.selling_price.toString());
+        setSellingPriceTouched(false);
         setStockLevel(editProduct.stock_level.toString());
         setReorderLevel(String(editProduct.reorder_level ?? 0));
         setSkuType(editProduct.sku_type);
@@ -130,6 +133,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         setBarcode(initialBarcode?.trim() || '');
         setCostPrice('');
         setSellingPrice('');
+        setSellingPriceTouched(false);
         setStockLevel('');
         setReorderLevel('0');
         setSkuType('unit');
@@ -175,7 +179,8 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
 
   const profitMargin = (() => {
     const cost = parseFloat(costPrice);
-    const sell = parseFloat(sellingPrice);
+    const typed = parseFloat(sellingPrice);
+    const sell = vatRate > 0 && sellingPriceTouched ? vatInclusivePrice(sellingPrice, vatRate) : typed;
     if (isNaN(cost) || isNaN(sell) || cost <= 0) return null;
     return ((sell - cost) / cost * 100).toFixed(1);
   })();
@@ -253,7 +258,9 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
       return;
     }
     const cost = toMoneyAmount(costPrice);
-    const sell = toMoneyAmount(sellingPrice);
+    const sell = vatRate > 0 && sellingPriceTouched
+      ? vatInclusivePrice(sellingPrice, vatRate)
+      : toMoneyAmount(sellingPrice);
     if (!costPrice || cost < 0 || Number.isNaN(Number(costPrice))) {
       setError('Enter a valid cost price');
       return;
@@ -659,12 +666,22 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
               <input
                 type="number"
                 value={sellingPrice}
-                onChange={e => setSellingPrice(e.target.value)}
+                onChange={e => {
+                  setSellingPriceTouched(true);
+                  setSellingPrice(e.target.value);
+                }}
                 placeholder="0.00"
                 min="0"
                 step="0.01"
                 className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
               />
+              {vatRate > 0 && (
+                <p className="mt-1 text-[11px] text-gray-500">
+                  {sellingPriceTouched
+                    ? `Saved selling price ${currencySymbol}${vatInclusivePrice(sellingPrice, vatRate).toFixed(2)}. VAT is rounded into this price and is not printed on the receipt.`
+                    : 'This selling price already includes VAT. Change it only if you are entering a price before VAT. Receipts do not show a VAT line.'}
+                </p>
+              )}
             </div>
           </div>
 
@@ -706,7 +723,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
             </div>
           </div>
 
-          <div className="ios-glass rounded-2xl p-3 space-y-3">
+          <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
             <div>
               <label className="text-sm font-medium text-gray-700 mb-1.5 block">Sell by</label>
               <select value={unit} onChange={(event) => setUnit(event.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm bg-white">

@@ -459,25 +459,25 @@ export default function ExpensesPage({
           </div>
         )}
 
-        <section className="ios-glass grid gap-2 rounded-2xl p-3 sm:grid-cols-4">
+        <section className="grid gap-2 rounded-xl border border-gray-100 bg-white p-3 shadow-sm sm:grid-cols-4">
           <label className="text-xs text-gray-600">
             From
-            <input type="date" value={filterFrom} onChange={(event) => setFilterFrom(event.target.value)} className="mt-1 w-full rounded-lg border border-white/70 bg-white/80 px-2 py-2 text-sm" />
+            <input type="date" value={filterFrom} onChange={(event) => setFilterFrom(event.target.value)} className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
           </label>
           <label className="text-xs text-gray-600">
             To
-            <input type="date" value={filterTo} onChange={(event) => setFilterTo(event.target.value)} className="mt-1 w-full rounded-lg border border-white/70 bg-white/80 px-2 py-2 text-sm" />
+            <input type="date" value={filterTo} onChange={(event) => setFilterTo(event.target.value)} className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
           </label>
           <label className="text-xs text-gray-600">
             Category
-            <select value={filterCategory} onChange={(event) => setFilterCategory(event.target.value)} className="mt-1 w-full rounded-lg border border-white/70 bg-white/80 px-2 py-2 text-sm">
+            <select value={filterCategory} onChange={(event) => setFilterCategory(event.target.value)} className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm">
               <option value="all">All categories</option>
               {[...new Set(expenses.map((expense) => expense.category))].map((item) => <option key={item}>{item}</option>)}
             </select>
           </label>
           <label className="text-xs text-gray-600">
             Method
-            <select value={filterMethod} onChange={(event) => setFilterMethod(event.target.value)} className="mt-1 w-full rounded-lg border border-white/70 bg-white/80 px-2 py-2 text-sm">
+            <select value={filterMethod} onChange={(event) => setFilterMethod(event.target.value)} className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm">
               <option value="all">All methods</option>
               <option value="cash">Cash</option>
               <option value="momo">MoMo</option>

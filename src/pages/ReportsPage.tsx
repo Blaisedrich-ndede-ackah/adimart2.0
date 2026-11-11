@@ -486,7 +486,7 @@ export default function ReportsPage() {
                 )}
               </div>
               {voidedSales.length > 0 && (
-                <div className="ios-glass rounded-xl p-3 col-span-2 md:col-span-4">
+                <div className="rounded-xl border border-gray-100 bg-white p-3 shadow-sm col-span-2 md:col-span-4">
                   <p className="text-xs font-semibold text-gray-700">Voided sales are excluded from these totals</p>
                   <ul className="mt-2 space-y-1">
                     {voidedSales.slice(0, 8).map((sale) => (
