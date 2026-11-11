@@ -642,7 +642,7 @@ async function finalizeIntent(reference: string, charge: VerifiedCharge): Promis
     order_id: order.id,
   }).eq('id', intent.id);
   try {
-    const { sendStoreMomoPayout } = await import('../../api/store-momo-payout.js');
+    const { sendStoreMomoPayout } = await import('./storeMomoPayout');
     await sendStoreMomoPayout({
       storeId: String(intent.store_id),
       reference,
