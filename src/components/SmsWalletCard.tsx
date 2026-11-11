@@ -4,9 +4,8 @@ import { useFormatMoney } from '@/lib/currency';
 import {
   SMS_TOPUP_PRESETS_GHS,
   loadSmsWallet,
-  startSmsTopup,
+  paySmsTopup,
   textsRemaining,
-  verifySmsTopup,
   type SmsWalletSnapshot,
 } from '@/lib/smsWallet';
 
@@ -44,30 +43,6 @@ export default function SmsWalletCard({
           setError(loadError instanceof Error ? loadError.message : 'SMS credit could not be refreshed.');
         }
       });
-    const params = new URLSearchParams(window.location.search);
-    const reference = params.get('reference') || params.get('trxref') || '';
-    if (params.get('smsWallet') === '1' && reference.startsWith('SMS-')) {
-      const verifyTicket = ++generation.current;
-      setBusy('confirm');
-      void verifySmsTopup(storeId, userId, reference)
-        .then((next) => {
-          if (cancelled || verifyTicket !== generation.current) return;
-          setSnapshot(next);
-          setNotice(`SMS credit added. Balance GHS ${(next.balancePesewas / 100).toFixed(2)}.`);
-          setError('');
-        })
-        .catch((verifyError: unknown) => {
-          if (!cancelled) setError(verifyError instanceof Error ? verifyError.message : 'Paystack could not confirm this SMS payment.');
-        })
-        .finally(() => {
-          if (!cancelled) setBusy('');
-          params.delete('smsWallet');
-          params.delete('reference');
-          params.delete('trxref');
-          const query = params.toString();
-          window.history.replaceState({}, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`);
-        });
-    }
     return () => {
       cancelled = true;
     };
@@ -83,8 +58,9 @@ export default function SmsWalletCard({
     setError('');
     setNotice('Opening Paystack…');
     try {
-      const url = await startSmsTopup(storeId, userId, value);
-      window.location.assign(url);
+      const next = await paySmsTopup(storeId, value);
+      setSnapshot(next);
+      setNotice(`SMS credit added. Balance GHS ${(next.balancePesewas / 100).toFixed(2)}.`);
     } catch (payError: unknown) {
       setNotice('');
       setError(payError instanceof Error ? payError.message : 'Paystack could not open.');
