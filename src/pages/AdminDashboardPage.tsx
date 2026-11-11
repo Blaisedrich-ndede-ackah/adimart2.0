@@ -51,8 +51,9 @@ import AdminActivityLog from '@/components/AdminActivityLog';
 import CopyableStoreId from '@/components/CopyableStoreId';
 import AdminAgentsPanel from '@/components/AdminAgentsPanel';
 import AdminActiveDevicesPanel from '@/components/AdminActiveDevicesPanel';
+import AdminPaystackApprovals from '@/components/AdminPaystackApprovals';
 
-type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact' | 'campaigns' | 'learn' | 'sales' | 'agents' | 'support' | 'activity' | 'devices' | 'sms';
+type Tab = 'overview' | 'stores' | 'users' | 'products' | 'payouts' | 'subscriptions' | 'reports' | 'contact' | 'campaigns' | 'learn' | 'sales' | 'paystack' | 'agents' | 'support' | 'activity' | 'devices' | 'sms';
 
 function defaultReportFromDate(): string {
   const d = new Date();
@@ -467,6 +468,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
       ['payouts', 'Payouts', Wallet],
       ['products', 'Products', Package],
       ['sales', 'Sales', CreditCard],
+      ['paystack', 'Paystack', Wallet],
       ['reports', 'Reports', FileBarChart],
       ['contact', 'Contact', Mail],
       ['campaigns', 'Campaigns', Megaphone],
@@ -1577,6 +1579,7 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
         {tab === 'activity' && <AdminActivityLog />}
         {tab === 'devices' && <AdminActiveDevicesPanel />}
         {data && tab === 'sms' && <AdminBroadcastSms stores={data.stores} users={data.users} />}
+        {tab === 'paystack' && <AdminPaystackApprovals />}
 
         {data && tab === 'products' && (
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
