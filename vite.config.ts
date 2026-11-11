@@ -15,7 +15,7 @@ const devApiModules: Record<string, string> = {
   "/api/shop-owner": "api/shop-owner.ts",
   "/api/paystack-webhook": "api/paystack-webhook.ts",
   "/api/paystack-return": "api/paystack-return.ts",
-  "/api/store-momo-payout": "api/store-momo-payout.ts",
+  "/api/store-momo-payout": "api/shop-checkout.ts",
 };
 
 function promotionalCampaignDevApi(): Plugin {

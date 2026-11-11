@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
 import { parseGhanaPhone } from '../lib/ghanaPhone';
+import { sendStoreMomoPayout } from './storeMomoPayout';
 
 export interface ApiRequest {
   method?: string;
@@ -642,7 +643,6 @@ async function finalizeIntent(reference: string, charge: VerifiedCharge): Promis
     order_id: order.id,
   }).eq('id', intent.id);
   try {
-    const { sendStoreMomoPayout } = await import('./storeMomoPayout');
     await sendStoreMomoPayout({
       storeId: String(intent.store_id),
       reference,
