@@ -298,3 +298,10 @@ export async function sendStoreSms(input: {
     retryable: retryableMessage(error),
   };
 }
+
+/** Admin confirmation that Paystack already collected this SMS top-up. */
+export async function creditStoreSms(storeId: string, pesewas: number, reference: string): Promise<number> {
+  const amount = Math.round(Number(pesewas));
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter a valid SMS amount.');
+  return changeBalance(storeId, amount, 'topup', 'credit', 0, 'Admin confirmed Paystack SMS credit', reference.trim());
+}
