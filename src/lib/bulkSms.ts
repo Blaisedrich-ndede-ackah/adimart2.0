@@ -6,7 +6,8 @@
 
 import { db, generateId, getCurrentStore, getCurrentStoreCustomers, getCurrentStoreId, type LocalBulkSmsCampaign } from '@/lib/dexie';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
-import { sendBulkSmsViaMnotify, normalizeRecipientList, type BulkSmsResult } from '@/lib/mnotify';
+import { normalizeRecipientList, type BulkSmsResult } from '@/lib/mnotify';
+import { sendStoreSms } from '@/lib/smsWallet';
 
 export type { LocalBulkSmsCampaign } from '@/lib/dexie';
 
@@ -77,7 +78,20 @@ export async function sendBulkSmsToCurrentStoreCustomers(
   }
 
   const message = input.message.trim();
-  const result = await sendBulkSmsViaMnotify(phones, message);
+  const wallet = await sendStoreSms({
+    storeId,
+    kind: 'bulk',
+    recipients: phones,
+    message,
+  });
+  const result: BulkSmsResult = {
+    success: wallet.ok,
+    recipientCount: wallet.recipientCount,
+    sentCount: wallet.sentCount,
+    failedCount: wallet.failedCount,
+    status: wallet.ok ? 'sent' : 'failed',
+    error: wallet.error,
+  };
 
   const campaign: LocalBulkSmsCampaign = {
     id: generateId(),

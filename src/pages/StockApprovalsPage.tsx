@@ -70,7 +70,7 @@ export default function StockApprovalsPage() {
 
   const submitRequest = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!currentStore?.id || !currentUser) return;
+    if (!currentStore?.id || !currentUser || isCashier) return;
     setError('');
     setMessage('');
     setBusyId('new');
@@ -144,6 +144,7 @@ export default function StockApprovalsPage() {
         )}
         {message && <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">{message}</p>}
 
+        {!isCashier && (
         <form onSubmit={(event) => void submitRequest(event)} className="space-y-3 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
           <div className="flex items-center gap-2">
             <ClipboardCheck className="h-5 w-5 text-primary" />
@@ -179,6 +180,7 @@ export default function StockApprovalsPage() {
             {busyId === 'new' ? 'Saving request…' : 'Queue for cashier approval'}
           </button>
         </form>
+        )}
 
         <section className="space-y-3">
           <h2 className="font-semibold text-gray-900">Waiting for approval ({pending.length})</h2>

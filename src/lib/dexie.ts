@@ -92,6 +92,8 @@ export interface LocalStore {
   cashiers_can_record_expenses?: number;
   /** VAT percent folded into selling prices. 0 leaves prices unchanged. */
   vat_rate?: number;
+  /** Cached store SMS balance in pesewas. The server wallet is the source of truth. */
+  sms_balance_pesewas?: number;
   created_at: string;
   synced: number;
 }

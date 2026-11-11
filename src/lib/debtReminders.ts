@@ -18,7 +18,8 @@ import {
   type LocalStore,
 } from '@/lib/dexie';
 import { buildCustomerBalances, type CustomerBalance } from '@/lib/customerBalances';
-import { sendSmsViaMnotify, normalizeRecipientList } from '@/lib/mnotify';
+import { normalizeRecipientList } from '@/lib/mnotify';
+import { sendStoreSms } from '@/lib/smsWallet';
 import { formatOfficialMoney } from '@/lib/currency';
 import {
   DEBT_REMINDER_MAX_CHARS,
@@ -206,7 +207,12 @@ export async function sendPreparedDebtReminder(input: {
     });
     return { ok: false, error: 'No phone number on file.' };
   }
-  const sendResult = await sendSmsViaMnotify(input.phone, message);
+  const sendResult = await sendStoreSms({
+    storeId: input.storeId,
+    kind: 'debt',
+    recipients: [input.phone],
+    message,
+  });
   await recordReminder({
     store_id: input.storeId,
     customer_id: input.customerId,
@@ -216,13 +222,13 @@ export async function sendPreparedDebtReminder(input: {
     message,
     provider: 'mnotify',
     provider_message_id: null,
-    status: sendResult.success ? 'sent' : 'failed',
-    error_message: sendResult.success ? null : sendResult.error || 'Unknown error',
+    status: sendResult.ok ? 'sent' : 'failed',
+    error_message: sendResult.ok ? null : sendResult.error || 'Unknown error',
     sent_at: new Date().toISOString(),
   });
   return {
-    ok: sendResult.success,
-    error: sendResult.success ? undefined : sendResult.error || 'Could not send the reminder.',
+    ok: sendResult.ok,
+    error: sendResult.ok ? undefined : sendResult.error || 'Could not send the reminder.',
   };
 }
 
@@ -295,14 +301,17 @@ export async function sendDebtRemindersForStore(
       continue;
     }
 
-    const sendResult = await sendSmsViaMnotify(candidate.phone, message);
-    if (sendResult.error === 'mNotify API key not configured') {
-      // Nothing can be sent on this device. Stop the sweep without burning
-      // each customer's reminder interval on a failed attempt.
-      result.reason = 'mNotify API key is not configured on this device.';
+    const sendResult = await sendStoreSms({
+      storeId: store.id,
+      kind: 'debt',
+      recipients: [candidate.phone],
+      message,
+    });
+    if (sendResult.retryable || /too low|SMS credit/i.test(sendResult.error || '')) {
+      result.reason = sendResult.error || 'This store does not have enough SMS credit.';
       return result;
     }
-    if (sendResult.success) {
+    if (sendResult.ok) {
       result.sent += 1;
     } else {
       result.failed += 1;
@@ -317,8 +326,8 @@ export async function sendDebtRemindersForStore(
       message,
       provider: 'mnotify',
       provider_message_id: null,
-      status: sendResult.success ? 'sent' : 'failed',
-      error_message: sendResult.success ? null : sendResult.error || 'Unknown error',
+      status: sendResult.ok ? 'sent' : 'failed',
+      error_message: sendResult.ok ? null : sendResult.error || 'Unknown error',
       sent_at: new Date().toISOString(),
     });
   }

@@ -977,12 +977,19 @@ export async function handlePaystackWebhook(req: ApiRequest, res: ApiResponse): 
   try {
     const event = JSON.parse(raw) as { event?: string; data?: { reference?: string; amount?: number; currency?: string; status?: string } };
     if (event.event === 'charge.success' && event.data?.reference) {
-      await finalizeIntent(String(event.data.reference), {
-        reference: String(event.data.reference),
+      const reference = String(event.data.reference);
+      const charge = {
+        reference,
         amount: Number(event.data.amount) || 0,
         currency: String(event.data.currency || ''),
         status: String(event.data.status || ''),
-      });
+      };
+      if (reference.startsWith('SMS-')) {
+        const { settleSmsTopup } = await import('./smsWallet');
+        await settleSmsTopup(charge);
+      } else {
+        await finalizeIntent(reference, charge);
+      }
     }
     return json(res, 200, { received: true });
   } catch (error) {
