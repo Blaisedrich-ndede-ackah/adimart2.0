@@ -8,14 +8,14 @@ import { formatQty } from '@/lib/measure';
 export function receiptSmsText(input: {
   storeName: string;
   receiptNumber: string;
-  lines: Array<{ name: string; quantity: number; unit?: string; subtotal: number }>;
+  lines: Array<{ name: string; quantity: number; unit?: string; subtotal: number; serial?: string }>;
   total: number;
   paymentMethod: string;
   currency?: string;
 }): string {
   const currency = input.currency || 'GHS';
   const itemLines = input.lines.slice(0, 8).map((line) => (
-    `${line.name} ${formatQty(line.quantity, line.unit)} = ${currency} ${line.subtotal.toFixed(2)}`
+    `${line.name}${line.serial ? ` SN ${line.serial}` : ''} ${formatQty(line.quantity, line.unit)} = ${currency} ${line.subtotal.toFixed(2)}`
   ));
   return [
     input.storeName,

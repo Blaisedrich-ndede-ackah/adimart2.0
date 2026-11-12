@@ -61,6 +61,7 @@ export interface CartItem {
   list_unit_price?: number;
   promotion_label?: string;
   promotion_discount?: number;
+  serial_number?: string;
 }
 
 export type CartDiscountKind = 'none' | 'percentage' | 'fixed';
@@ -122,6 +123,7 @@ interface CartState {
   decrementItem: (itemId: string) => void;
   setItemSaleMode: (itemId: string, saleMode: SaleMode) => Promise<{ success: boolean; error?: string }>;
   setItemUnitType: (itemId: string, unitType: UnitType) => Promise<{ success: boolean; error?: string }>;
+  setItemSerial: (itemId: string, serial: string) => void;
   setDiscount: (percent: number) => void;
   setDiscountPercent: (percent: number) => void;
   setDiscountFixed: (amount: number) => void;
@@ -259,6 +261,11 @@ async function applyDeals(items: CartItem[], couponCode: string): Promise<{
   };
 }
 
+function withSerial(line: CartItem, serial?: string): CartItem {
+  const value = String(serial || '').trim().slice(0, 40);
+  return value ? { ...line, serial_number: value } : line;
+}
+
 function buildCartLine(
   product: LocalProduct,
   saleMode: SaleMode,
@@ -338,7 +345,10 @@ async function changeCartLine(
       current.unit_type === unitType
   );
   const quantity = source.quantity + (sibling?.quantity || 0);
-  const line = buildCartLine(product, saleMode, unitType, quantity, sibling?.id || source.id);
+  const line = withSerial(
+    buildCartLine(product, saleMode, unitType, quantity, sibling?.id || source.id),
+    source.serial_number || sibling?.serial_number,
+  );
   const available = await stockAtContext(product.id, latest.locationId);
   const otherBase = latest.items
     .filter(
@@ -515,7 +525,10 @@ export const useCartStore = create<CartState>((set, get) => ({
     }
 
     const draft = (existingItem?: CartItem): CartItem => {
-      const line = buildCartLine(product, itemSaleMode, unitType, existingItem ? nextQty : addQty, existingItem?.id);
+      const line = withSerial(
+        buildCartLine(product, itemSaleMode, unitType, existingItem ? nextQty : addQty, existingItem?.id),
+        existingItem?.serial_number,
+      );
       if (!opts.variant) return line;
       const price = variantSellingPrice(product, opts.variant);
       const qty = line.quantity;
@@ -579,7 +592,7 @@ export const useCartStore = create<CartState>((set, get) => ({
 
     const draft = state.items.map((item) => {
       if (item.id !== itemId) return item;
-      const line = buildCartLine(product, item.sale_mode, item.unit_type, qty, item.id);
+      const line = withSerial(buildCartLine(product, item.sale_mode, item.unit_type, qty, item.id), item.serial_number);
       if (!item.variant_id) return { ...line, variant_id: item.variant_id };
       return {
         ...line,
@@ -633,6 +646,12 @@ export const useCartStore = create<CartState>((set, get) => ({
   setItemSaleMode: (itemId, saleMode) => changeCartLine(get, set, itemId, { saleMode }),
 
   setItemUnitType: (itemId, unitType) => changeCartLine(get, set, itemId, { unitType }),
+  setItemSerial: (itemId, serial) => {
+    const value = String(serial || '').replace(/[\r\n]/g, '').slice(0, 40);
+    set((state) => ({
+      items: state.items.map((item) => item.id === itemId ? { ...item, serial_number: value } : item),
+    }));
+  },
 
   setDiscount: (percent) => {
     get().setDiscountPercent(percent);
@@ -1096,6 +1115,7 @@ export const useCartStore = create<CartState>((set, get) => ({
             measure_unit: item.measure_unit || '',
             list_unit_price: item.list_unit_price ?? item.unit_price,
             promotion_label: item.promotion_label || '',
+            serial_number: (item.serial_number || '').trim().slice(0, 40),
             synced: 0,
           }))
         );

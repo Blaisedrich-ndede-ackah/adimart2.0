@@ -15,6 +15,7 @@ import { fileToProductImageDataUrl } from '@/lib/productImage';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useFormatMoney } from '@/lib/currency';
 import { triggerPushSync } from '@/lib/sync';
+import { undoGoodsMomoPayout } from '@/lib/storeMomoPayout';
 
 export default function ReturnsPage() {
   const { currentStore, currentUser } = useAuthStore();
@@ -190,7 +191,16 @@ export default function ReturnsPage() {
         : record.refund_method === 'wallet'
           ? `Wallet credit ${money(record.wallet_credit)}`
           : `Debt reduced ${money(record.debt_applied)}${record.wallet_credit > 0 ? ` · wallet credit ${money(record.wallet_credit)}` : ''}`;
-      setMessage(`${record.product_name} return recorded; ${record.stock_quantity} inventory unit(s) restocked. ${refundSummary}.`);
+      let payoutNote = '';
+      if (currentUser && selectedTransaction.paystack_reference && (Number(selectedTransaction.paystack_amount) || 0) > 0) {
+        const payout = await undoGoodsMomoPayout({
+          storeId: currentStore.id,
+          userId: currentUser.id,
+          reference: selectedTransaction.paystack_reference,
+        });
+        payoutNote = ` ${payout.message}`;
+      }
+      setMessage(`${record.product_name} return recorded; ${record.stock_quantity} inventory unit(s) restocked. ${refundSummary}.${payoutNote}`);
       recordActivity({
         storeId: currentStore.id,
         storeName: currentStore.name,

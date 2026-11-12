@@ -19,6 +19,7 @@ export interface ReceiptData {
     unit?: string;
     unitPrice: number;
     subtotal: number;
+    serial?: string;
   }>;
   subtotal: number;
   discount: number;
@@ -168,6 +169,10 @@ function generateReceiptPDF(data: ReceiptData): jsPDF {
     const name = item.name.length > 20 ? item.name.substring(0, 20) + '...' : item.name;
     leftText(name, y, 9);
     y += 4;
+    if (item.serial) {
+      leftText(`  SN ${item.serial}`, y, 8);
+      y += 4;
+    }
 
     // Quantity x Price = Subtotal
     doc.setFontSize(8);
@@ -313,7 +318,7 @@ function generateOfficialReceiptPdf(data: ReceiptData): FormalPdf {
     pdf.dataTable(
       ['Description', 'Qty', 'Unit price', 'Amount'],
       data.items.map((item) => [
-        item.name,
+        item.serial ? `${item.name} SN ${item.serial}` : item.name,
         formatQty(item.quantity, item.unit),
         formatGhsOfficial(item.unitPrice, data.currencyCode),
         formatGhsOfficial(item.subtotal, data.currencyCode),
@@ -516,6 +521,7 @@ function generateReceiptText(data: ReceiptData): string {
   
   data.items.forEach(item => {
     lines.push(item.name);
+    if (item.serial) lines.push(`  SN ${item.serial}`);
     lines.push(leftRight(
       '  ' + formatQty(item.quantity, item.unit) + ' x ' + amt(data, item.unitPrice),
       amt(data, item.subtotal)

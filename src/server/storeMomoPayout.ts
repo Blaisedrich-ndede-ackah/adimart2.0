@@ -13,8 +13,11 @@ export interface StoreMomoPayoutRequest {
 export interface StoreMomoPayoutResult {
   ok: boolean;
   error?: string;
+  message?: string;
   transferCode?: string;
   alreadySent?: boolean;
+  status?: string;
+  amountGhs?: number;
 }
 
 function clean(value: unknown): string {
@@ -154,5 +157,123 @@ export async function sendStoreMomoPayout(
     return { ok: true, transferCode: String(transfer.transfer_code || '') };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : 'Could not send the MoMo payout.' };
+  }
+}
+
+interface StoredPayout {
+  status?: string;
+  paystack_transfer_code?: string;
+  amount_pesewas?: number;
+  error_message?: string;
+}
+
+function payoutReferenceFor(reference: string): string {
+  return `MOMO-${reference}`.slice(0, 100);
+}
+
+async function readPayout(reference: string): Promise<StoredPayout | null> {
+  const rows = await rest(
+    `store_momo_payouts?reference=eq.${encodeURIComponent(payoutReferenceFor(reference))}&select=status,paystack_transfer_code,amount_pesewas,error_message&limit=1`
+  ).catch(() => []);
+  return Array.isArray(rows) ? (rows[0] as StoredPayout | undefined) || null : null;
+}
+
+async function writePayoutStatus(reference: string, status: string, errorMessage: string): Promise<void> {
+  await rest(`store_momo_payouts?reference=eq.${encodeURIComponent(payoutReferenceFor(reference))}`, {
+    method: 'PATCH',
+    prefer: 'return=minimal',
+    body: JSON.stringify({ status, error_message: errorMessage.slice(0, 240) }),
+  });
+}
+
+function moneyFromPesewas(pesewas: number): string {
+  return (Math.round(pesewas) / 100).toFixed(2);
+}
+
+/**
+ * A sent MoMo transfer cannot be pulled back by Paystack. Flag it so the
+ * store can return the amount, then mark that return as settled.
+ */
+export async function undoStoreMomoPayout(
+  body: StoreMomoPayoutRequest,
+  options: { trusted?: boolean } = {},
+): Promise<StoreMomoPayoutResult> {
+  try {
+    const storeId = String(body.storeId || '').trim();
+    const userId = String(body.userId || '').trim();
+    const reference = String(body.reference || '').trim().slice(0, 80);
+    if (!storeId || !reference || (!options.trusted && !userId)) {
+      throw new Error('Store, staff, and Paystack reference are required.');
+    }
+    if (!options.trusted) {
+      const staff = await rest(`users?id=eq.${encodeURIComponent(userId)}&store_id=eq.${encodeURIComponent(storeId)}&select=id,is_active&limit=1`);
+      const person = Array.isArray(staff) ? staff[0] as { is_active?: boolean } : null;
+      if (!person || person.is_active === false) throw new Error('Store staff sign-in is required.');
+    }
+
+    const prior = await readPayout(reference);
+    if (!prior) {
+      return { ok: true, status: 'none', message: 'No goods MoMo payout was sent for this payment.' };
+    }
+    const amountGhs = (Number(prior.amount_pesewas) || 0) / 100;
+    if (prior.status === 'reversed') {
+      return { ok: true, status: 'reversed', amountGhs, message: 'This MoMo payout is already marked returned.' };
+    }
+    if (prior.status === 'reversal_due') {
+      return {
+        ok: true,
+        status: 'reversal_due',
+        amountGhs,
+        message: prior.error_message || `GH₵ ${moneyFromPesewas(Number(prior.amount_pesewas) || 0)} is still on the store MoMo. Return it, then mark it returned.`,
+      };
+    }
+
+    let transferStatus = '';
+    try {
+      const transfer = await paystack(`/transfer/verify/${encodeURIComponent(payoutReferenceFor(reference))}`);
+      transferStatus = String(transfer.status || '').toLowerCase();
+    } catch {
+      transferStatus = '';
+    }
+    if (transferStatus === 'failed' || transferStatus === 'reversed' || transferStatus === 'abandoned') {
+      await writePayoutStatus(reference, 'reversed', 'Paystack did not complete this MoMo payout.');
+      return { ok: true, status: 'reversed', amountGhs, message: 'Paystack did not complete this MoMo payout, so nothing has to be returned.' };
+    }
+
+    const message = `GH₵ ${moneyFromPesewas(Number(prior.amount_pesewas) || 0)} was sent to the store MoMo. Paystack cannot pull a sent transfer back. Return that amount, then mark it returned.`;
+    await writePayoutStatus(reference, 'reversal_due', message);
+    return { ok: true, status: 'reversal_due', amountGhs, message };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Could not undo the MoMo payout.' };
+  }
+}
+
+export async function settleStoreMomoReversal(
+  body: StoreMomoPayoutRequest,
+  options: { trusted?: boolean } = {},
+): Promise<StoreMomoPayoutResult> {
+  try {
+    const storeId = String(body.storeId || '').trim();
+    const userId = String(body.userId || '').trim();
+    const reference = String(body.reference || '').trim().slice(0, 80);
+    if (!storeId || !reference || (!options.trusted && !userId)) {
+      throw new Error('Store, staff, and Paystack reference are required.');
+    }
+    if (!options.trusted) {
+      const staff = await rest(`users?id=eq.${encodeURIComponent(userId)}&store_id=eq.${encodeURIComponent(storeId)}&select=id,role,is_active&limit=1`);
+      const person = Array.isArray(staff) ? staff[0] as { role?: string; is_active?: boolean } : null;
+      if (!person || person.is_active === false || person.role !== 'owner') {
+        throw new Error('Only the store owner can mark a MoMo payout returned.');
+      }
+    }
+    const prior = await readPayout(reference);
+    if (!prior) return { ok: false, error: 'No goods MoMo payout was sent for this payment.' };
+    if (prior.status === 'reversed') {
+      return { ok: true, status: 'reversed', message: 'This MoMo payout is already marked returned.' };
+    }
+    await writePayoutStatus(reference, 'reversed', 'The store returned this MoMo payout.');
+    return { ok: true, status: 'reversed', amountGhs: (Number(prior.amount_pesewas) || 0) / 100, message: 'The MoMo payout is marked returned.' };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Could not mark the MoMo payout returned.' };
   }
 }
