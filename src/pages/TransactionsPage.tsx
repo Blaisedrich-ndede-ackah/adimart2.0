@@ -13,6 +13,7 @@ import {
 } from '@/lib/dexie';
 import { useAuthStore } from '@/store/useAuthStore';
 import { reprintTransactionReceipt } from '@/lib/receiptReprint';
+import { TransactionReceiptSend } from '@/components/ReceiptSendActions';
 import { isPrinterConnected } from '@/lib/bluetoothPeripherals';
 import { openComputerPrinterWindow } from '@/lib/printService';
 import { parseOtherCharges } from '@/lib/otherCharges';
@@ -327,6 +328,9 @@ export default function TransactionsPage() {
                     {t('sales.printReceipt')}
                   </button>
                 </div>
+                <div className="border-t border-gray-50 px-3 py-2">
+                  <TransactionReceiptSend txn={txn} />
+                </div>
               </div>
             );
           })}
@@ -577,6 +581,7 @@ export default function TransactionsPage() {
                   {t('common.close')}
                 </button>
               </div>
+              <TransactionReceiptSend txn={previewTxn} />
             </div>
           </div>
         </div>
