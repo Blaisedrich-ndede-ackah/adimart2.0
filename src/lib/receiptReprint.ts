@@ -33,6 +33,7 @@ export async function buildReceiptDataFromTransaction(
       quantity: i.quantity,
       unitPrice: i.unit_price,
       subtotal: i.subtotal,
+      serial: i.serial_number || '',
     })),
     subtotal: Math.round(lineSubtotal * 100) / 100,
     discount,

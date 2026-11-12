@@ -4,7 +4,7 @@ import { isSupabaseConfigured, supabase, testSupabaseConnection } from './supaba
 import { isAdminSuperPin } from './superPin';
 import { toMoneyAmount } from './money';
 import { formatUnknownError, isUuid, openingBatchId, uuidOrNull } from './ids';
-import { cashbookAccessFromCloud } from './staffAccess';
+import { cashbookAccessFromCloud, customerPaymentsAccessFromCloud } from './staffAccess';
 import { normalizeSessionTimeoutMinutes } from './sessionTimeout';
 import {
   DEFAULT_DEBT_REMINDER_INTERVAL_DAYS,
@@ -181,6 +181,8 @@ export interface LocalUser {
   can_manage_ecommerce?: number;
   /** Cashiers may open Cash Book when 1. Missing = allowed (legacy). Owners always can. */
   can_access_cashbook?: number;
+  /** Cashiers may record a customer account payment and print its receipt when 1. Missing = off. */
+  can_record_customer_payments?: number;
   /** Owner-configured POS section order, shared across their signed-in devices. */
   pos_layout_json?: string;
   /** Compressed JPEG data URL. Each person sets their own; missing stays empty. */
@@ -1586,6 +1588,7 @@ export async function createStoreWithOwner(
     can_sell_from_warehouse: 1,
     can_manage_ecommerce: 1,
     can_access_cashbook: 1,
+    can_record_customer_payments: 1,
     created_at: now,
     synced: 0,
     pin_dirty: 1,
@@ -1921,6 +1924,7 @@ export async function addUserToStore(
     can_sell_from_warehouse: role === 'owner' ? 1 : 0,
     can_manage_ecommerce: role === 'owner' ? 1 : 0,
     can_access_cashbook: role === 'owner' ? 1 : 0,
+    can_record_customer_payments: role === 'owner' ? 1 : 0,
     created_at: new Date().toISOString(),
     synced: 0,
     pin_dirty: 1,
@@ -3039,7 +3043,7 @@ const OPTIONAL_PUSH_COLUMNS: Record<string, string[]> = {
   transaction_items: ['variant_id', 'measure_unit', 'list_unit_price', 'promotion_label', 'serial_number'],
   purchase_orders: ['amount_paid', 'due_date'],
   stock_batches: ['variant_id'],
-  users: ['photo_url'],
+  users: ['photo_url', 'can_record_customer_payments'],
 };
 export const FAST_SYNC_TABLES = Object.keys(INCREMENTAL_PULL_FIELDS)
   .filter((table) => table !== 'debt_reminders');
@@ -3627,6 +3631,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
         can_sell_from_warehouse: (u.can_sell_from_warehouse ?? 0) === 1,
         can_manage_ecommerce: (u.can_manage_ecommerce ?? (u.role === 'owner' ? 1 : 0)) === 1,
         can_access_cashbook: u.role === 'owner' ? true : (u.can_access_cashbook ?? 1) === 1,
+        can_record_customer_payments: u.role === 'owner' ? true : (u.can_record_customer_payments ?? 0) === 1,
         pos_layout_json: u.role === 'owner' ? u.pos_layout_json || null : null,
         photo_url: u.photo_url || '',
         created_at: u.created_at,
@@ -4740,6 +4745,7 @@ export async function syncFromSupabase(opts?: {
           can_sell_from_warehouse: row.can_sell_from_warehouse ? 1 : 0,
           can_manage_ecommerce: (row.can_manage_ecommerce || row.role === 'owner') ? 1 : 0,
           can_access_cashbook: cashbookAccessFromCloud(row.role, row.can_access_cashbook),
+          can_record_customer_payments: customerPaymentsAccessFromCloud(row.role, row.can_record_customer_payments),
           pos_layout_json: row.role === 'owner' && typeof row.pos_layout_json === 'string'
             ? row.pos_layout_json
             : undefined,
@@ -4770,6 +4776,7 @@ export async function syncFromSupabase(opts?: {
                 local.can_sell_from_warehouse ?? remote.can_sell_from_warehouse,
               can_manage_ecommerce: local.can_manage_ecommerce ?? remote.can_manage_ecommerce,
               can_access_cashbook: local.can_access_cashbook ?? remote.can_access_cashbook,
+              can_record_customer_payments: local.can_record_customer_payments ?? remote.can_record_customer_payments,
               pos_layout_json: local.pos_layout_json ?? remote.pos_layout_json,
               photo_url: local.photo_url ?? remote.photo_url,
               synced: 0,

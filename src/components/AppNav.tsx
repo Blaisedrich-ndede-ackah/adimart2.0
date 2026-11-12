@@ -13,7 +13,7 @@ import { COMMUNITY_CHAT_URL } from '@/lib/community';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
 import AccessibilityControls from '@/components/AccessibilityControls';
 import { useT } from '@/lib/i18n';
-import { canAccessCashbook } from '@/lib/staffAccess';
+import { canAccessCashbook, canRecordCustomerPayments } from '@/lib/staffAccess';
 
 interface AppNavProps {
   currentPage: string;
@@ -78,7 +78,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
           icon: Receipt,
           show: true,
         },
-        { id: 'customers', label: 'Customers', icon: ContactRound, show: isOwner },
+        { id: 'customers', label: 'Customers', icon: ContactRound, show: isOwner || canRecordCustomerPayments(currentUser) },
         { id: 'returns', label: 'Returns', icon: RotateCcw, show: isOwner },
         { id: 'expenses', label: t('nav.expenses'), icon: PiggyBank, show: true },
         { id: 'cashbook', label: t('nav.cashbook'), icon: BookOpen, show: cashbookOk },

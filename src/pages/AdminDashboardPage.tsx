@@ -25,6 +25,7 @@ import {
   updateStoreWarehouseLimits,
   buildLinkedUserStores,
 } from '@/lib/adminPortal';
+import ReceiptSendActions from '@/components/ReceiptSendActions';
 import { isPrinterConnected } from '@/lib/bluetoothPeripherals';
 import { openComputerPrinterWindow, printReceipt } from '@/lib/printService';
 import {
@@ -1285,6 +1286,15 @@ export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps
                         Close
                       </button>
                     </div>
+                    <ReceiptSendActions
+                      data={buildAdminReceiptData(
+                        salesPreview,
+                        salesItems[salesPreview.id] || [],
+                        data?.stores.find((store) => store.id === salesPreview.store_id),
+                      )}
+                      defaultPhone={salesPreview.customer_phone}
+                      storeId={salesPreview.store_id}
+                    />
                   </div>
                 </div>
               </div>

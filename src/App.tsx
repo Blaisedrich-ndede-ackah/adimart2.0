@@ -51,7 +51,7 @@ import { isStoreAccessBlocked } from '@/lib/subscription';
 import { checkAndSendSubscriptionExpirySms } from '@/lib/subscriptionReminders';
 import { checkAndSendDebtReminders } from '@/lib/debtReminders';
 import { flushSmsOutbox, sendClosingSummary } from '@/lib/smsOutbox';
-import { canAccessCashbook } from '@/lib/staffAccess';
+import { canAccessCashbook, canRecordCustomerPayments } from '@/lib/staffAccess';
 import { createAutomaticStoreBackup, recordBackupIssue } from '@/lib/storeBackup';
 import { createDueRecurringExpenses } from '@/lib/dexie';
 import { useAccessibilityStore } from '@/lib/accessibility';
@@ -254,11 +254,13 @@ export default function App() {
   useEffect(() => {
     // Cashiers cannot stay on owner-only pages after switch/login
     if (currentUser?.role !== 'cashier') return;
-    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'customers', 'returns', 'multistore', 'adimat-ai', 'store-deals'];
+    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'returns', 'multistore', 'adimat-ai', 'store-deals'];
     const ecommerceOk = (currentUser.can_manage_ecommerce ?? 0) === 1;
     const cashbookOk = canAccessCashbook(currentUser);
+    const customerPaymentsOk = canRecordCustomerPayments(currentUser);
     if (
       ownerOnly.includes(currentPage) ||
+      (currentPage === 'customers' && !customerPaymentsOk) ||
       (currentPage === 'ecommerce' && !ecommerceOk) ||
       (currentPage === 'cashbook' && !cashbookOk)
     ) {
@@ -471,7 +473,7 @@ export default function App() {
       case 'transactions':
         return <TransactionsPage />;
       case 'customers':
-        return role === 'owner' ? <CustomersPage onNavigate={setCurrentPage} /> : <POSPage />;
+        return canRecordCustomerPayments(currentUser) ? <CustomersPage onNavigate={setCurrentPage} /> : <POSPage />;
       case 'multistore':
         return role === 'owner' ? <MultiStorePage onNavigate={setCurrentPage} /> : <POSPage />;
       case 'returns':
