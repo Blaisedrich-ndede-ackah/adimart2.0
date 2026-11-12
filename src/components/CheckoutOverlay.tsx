@@ -29,6 +29,7 @@ import { getBluetoothHardwareStatus } from '@/lib/bluetoothPeripherals';
 import { formatCustomerAddress } from '@/lib/customerAddress';
 import { recordActivity } from '@/lib/activityLog';
 import { queueSms, receiptSmsText } from '@/lib/smsOutbox';
+import { parseGhanaPhone } from '@/lib/ghanaPhone';
 import { routeGoodsPaymentToStoreMomo } from '@/lib/storeMomoPayout';
 
 interface CheckoutOverlayProps {
@@ -169,6 +170,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         unit: i.measure_unit,
         unitPrice: i.unit_price,
         subtotal: i.subtotal,
+        serial: i.serial_number || '',
       })),
       subtotal: result.subtotal,
       discount: result.discount,
@@ -449,6 +451,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
             quantity: item.quantity,
             unit: item.measure_unit,
             subtotal: item.subtotal,
+            serial: item.serial_number || '',
           })),
           total: saleResult.total,
           paymentMethod: getPaymentMethodLabel(saleResult.paymentMethod || 'cash'),
@@ -468,6 +471,30 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       smsSendingRef.current = false;
       setSmsSending(false);
     }
+  }
+
+  function handleWhatsAppToCustomer() {
+    if (!currentStore || !saleResult) return;
+    const phone = parseGhanaPhone(smsPhone);
+    if (!phone) {
+      setSmsNote('Enter a Ghana mobile number for WhatsApp.');
+      return;
+    }
+    const text = receiptSmsText({
+      storeName: currentStore.name,
+      receiptNumber: saleResult.receiptNumber,
+      lines: saleResult.items.map((item) => ({
+        name: item.name,
+        quantity: item.quantity,
+        unit: item.measure_unit,
+        subtotal: item.subtotal,
+        serial: item.serial_number || '',
+      })),
+      total: saleResult.total,
+      paymentMethod: getPaymentMethodLabel(saleResult.paymentMethod || 'cash'),
+      currency: currentStore.currency_code || 'GHS',
+    });
+    window.open(`https://wa.me/${phone.e164.replace('+', '')}?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
   }
 
   function handleWhatsAppReceipt() {
@@ -1592,6 +1619,14 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                 >
                   <MessageCircle className="h-4 w-4" />
                   {smsSending ? 'Sending SMS…' : 'Send SMS'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleWhatsAppToCustomer}
+                  className="flex w-full items-center justify-center gap-1 rounded-xl border border-gray-300 bg-white py-2.5 text-xs font-semibold text-gray-800"
+                >
+                  <MessageCircle className="h-4 w-4" />
+                  WhatsApp
                 </button>
                 {smsNote && <p className="text-center text-[11px] text-gray-600">{smsNote}</p>}
               </div>

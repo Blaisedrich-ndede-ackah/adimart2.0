@@ -1237,6 +1237,15 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                           </button>
                         </div>
 
+                        <input
+                          value={item.serial_number || ''}
+                          onChange={(event) => cart.setItemSerial(item.id, event.target.value)}
+                          placeholder="Serial or IMEI"
+                          aria-label={`Serial or IMEI for ${item.name}`}
+                          maxLength={40}
+                          className="mt-2 w-full rounded-lg border border-gray-200 bg-transparent px-2 py-1 text-xs text-gray-800 outline-none"
+                        />
+
                         <div className="mt-3 flex items-center justify-between gap-3">
                           <div role="group" aria-label={`Quantity for ${item.name}`} className="flex items-center gap-2">
                             <button

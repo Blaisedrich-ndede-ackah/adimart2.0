@@ -476,6 +476,7 @@ export interface LocalTransactionItem {
   measure_unit?: string;
   list_unit_price?: number;
   promotion_label?: string;
+  serial_number?: string;
   synced: number;
 }
 
@@ -3035,7 +3036,7 @@ const OPTIONAL_PUSH_COLUMNS: Record<string, string[]> = {
     'voided_by', 'voided_by_name', 'voided_at', 'loyalty_points_earned', 'loyalty_points_redeemed',
     'loyalty_redeem_amount', 'promotion_discount', 'promotion_summary', 'coupon_code', 'credit_due_date',
   ],
-  transaction_items: ['variant_id', 'measure_unit', 'list_unit_price', 'promotion_label'],
+  transaction_items: ['variant_id', 'measure_unit', 'list_unit_price', 'promotion_label', 'serial_number'],
   purchase_orders: ['amount_paid', 'due_date'],
   stock_batches: ['variant_id'],
   users: ['photo_url'],
@@ -5097,6 +5098,7 @@ export async function syncFromSupabase(opts?: {
           measure_unit: String(row.measure_unit || ''),
           list_unit_price: Number(row.list_unit_price) || Number(row.unit_price) || 0,
           promotion_label: String(row.promotion_label || ''),
+          serial_number: String(row.serial_number || ''),
           synced: 1,
         }),
         dbTable: db.transaction_items,

@@ -22,6 +22,7 @@ import { useT } from '@/lib/i18n';
 import CloudSyncPanel from '@/components/CloudSyncPanel';
 import { filterSalesByPeriod, type SalesPeriod } from '@/lib/salesRange';
 import { rejectSaleVoid, requestOrVoidSale } from '@/lib/saleVoids';
+import { markGoodsMomoPayoutReturned, undoGoodsMomoPayout } from '@/lib/storeMomoPayout';
 
 const PERIODS: SalesPeriod[] = ['all', 'today', 'week', 'custom'];
 
@@ -405,6 +406,7 @@ export default function TransactionsPage() {
                       )}
                       <span className="block text-[10px] text-gray-400">
                         {money(item.unit_price)} each
+                        {item.serial_number ? ` · SN ${item.serial_number}` : ''}
                       </span>
                     </span>
                     <span className="font-semibold flex-shrink-0">{money(item.subtotal)}</span>
@@ -459,9 +461,29 @@ export default function TransactionsPage() {
               )}
 
               {previewTxn.void_status === 'voided' && (
-                <p className="rounded-xl bg-gray-100 px-3 py-2 text-xs text-gray-700">
-                  Voided by {previewTxn.voided_by_name || 'owner'}. {previewTxn.void_reason}
-                </p>
+                <div className="space-y-2">
+                  <p className="rounded-xl bg-gray-100 px-3 py-2 text-xs text-gray-700">
+                    Voided by {previewTxn.voided_by_name || 'owner'}. {previewTxn.void_reason}
+                  </p>
+                  {isOwner && currentUser && previewTxn.paystack_reference && (Number(previewTxn.paystack_amount) || 0) > 0 && (
+                    <button
+                      type="button"
+                      className="w-full rounded-xl border border-gray-200 bg-white py-2 text-xs font-semibold text-gray-800"
+                      onClick={() => {
+                        void markGoodsMomoPayoutReturned({
+                          storeId: currentStore?.id || previewTxn.store_id,
+                          userId: currentUser.id,
+                          reference: previewTxn.paystack_reference,
+                        }).then((result) => {
+                          setStatus(result.message);
+                          setStatusTone(result.ok ? 'ok' : 'error');
+                        });
+                      }}
+                    >
+                      Mark MoMo payout returned
+                    </button>
+                  )}
+                </div>
               )}
               {previewTxn.void_status !== 'voided' && currentUser && (
                 <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
@@ -486,7 +508,16 @@ export default function TransactionsPage() {
                           actor: currentUser,
                           storeName: currentStore?.name,
                         }).then(async (result) => {
-                          setStatus(result === 'voided' ? 'Sale voided. Stock was restored.' : 'Void request sent to the owner.');
+                          let note = result === 'voided' ? 'Sale voided. Stock was restored.' : 'Void request sent to the owner.';
+                          if (result === 'voided' && previewTxn.paystack_reference && (Number(previewTxn.paystack_amount) || 0) > 0 && currentUser) {
+                            const payout = await undoGoodsMomoPayout({
+                              storeId: currentStore?.id || previewTxn.store_id,
+                              userId: currentUser.id,
+                              reference: previewTxn.paystack_reference,
+                            });
+                            note = `${note} ${payout.message}`;
+                          }
+                          setStatus(note);
                           setStatusTone('ok');
                           setVoidReason('');
                           await load();
