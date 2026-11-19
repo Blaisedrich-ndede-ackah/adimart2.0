@@ -3,6 +3,7 @@ import {
   ShoppingCart, Minus, Plus, Trash2, Search, Package, AlertCircle, Bluetooth,
   ScanBarcode, MapPin, X, Settings2, GripVertical, MoveUp, MoveDown, Mic, Pause, Play,
   CircleCheck, CircleX,
+  MonitorUp,
 } from 'lucide-react';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import CheckoutOverlay from '@/components/CheckoutOverlay';
@@ -34,6 +35,7 @@ import {
 import { triggerAutoSync } from '@/lib/sync';
 import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
+import { broadcastCfdMessage, isCustomerDisplayEnabled, useCustomerDisplayChannel, type CfdMessage } from '@/lib/cfdChannel';
 import {
   loadOwnerPosLayout,
   saveOwnerPosLayout,
@@ -155,6 +157,57 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   const [showLayoutEditor, setShowLayoutEditor] = useState(false);
   const [layoutStatus, setLayoutStatus] = useState('');
   const [draggedSection, setDraggedSection] = useState<PosSection | null>(null);
+  const [customerDisplayEnabled] = useState(isCustomerDisplayEnabled);
+
+  const handleCfdMessage = useCallback((message: CfdMessage) => {
+    if (message.type !== 'DisplayReady') return;
+    const items = cart.items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      quantity: item.quantity,
+      unit_price: item.unit_price,
+      subtotal: item.subtotal,
+      ...(item.image_url ? { image_url: item.image_url } : {}),
+    }));
+    broadcastCfdMessage({
+      type: 'CartUpdated',
+      payload: {
+        items,
+        subtotal: cart.subtotal,
+        total: cart.total,
+        itemCount: items.reduce((count, item) => count + item.quantity, 0),
+        currency: currentStore?.currency_code || 'GHS',
+      },
+    });
+  }, [cart.items, cart.subtotal, cart.total, currentStore?.currency_code]);
+  useCustomerDisplayChannel(handleCfdMessage);
+
+  useEffect(() => {
+    const items = cart.items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      quantity: item.quantity,
+      unit_price: item.unit_price,
+      subtotal: item.subtotal,
+      ...(item.image_url ? { image_url: item.image_url } : {}),
+    }));
+    broadcastCfdMessage({
+      type: 'CartUpdated',
+      payload: {
+        items,
+        subtotal: cart.subtotal,
+        total: cart.total,
+        itemCount: items.reduce((count, item) => count + item.quantity, 0),
+        currency: currentStore?.currency_code || 'GHS',
+      },
+    });
+  }, [cart.items, cart.subtotal, cart.total, currentStore?.currency_code]);
+
+  const openCustomerDisplay = () => {
+    const displayUrl = new URL(window.location.href);
+    displayUrl.hash = '/pos/customer-display';
+    window.open(displayUrl.toString(), '_blank', 'popup=yes,width=1280,height=800');
+  };
 
   const canWholesale = canUserSellWholesale(currentUser);
   const isStoreOwner = currentUser?.role === 'owner';
@@ -728,6 +781,18 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {customerDisplayEnabled && (
+            <button
+              type="button"
+              onClick={openCustomerDisplay}
+              aria-label={t('cfd.openCustomerDisplay')}
+              title={`${t('cfd.openCustomerDisplay')} — ${t('cfd.moveToMonitor')}`}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-white/20 px-2.5 py-2 text-xs font-semibold text-white touch-target hover:bg-white/30"
+            >
+              <MonitorUp className="h-4 w-4" />
+              <span className="hidden sm:inline">{t('cfd.openCustomerDisplay')}</span>
+            </button>
+          )}
           {(btStatus.hidScannerEnabled || btStatus.scannerConnected) && (
             <div
               className="bg-white/15 px-2 py-1 rounded-lg flex items-center gap-1"

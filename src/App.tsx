@@ -18,6 +18,7 @@ const LoginPage = lazy(() => import('@/pages/LoginPage'));
 const CashierBlockedPage = lazy(() => import('@/pages/CashierBlockedPage'));
 const StoreAccessBlockedPage = lazy(() => import('@/pages/StoreAccessBlockedPage'));
 const POSPage = lazy(() => import('@/pages/POSPage'));
+const CustomerDisplayPage = lazy(() => import('@/pages/CustomerDisplayPage'));
 const SearchPage = lazy(() => import('@/pages/SearchPage'));
 const InventoryPage = lazy(() => import('@/pages/InventoryPage'));
 const ReportsPage = lazy(() => import('@/pages/ReportsPage'));
@@ -73,6 +74,13 @@ function readAgentHash(): boolean {
   return hash.toLowerCase() === 'agent';
 }
 
+function isCustomerDisplayRoute(): boolean {
+  if (typeof window === 'undefined') return false;
+  const hash = window.location.hash.replace(/^#/, '').replace(/\/$/, '').toLowerCase();
+  const path = window.location.pathname.replace(/\/$/, '').toLowerCase();
+  return hash === '/pos/customer-display' || path === '/pos/customer-display';
+}
+
 function readPublicUtilityRoute(): 'terms' | '404' | null {
   if (typeof window === 'undefined') return null;
   const hash = window.location.hash.replace(/^#/, '').replace(/^\//, '').replace(/\/$/, '');
@@ -100,6 +108,19 @@ function userNeedsPhone(user: { phone?: string | null } | null | undefined): boo
 }
 
 export default function App() {
+  if (isCustomerDisplayRoute()) return <CustomerDisplayRoute />;
+  return <AuthenticatedApp />;
+}
+
+function CustomerDisplayRoute() {
+  const initialize = useAuthStore((state) => state.initialize);
+  useEffect(() => {
+    void initialize(true);
+  }, [initialize]);
+  return <Suspense fallback={<div className="min-h-screen bg-slate-950" />}><CustomerDisplayPage /></Suspense>;
+}
+
+function AuthenticatedApp() {
   const { isAuthenticated, currentUser, currentStore, isStoreSetup, isLoading, initialize, switchUser } =
     useAuthStore();
   const initializeAgent = useAgentAuthStore((state) => state.initialize);

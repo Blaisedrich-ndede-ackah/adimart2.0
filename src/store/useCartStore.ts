@@ -39,6 +39,7 @@ import { isCountedSale } from '@/lib/saleStatus';
 import { findVariantByCode, variantLabel, variantSellingPrice } from '@/lib/variants';
 import type { LocalProductVariant } from '@/lib/dexie';
 import { recordActivity } from '@/lib/activityLog';
+import { broadcastCfdMessage } from '@/lib/cfdChannel';
 
 export interface CartItem {
   id: string;
@@ -734,6 +735,7 @@ export const useCartStore = create<CartState>((set, get) => ({
   },
 
   clearCart: () => {
+    broadcastCfdMessage({ type: 'Reset' });
     set({
       items: [],
       discountKind: 'none',

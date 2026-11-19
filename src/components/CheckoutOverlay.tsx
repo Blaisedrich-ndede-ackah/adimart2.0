@@ -31,6 +31,7 @@ import { recordActivity } from '@/lib/activityLog';
 import { queueSms, receiptSmsText } from '@/lib/smsOutbox';
 import { parseGhanaPhone } from '@/lib/ghanaPhone';
 import { routeGoodsPaymentToStoreMomo } from '@/lib/storeMomoPayout';
+import { broadcastCfdMessage } from '@/lib/cfdChannel';
 
 interface CheckoutOverlayProps {
   isOpen: boolean;
@@ -310,6 +311,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       cart.clearDiscount();
     }
     setStep('processing');
+    broadcastCfdMessage({ type: 'PaymentStarted' });
     setError('');
 
     try {
@@ -362,6 +364,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       setSmsPhone(customerPhone || creditCustomers.find((customer) => customer.id === (customerId || cart.loyaltyCustomerId))?.phone || '');
       setSmsNote('');
       setStep('success');
+      broadcastCfdMessage({ type: 'PaymentSuccess' });
       if (currentStore?.id) {
         recordActivity({
           storeId: currentStore.id,
@@ -376,6 +379,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
+      broadcastCfdMessage({ type: 'PaymentFailed' });
       setError(msg);
       setStep('method');
     }
@@ -641,6 +645,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
     }
 
     setStep('paystack');
+    broadcastCfdMessage({ type: 'PaymentStarted' });
     setPaystackError('');
 
     try {
@@ -656,12 +661,14 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
           }
         },
         onClose: () => {
+          broadcastCfdMessage({ type: 'PaymentFailed' });
           setStep('method');
           setPaystackError('Payment was cancelled');
         },
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
+      broadcastCfdMessage({ type: 'PaymentFailed' });
       setPaystackError(msg);
       setStep('method');
     }

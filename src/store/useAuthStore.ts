@@ -37,7 +37,7 @@ interface AuthState {
   loginError: string;
   isLoading: boolean;
   
-  initialize: () => Promise<void>;
+  initialize: (localOnly?: boolean) => Promise<void>;
   login: (pin: string) => Promise<boolean>;
   /** After warehouse PIN succeeds — enter as the store owner. */
   loginAsStoreOwner: () => Promise<boolean>;
@@ -62,7 +62,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   loginError: '',
   isLoading: true,
 
-  initialize: async () => {
+  initialize: async (localOnly = false) => {
     set({ isLoading: true });
     
     const hasStore = await hasAnyStore();
@@ -79,7 +79,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     
     let store = await getCurrentStore();
     if (store?.id) {
-      store = (await pullAdminStoreLimits(store.id)) || store;
+      if (!localOnly) store = (await pullAdminStoreLimits(store.id)) || store;
       applyStoreLanguageDefault(store.preferred_language);
     }
 
@@ -108,7 +108,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isStoreSetup: true,
         loginError: '',
       });
-      void refreshStockFromCloud();
+      if (!localOnly) void refreshStockFromCloud();
       set({ isLoading: false });
       return;
     }

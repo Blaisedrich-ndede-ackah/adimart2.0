@@ -32,6 +32,7 @@ import WarehousePortalSection from '@/components/WarehousePortalSection';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
 import CurrencySelect from '@/components/CurrencySelect';
 import { useI18nStore, useT } from '@/lib/i18n';
+import { isCustomerDisplayEnabled, setCustomerDisplayEnabled } from '@/lib/cfdChannel';
 import { DEFAULT_CURRENCY, normalizeCurrencyCode, getStoreCurrency } from '@/lib/currency';
 import { canAccessCashbook, canRecordCustomerPayments } from '@/lib/staffAccess';
 import {
@@ -89,6 +90,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [debtReminderMessage, setDebtReminderMessage] = useState(DEFAULT_DEBT_REMINDER_TEMPLATE);
   const [salesTargetDaily, setSalesTargetDaily] = useState('0');
   const [salesTargetMonthly, setSalesTargetMonthly] = useState('0');
+  const [customerDisplayEnabled, setCustomerDisplayEnabledState] = useState(isCustomerDisplayEnabled);
   
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -405,6 +407,28 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
           <CurrencySelect value={currencyCode} onChange={setCurrencyCode} />
           <p className="text-[11px] text-gray-500 mt-2">{t('settings.currencyHint')}</p>
         </div>
+
+        <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3" aria-labelledby="cfd-settings-title">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h3 id="cfd-settings-title" className="font-bold text-gray-900">{t('cfd.settings.label')}</h3>
+              <p className="mt-1 text-xs text-gray-500">{t('cfd.settings.hint')}</p>
+            </div>
+            <label className="inline-flex cursor-pointer items-center gap-3">
+              <span className="sr-only">{t('cfd.settings.label')}</span>
+              <input
+                type="checkbox"
+                checked={customerDisplayEnabled}
+                onChange={(event) => {
+                  setCustomerDisplayEnabledState(event.target.checked);
+                  setCustomerDisplayEnabled(event.target.checked);
+                }}
+                className="h-5 w-5 accent-emerald-600"
+              />
+              <span className="text-sm font-medium text-gray-700">{customerDisplayEnabled ? t('common.on') : t('common.off')}</span>
+            </label>
+          </div>
+        </section>
 
         {/* Store Profile */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">
