@@ -9,6 +9,7 @@ import ResetUserPinModal from '@/components/ResetUserPinModal';
 import BluetoothHardwareSettings from '@/components/BluetoothHardwareSettings';
 import CloudSyncPanel from '@/components/CloudSyncPanel';
 import BackupSyncTools from '@/components/BackupSyncTools';
+import PriceScanQRGenerator from '@/components/PriceScanQRGenerator';
 import { 
   db, 
   LocalUser,
@@ -33,7 +34,9 @@ import LanguageSwitcher from '@/components/LanguageSwitcher';
 import CurrencySelect from '@/components/CurrencySelect';
 import { useI18nStore, useT } from '@/lib/i18n';
 import { isCustomerDisplayEnabled, setCustomerDisplayEnabled } from '@/lib/cfdChannel';
-import { DEFAULT_CURRENCY, normalizeCurrencyCode, getStoreCurrency } from '@/lib/currency';
+import { DEFAULT_CURRENCY, normalizeCurrencyCode, getStoreCurrency, useFormatMoney } from '@/lib/currency';
+import { isPriceScanPortalEnabled, setPriceScanPortalEnabled } from '@/lib/priceScan';
+import { flushPriceChanges, getPendingPriceChanges } from '@/lib/priceChangeQueue';
 import { canAccessCashbook, canRecordCustomerPayments } from '@/lib/staffAccess';
 import {
   DEFAULT_SESSION_TIMEOUT_MINUTES,
@@ -122,8 +125,6 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [locations, setLocations] = useState<LocalLocation[]>([]);
   const [permUserId, setPermUserId] = useState<string | null>(null);
   const [priceScanEnabled, setPriceScanEnabledState] = useState(isPriceScanPortalEnabled);
-  const [priceScanSlug, setPriceScanSlug] = useState('');
-  const [priceScanError, setPriceScanError] = useState('');
   const [pendingPriceChanges, setPendingPriceChanges] = useState<PendingPriceChangeView[]>([]);
   const [syncingPriceChanges, setSyncingPriceChanges] = useState(false);
   const [priceQueueMessage, setPriceQueueMessage] = useState('');
@@ -149,22 +150,6 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
     window.addEventListener('online', refresh);
     return () => window.removeEventListener('online', refresh);
   }, [refreshPriceQueue]);
-
-  useEffect(() => {
-    if (!priceScanEnabled || !currentStore?.id) {
-      setPriceScanSlug('');
-      setPriceScanError('');
-      return;
-    }
-    let active = true;
-    setPriceScanError('');
-    void ensureEcommerceSlug(currentStore.id).then((slug) => {
-      if (active) setPriceScanSlug(slug);
-    }).catch((error: unknown) => {
-      if (active) setPriceScanError(error instanceof Error ? error.message : t('priceScan.qrFailed'));
-    });
-    return () => { active = false; };
-  }, [priceScanEnabled, currentStore?.id, t]);
 
   const syncPendingPrices = async () => {
     if (!currentStore?.id) return;
@@ -495,6 +480,66 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
               <span className="text-sm font-medium text-gray-700">{customerDisplayEnabled ? t('common.on') : t('common.off')}</span>
             </label>
           </div>
+        </section>
+
+        <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3" aria-labelledby="price-scan-settings-title">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 id="price-scan-settings-title" className="font-bold text-gray-900">{t('priceScan.enablePortal')}</h3>
+              <p className="mt-1 text-xs text-gray-500">{t('priceScan.enablePortalHint')}</p>
+            </div>
+            <label className="inline-flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                checked={priceScanEnabled}
+                onChange={(event) => {
+                  setPriceScanEnabledState(event.target.checked);
+                  setPriceScanPortalEnabled(event.target.checked);
+                }}
+                className="h-5 w-5 accent-emerald-600"
+                aria-label={t('priceScan.enablePortal')}
+              />
+              <span className="text-sm font-medium text-gray-700">{priceScanEnabled ? t('common.on') : t('common.off')}</span>
+            </label>
+          </div>
+          {priceScanEnabled && (
+            <div className="mt-4 space-y-3">
+              {currentStore?.id && (
+                <PriceScanQRGenerator
+                  storeId={currentStore.id}
+                  storeName={currentStore?.name || storeName || t('common.store')}
+                />
+              )}
+            </div>
+          )}
+        </section>
+
+        <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3" aria-labelledby="price-change-queue-title">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 id="price-change-queue-title" className="font-bold text-gray-900">{t('priceScan.pendingChanges')}</h3>
+              <p className="mt-1 text-xs text-gray-500">{t('priceScan.pendingChangesCount', { count: pendingPriceChanges.length })}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void syncPendingPrices()}
+              disabled={syncingPriceChanges || pendingPriceChanges.length === 0}
+              className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white touch-target disabled:opacity-50"
+            >
+              {syncingPriceChanges ? t('priceScan.syncing') : t('priceScan.syncNow')}
+            </button>
+          </div>
+          {pendingPriceChanges.length > 0 && (
+            <ul className="mt-3 divide-y divide-gray-100">
+              {pendingPriceChanges.slice(0, 5).map((change) => (
+                <li key={change.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                  <span className="min-w-0 truncate font-medium text-gray-800">{change.productName}</span>
+                  <span className="shrink-0 text-gray-600">{money(change.previousPrice)} → {money(change.newPrice)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {priceQueueMessage && <p className="mt-3 text-sm text-gray-600" role="status">{priceQueueMessage}</p>}
         </section>
 
         {/* Store Profile */}

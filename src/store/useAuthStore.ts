@@ -35,6 +35,7 @@ interface AuthState {
   isAuthenticated: boolean;
   isStoreSetup: boolean;
   loginError: string;
+  startupError: string;
   isLoading: boolean;
   
   initialize: (localOnly?: boolean) => Promise<void>;
@@ -54,72 +55,125 @@ interface AuthState {
   setStoreSetup: (value: boolean) => void;
 }
 
+function refreshLimitsInBackground(
+  storeId: string,
+  onUpdated: (store: LocalStore) => void
+): void {
+  void pullAdminStoreLimits(storeId)
+    .then((store) => {
+      if (store) onUpdated(store);
+    })
+    .catch((error: unknown) => {
+      console.warn('[Startup] Could not refresh store limits from cloud:', error);
+    });
+}
+
+let authInitializationAttempt = 0;
+const AUTH_INITIALIZATION_TIMEOUT_MS = 15_000;
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   currentUser: null,
   currentStore: null,
   isAuthenticated: false,
   isStoreSetup: false,
   loginError: '',
+  startupError: '',
   isLoading: true,
 
   initialize: async (localOnly = false) => {
-    set({ isLoading: true });
-    
-    const hasStore = await hasAnyStore();
-    if (!hasStore) {
-      set({
-        isStoreSetup: false,
-        isLoading: false,
-        currentStore: null,
-        currentUser: null,
-        isAuthenticated: false,
-      });
-      return;
-    }
-    
-    let store = await getCurrentStore();
-    if (store?.id) {
-      if (!localOnly) store = (await pullAdminStoreLimits(store.id)) || store;
-      applyStoreLanguageDefault(store.preferred_language);
-    }
-
-    const persistedUser = await getPersistedCurrentUser();
-    if (persistedUser) {
-      const timeoutMinutes = normalizeSessionTimeoutMinutes(store?.session_timeout_minutes);
-      if (store?.id && isSessionIdle(store.id, timeoutMinutes)) {
-        await setCurrentUserId(null);
-        markIdleLock();
-        useCartStore.getState().clearCart();
-        useCartStore.getState().clearParkedCarts();
+    const attempt = ++authInitializationAttempt;
+    set({ isLoading: true, startupError: '' });
+    const timeoutId = globalThis.setTimeout(() => {
+      if (attempt !== authInitializationAttempt) return;
+      console.error('[Startup] Local store initialization timed out.');
+      set({ startupError: 'startup_timeout', isLoading: false });
+    }, AUTH_INITIALIZATION_TIMEOUT_MS);
+    try {
+      const hasStore = await hasAnyStore();
+      if (attempt !== authInitializationAttempt) return;
+      if (!hasStore) {
         set({
-          currentStore: store,
+          isStoreSetup: false,
+          isLoading: false,
+          currentStore: null,
           currentUser: null,
           isAuthenticated: false,
-          isStoreSetup: true,
-          loginError: '',
-          isLoading: false,
+          startupError: '',
         });
         return;
       }
+
+      const store = await getCurrentStore();
+      if (attempt !== authInitializationAttempt) return;
+      if (store?.id) applyStoreLanguageDefault(store.preferred_language);
+
+      const persistedUser = await getPersistedCurrentUser();
+      if (attempt !== authInitializationAttempt) return;
+      if (persistedUser) {
+        const timeoutMinutes = normalizeSessionTimeoutMinutes(store?.session_timeout_minutes);
+        if (store?.id && isSessionIdle(store.id, timeoutMinutes)) {
+          await setCurrentUserId(null);
+          if (attempt !== authInitializationAttempt) return;
+          markIdleLock();
+          useCartStore.getState().clearCart();
+          useCartStore.getState().clearParkedCarts();
+          set({
+            currentStore: store,
+            currentUser: null,
+            isAuthenticated: false,
+            isStoreSetup: true,
+            loginError: '',
+            startupError: '',
+            isLoading: false,
+          });
+          if (!localOnly && store.id) {
+            refreshLimitsInBackground(store.id, (updated) => {
+              if (get().currentStore?.id === store.id) set({ currentStore: updated });
+            });
+          }
+          return;
+        }
+        set({
+          currentStore: store,
+          currentUser: persistedUser,
+          isAuthenticated: true,
+          isStoreSetup: true,
+          loginError: '',
+          startupError: '',
+          isLoading: false,
+        });
+        if (!localOnly && store?.id) {
+          refreshLimitsInBackground(store.id, (updated) => {
+            if (get().currentStore?.id === store.id) set({ currentStore: updated });
+          });
+          void refreshStockFromCloud();
+        }
+        return;
+      }
+
       set({
         currentStore: store,
-        currentUser: persistedUser,
-        isAuthenticated: true,
+        currentUser: null,
+        isAuthenticated: false,
         isStoreSetup: true,
-        loginError: '',
+        startupError: '',
+        isLoading: false,
       });
-      if (!localOnly) void refreshStockFromCloud();
-      set({ isLoading: false });
-      return;
+      if (!localOnly && store?.id) {
+        refreshLimitsInBackground(store.id, (updated) => {
+          if (get().currentStore?.id === store.id) set({ currentStore: updated });
+        });
+      }
+    } catch (error) {
+      if (attempt !== authInitializationAttempt) return;
+      console.error('[Startup] Could not initialize the local store:', error);
+      set({
+        startupError: error instanceof Error ? error.message : 'startup_failed',
+        isLoading: false,
+      });
+    } finally {
+      globalThis.clearTimeout(timeoutId);
     }
-
-    set({
-      currentStore: store,
-      currentUser: null,
-      isAuthenticated: false,
-      isStoreSetup: true,
-      isLoading: false,
-    });
   },
 
   login: async (pin: string) => {

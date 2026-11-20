@@ -38,7 +38,11 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const [storeCount, setStoreCount] = useState(1);
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window === 'undefined') return true;
-    return window.localStorage.getItem('adimat-theme') !== 'light';
+    try {
+      return window.localStorage.getItem('adimat-theme') !== 'light';
+    } catch {
+      return true;
+    }
   });
   const leftHanded = useAccessibilityStore((state) => state.leftHanded);
   const isOwner = currentUser?.role === 'owner';
@@ -50,7 +54,11 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
     document.documentElement.style.colorScheme = darkMode ? 'dark' : 'light';
-    window.localStorage.setItem('adimat-theme', darkMode ? 'dark' : 'light');
+    try {
+      window.localStorage.setItem('adimat-theme', darkMode ? 'dark' : 'light');
+    } catch {
+      // Keep the current theme for this session when storage is unavailable.
+    }
   }, [darkMode]);
 
   useEffect(() => {

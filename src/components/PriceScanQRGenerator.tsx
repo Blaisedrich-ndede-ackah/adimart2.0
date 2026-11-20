@@ -5,15 +5,15 @@ import { buildPriceScanUrl } from '@/lib/priceScan';
 import { useT } from '@/lib/i18n';
 
 interface PriceScanQRGeneratorProps {
-  storeSlug: string;
+  storeId: string;
   storeName: string;
 }
 
-export default function PriceScanQRGenerator({ storeSlug, storeName }: PriceScanQRGeneratorProps) {
+export default function PriceScanQRGenerator({ storeId, storeName }: PriceScanQRGeneratorProps) {
   const t = useT();
   const [qrImage, setQrImage] = useState('');
   const [error, setError] = useState('');
-  const url = buildPriceScanUrl(storeSlug);
+  const url = buildPriceScanUrl(storeId);
 
   useEffect(() => {
     let active = true;
@@ -65,7 +65,7 @@ export default function PriceScanQRGenerator({ storeSlug, storeName }: PriceScan
       )}
       {error && <p role="alert" className="mb-3 text-sm text-red-700">{error}</p>}
       <div className="flex flex-wrap gap-2">
-        <a href={qrImage || undefined} download={`${storeSlug}-price-scan.png`} aria-disabled={!qrImage} className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold touch-target ${qrImage ? 'bg-primary text-white' : 'pointer-events-none bg-gray-200 text-gray-500'}`}>
+        <a href={qrImage || undefined} download={`${storeId}-price-scan.png`} aria-disabled={!qrImage} className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold touch-target ${qrImage ? 'bg-primary text-white' : 'pointer-events-none bg-gray-200 text-gray-500'}`}>
           <Download className="h-4 w-4" />{t('priceScan.downloadQR')}
         </a>
         <button type="button" onClick={printQr} disabled={!qrImage} className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 touch-target disabled:opacity-50">

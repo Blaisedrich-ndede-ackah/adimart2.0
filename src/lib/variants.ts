@@ -1,5 +1,6 @@
 import { db, generateId, type LocalProduct, type LocalProductVariant } from '@/lib/dexie';
 import { roundStockQtyAllowZero } from '@/lib/measure';
+import { getBarcodeCandidates } from '@/lib/barcodeUtils';
 
 export async function listProductVariants(productId: string): Promise<LocalProductVariant[]> {
   return db.product_variants.where('product_id').equals(productId).sortBy('variant_value');
@@ -12,10 +13,11 @@ export async function listStoreVariants(storeId: string): Promise<LocalProductVa
 export async function findVariantByCode(storeId: string, code: string): Promise<LocalProductVariant | null> {
   const needle = code.trim().toLowerCase();
   if (!needle) return null;
+  const barcodeCandidates = new Set(getBarcodeCandidates(code).map((candidate) => candidate.toLowerCase()));
   const rows = await db.product_variants.where('store_id').equals(storeId).toArray();
   return (
     rows.find((row) => row.is_active === 1 && (
-      (row.barcode || '').trim().toLowerCase() === needle ||
+      barcodeCandidates.has((row.barcode || '').trim().toLowerCase()) ||
       (row.sku || '').trim().toLowerCase() === needle
     )) || null
   );

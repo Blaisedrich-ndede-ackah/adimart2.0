@@ -41,6 +41,7 @@ const LearnAdimatPage = lazy(() => import('@/pages/LearnAdimatPage'));
 const CampaignsPage = lazy(() => import('@/pages/CampaignsPage'));
 const StoreDealsPage = lazy(() => import('@/pages/StoreDealsPage'));
 const PublicShopPage = lazy(() => import('@/pages/PublicShopPage'));
+const PriceScanPage = lazy(() => import('@/pages/PriceScanPage'));
 const TermsPage = lazy(() => import('@/pages/TermsPage'));
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
 const AdminLoginPage = lazy(() => import('@/pages/AdminLoginPage'));
@@ -57,6 +58,7 @@ import { createAutomaticStoreBackup, recordBackupIssue } from '@/lib/storeBackup
 import { createDueRecurringExpenses } from '@/lib/dexie';
 import { flushPriceChanges } from '@/lib/priceChangeQueue';
 import { useAccessibilityStore } from '@/lib/accessibility';
+import { useT } from '@/lib/i18n';
 
 type AppMode = 'store' | 'admin-login' | 'admin' | 'agent-login' | 'agent';
 
@@ -130,8 +132,9 @@ function CustomerDisplayRoute() {
 }
 
 function AuthenticatedApp() {
-  const { isAuthenticated, currentUser, currentStore, isStoreSetup, isLoading, initialize, switchUser } =
+  const { isAuthenticated, currentUser, currentStore, isStoreSetup, isLoading, startupError, initialize, switchUser } =
     useAuthStore();
+  const t = useT();
   const initializeAgent = useAgentAuthStore((state) => state.initialize);
   const leftHanded = useAccessibilityStore((state) => state.leftHanded);
   const [currentPage, setCurrentPage] = useState('home');
@@ -425,6 +428,24 @@ function AuthenticatedApp() {
           />
         </div>
       </div>
+    );
+  }
+
+  if (startupError) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-primary px-5 py-10 text-white">
+        <section className="w-full max-w-md rounded-2xl bg-white p-6 text-center text-gray-900 shadow-xl">
+          <h1 className="text-xl font-bold">{t('app.startupErrorTitle')}</h1>
+          <p className="mt-2 text-sm text-gray-600">{t('app.startupErrorBody')}</p>
+          <button
+            type="button"
+            onClick={() => void initialize()}
+            className="mt-5 rounded-xl bg-primary px-5 py-3 font-semibold text-white touch-target"
+          >
+            {t('common.retry')}
+          </button>
+        </section>
+      </main>
     );
   }
 

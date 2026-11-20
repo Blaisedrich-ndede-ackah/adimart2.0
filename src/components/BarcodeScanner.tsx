@@ -1,6 +1,24 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { BrowserMultiFormatReader } from '@zxing/library';
+import type { BrowserMultiFormatReader, IScannerControls } from '@zxing/browser';
 import { Camera, CameraOff, Keyboard, RefreshCw } from 'lucide-react';
+
+interface NativeDetectedBarcode {
+  rawValue: string;
+}
+
+interface NativeBarcodeDetector {
+  detect(source: HTMLVideoElement): Promise<NativeDetectedBarcode[]>;
+}
+
+interface NativeBarcodeDetectorConstructor {
+  new(options?: { formats?: string[] }): NativeBarcodeDetector;
+  getSupportedFormats(): Promise<string[]>;
+}
+
+const NATIVE_BARCODE_FORMATS = [
+  'codabar', 'code_39', 'code_93', 'code_128', 'data_matrix',
+  'ean_8', 'ean_13', 'itf', 'qr_code', 'upc_a', 'upc_e',
+];
 
 interface BarcodeScannerProps {
   onScan: (barcode: string) => void;
@@ -11,7 +29,11 @@ interface BarcodeScannerProps {
 export default function BarcodeScanner({ onScan, active, large = false }: BarcodeScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+  const scannerControlsRef = useRef<IScannerControls | null>(null);
   const restartTimerRef = useRef<number | null>(null);
+  const nativeScanTimerRef = useRef<number | null>(null);
+  const cameraGenerationRef = useRef(0);
+  const onScanRef = useRef(onScan);
   const lastScannedRef = useRef<string>('');
   const lastScanTimeRef = useRef<number>(0);
 
@@ -22,64 +44,87 @@ export default function BarcodeScanner({ onScan, active, large = false }: Barcod
   const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([]);
   const [selectedCameraId, setSelectedCameraId] = useState<string>('');
 
+  useEffect(() => {
+    onScanRef.current = onScan;
+  }, [onScan]);
+
   const stopCamera = useCallback(() => {
+    cameraGenerationRef.current += 1;
+    if (nativeScanTimerRef.current !== null) {
+      window.clearTimeout(nativeScanTimerRef.current);
+      nativeScanTimerRef.current = null;
+    }
+    scannerControlsRef.current?.stop();
+    scannerControlsRef.current = null;
     if (readerRef.current) {
-      readerRef.current.reset();
       readerRef.current = null;
+    }
+    const video = videoRef.current;
+    const stream = video?.srcObject;
+    if (stream instanceof MediaStream) {
+      stream.getTracks().forEach((track) => track.stop());
+      video.srcObject = null;
     }
     setIsScanning(false);
   }, []);
 
   const startCamera = useCallback(async (deviceId?: string) => {
+    const generation = ++cameraGenerationRef.current;
     setCameraError('');
     setIsScanning(false);
 
     try {
-      const { BrowserMultiFormatReader, NotFoundException } = await import('@zxing/library');
-      const reader = new BrowserMultiFormatReader();
+      const [{ BarcodeFormat, DecodeHintType, NotFoundException }, { BrowserMultiFormatReader }] = await Promise.all([
+        import('@zxing/library'),
+        import('@zxing/browser'),
+      ]);
+      if (generation !== cameraGenerationRef.current) return;
+
+      const hints = new Map<DecodeHintType, boolean | number[]>();
+      hints.set(DecodeHintType.TRY_HARDER, true);
+      hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+        BarcodeFormat.CODABAR,
+        BarcodeFormat.CODE_39,
+        BarcodeFormat.CODE_93,
+        BarcodeFormat.CODE_128,
+        BarcodeFormat.DATA_MATRIX,
+        BarcodeFormat.EAN_8,
+        BarcodeFormat.EAN_13,
+        BarcodeFormat.ITF,
+        BarcodeFormat.QR_CODE,
+        BarcodeFormat.UPC_A,
+        BarcodeFormat.UPC_E,
+      ]);
+      const reader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 180 });
       readerRef.current = reader;
 
-      // Get available cameras
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoDevices = devices.filter(d => d.kind === 'videoinput');
-      setAvailableCameras(videoDevices);
-
-      // Find back camera if no specific device selected
-      let cameraId = deviceId;
-      if (!cameraId) {
-        const backCamera = videoDevices.find(d => 
-          d.label.toLowerCase().includes('back') || 
-          d.label.toLowerCase().includes('rear') ||
-          d.label.toLowerCase().includes('environment')
-        );
-        cameraId = backCamera?.deviceId || videoDevices[videoDevices.length - 1]?.deviceId;
-      }
-
-      if (cameraId) {
-        setSelectedCameraId(cameraId);
-      }
+      const handleDecodedCode = (rawValue: string) => {
+        const code = rawValue.trim();
+        const now = Date.now();
+        if (code && (code !== lastScannedRef.current || now - lastScanTimeRef.current > 2000)) {
+          lastScannedRef.current = code;
+          lastScanTimeRef.current = now;
+          onScanRef.current(code);
+        }
+      };
 
       if (!videoRef.current) {
         setCameraError('Video element not ready');
         return;
       }
 
-      // Start continuous decoding
-      await reader.decodeFromVideoDevice(
-        cameraId || null,
+      // Ask the browser for the rear camera first. Device labels are often
+      // hidden until camera permission is granted, so enumerate after startup.
+      const videoConstraints: MediaTrackConstraints = {
+        ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: { ideal: 'environment' } }),
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      };
+      const scannerControls = await reader.decodeFromConstraints(
+        { audio: false, video: videoConstraints },
         videoRef.current,
         (result, error) => {
-          if (result) {
-            const code = result.getText();
-            const now = Date.now();
-            
-            // Debounce: prevent same code within 2 seconds
-            if (code !== lastScannedRef.current || now - lastScanTimeRef.current > 2000) {
-              lastScannedRef.current = code;
-              lastScanTimeRef.current = now;
-              onScan(code);
-            }
-          }
+          if (result) handleDecodedCode(result.getText());
           
           if (error && !(error instanceof NotFoundException)) {
             // Only log non-expected errors
@@ -88,8 +133,52 @@ export default function BarcodeScanner({ onScan, active, large = false }: Barcod
         }
       );
 
+      if (generation !== cameraGenerationRef.current) {
+        scannerControls.stop();
+        return;
+      }
+      scannerControlsRef.current = scannerControls;
+
+      const stream = videoRef.current.srcObject;
+      if (stream instanceof MediaStream) {
+        const activeTrack = stream.getVideoTracks()[0];
+        if (activeTrack && typeof activeTrack.getCapabilities === 'function') {
+          try {
+            const capabilities = activeTrack.getCapabilities() as MediaTrackCapabilities & { focusMode?: string[] };
+            if (capabilities.focusMode?.includes('continuous') && typeof activeTrack.applyConstraints === 'function') {
+              void activeTrack.applyConstraints({
+                advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet],
+              }).catch(() => {
+                // Keep the camera's default focus if continuous focus cannot be changed.
+              });
+            }
+          } catch {
+            // Camera capability inspection is optional.
+          }
+        }
+      }
+      const activeDeviceId = stream instanceof MediaStream
+        ? stream.getVideoTracks()[0]?.getSettings().deviceId || deviceId || ''
+        : deviceId || '';
+      let videoDevices: MediaDeviceInfo[] = [];
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        videoDevices = devices.filter((device) => device.kind === 'videoinput');
+      } catch {
+        // Camera enumeration is optional; keep scanning with the active stream.
+      }
+      if (generation !== cameraGenerationRef.current) {
+        scannerControls.stop();
+        if (scannerControlsRef.current === scannerControls) scannerControlsRef.current = null;
+        return;
+      }
+      setAvailableCameras(videoDevices);
+      setSelectedCameraId(activeDeviceId);
+
       setIsScanning(true);
+      startNativeBarcodeDetection(videoRef.current, generation, cameraGenerationRef, nativeScanTimerRef, handleDecodedCode);
     } catch (err: unknown) {
+      if (generation !== cameraGenerationRef.current) return;
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('NotAllowedError') || msg.includes('Permission')) {
         setCameraError('Camera permission denied. Please allow camera access in your browser settings.');
@@ -101,7 +190,7 @@ export default function BarcodeScanner({ onScan, active, large = false }: Barcod
         setCameraError('Camera error: ' + msg);
       }
     }
-  }, [onScan]);
+  }, []);
 
   const scheduleRestart = useCallback((deviceId?: string) => {
     if (restartTimerRef.current !== null) window.clearTimeout(restartTimerRef.current);
@@ -254,4 +343,48 @@ export default function BarcodeScanner({ onScan, active, large = false }: Barcod
       )}
     </div>
   );
+}
+
+function startNativeBarcodeDetection(
+  video: HTMLVideoElement | null,
+  generation: number,
+  currentGeneration: { current: number },
+  timerRef: { current: number | null },
+  onCode: (value: string) => void
+): void {
+  if (!video) return;
+  const Detector = (window as Window & { BarcodeDetector?: NativeBarcodeDetectorConstructor }).BarcodeDetector;
+  if (!Detector) return;
+
+  void (async () => {
+    try {
+      const supportedFormats = await Detector.getSupportedFormats();
+      const formats = NATIVE_BARCODE_FORMATS.filter((format) => supportedFormats.includes(format));
+      if (formats.length === 0 || generation !== currentGeneration.current) return;
+
+      const detector = new Detector({ formats });
+      let detectionInProgress = false;
+      const detectNextFrame = async () => {
+        if (generation !== currentGeneration.current) return;
+        if (!detectionInProgress && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+          detectionInProgress = true;
+          try {
+            const results = await detector.detect(video);
+            const value = results.find((result) => result.rawValue.trim())?.rawValue;
+            if (value) onCode(value);
+          } catch {
+            // ZXing continues scanning if the browser detector cannot read a frame.
+          } finally {
+            detectionInProgress = false;
+          }
+        }
+        if (generation === currentGeneration.current) {
+          timerRef.current = window.setTimeout(() => void detectNextFrame(), 180);
+        }
+      };
+      void detectNextFrame();
+    } catch {
+      // The browser-native detector is optional; ZXing remains active.
+    }
+  })();
 }

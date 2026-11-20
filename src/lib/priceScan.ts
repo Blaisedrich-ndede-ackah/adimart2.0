@@ -1,4 +1,5 @@
 import { db, type LocalProduct } from '@/lib/dexie';
+import { getBarcodeCandidates } from '@/lib/barcodeUtils';
 import { formatStoreMoney } from '@/lib/currency';
 import type { AppLanguage } from '@/lib/i18n';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
@@ -20,9 +21,9 @@ export interface ScanResult {
 
 export type SimilarProduct = LocalProduct;
 
-export function buildPriceScanUrl(storeSlug: string): string {
-  const slug = encodeURIComponent(storeSlug.trim().toLowerCase());
-  const route = `#/price-scan/${slug}`;
+export function buildPriceScanUrl(storeId: string): string {
+  const id = encodeURIComponent(storeId.trim().toLowerCase());
+  const route = `#/price-scan/${id}`;
   if (typeof window === 'undefined') return route;
   return `${window.location.origin}${window.location.pathname}${route}`;
 }
@@ -46,10 +47,13 @@ export function setPriceScanPortalEnabled(enabled: boolean): void {
 export async function resolvePriceScanStore(slug: string): Promise<PriceScanStore | null> {
   const cleanSlug = slug.trim().toLowerCase();
   if (!cleanSlug) return null;
+  const isStoreId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cleanSlug);
 
-  const localStore = await db.stores
-    .filter((store) => (store.ecommerce_slug || '').trim().toLowerCase() === cleanSlug)
-    .first();
+  const localStore = isStoreId
+    ? await db.stores.get(cleanSlug)
+    : await db.stores
+      .filter((store) => (store.ecommerce_slug || '').trim().toLowerCase() === cleanSlug)
+      .first();
   if (localStore) {
     const result = {
       id: localStore.id,
@@ -66,7 +70,7 @@ export async function resolvePriceScanStore(slug: string): Promise<PriceScanStor
       const { data, error } = await supabase
         .from('stores')
         .select('id, name, logo_url, currency_code, ecommerce_slug')
-        .eq('ecommerce_slug', cleanSlug)
+        .eq(isStoreId ? 'id' : 'ecommerce_slug', cleanSlug)
         .maybeSingle();
       if (!error && data) {
         const row: unknown = data;
@@ -100,6 +104,7 @@ export async function lookupProductByBarcodeWithSource(
 ): Promise<ScanResult | null> {
   const cleanBarcode = barcode.trim();
   if (!storeId || !cleanBarcode) return null;
+  const barcodeCandidates = getBarcodeCandidates(cleanBarcode);
 
   if (isOnline() && isSupabaseConfigured()) {
     try {
@@ -107,7 +112,7 @@ export async function lookupProductByBarcodeWithSource(
         .from('products')
         .select('id, store_id, name, category, sku_type, barcode, selling_price, stock_level, is_active, image_url, reorder_level, created_at, updated_at')
         .eq('store_id', storeId)
-        .eq('barcode', cleanBarcode)
+        .in('barcode', barcodeCandidates)
         .eq('is_active', true)
         .limit(1)
         .maybeSingle();
@@ -127,7 +132,7 @@ export async function lookupProductByBarcodeWithSource(
   const product = await db.products
     .where('store_id')
     .equals(storeId)
-    .filter((row) => row.is_active === 1 && row.barcode.trim() === cleanBarcode)
+    .filter((row) => row.is_active === 1 && barcodeCandidates.includes(row.barcode.trim()))
     .first();
   return product ? { product, source: 'cached' } : null;
 }
