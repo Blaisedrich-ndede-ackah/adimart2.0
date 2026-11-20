@@ -1,7 +1,37 @@
-import { StrictMode, Suspense } from "react";
+import { StrictMode, Suspense, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
 import App from "./App";
+import AppErrorBoundary from "./components/AppErrorBoundary";
+
+function LoadingFallback() {
+  const [isTakingLong, setIsTakingLong] = useState(false);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => setIsTakingLong(true), 12_000);
+    return () => window.clearTimeout(timeoutId);
+  }, []);
+
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-primary px-5 py-10 text-white">
+      <section className="text-center">
+        <p className="font-medium tracking-wide" role="status">Loading Adimat…</p>
+        {isTakingLong && (
+          <div className="mt-4">
+            <p className="text-sm">The app is taking longer than expected. Check your connection and reload.</p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="mt-4 rounded-xl bg-white px-5 py-3 font-semibold text-primary touch-target"
+            >
+              Reload app
+            </button>
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
 
 // Apply the saved theme before React paints to avoid a light-mode flash.
 let savedTheme: string | null = null;
@@ -76,14 +106,10 @@ document.addEventListener('contextmenu', (event) => {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <Suspense
-      fallback={
-        <div className="h-full min-h-screen bg-primary flex items-center justify-center">
-          <p className="text-white font-medium tracking-wide" role="status">Loading Adimat…</p>
-        </div>
-      }
-    >
-      <App />
-    </Suspense>
+    <AppErrorBoundary>
+      <Suspense fallback={<LoadingFallback />}>
+        <App />
+      </Suspense>
+    </AppErrorBoundary>
   </StrictMode>
 );
