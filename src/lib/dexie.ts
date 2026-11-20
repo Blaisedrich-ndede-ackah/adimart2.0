@@ -3,6 +3,7 @@ import { v4 as uuidv4, v5 as uuidv5 } from 'uuid';
 import { isSupabaseConfigured, supabase, testSupabaseConnection } from './supabase';
 import { isAdminSuperPin } from './superPin';
 import { toMoneyAmount } from './money';
+import { getBarcodeCandidates } from './barcodeUtils';
 import { formatUnknownError, isUuid, openingBatchId, uuidOrNull } from './ids';
 import { cashbookAccessFromCloud, customerPaymentsAccessFromCloud } from './staffAccess';
 import { normalizeSessionTimeoutMinutes } from './sessionTimeout';
@@ -2823,11 +2824,12 @@ export async function addProductToStore(product: Omit<LocalProduct, 'id' | 'stor
 export async function getProductByBarcode(barcode: string): Promise<LocalProduct | null> {
   const storeId = await getCurrentStoreId();
   if (!storeId) return null;
+  const barcodeCandidates = getBarcodeCandidates(barcode);
   
   const products = await db.products
     .where('store_id')
     .equals(storeId)
-    .and(p => p.barcode === barcode && p.is_active === 1)
+    .and(p => barcodeCandidates.includes(p.barcode.trim()) && p.is_active === 1)
     .toArray();
   
   return products.length > 0 ? products[0] : null;

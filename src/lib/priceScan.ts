@@ -1,4 +1,5 @@
 import { db, type LocalProduct } from '@/lib/dexie';
+import { getBarcodeCandidates } from '@/lib/barcodeUtils';
 import { formatStoreMoney } from '@/lib/currency';
 import type { AppLanguage } from '@/lib/i18n';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
@@ -100,6 +101,7 @@ export async function lookupProductByBarcodeWithSource(
 ): Promise<ScanResult | null> {
   const cleanBarcode = barcode.trim();
   if (!storeId || !cleanBarcode) return null;
+  const barcodeCandidates = getBarcodeCandidates(cleanBarcode);
 
   if (isOnline() && isSupabaseConfigured()) {
     try {
@@ -107,7 +109,7 @@ export async function lookupProductByBarcodeWithSource(
         .from('products')
         .select('id, store_id, name, category, sku_type, barcode, selling_price, stock_level, is_active, image_url, reorder_level, created_at, updated_at')
         .eq('store_id', storeId)
-        .eq('barcode', cleanBarcode)
+        .in('barcode', barcodeCandidates)
         .eq('is_active', true)
         .limit(1)
         .maybeSingle();
@@ -127,7 +129,7 @@ export async function lookupProductByBarcodeWithSource(
   const product = await db.products
     .where('store_id')
     .equals(storeId)
-    .filter((row) => row.is_active === 1 && row.barcode.trim() === cleanBarcode)
+    .filter((row) => row.is_active === 1 && barcodeCandidates.includes(row.barcode.trim()))
     .first();
   return product ? { product, source: 'cached' } : null;
 }
