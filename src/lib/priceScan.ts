@@ -21,9 +21,9 @@ export interface ScanResult {
 
 export type SimilarProduct = LocalProduct;
 
-export function buildPriceScanUrl(storeSlug: string): string {
-  const slug = encodeURIComponent(storeSlug.trim().toLowerCase());
-  const route = `#/price-scan/${slug}`;
+export function buildPriceScanUrl(storeId: string): string {
+  const id = encodeURIComponent(storeId.trim().toLowerCase());
+  const route = `#/price-scan/${id}`;
   if (typeof window === 'undefined') return route;
   return `${window.location.origin}${window.location.pathname}${route}`;
 }
@@ -47,10 +47,13 @@ export function setPriceScanPortalEnabled(enabled: boolean): void {
 export async function resolvePriceScanStore(slug: string): Promise<PriceScanStore | null> {
   const cleanSlug = slug.trim().toLowerCase();
   if (!cleanSlug) return null;
+  const isStoreId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cleanSlug);
 
-  const localStore = await db.stores
-    .filter((store) => (store.ecommerce_slug || '').trim().toLowerCase() === cleanSlug)
-    .first();
+  const localStore = isStoreId
+    ? await db.stores.get(cleanSlug)
+    : await db.stores
+      .filter((store) => (store.ecommerce_slug || '').trim().toLowerCase() === cleanSlug)
+      .first();
   if (localStore) {
     const result = {
       id: localStore.id,
@@ -67,7 +70,7 @@ export async function resolvePriceScanStore(slug: string): Promise<PriceScanStor
       const { data, error } = await supabase
         .from('stores')
         .select('id, name, logo_url, currency_code, ecommerce_slug')
-        .eq('ecommerce_slug', cleanSlug)
+        .eq(isStoreId ? 'id' : 'ecommerce_slug', cleanSlug)
         .maybeSingle();
       if (!error && data) {
         const row: unknown = data;

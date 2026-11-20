@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { BrowserMultiFormatReader } from '@zxing/library';
+import type { BrowserMultiFormatReader, IScannerControls } from '@zxing/browser';
 import { Camera, CameraOff, Keyboard, RefreshCw } from 'lucide-react';
 
 interface NativeDetectedBarcode {
@@ -29,6 +29,7 @@ interface BarcodeScannerProps {
 export default function BarcodeScanner({ onScan, active, large = false }: BarcodeScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+  const scannerControlsRef = useRef<IScannerControls | null>(null);
   const restartTimerRef = useRef<number | null>(null);
   const nativeScanTimerRef = useRef<number | null>(null);
   const cameraGenerationRef = useRef(0);
@@ -53,9 +54,16 @@ export default function BarcodeScanner({ onScan, active, large = false }: Barcod
       window.clearTimeout(nativeScanTimerRef.current);
       nativeScanTimerRef.current = null;
     }
+    scannerControlsRef.current?.stop();
+    scannerControlsRef.current = null;
     if (readerRef.current) {
-      readerRef.current.reset();
       readerRef.current = null;
+    }
+    const video = videoRef.current;
+    const stream = video?.srcObject;
+    if (stream instanceof MediaStream) {
+      stream.getTracks().forEach((track) => track.stop());
+      video.srcObject = null;
     }
     setIsScanning(false);
   }, []);
@@ -66,7 +74,10 @@ export default function BarcodeScanner({ onScan, active, large = false }: Barcod
     setIsScanning(false);
 
     try {
-      const { BarcodeFormat, BrowserMultiFormatReader, DecodeHintType, NotFoundException } = await import('@zxing/library');
+      const [{ BarcodeFormat, DecodeHintType, NotFoundException }, { BrowserMultiFormatReader }] = await Promise.all([
+        import('@zxing/library'),
+        import('@zxing/browser'),
+      ]);
       if (generation !== cameraGenerationRef.current) return;
 
       const hints = new Map<DecodeHintType, boolean | number[]>();
@@ -84,7 +95,7 @@ export default function BarcodeScanner({ onScan, active, large = false }: Barcod
         BarcodeFormat.UPC_A,
         BarcodeFormat.UPC_E,
       ]);
-      const reader = new BrowserMultiFormatReader(hints, 180);
+      const reader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 180 });
       readerRef.current = reader;
 
       const handleDecodedCode = (rawValue: string) => {
@@ -109,7 +120,7 @@ export default function BarcodeScanner({ onScan, active, large = false }: Barcod
         width: { ideal: 1920 },
         height: { ideal: 1080 },
       };
-      await reader.decodeFromConstraints(
+      const scannerControls = await reader.decodeFromConstraints(
         { audio: false, video: videoConstraints },
         videoRef.current,
         (result, error) => {
@@ -123,9 +134,10 @@ export default function BarcodeScanner({ onScan, active, large = false }: Barcod
       );
 
       if (generation !== cameraGenerationRef.current) {
-        reader.reset();
+        scannerControls.stop();
         return;
       }
+      scannerControlsRef.current = scannerControls;
 
       const stream = videoRef.current.srcObject;
       if (stream instanceof MediaStream) {
@@ -156,7 +168,8 @@ export default function BarcodeScanner({ onScan, active, large = false }: Barcod
         // Camera enumeration is optional; keep scanning with the active stream.
       }
       if (generation !== cameraGenerationRef.current) {
-        reader.reset();
+        scannerControls.stop();
+        if (scannerControlsRef.current === scannerControls) scannerControlsRef.current = null;
         return;
       }
       setAvailableCameras(videoDevices);

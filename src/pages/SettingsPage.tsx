@@ -35,7 +35,6 @@ import CurrencySelect from '@/components/CurrencySelect';
 import { useI18nStore, useT } from '@/lib/i18n';
 import { isCustomerDisplayEnabled, setCustomerDisplayEnabled } from '@/lib/cfdChannel';
 import { DEFAULT_CURRENCY, normalizeCurrencyCode, getStoreCurrency, useFormatMoney } from '@/lib/currency';
-import { ensureEcommerceSlug } from '@/lib/ecommerce';
 import { isPriceScanPortalEnabled, setPriceScanPortalEnabled } from '@/lib/priceScan';
 import { flushPriceChanges, getPendingPriceChanges } from '@/lib/priceChangeQueue';
 import { canAccessCashbook, canRecordCustomerPayments } from '@/lib/staffAccess';
@@ -126,8 +125,6 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [locations, setLocations] = useState<LocalLocation[]>([]);
   const [permUserId, setPermUserId] = useState<string | null>(null);
   const [priceScanEnabled, setPriceScanEnabledState] = useState(isPriceScanPortalEnabled);
-  const [priceScanSlug, setPriceScanSlug] = useState('');
-  const [priceScanError, setPriceScanError] = useState('');
   const [pendingPriceChanges, setPendingPriceChanges] = useState<PendingPriceChangeView[]>([]);
   const [syncingPriceChanges, setSyncingPriceChanges] = useState(false);
   const [priceQueueMessage, setPriceQueueMessage] = useState('');
@@ -153,22 +150,6 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
     window.addEventListener('online', refresh);
     return () => window.removeEventListener('online', refresh);
   }, [refreshPriceQueue]);
-
-  useEffect(() => {
-    if (!priceScanEnabled || !currentStore?.id) {
-      setPriceScanSlug('');
-      setPriceScanError('');
-      return;
-    }
-    let active = true;
-    setPriceScanError('');
-    void ensureEcommerceSlug(currentStore.id).then((slug) => {
-      if (active) setPriceScanSlug(slug);
-    }).catch((error: unknown) => {
-      if (active) setPriceScanError(error instanceof Error ? error.message : t('priceScan.qrFailed'));
-    });
-    return () => { active = false; };
-  }, [priceScanEnabled, currentStore?.id, t]);
 
   const syncPendingPrices = async () => {
     if (!currentStore?.id) return;
@@ -523,10 +504,9 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
           </div>
           {priceScanEnabled && (
             <div className="mt-4 space-y-3">
-              {priceScanError && <p className="text-sm text-red-700" role="alert">{priceScanError}</p>}
-              {priceScanSlug && (
+              {currentStore?.id && (
                 <PriceScanQRGenerator
-                  storeSlug={priceScanSlug}
+                  storeId={currentStore.id}
                   storeName={currentStore?.name || storeName || t('common.store')}
                 />
               )}
