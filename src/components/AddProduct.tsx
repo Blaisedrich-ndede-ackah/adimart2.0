@@ -324,6 +324,9 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
       };
 
       if (editProduct) {
+        if (Math.abs(Number(editProduct.selling_price) - sell) >= 0.005) {
+          await queuePriceChange(storeId, editProduct.id, editProduct.selling_price, sell);
+        }
         await db.products.update(editProduct.id, {
           name: name.trim(),
           category,

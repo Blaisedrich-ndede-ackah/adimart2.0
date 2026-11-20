@@ -24,6 +24,8 @@ const BACKUP_TABLES = [
   'suppliers',
   'purchase_orders',
   'deleted_records',
+  'product_variants',
+  'customer_loyalty_transactions',
 ] as const;
 const MAX_BACKUP_SIZE_BYTES = 50 * 1024 * 1024;
 

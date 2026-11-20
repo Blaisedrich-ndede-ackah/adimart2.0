@@ -120,6 +120,8 @@ export interface LocalCustomer {
   opening_balance: number;
   opening_balance_remaining: number;
   wallet_balance?: number;
+  /** Accumulated loyalty/rewards points balance. */
+  loyalty_points_balance?: number;
   is_active: number;
   /** Customer asked not to receive automated debt reminder SMS (0/1) */
   debt_reminder_opt_out?: number;
@@ -382,6 +384,17 @@ export interface LocalProduct {
   synced: number;
 }
 
+export interface PriceChange {
+  id: string;
+  store_id: string;
+  product_id: string;
+  previous_price: number;
+  new_price: number;
+  changed_at: string;
+  synced: number;
+  applied: number;
+}
+
 export type OnlineOrderStatus = 'new' | 'confirmed' | 'fulfilled' | 'cancelled';
 
 export interface LocalOnlineOrder {
@@ -539,6 +552,37 @@ export interface LocalCustomerWalletTransaction {
   transaction_id?: string | null;
   description: string;
   created_by: string;
+  created_at: string;
+  synced: number;
+}
+
+/** A product variant (e.g. Size=Large, Color=Red) tied to a base product. */
+export interface LocalProductVariant {
+  id: string;
+  store_id: string;
+  product_id: string;
+  variant_name: string;   // e.g. 'Size', 'Color', 'Flavor'
+  variant_value: string;  // e.g. 'Large', 'Red', 'Vanilla'
+  sku: string;
+  barcode: string;
+  price_adjustment: number; // added to base selling price
+  stock_level: number;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+/** Loyalty points ledger: earn on sales, redeem on discounts. */
+export interface LocalCustomerLoyaltyTransaction {
+  id: string;
+  store_id: string;
+  customer_id: string;
+  transaction_id: string | null;
+  type: 'earn' | 'redeem';
+  points: number;
+  balance_after: number;
+  reason: string;
   created_at: string;
   synced: number;
 }
@@ -2177,6 +2221,162 @@ export async function setCustomerActive(customerId: string, isActive: boolean): 
   });
 }
 
+export async function getCurrentStoreProductVariants(): Promise<LocalProductVariant[]> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) return [];
+  return db.product_variants
+    .where('store_id')
+    .equals(storeId)
+    .filter((v) => v.is_active === 1)
+    .sortBy(['variant_name', 'variant_value']);
+}
+
+export async function getProductVariants(productId: string): Promise<LocalProductVariant[]> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) return [];
+  return db.product_variants
+    .where('store_id')
+    .equals(storeId)
+    .filter((v) => v.product_id === productId && v.is_active === 1)
+    .sortBy(['variant_name', 'variant_value']);
+}
+
+export async function addProductVariant(
+  productId: string,
+  variantName: string,
+  variantValue: string,
+  priceAdjustment: number,
+  sku: string,
+  barcode: string
+): Promise<LocalProductVariant> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) throw new Error('No store selected');
+  const now = new Date().toISOString();
+  const variant: LocalProductVariant = {
+    id: generateId(),
+    store_id: storeId,
+    product_id: productId,
+    variant_name: variantName.trim(),
+    variant_value: variantValue.trim(),
+    sku: sku.trim(),
+    barcode: barcode.trim(),
+    price_adjustment: Math.max(0, Number(priceAdjustment) || 0),
+    stock_level: 0,
+    is_active: 1,
+    created_at: now,
+    updated_at: now,
+    synced: 0,
+  };
+  await db.product_variants.add(variant);
+  return variant;
+}
+
+export async function updateProductVariantStock(
+  variantId: string,
+  stockLevel: number
+): Promise<void> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) throw new Error('No store selected');
+  await db.product_variants.update(variantId, {
+    stock_level: Math.max(0, Math.floor(Number(stockLevel) || 0)),
+    updated_at: new Date().toISOString(),
+    synced: 0,
+  });
+}
+
+export async function getCustomerLoyaltyBalance(customerId: string): Promise<number> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) return 0;
+  const customer = await db.customers.get(customerId);
+  if (!customer || customer.store_id !== storeId) return 0;
+  return Number(customer.loyalty_points_balance || 0);
+}
+
+export async function getCustomerLoyaltyTransactions(customerId: string): Promise<LocalCustomerLoyaltyTransaction[]> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) return [];
+  return db.customer_loyalty_transactions
+    .where('store_id')
+    .equals(storeId)
+    .filter((t) => t.customer_id === customerId)
+    .sortBy('created_at');
+}
+
+export async function awardLoyaltyPoints(
+  customerId: string,
+  transactionId: string | null,
+  points: number,
+  reason: string
+): Promise<LocalCustomerLoyaltyTransaction> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) throw new Error('No store selected');
+  if (!Number.isFinite(points) || points <= 0) throw new Error('Points must be greater than zero.');
+  const customer = await db.customers.get(customerId);
+  if (!customer || customer.store_id !== storeId) throw new Error('Customer not found.');
+  const currentBalance = Number(customer.loyalty_points_balance || 0);
+  const balanceAfter = currentBalance + points;
+  const now = new Date().toISOString();
+  const loyaltyTx: LocalCustomerLoyaltyTransaction = {
+    id: generateId(),
+    store_id: storeId,
+    customer_id: customerId,
+    transaction_id: transactionId,
+    type: 'earn',
+    points,
+    balance_after: balanceAfter,
+    reason,
+    created_at: now,
+    synced: 0,
+  };
+  await db.transaction('rw', [db.customers, db.customer_loyalty_transactions], async () => {
+    await db.customers.update(customerId, {
+      loyalty_points_balance: balanceAfter,
+      updated_at: now,
+      synced: 0,
+    });
+    await db.customer_loyalty_transactions.add(loyaltyTx);
+  });
+  return loyaltyTx;
+}
+
+export async function redeemLoyaltyPoints(
+  customerId: string,
+  transactionId: string | null,
+  points: number,
+  reason: string
+): Promise<LocalCustomerLoyaltyTransaction> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) throw new Error('No store selected');
+  if (!Number.isFinite(points) || points <= 0) throw new Error('Points must be greater than zero.');
+  const customer = await db.customers.get(customerId);
+  if (!customer || customer.store_id !== storeId) throw new Error('Customer not found.');
+  const currentBalance = Number(customer.loyalty_points_balance || 0);
+  if (points > currentBalance) throw new Error('Insufficient loyalty points balance.');
+  const balanceAfter = currentBalance - points;
+  const now = new Date().toISOString();
+  const loyaltyTx: LocalCustomerLoyaltyTransaction = {
+    id: generateId(),
+    store_id: storeId,
+    customer_id: customerId,
+    transaction_id: transactionId,
+    type: 'redeem',
+    points,
+    balance_after: balanceAfter,
+    reason,
+    created_at: now,
+    synced: 0,
+  };
+  await db.transaction('rw', [db.customers, db.customer_loyalty_transactions], async () => {
+    await db.customers.update(customerId, {
+      loyalty_points_balance: balanceAfter,
+      updated_at: now,
+      synced: 0,
+    });
+    await db.customer_loyalty_transactions.add(loyaltyTx);
+  });
+  return loyaltyTx;
+}
+
 export async function getCustomerOpeningPayments(customerId: string): Promise<LocalCustomerOpeningPayment[]> {
   return db.customer_opening_payments
     .where('customer_id')
@@ -3166,7 +3366,11 @@ export async function adoptCloudStockLedger(
 
   const nextBatches: LocalStockBatch[] = remoteBatches.map((remote) => {
     const local = localById.get(remote.id);
-    if (local && local.synced === 0 && asQty(local.quantity) < asQty(remote.quantity)) {
+    if (local && local.synced === 0) {
+      // Preserve ALL unsynced local changes — both sales/deductions (local < remote)
+      // and stock receives (local > remote). Without this, an unsynced receive on this
+      // device would be silently overwritten by a lower cloud value, and a synced batch
+      // with a higher cloud value would spuriously inflate local stock on auto-sync.
       return {
         ...remote,
         quantity: asQty(local.quantity),
@@ -4061,6 +4265,64 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
       errors
     );
 
+    const unsyncedVariants = await db.product_variants
+      .where('store_id')
+      .equals(storeId)
+      .and((v) => v.synced === 0)
+      .toArray();
+    syncedCount += await upsertToSupabase(
+      'Product variants',
+      'product_variants',
+      unsyncedVariants.map((v) => ({
+        id: v.id,
+        store_id: v.store_id,
+        product_id: v.product_id,
+        variant_name: v.variant_name,
+        variant_value: v.variant_value,
+        sku: v.sku,
+        barcode: v.barcode,
+        price_adjustment: v.price_adjustment,
+        stock_level: v.stock_level,
+        is_active: v.is_active === 1,
+        created_at: v.created_at,
+        updated_at: v.updated_at,
+      })),
+      async () => {
+        await Promise.all(unsyncedVariants.map((v) =>
+          db.product_variants.update(v.id, { synced: 1 })
+        ));
+      },
+      errors
+    );
+
+    const unsyncedLoyalty = await db.customer_loyalty_transactions
+      .where('store_id')
+      .equals(storeId)
+      .and((t) => t.synced === 0)
+      .toArray();
+    syncedCount += await upsertToSupabase(
+      'Customer loyalty transactions',
+      'customer_loyalty_transactions',
+      unsyncedLoyalty.map((t) => ({
+        id: t.id,
+        store_id: t.store_id,
+        customer_id: t.customer_id,
+        transaction_id: t.transaction_id,
+        type: t.type,
+        points: t.points,
+        balance_after: t.balance_after,
+        reason: t.reason,
+        created_at: t.created_at,
+        synced: t.synced === 1,
+      })),
+      async () => {
+        await Promise.all(unsyncedLoyalty.map((t) =>
+          db.customer_loyalty_transactions.update(t.id, { synced: 1 })
+        ));
+      },
+      errors
+    );
+
     const unsyncedTxns = await db.transactions
       .where('store_id')
       .equals(storeId)
@@ -4826,6 +5088,7 @@ export async function syncFromSupabase(opts?: {
           opening_balance: Number(row.opening_balance) || 0,
           opening_balance_remaining: Number(row.opening_balance_remaining) || 0,
           wallet_balance: Number(row.wallet_balance) || 0,
+          loyalty_points_balance: Number(row.loyalty_points_balance) || 0,
           is_active: row.is_active === false ? 0 : 1,
           debt_reminder_opt_out: row.debt_reminder_opt_out === true ? 1 : 0,
           loyalty_points_balance: 'loyalty_points_balance' in row
@@ -5646,9 +5909,8 @@ export async function syncFromSupabase(opts?: {
       );
 
       if (error) {
-        // The debt_reminders table only exists after
-        // supabase-migrate-debt-reminders-dashboard.sql has been run. Skip it
-        // quietly until then instead of failing the whole pull.
+        // The following tables only exist after their migrations have been run.
+        // Skip them quietly until then instead of failing the whole pull.
         if (
           OPTIONAL_CLOUD_TABLES.has(config.table) &&
           /does not exist|PGRST205|schema cache/i.test(error.message || '')
@@ -5668,7 +5930,9 @@ export async function syncFromSupabase(opts?: {
           continue;
         }
         if (
-          (config.table === 'stock_batches' || config.table === 'stock_movements') &&
+          (config.table === 'stock_batches' ||
+            config.table === 'stock_movements' ||
+            config.table === 'product_variants') &&
           deletedProductIds.has(mapped.product_id as string)
         ) {
           continue;

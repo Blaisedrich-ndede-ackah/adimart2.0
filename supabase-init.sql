@@ -215,6 +215,37 @@ CREATE INDEX IF NOT EXISTS idx_product_variants_sku ON product_variants(store_id
 CREATE INDEX IF NOT EXISTS idx_product_variants_barcode ON product_variants(store_id, barcode);
 
 -- ============================================================
+-- PRODUCT VARIANTS (size, color, flavor)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS product_variants (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  variant_name VARCHAR(50) NOT NULL DEFAULT '',
+  variant_value VARCHAR(100) NOT NULL DEFAULT '',
+  sku VARCHAR(100) DEFAULT '',
+  barcode VARCHAR(100) DEFAULT '',
+  price_adjustment DECIMAL(12,2) NOT NULL DEFAULT 0,
+  stock_level INTEGER NOT NULL DEFAULT 0 CHECK (stock_level >= 0),
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (store_id, product_id, variant_name, variant_value)
+);
+
+ALTER TABLE product_variants ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "product_variants_select" ON product_variants FOR SELECT USING (true);
+CREATE POLICY "product_variants_insert" ON product_variants FOR INSERT WITH CHECK (true);
+CREATE POLICY "product_variants_update" ON product_variants FOR UPDATE USING (true);
+CREATE POLICY "product_variants_delete" ON product_variants FOR DELETE USING (true);
+
+CREATE INDEX IF NOT EXISTS idx_product_variants_store ON product_variants(store_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_product_variants_product ON product_variants(product_id);
+CREATE INDEX IF NOT EXISTS idx_product_variants_sku ON product_variants(store_id, sku);
+CREATE INDEX IF NOT EXISTS idx_product_variants_barcode ON product_variants(store_id, barcode);
+
+-- ============================================================
 -- SUPPLIERS AND PURCHASE ORDERS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS suppliers (

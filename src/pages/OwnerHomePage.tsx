@@ -13,6 +13,8 @@ import {
   Users,
   Building2,
   ArrowRightLeft,
+  QrCode,
+  RefreshCw,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -88,6 +90,21 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
   const [linkedStoreCount, setLinkedStoreCount] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [pendingPriceChangeCount, setPendingPriceChangeCount] = useState(0);
+
+  const loadPendingPriceChangeCount = useCallback(async () => {
+    if (!currentStore?.id) {
+      setPendingPriceChangeCount(0);
+      return;
+    }
+    setPendingPriceChangeCount((await getPendingPriceChanges(currentStore.id)).length);
+  }, [currentStore?.id]);
+
+  useEffect(() => {
+    void loadPendingPriceChangeCount();
+    const interval = window.setInterval(() => void loadPendingPriceChangeCount(), 30_000);
+    return () => window.clearInterval(interval);
+  }, [loadPendingPriceChangeCount]);
 
   const load = useCallback(async () => {
     const storeId = await getCurrentStoreId();
@@ -201,6 +218,8 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
     { label: 'Add product', detail: 'Update your catalog', page: 'inventory', quickAdd: true, icon: Package, className: 'bg-white text-primary border border-emerald-100' },
     { label: 'Restock', detail: 'Replenish low stock', page: 'inventory', icon: Package, className: 'bg-white text-primary border border-amber-100' },
     { label: 'Add expense', detail: 'Record a store cost', page: 'expenses', quickAdd: true, icon: Plus, className: 'bg-white text-primary border border-emerald-100' },
+    { label: t('priceScan.ownerQrAction'), detail: t('priceScan.ownerQrDetail'), page: 'settings', icon: QrCode, className: 'bg-white text-primary border border-emerald-100' },
+    { label: t('priceScan.manageQueue'), detail: t('priceScan.queueActionDetail', { count: pendingPriceChangeCount }), page: 'settings', icon: RefreshCw, className: 'bg-amber-50 text-amber-900 border border-amber-100' },
   ];
 
   return (

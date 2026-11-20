@@ -55,6 +55,7 @@ import { flushSmsOutbox, sendClosingSummary } from '@/lib/smsOutbox';
 import { canAccessCashbook, canRecordCustomerPayments } from '@/lib/staffAccess';
 import { createAutomaticStoreBackup, recordBackupIssue } from '@/lib/storeBackup';
 import { createDueRecurringExpenses } from '@/lib/dexie';
+import { flushPriceChanges } from '@/lib/priceChangeQueue';
 import { useAccessibilityStore } from '@/lib/accessibility';
 
 type AppMode = 'store' | 'admin-login' | 'admin' | 'agent-login' | 'agent';
@@ -81,6 +82,13 @@ function isCustomerDisplayRoute(): boolean {
   return hash === '/pos/customer-display' || path === '/pos/customer-display';
 }
 
+function readPriceScanSlug(): string | null {
+  if (typeof window === 'undefined') return null;
+  const hash = window.location.hash.replace(/^#/, '');
+  const match = hash.match(/^\/?price-scan\/([^/?#]+)/i);
+  return match?.[1] ? decodeURIComponent(match[1]).trim().toLowerCase() : null;
+}
+
 function readPublicUtilityRoute(): 'terms' | '404' | null {
   if (typeof window === 'undefined') return null;
   const hash = window.location.hash.replace(/^#/, '').replace(/^\//, '').replace(/\/$/, '');
@@ -88,6 +96,7 @@ function readPublicUtilityRoute(): 'terms' | '404' | null {
   if (hash.toLowerCase() === 'terms') return 'terms';
   if (hash.toLowerCase() === 'agent') return null;
   if (/^shop\//i.test(hash)) return null;
+  if (/^price-scan\//i.test(hash)) return null;
   return '404';
 }
 
@@ -130,6 +139,7 @@ function AuthenticatedApp() {
   const [appMode, setAppMode] = useState<AppMode>(() => (readAgentHash() ? 'agent-login' : 'store'));
   const [adminSessionResolved, setAdminSessionResolved] = useState(false);
   const [publicShopSlug, setPublicShopSlug] = useState<string | null>(() => readPublicShopSlug());
+  const [priceScanSlug, setPriceScanSlug] = useState<string | null>(() => readPriceScanSlug());
   const [publicUtilityRoute, setPublicUtilityRoute] = useState<'terms' | '404' | null>(() => readPublicUtilityRoute());
 
   useEffect(() => {
@@ -151,11 +161,14 @@ function AuthenticatedApp() {
 
   useEffect(() => {
     const onHashChange = () => setPublicShopSlug(readPublicShopSlug());
+    const onPriceScanHashChange = () => setPriceScanSlug(readPriceScanSlug());
     const onUtilityHashChange = () => setPublicUtilityRoute(readPublicUtilityRoute());
     window.addEventListener('hashchange', onHashChange);
+    window.addEventListener('hashchange', onPriceScanHashChange);
     window.addEventListener('hashchange', onUtilityHashChange);
     return () => {
       window.removeEventListener('hashchange', onHashChange);
+      window.removeEventListener('hashchange', onPriceScanHashChange);
       window.removeEventListener('hashchange', onUtilityHashChange);
     };
   }, []);
@@ -177,6 +190,18 @@ function AuthenticatedApp() {
     window.addEventListener('hashchange', onAgentHash);
     return () => window.removeEventListener('hashchange', onAgentHash);
   }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentStore?.id) return;
+    const flush = () => { void flushPriceChanges(currentStore.id); };
+    flush();
+    window.addEventListener('online', flush);
+    const interval = window.setInterval(flush, 60_000);
+    return () => {
+      window.removeEventListener('online', flush);
+      window.clearInterval(interval);
+    };
+  }, [isAuthenticated, currentStore?.id]);
 
   useEffect(() => {
     if (!isAuthenticated || !currentStore?.id) return;
@@ -333,6 +358,10 @@ function AuthenticatedApp() {
 
   if (publicShopSlug) {
     return <PublicShopPage slug={publicShopSlug} />;
+  }
+
+  if (priceScanSlug) {
+    return <Suspense fallback={<div className="flex min-h-screen items-center justify-center">Loadingâ€¦</div>}><PriceScanPage slug={priceScanSlug} /></Suspense>;
   }
 
   if (publicUtilityRoute === 'terms') return <TermsPage />;

@@ -54,9 +54,17 @@ interface SettingsPageProps {
   onNavigate?: (page: string) => void;
 }
 
+interface PendingPriceChangeView {
+  id: string;
+  productName: string;
+  previousPrice: number;
+  newPrice: number;
+}
+
 export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const { currentUser, currentStore, refreshStore } = useAuthStore();
   const t = useT();
+  const money = useFormatMoney();
   const language = useI18nStore((s) => s.language);
   const logoInputRef = useRef<HTMLInputElement>(null);
   
@@ -113,6 +121,65 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [resetPinUser, setResetPinUser] = useState<LocalUser | null>(null);
   const [locations, setLocations] = useState<LocalLocation[]>([]);
   const [permUserId, setPermUserId] = useState<string | null>(null);
+  const [priceScanEnabled, setPriceScanEnabledState] = useState(isPriceScanPortalEnabled);
+  const [priceScanSlug, setPriceScanSlug] = useState('');
+  const [priceScanError, setPriceScanError] = useState('');
+  const [pendingPriceChanges, setPendingPriceChanges] = useState<PendingPriceChangeView[]>([]);
+  const [syncingPriceChanges, setSyncingPriceChanges] = useState(false);
+  const [priceQueueMessage, setPriceQueueMessage] = useState('');
+
+  const refreshPriceQueue = useCallback(async () => {
+    if (!currentStore?.id) {
+      setPendingPriceChanges([]);
+      return;
+    }
+    const changes = await getPendingPriceChanges(currentStore.id);
+    const products = await db.products.bulkGet(changes.map((change) => change.product_id));
+    setPendingPriceChanges(changes.map((change, index) => ({
+      id: change.id,
+      productName: products[index]?.name || change.product_id,
+      previousPrice: change.previous_price,
+      newPrice: change.new_price,
+    })));
+  }, [currentStore?.id]);
+
+  useEffect(() => {
+    void refreshPriceQueue();
+    const refresh = () => { void refreshPriceQueue(); };
+    window.addEventListener('online', refresh);
+    return () => window.removeEventListener('online', refresh);
+  }, [refreshPriceQueue]);
+
+  useEffect(() => {
+    if (!priceScanEnabled || !currentStore?.id) {
+      setPriceScanSlug('');
+      setPriceScanError('');
+      return;
+    }
+    let active = true;
+    setPriceScanError('');
+    void ensureEcommerceSlug(currentStore.id).then((slug) => {
+      if (active) setPriceScanSlug(slug);
+    }).catch((error: unknown) => {
+      if (active) setPriceScanError(error instanceof Error ? error.message : t('priceScan.qrFailed'));
+    });
+    return () => { active = false; };
+  }, [priceScanEnabled, currentStore?.id, t]);
+
+  const syncPendingPrices = async () => {
+    if (!currentStore?.id) return;
+    setSyncingPriceChanges(true);
+    setPriceQueueMessage('');
+    try {
+      const count = await flushPriceChanges(currentStore.id);
+      await refreshPriceQueue();
+      setPriceQueueMessage(t('priceScan.syncedCount', { count }));
+    } catch (error: unknown) {
+      setPriceQueueMessage(error instanceof Error ? error.message : t('priceScan.syncFailed'));
+    } finally {
+      setSyncingPriceChanges(false);
+    }
+  };
 
   const loadData = useCallback(async () => {
     if (currentStore) {
