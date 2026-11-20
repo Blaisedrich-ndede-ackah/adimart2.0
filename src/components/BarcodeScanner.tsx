@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { BrowserMultiFormatReader, NotFoundException } from '@zxing/library';
+import type { BrowserMultiFormatReader } from '@zxing/library';
 import { Camera, CameraOff, Keyboard, RefreshCw } from 'lucide-react';
 
 interface BarcodeScannerProps {
@@ -35,6 +35,7 @@ export default function BarcodeScanner({ onScan, active, large = false }: Barcod
     setIsScanning(false);
 
     try {
+      const { BrowserMultiFormatReader, NotFoundException } = await import('@zxing/library');
       const reader = new BrowserMultiFormatReader();
       readerRef.current = reader;
 

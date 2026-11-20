@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Store, Shield, Percent,
   Save, Loader2, CheckCircle2, UserPlus,
   Trash2, Users, Fingerprint, AlertCircle, Key, Smartphone, Ban, ImagePlus, Timer,
-  BellRing, Target
+  BellRing, Target, Eye
 } from 'lucide-react';
 import ChangePinModal from '@/components/ChangePinModal';
 import ResetUserPinModal from '@/components/ResetUserPinModal';
@@ -23,6 +23,7 @@ import {
 } from '@/lib/dexie';
 import { ensureStoreLocations, listLocations } from '@/lib/warehouse';
 import { useAuthStore } from '@/store/useAuthStore';
+import { recordActivity } from '@/lib/activityLog';
 import { isBiometricAvailable, registerBiometric, hasBiometricRegistered, clearBiometricRegistration } from '@/lib/biometric';
 import { isValidGhanaPhone } from '@/lib/platformSettings';
 import { fileToStoreLogoDataUrl, hasStoreLogo } from '@/lib/productImage';
@@ -31,12 +32,9 @@ import WarehousePortalSection from '@/components/WarehousePortalSection';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
 import CurrencySelect from '@/components/CurrencySelect';
 import { useI18nStore, useT } from '@/lib/i18n';
-import PriceScanQRGenerator from '@/components/PriceScanQRGenerator';
-import { ensureEcommerceSlug } from '@/lib/ecommerce';
-import { isPriceScanPortalEnabled, setPriceScanPortalEnabled } from '@/lib/priceScan';
-import { flushPriceChanges, getPendingPriceChanges } from '@/lib/priceChangeQueue';
-import { DEFAULT_CURRENCY, normalizeCurrencyCode, getStoreCurrency, useFormatMoney } from '@/lib/currency';
-import { canAccessCashbook } from '@/lib/staffAccess';
+import { isCustomerDisplayEnabled, setCustomerDisplayEnabled } from '@/lib/cfdChannel';
+import { DEFAULT_CURRENCY, normalizeCurrencyCode, getStoreCurrency } from '@/lib/currency';
+import { canAccessCashbook, canRecordCustomerPayments } from '@/lib/staffAccess';
 import {
   DEFAULT_SESSION_TIMEOUT_MINUTES,
   SESSION_TIMEOUT_OPTIONS,
@@ -80,6 +78,15 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [allowPercentage, setAllowPercentage] = useState(true);
   const [allowFixed, setAllowFixed] = useState(true);
   const [cashierCanDiscount, setCashierCanDiscount] = useState(true);
+  const [cashiersCanViewStock, setCashiersCanViewStock] = useState(true);
+  const [loyaltyEarnRate, setLoyaltyEarnRate] = useState('0');
+  const [loyaltyRedeemValue, setLoyaltyRedeemValue] = useState('0');
+  const [creditLimitAction, setCreditLimitAction] = useState<'warn' | 'block'>('warn');
+  const [closingSmsEnabled, setClosingSmsEnabled] = useState(false);
+  const [closingSmsTime, setClosingSmsTime] = useState('20:00');
+  const [cashiersCanRecordExpenses, setCashiersCanRecordExpenses] = useState(true);
+  const [vatRate, setVatRate] = useState('0');
+  const [closingSmsNote, setClosingSmsNote] = useState('');
   const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState(DEFAULT_SESSION_TIMEOUT_MINUTES);
   const [momoAccountName, setMomoAccountName] = useState('');
   const [momoNumber, setMomoNumber] = useState('');
@@ -91,6 +98,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [debtReminderMessage, setDebtReminderMessage] = useState(DEFAULT_DEBT_REMINDER_TEMPLATE);
   const [salesTargetDaily, setSalesTargetDaily] = useState('0');
   const [salesTargetMonthly, setSalesTargetMonthly] = useState('0');
+  const [customerDisplayEnabled, setCustomerDisplayEnabledState] = useState(isCustomerDisplayEnabled);
   
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -184,6 +192,14 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
       setAllowPercentage((currentStore.discount_allow_percentage ?? 1) === 1);
       setAllowFixed((currentStore.discount_allow_fixed ?? 1) === 1);
       setCashierCanDiscount((currentStore.cashier_can_discount ?? 1) === 1);
+      setCashiersCanViewStock((currentStore.cashiers_can_view_stock ?? 1) === 1);
+      setLoyaltyEarnRate(String(Math.max(0, Math.floor(Number(currentStore.loyalty_earn_rate) || 0))));
+      setLoyaltyRedeemValue(String(Number(currentStore.loyalty_redeem_value) || 0));
+      setCreditLimitAction(currentStore.credit_limit_action === 'block' ? 'block' : 'warn');
+      setClosingSmsEnabled((currentStore.closing_sms_enabled ?? 0) === 1);
+      setClosingSmsTime(currentStore.closing_sms_time || '20:00');
+      setCashiersCanRecordExpenses((currentStore.cashiers_can_record_expenses ?? 1) === 1);
+      setVatRate(String(Number(currentStore.vat_rate) || 0));
       setSessionTimeoutMinutes(normalizeSessionTimeoutMinutes(currentStore.session_timeout_minutes));
       setMomoAccountName(currentStore.momo_account_name || '');
       setMomoNumber(currentStore.momo_number || '');
@@ -267,6 +283,14 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         discount_allow_percentage: allowPercentage ? 1 : 0,
         discount_allow_fixed: allowFixed ? 1 : 0,
         cashier_can_discount: cashierCanDiscount ? 1 : 0,
+        cashiers_can_view_stock: cashiersCanViewStock ? 1 : 0,
+        loyalty_earn_rate: Math.max(0, Math.floor(Number(loyaltyEarnRate) || 0)),
+        loyalty_redeem_value: Math.max(0, Number(loyaltyRedeemValue) || 0),
+        credit_limit_action: creditLimitAction,
+        closing_sms_enabled: closingSmsEnabled ? 1 : 0,
+        closing_sms_time: closingSmsTime || '20:00',
+        cashiers_can_record_expenses: cashiersCanRecordExpenses ? 1 : 0,
+        vat_rate: Math.max(0, Math.min(100, Number(vatRate) || 0)),
         session_timeout_minutes: normalizeSessionTimeoutMinutes(sessionTimeoutMinutes),
         momo_account_name: momoAccountName.trim(),
         momo_number: momoNumber.trim(),
@@ -283,6 +307,18 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
       });
       
       await refreshStore();
+      if (currentUser) {
+        recordActivity({
+          storeId,
+          storeName: storeName.trim(),
+          userId: currentUser.id,
+          username: currentUser.name,
+          role: currentUser.role,
+          activityType: 'settings',
+          summary: 'Updated store settings',
+          details: cashiersCanViewStock ? 'Cashiers can see stock quantities' : 'Cashiers cannot see stock quantities',
+        });
+      }
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err: unknown) {
@@ -372,6 +408,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         | 'can_sell_from_warehouse'
         | 'can_manage_ecommerce'
         | 'can_access_cashbook'
+        | 'can_record_customer_payments'
         | 'phone'
       >
     >
@@ -438,55 +475,26 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
           <p className="text-[11px] text-gray-500 mt-2">{t('settings.currencyHint')}</p>
         </div>
 
-        <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3" aria-labelledby="price-scan-settings-title">
-          <div className="flex items-start justify-between gap-4">
+        <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3" aria-labelledby="cfd-settings-title">
+          <div className="flex items-center justify-between gap-4">
             <div>
-              <h3 id="price-scan-settings-title" className="font-bold text-gray-900">{t('priceScan.enablePortal')}</h3>
-              <p className="mt-1 text-xs text-gray-500">{t('priceScan.enablePortalHint')}</p>
+              <h3 id="cfd-settings-title" className="font-bold text-gray-900">{t('cfd.settings.label')}</h3>
+              <p className="mt-1 text-xs text-gray-500">{t('cfd.settings.hint')}</p>
             </div>
-            <label className="inline-flex cursor-pointer items-center gap-2">
+            <label className="inline-flex cursor-pointer items-center gap-3">
+              <span className="sr-only">{t('cfd.settings.label')}</span>
               <input
                 type="checkbox"
-                checked={priceScanEnabled}
+                checked={customerDisplayEnabled}
                 onChange={(event) => {
-                  setPriceScanEnabledState(event.target.checked);
-                  setPriceScanPortalEnabled(event.target.checked);
+                  setCustomerDisplayEnabledState(event.target.checked);
+                  setCustomerDisplayEnabled(event.target.checked);
                 }}
                 className="h-5 w-5 accent-emerald-600"
-                aria-label={t('priceScan.enablePortal')}
               />
-              <span className="text-sm font-medium text-gray-700">{priceScanEnabled ? t('common.on') : t('common.off')}</span>
+              <span className="text-sm font-medium text-gray-700">{customerDisplayEnabled ? t('common.on') : t('common.off')}</span>
             </label>
           </div>
-          {priceScanEnabled && (
-            <div className="mt-4 space-y-3">
-              {priceScanError && <p className="text-sm text-red-700" role="alert">{priceScanError}</p>}
-              {priceScanSlug && <PriceScanQRGenerator storeSlug={priceScanSlug} storeName={currentStore?.name || storeName || t('common.store')} />}
-            </div>
-          )}
-        </section>
-
-        <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3" aria-labelledby="price-change-queue-title">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 id="price-change-queue-title" className="font-bold text-gray-900">{t('priceScan.pendingChanges')}</h3>
-              <p className="mt-1 text-xs text-gray-500">{t('priceScan.pendingChangesCount', { count: pendingPriceChanges.length })}</p>
-            </div>
-            <button type="button" onClick={() => void syncPendingPrices()} disabled={syncingPriceChanges || pendingPriceChanges.length === 0} className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white touch-target disabled:opacity-50">
-              {syncingPriceChanges ? t('priceScan.syncing') : t('priceScan.syncNow')}
-            </button>
-          </div>
-          {pendingPriceChanges.length > 0 && (
-            <ul className="mt-3 divide-y divide-gray-100">
-              {pendingPriceChanges.slice(0, 5).map((change) => (
-                <li key={change.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                  <span className="min-w-0 truncate font-medium text-gray-800">{change.productName}</span>
-                  <span className="shrink-0 text-gray-600">{money(change.previousPrice)} → {money(change.newPrice)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-          {priceQueueMessage && <p className="mt-3 text-sm text-gray-600" role="status">{priceQueueMessage}</p>}
         </section>
 
         {/* Store Profile */}
@@ -621,6 +629,114 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
               </select>
             </div>
           </div>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">
+          <div className="flex items-center gap-2 mb-4">
+            <Eye className="w-5 h-5 text-primary" />
+            <h3 className="font-bold text-gray-900">Stock quantity visibility</h3>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-gray-700">Cashiers can see stock quantities</p>
+              <p className="text-xs text-gray-500">Turn off to hide on-hand quantities from cashier screens. You can still see them.</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={cashiersCanViewStock}
+              onClick={() => setCashiersCanViewStock((value) => !value)}
+              className={`w-12 h-7 rounded-full transition-colors flex items-center px-0.5 touch-target shrink-0 ${
+                cashiersCanViewStock ? 'bg-primary justify-end' : 'bg-gray-300 justify-start'
+              }`}
+            >
+              <div className="w-6 h-6 bg-white rounded-full shadow" />
+            </button>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">
+          <h3 className="font-bold text-gray-900 mb-1">VAT in the selling price</h3>
+          <p className="text-xs text-gray-500 mb-3">When you change a product’s selling price, this percent is rounded into that price. Receipts charge the selling price and do not print a VAT line. Leave it at 0 to keep prices as you type them.</p>
+          <label className="text-xs font-medium text-gray-600 mb-1 block">VAT percent</label>
+          <input
+            type="number"
+            min="0"
+            max="100"
+            step="0.01"
+            value={vatRate}
+            onChange={(event) => setVatRate(event.target.value)}
+            className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+          />
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3 space-y-3">
+          <h3 className="font-bold text-gray-900">Loyalty points</h3>
+          <p className="text-xs text-gray-600">Points are earned on sales to a known customer and can be redeemed at checkout. Leave both at 0 to keep loyalty off.</p>
+          <label className="block text-sm">
+            Points earned per 1 {currentStore?.currency_code || 'GHS'}
+            <input type="number" min="0" step="1" value={loyaltyEarnRate} onChange={(event) => setLoyaltyEarnRate(event.target.value)} className="mt-1 w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary focus:border-primary" />
+          </label>
+          <label className="block text-sm">
+            Value of 1 point
+            <input type="number" min="0" step="0.01" value={loyaltyRedeemValue} onChange={(event) => setLoyaltyRedeemValue(event.target.value)} className="mt-1 w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary focus:border-primary" />
+          </label>
+          <label className="block text-sm">
+            When a credit sale would pass the customer's limit
+            <select value={creditLimitAction} onChange={(event) => setCreditLimitAction(event.target.value === 'block' ? 'block' : 'warn')} className="mt-1 w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none bg-white focus:ring-2 focus:ring-primary focus:border-primary">
+              <option value="warn">Warn and allow the sale</option>
+              <option value="block">Block the sale</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3 space-y-3">
+          <h3 className="font-bold text-gray-900">Closing SMS</h3>
+          <p className="text-xs text-gray-600">
+            Sends today’s sales, cash, MoMo, credit, voids, expenses, and net to the store phone. If the device is offline, the message waits until it reconnects.
+          </p>
+          <label className="flex items-center justify-between gap-3 text-sm">
+            <span>Send automatically</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={closingSmsEnabled}
+              onClick={() => setClosingSmsEnabled((value) => !value)}
+              className={`flex h-7 w-12 items-center rounded-full px-0.5 ${closingSmsEnabled ? 'justify-end bg-primary' : 'justify-start bg-gray-300'}`}
+            >
+              <span className="h-6 w-6 rounded-full bg-white shadow" />
+            </button>
+          </label>
+          <label className="block text-sm">
+            Closing time
+            <input type="time" value={closingSmsTime} onChange={(event) => setClosingSmsTime(event.target.value)} className="mt-1 w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary focus:border-primary" />
+          </label>
+          <label className="flex items-center justify-between gap-3 text-sm">
+            <span>Cashiers can record expenses</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={cashiersCanRecordExpenses}
+              onClick={() => setCashiersCanRecordExpenses((value) => !value)}
+              className={`flex h-7 w-12 items-center rounded-full px-0.5 ${cashiersCanRecordExpenses ? 'justify-end bg-primary' : 'justify-start bg-gray-300'}`}
+            >
+              <span className="h-6 w-6 rounded-full bg-white shadow" />
+            </button>
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              void import('@/lib/smsOutbox').then(async (mod) => {
+                if (!currentStore) return;
+                const result = await mod.sendClosingSummary({ ...currentStore, closing_sms_enabled: 1, support_number: supportNumber || currentStore.support_number }, true);
+                setClosingSmsNote(result === 'sent' ? 'Closing SMS sent.' : result === 'queued' ? 'Closing SMS queued until this device is online.' : 'Add the store phone first.');
+              });
+            }}
+            className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white"
+          >
+            Send today’s closing SMS now
+          </button>
+          {closingSmsNote && <p className="text-xs text-gray-600">{closingSmsNote}</p>}
         </div>
 
         {/* Discount Settings */}
@@ -1164,6 +1280,21 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
                       )}
                       <label className="flex items-center justify-between gap-2 py-1">
                         <span>
+                          <span className="text-gray-700 font-medium block">Can record customer payments</span>
+                          <span className="text-[11px] text-gray-500">Record a payment on a customer account and print or send the receipt</span>
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={canRecordCustomerPayments(user)}
+                          onChange={(e) =>
+                            void updateCashierPerms(user, {
+                              can_record_customer_payments: e.target.checked ? 1 : 0,
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="flex items-center justify-between gap-2 py-1">
+                        <span>
                           <span className="text-gray-700 font-medium block">{t('settings.canCashbook')}</span>
                           <span className="text-[11px] text-gray-500">{t('settings.canCashbookHint')}</span>
                         </span>
@@ -1203,7 +1334,7 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         <button
           onClick={handleSave}
           disabled={saving}
-          className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 touch-target mb-6 transition-colors ${
+          className={`sticky bottom-0 z-10 w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 touch-target mb-6 transition-colors shadow-lg ${
             saveSuccess
               ? 'bg-green-500 text-white'
               : 'bg-primary text-white disabled:opacity-50'

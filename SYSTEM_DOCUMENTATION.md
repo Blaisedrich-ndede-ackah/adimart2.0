@@ -17,7 +17,7 @@ Adimat POS is a **mobile-first, offline-first Point of Sale and inventory Progre
 - **Payments:** Paystack Inline (Mobile Money, card, bank, USSD, QR)
 - **Hardware:** Camera barcode scanning (ZXing), Web Bluetooth ESC/POS thermal printing, WebAuthn biometrics
 
-There is **no first-party application server**. Production deployment is static hosting of a Vite-built single-file bundle.
+There is **no first-party application server**. Production uses a static Vite build with route-level JavaScript chunks, loaded on demand and cached by the service worker for offline use.
 
 ### Primary capabilities
 
@@ -68,7 +68,7 @@ There is **no first-party application server**. Production deployment is static 
 | Layer | Technology | Notes |
 |-------|------------|-------|
 | UI framework | React 19.2 + TypeScript 5.9 | SPA, no React Router usage in app shell |
-| Build | Vite 7 + `@vitejs/plugin-react` + `vite-plugin-singlefile` | Single-file `dist` output |
+| Build | Vite 7 + `@vitejs/plugin-react` | Lazy route chunks with service-worker offline precaching |
 | Styling | Tailwind CSS v4 (`@tailwindcss/vite`) | Theme tokens in `src/index.css` |
 | Client state | Zustand 5 | Auth + cart |
 | Local DB | Dexie.js 4 / IndexedDB | DB name `AdimatPOS` |
@@ -506,7 +506,7 @@ npm run dev
 ### 13.3 Production build
 
 ```bash
-npm run build      # vite build → single-file dist via vite-plugin-singlefile
+npm run build      # vite build → static dist with route chunks and offline precache manifest
 npm run preview
 ```
 
@@ -660,7 +660,7 @@ These are important for maintainers; several differ from older README claims:
 4. Owner PIN is chosen at setup (not a global hardcoded `1234`)  
 5. Low-stock threshold is hardcoded at `< 5`  
 6. Stock adjustment reason is collected in UI but not stored  
-7. Build output is a single HTML file via `vite-plugin-singlefile`  
+7. Build output contains route-level JavaScript chunks, precached by the service worker for offline use
 8. No automated tests or CI workflows in-repo  
 9. Open Supabase RLS policies are unsuitable for untrusted multi-tenant production without hardening  
 10. Manifest screenshot / splash assets referenced may not all exist on disk  

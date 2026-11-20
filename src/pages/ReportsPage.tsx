@@ -8,7 +8,7 @@ import {
   Warehouse, Store, MapPin, Camera
 } from 'lucide-react';
 import {
-  db, LocalTransaction, LocalTransactionItem, LocalExpense, LocalCreditPayment, LocalCustomerOpeningPayment, LocalStockBatch, LocalLocation,
+  db, LocalTransaction, LocalTransactionItem, LocalSaleReturn, LocalExpense, LocalCreditPayment, LocalCustomerOpeningPayment, LocalStockBatch, LocalLocation,
   getCurrentStoreTransactions, getCurrentStoreExpenses, getCurrentStoreId,
   addExpense, deleteExpense
 } from '@/lib/dexie';
@@ -17,6 +17,7 @@ import { roundMoney, toMoneyAmount } from '@/lib/money';
 import {
   buildLocationReportSummary,
   buildReportSummary,
+  exportGraSalesRegisterPdf,
   exportLocationReportCsv,
   exportLocationReportPdf,
   exportReportCsv,
@@ -30,12 +31,12 @@ import {
 import { getExpiringBatches } from '@/lib/warehouse';
 import FinancialDonutChart from '@/components/FinancialDonutChart';
 import { parseOtherCharges } from '@/lib/otherCharges';
-import { orgFromStore } from '@/lib/formalPdf';
+import { orgFromStore } from '@/lib/formalPdfMeta';
 import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
 import { fileToProductImageDataUrl } from '@/lib/productImage';
 
-type ReportTab = 'overview' | 'products' | 'expenses' | 'locations';
+type ReportTab = 'overview' | 'products' | 'expenses' | 'locations' | 'gra';
 
 interface DayData {
   day: string;
@@ -67,6 +68,8 @@ export default function ReportsPage() {
   const [rangeError, setRangeError] = useState('');
   const [tab, setTab] = useState<ReportTab>('overview');
   const [transactions, setTransactions] = useState<LocalTransaction[]>([]);
+  const [voidedSales, setVoidedSales] = useState<LocalTransaction[]>([]);
+  const [periodReturns, setPeriodReturns] = useState<LocalSaleReturn[]>([]);
   const [creditPayments, setCreditPayments] = useState<LocalCreditPayment[]>([]);
   const [customerOpeningPayments, setCustomerOpeningPayments] = useState<LocalCustomerOpeningPayment[]>([]);
   const [outstandingCredit, setOutstandingCredit] = useState(0);
@@ -109,7 +112,15 @@ export default function ReportsPage() {
     setLoadError('');
     try {
       const { start, end } = range;
-      const allTxns = (await getCurrentStoreTransactions()).filter(t => t.status === 'completed');
+      const loadedTxns = await getCurrentStoreTransactions();
+      const voidedInPeriod = loadedTxns.filter((sale) => sale.void_status === 'voided');
+      setVoidedSales(voidedInPeriod);
+      const allTxns = loadedTxns.filter((sale) => sale.status === 'completed' && sale.void_status !== 'voided');
+      const allReturns = await db.sales_returns.where('store_id').equals(storeId).toArray();
+      setPeriodReturns(allReturns.filter((record) => {
+        const returnedAt = new Date(record.created_at);
+        return returnedAt >= start && returnedAt <= end;
+      }));
       const allCreditPayments = await db.credit_payments.where('store_id').equals(storeId).toArray();
       const allCustomerOpeningPayments = await db.customer_opening_payments.where('store_id').equals(storeId).toArray();
       setCustomerOpeningPayments(allCustomerOpeningPayments.filter((payment) => {
@@ -213,9 +224,22 @@ export default function ReportsPage() {
     exportReportCsv(summary, periodLabel, currentStore.name, transactions, expenses);
   };
 
-  const handleExportPdf = () => {
+  const handleExportPdf = async () => {
     if (!summary || !currentStore) return;
-    exportReportPdf(summary, periodLabel, currentStore.name, orgFromStore(currentStore));
+    try {
+      await exportReportPdf(summary, periodLabel, currentStore.name, orgFromStore(currentStore));
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Could not export this report.');
+    }
+  };
+
+  const handleExportGraSalesRegisterPdf = async () => {
+    if (!currentStore) return;
+    try {
+      await exportGraSalesRegisterPdf(transactions, periodReturns, periodLabel, orgFromStore(currentStore));
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Could not export the GRA sales register.');
+    }
   };
 
   const handleExportLocation = async (locationId: string, format: 'csv' | 'pdf') => {
@@ -233,7 +257,7 @@ export default function ReportsPage() {
         period
       );
       if (format === 'csv') exportLocationReportCsv(locSummary);
-      else exportLocationReportPdf(locSummary, orgFromStore(currentStore));
+      else await exportLocationReportPdf(locSummary, orgFromStore(currentStore));
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to export location report');
     }
@@ -385,7 +409,7 @@ export default function ReportsPage() {
               type="button"
               onClick={applyCustomRange}
               disabled={loadingReport}
-              className="w-full rounded-lg bg-white text-primary py-2 text-sm font-semibold disabled:opacity-60"
+              className="w-full rounded-full bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-60"
             >
               {loadingReport ? 'Generating…' : 'Generate report'}
             </button>
@@ -406,6 +430,7 @@ export default function ReportsPage() {
             { key: 'products', label: 'Products', icon: Package },
             { key: 'expenses', label: 'Expenses', icon: PiggyBank },
             { key: 'locations', label: 'Locations', icon: MapPin },
+            { key: 'gra', label: 'GRA', icon: FileText },
           ] as const).map(item => {
             const Icon = item.icon;
             return (
@@ -454,14 +479,33 @@ export default function ReportsPage() {
                 </div>
                 <p className="text-2xl font-bold text-gray-900">{money(totalRevenue)}</p>
                 <p className="text-xs text-gray-500">{transactions.length} transactions</p>
+                {transactions.some((sale) => (sale.promotion_discount || 0) > 0) && (
+                  <p className="text-xs text-emerald-700 mt-1">
+                    Store deals saved customers {money(transactions.reduce((sum, sale) => sum + (Number(sale.promotion_discount) || 0), 0))}
+                  </p>
+                )}
               </div>
+              {voidedSales.length > 0 && (
+                <div className="rounded-xl border border-gray-100 bg-white p-3 shadow-sm col-span-2 md:col-span-4">
+                  <p className="text-xs font-semibold text-gray-700">Voided sales are excluded from these totals</p>
+                  <ul className="mt-2 space-y-1">
+                    {voidedSales.slice(0, 8).map((sale) => (
+                      <li key={sale.id} className="flex justify-between gap-2 text-xs text-gray-600">
+                        <span className="truncate">{sale.receipt_number} · {sale.void_reason || 'Voided'}</span>
+                        <span>{money(sale.total_amount)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100">
                 <p className="text-xs text-gray-500">Gross Profit</p>
                 <p className="text-lg font-bold text-green-600">{money(summary.grossProfit)}</p>
               </div>
               <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100">
-                <p className="text-xs text-gray-500">Net Profit</p>
+                <p className="text-xs text-gray-500">Net profit</p>
+                <p className="text-[10px] text-gray-400">Gross profit minus expenses</p>
                 <p className={`text-lg font-bold ${summary.netProfit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                   {money(summary.netProfit)}
                 </p>
@@ -823,6 +867,57 @@ export default function ReportsPage() {
                 );
               })
             )}
+          </div>
+        )}
+
+        {tab === 'gra' && (
+          <div className="space-y-3 md:max-w-3xl md:mx-auto xl:max-w-none xl:mx-0">
+            <div className="rounded-xl border border-emerald-100 bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-bold text-gray-900">GRA sales register</h2>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Completed sales and recorded returns for {periodLabel}.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleExportGraSalesRegisterPdf}
+                  disabled={!currentStore || loadingReport}
+                  className="flex flex-shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                >
+                  {loadingReport ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                  Export PDF
+                </button>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <div className="rounded-lg bg-slate-50 p-3">
+                  <p className="text-[11px] text-gray-500">Recorded sales total</p>
+                  <p className="mt-1 text-sm font-bold text-gray-900">
+                    {money(transactions.reduce((sum, transaction) => sum + (Number(transaction.total_amount) || 0), 0))}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-slate-50 p-3">
+                  <p className="text-[11px] text-gray-500">Recorded discounts</p>
+                  <p className="mt-1 text-sm font-bold text-gray-900">
+                    {money(transactions.reduce((sum, transaction) => sum + (Number(transaction.discount_applied) || 0), 0))}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-slate-50 p-3">
+                  <p className="text-[11px] text-gray-500">Completed sales</p>
+                  <p className="mt-1 text-sm font-bold text-gray-900">{transactions.length}</p>
+                </div>
+                <div className="rounded-lg bg-slate-50 p-3">
+                  <p className="text-[11px] text-gray-500">Recorded return entries</p>
+                  <p className="mt-1 text-sm font-bold text-gray-900">{periodReturns.length}</p>
+                </div>
+              </div>
+            </div>
+            <div role="note" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs leading-relaxed text-amber-900">
+              This is a sales register for reference, not an official GRA tax return. Adimat does not calculate tax
+              amounts or include tax-identification and purchase-tax data in this report. Review the register against
+              current GRA requirements before filing.
+            </div>
           </div>
         )}
       </div>

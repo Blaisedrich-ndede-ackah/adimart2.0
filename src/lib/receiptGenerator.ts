@@ -2,6 +2,7 @@ import jsPDF from 'jspdf';
 import { FormalPdf, formatGhsOfficial, formatOfficialDate, orgFromStore } from './formalPdf';
 import { formatOfficialMoney } from './currency';
 import { getPaymentMethodLabel } from './paymentMethods';
+import { formatQty } from './measure';
 
 export interface ReceiptData {
   storeName: string;
@@ -15,8 +16,10 @@ export interface ReceiptData {
   items: Array<{
     name: string;
     quantity: number;
+    unit?: string;
     unitPrice: number;
     subtotal: number;
+    serial?: string;
   }>;
   subtotal: number;
   discount: number;
@@ -37,6 +40,10 @@ export interface ReceiptData {
   balanceAfterPayment?: number;
   receiptPurpose?: 'sale' | 'credit-payment';
   currencyCode?: string;
+  promotionSummary?: string;
+  loyaltyPointsEarned?: number;
+  loyaltyPointsRedeemed?: number;
+  loyaltyRedeemAmount?: number;
 }
 
 function amt(data: ReceiptData, n: number): string {
@@ -162,6 +169,10 @@ function generateReceiptPDF(data: ReceiptData): jsPDF {
     const name = item.name.length > 20 ? item.name.substring(0, 20) + '...' : item.name;
     leftText(name, y, 9);
     y += 4;
+    if (item.serial) {
+      leftText(`  SN ${item.serial}`, y, 8);
+      y += 4;
+    }
 
     // Quantity x Price = Subtotal
     doc.setFontSize(8);
@@ -183,6 +194,14 @@ function generateReceiptPDF(data: ReceiptData): jsPDF {
     doc.setTextColor(200, 50, 50);
     leftRightText('Discount:', '-' + amt(data, data.discount), y, 9);
     doc.setTextColor(0);
+    y += 4;
+  }
+  if ((data.loyaltyRedeemAmount || 0) > 0) {
+    leftRightText('Points redeemed:', '-' + amt(data, data.loyaltyRedeemAmount || 0), y, 9);
+    y += 4;
+  }
+  if (data.promotionSummary) {
+    leftText(`Deal: ${data.promotionSummary}`.slice(0, 42), y, 8);
     y += 4;
   }
 
@@ -299,8 +318,8 @@ function generateOfficialReceiptPdf(data: ReceiptData): FormalPdf {
     pdf.dataTable(
       ['Description', 'Qty', 'Unit price', 'Amount'],
       data.items.map((item) => [
-        item.name,
-        String(item.quantity),
+        item.serial ? `${item.name} SN ${item.serial}` : item.name,
+        formatQty(item.quantity, item.unit),
         formatGhsOfficial(item.unitPrice, data.currencyCode),
         formatGhsOfficial(item.subtotal, data.currencyCode),
       ]),
@@ -314,6 +333,13 @@ function generateOfficialReceiptPdf(data: ReceiptData): FormalPdf {
       : []),
     ...(data.discount > 0
       ? [{ label: 'Discount', value: formatGhsOfficial(-data.discount, data.currencyCode) }]
+      : []),
+    ...((data.loyaltyRedeemAmount || 0) > 0
+      ? [{ label: 'Points redeemed', value: formatGhsOfficial(-(data.loyaltyRedeemAmount || 0), data.currencyCode) }]
+      : []),
+    ...(data.promotionSummary ? [{ label: 'Deal', value: data.promotionSummary }] : []),
+    ...((data.loyaltyPointsEarned || 0) > 0
+      ? [{ label: 'Points earned', value: String(data.loyaltyPointsEarned) }]
       : []),
     ...(data.otherCharges || [])
       .filter((c) => c?.amount)
@@ -495,8 +521,9 @@ function generateReceiptText(data: ReceiptData): string {
   
   data.items.forEach(item => {
     lines.push(item.name);
+    if (item.serial) lines.push(`  SN ${item.serial}`);
     lines.push(leftRight(
-      '  ' + item.quantity + ' x ' + amt(data, item.unitPrice),
+      '  ' + formatQty(item.quantity, item.unit) + ' x ' + amt(data, item.unitPrice),
       amt(data, item.subtotal)
     ));
   });
@@ -505,6 +532,13 @@ function generateReceiptText(data: ReceiptData): string {
   lines.push(leftRight('Subtotal:', amt(data, data.subtotal)));
   if (data.discount > 0) {
     lines.push(leftRight('Discount:', '-' + amt(data, data.discount)));
+  }
+  if ((data.loyaltyRedeemAmount || 0) > 0) {
+    lines.push(leftRight('Points redeemed:', '-' + amt(data, data.loyaltyRedeemAmount || 0)));
+  }
+  if (data.promotionSummary) lines.push(`Deal: ${data.promotionSummary}`);
+  if ((data.loyaltyPointsEarned || 0) > 0) {
+    lines.push(leftRight('Points earned:', String(data.loyaltyPointsEarned)));
   }
   for (const charge of data.otherCharges || []) {
     if (!charge?.amount) continue;

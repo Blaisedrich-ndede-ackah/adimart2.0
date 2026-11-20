@@ -16,6 +16,7 @@ import {
   setCurrentUserId,
   switchToStore,
   updateUserPhone,
+  updateUserPhoto,
 } from '@/lib/dexie';
 import { clearAllWarehouseSessions, clearWarehouseUnlock } from '@/lib/warehouseAccess';
 import { applyStoreLanguageDefault, tNow } from '@/lib/i18n';
@@ -26,6 +27,7 @@ import {
   touchLastActivity,
 } from '@/lib/sessionTimeout';
 import { useCartStore } from '@/store/useCartStore';
+import { recordLogin, recordLogout } from '@/lib/activityLog';
 
 interface AuthState {
   currentUser: LocalUser | null;
@@ -35,7 +37,7 @@ interface AuthState {
   loginError: string;
   isLoading: boolean;
   
-  initialize: () => Promise<void>;
+  initialize: (localOnly?: boolean) => Promise<void>;
   login: (pin: string) => Promise<boolean>;
   /** After warehouse PIN succeeds — enter as the store owner. */
   loginAsStoreOwner: () => Promise<boolean>;
@@ -48,6 +50,7 @@ interface AuthState {
   getAllUsers: () => Promise<LocalUser[]>;
   refreshStore: () => Promise<void>;
   updateMyPhone: (phone: string) => Promise<void>;
+  setMyPhoto: (photoUrl: string) => Promise<void>;
   setStoreSetup: (value: boolean) => void;
 }
 
@@ -59,7 +62,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   loginError: '',
   isLoading: true,
 
-  initialize: async () => {
+  initialize: async (localOnly = false) => {
     set({ isLoading: true });
     
     const hasStore = await hasAnyStore();
@@ -76,7 +79,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     
     let store = await getCurrentStore();
     if (store?.id) {
-      store = (await pullAdminStoreLimits(store.id)) || store;
+      if (!localOnly) store = (await pullAdminStoreLimits(store.id)) || store;
       applyStoreLanguageDefault(store.preferred_language);
     }
 
@@ -105,7 +108,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isStoreSetup: true,
         loginError: '',
       });
-      void refreshStockFromCloud();
+      if (!localOnly) void refreshStockFromCloud();
       set({ isLoading: false });
       return;
     }
@@ -146,6 +149,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isAuthenticated: true, 
         loginError: '' 
       });
+      if (store?.id) {
+        recordLogin({
+          storeId: store.id,
+          storeName: store.name,
+          userId: user.id,
+          username: user.name,
+          role: user.role,
+        });
+      }
       return true;
     }
     
@@ -172,16 +184,27 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       isAuthenticated: true,
       loginError: '',
     });
+    if (store?.id) {
+      recordLogin({
+        storeId: store.id,
+        storeName: store.name,
+        userId: owner.id,
+        username: owner.name,
+        role: owner.role,
+      });
+    }
     return true;
   },
 
   logout: () => {
+    recordLogout();
     clearAllWarehouseSessions();
     void setCurrentUserId(null);
     set({ currentUser: null, isAuthenticated: false, loginError: '' });
   },
 
   switchUser: () => {
+    recordLogout();
     // Keep any pending warehouse login set by Settings → Open warehouse
     clearWarehouseUnlock();
     void setCurrentUserId(null);
@@ -189,6 +212,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   switchStore: async (storeId: string) => {
+    recordLogout();
     clearAllWarehouseSessions();
     useCartStore.getState().clearParkedCarts();
     const store = await switchToStore(storeId);
@@ -234,6 +258,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         ? refreshed
         : { ...user, phone: saved },
     });
+  },
+
+  setMyPhoto: async (photoUrl: string) => {
+    const user = get().currentUser;
+    if (!user) throw new Error('Not signed in');
+    await updateUserPhoto(user.id, photoUrl);
+    const refreshed = await (await import('@/lib/dexie')).db.users.get(user.id);
+    if (refreshed) set({ currentUser: refreshed });
   },
 
   setStoreSetup: (value: boolean) => {

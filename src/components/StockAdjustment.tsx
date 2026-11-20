@@ -71,7 +71,7 @@ export default function StockAdjustment({ isOpen, product, onClose, onSaved }: S
       else if (adjustmentType === 'add') newStock = liveTotal + value;
       else newStock = Math.max(0, liveTotal - value);
 
-      await setProductStockLevel({
+      const result = await setProductStockLevel({
         storeId,
         productId: product.id,
         targetQty: newStock,
@@ -80,6 +80,12 @@ export default function StockAdjustment({ isOpen, product, onClose, onSaved }: S
       });
       void triggerPushSync('stock-adjust');
       onSaved();
+      if (result.pending) {
+        setAmount('');
+        setError('This increase is waiting for a cashier to confirm the items are physically present. Stock was not added.');
+        setSaving(false);
+        return;
+      }
       onClose();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to update stock');

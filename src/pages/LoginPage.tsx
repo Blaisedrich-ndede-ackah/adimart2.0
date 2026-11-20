@@ -21,11 +21,12 @@ import { consumeIdleLock, touchLastActivity } from '@/lib/sessionTimeout';
 
 interface LoginPageProps {
   onOpenAdmin?: () => void;
+  onOpenAgent?: () => void;
   /** Called after a successful warehouse PIN login so the app can open the warehouse page. */
   onWarehouseLoginSuccess?: () => void;
 }
 
-export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: LoginPageProps) {
+export default function LoginPage({ onOpenAdmin, onOpenAgent, onWarehouseLoginSuccess }: LoginPageProps) {
   const [pin, setPin] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [shake, setShake] = useState(false);
@@ -355,7 +356,7 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
           <p className="text-emerald-200 text-sm mb-4">Verifying…</p>
         )}
 
-        <div className="grid grid-cols-3 gap-3 w-full max-w-[280px] md:max-w-[300px]">
+        <div className="ios-keypad">
           {keys.map(key => {
             if (key === 'biometric') {
               return (
@@ -363,14 +364,12 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
                   key={key}
                   onClick={() => void handleKeyPress(key)}
                   disabled={!biometricAvailable || warehouseMode}
-                  className={`h-16 md:h-[4.5rem] lg:h-[3.75rem] rounded-2xl flex items-center justify-center touch-target transition-colors ${
-                    biometricAvailable && !warehouseMode
-                      ? 'bg-white/20 active:bg-white/30'
-                      : 'bg-white/5 opacity-40'
+                  className={`ios-key ios-key-ghost touch-target ${
+                    biometricAvailable && !warehouseMode ? '' : 'opacity-40'
                   }`}
                   title={biometricAvailable ? 'Login with biometrics' : 'Biometrics not set up'}
                 >
-                  <Fingerprint className={`w-6 h-6 ${biometricAvailable && !warehouseMode ? 'text-emerald-200' : 'text-gray-400'}`} />
+                  <Fingerprint className={`w-7 h-7 ${biometricAvailable && !warehouseMode ? 'text-white' : 'text-white/40'}`} />
                 </button>
               );
             }
@@ -379,9 +378,10 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
                 <button
                   key={key}
                   onClick={() => void handleKeyPress(key)}
-                  className="h-16 md:h-[4.5rem] lg:h-[3.75rem] rounded-2xl bg-white/10 flex items-center justify-center touch-target active:bg-white/20 transition-colors"
+                  className="ios-key ios-key-ghost touch-target"
+                  aria-label="Delete"
                 >
-                  <Delete className="w-6 h-6 text-emerald-200" />
+                  <Delete className="w-7 h-7 text-white" />
                 </button>
               );
             }
@@ -390,7 +390,7 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
                 key={key}
                 onClick={() => void handleKeyPress(key)}
                 disabled={isLoading}
-                className="h-16 md:h-[4.5rem] lg:h-[3.75rem] rounded-2xl bg-white/15 text-white text-2xl font-semibold touch-target active:bg-white/30 transition-colors disabled:opacity-50"
+                className="ios-key touch-target"
               >
                 {key}
               </button>
@@ -417,6 +417,16 @@ export default function LoginPage({ onOpenAdmin, onWarehouseLoginSuccess }: Logi
           <FileText className="w-3.5 h-3.5" />
           Terms &amp; Conditions
         </a>
+
+        {onOpenAgent && (
+          <button
+            onClick={onOpenAgent}
+            className="mt-4 lg:mt-3 flex items-center gap-2 text-emerald-100/80 text-xs font-medium touch-target"
+          >
+            <Store className="w-3.5 h-3.5" />
+            Agent portal
+          </button>
+        )}
 
         {onOpenAdmin && (
           <button

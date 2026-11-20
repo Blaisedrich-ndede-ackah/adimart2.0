@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Receipt, Printer, Loader2, ChevronDown, ChevronUp, RefreshCcw, AlertCircle
+  Receipt, Printer, Loader2, RefreshCcw, AlertCircle, Eye, X, Search, FileText
 } from 'lucide-react';
 import {
   LocalTransaction,
@@ -13,6 +13,7 @@ import {
 } from '@/lib/dexie';
 import { useAuthStore } from '@/store/useAuthStore';
 import { reprintTransactionReceipt } from '@/lib/receiptReprint';
+import { TransactionReceiptSend } from '@/components/ReceiptSendActions';
 import { isPrinterConnected } from '@/lib/bluetoothPeripherals';
 import { openComputerPrinterWindow } from '@/lib/printService';
 import { parseOtherCharges } from '@/lib/otherCharges';
@@ -20,19 +21,31 @@ import { getPaymentMethodLabel } from '@/lib/paymentMethods';
 import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
 import CloudSyncPanel from '@/components/CloudSyncPanel';
+import { filterSalesByPeriod, type SalesPeriod } from '@/lib/salesRange';
+import { rejectSaleVoid, requestOrVoidSale } from '@/lib/saleVoids';
+import { markGoodsMomoPayoutReturned, undoGoodsMomoPayout } from '@/lib/storeMomoPayout';
+
+const PERIODS: SalesPeriod[] = ['all', 'today', 'week', 'custom'];
 
 export default function TransactionsPage() {
-  const { currentUser } = useAuthStore();
+  const { currentUser, currentStore } = useAuthStore();
   const money = useFormatMoney();
   const t = useT();
   const isOwner = currentUser?.role === 'owner';
   const [transactions, setTransactions] = useState<LocalTransaction[]>([]);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [period, setPeriod] = useState<SalesPeriod>('all');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const [itemsByTxn, setItemsByTxn] = useState<Record<string, LocalTransactionItem[]>>({});
   const [creditPaymentsByTxn, setCreditPaymentsByTxn] = useState<Record<string, LocalCreditPayment[]>>({});
   const [loading, setLoading] = useState(true);
   const [printingId, setPrintingId] = useState<string | null>(null);
   const [status, setStatus] = useState('');
+  const [statusTone, setStatusTone] = useState<'ok' | 'error'>('ok');
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [voidReason, setVoidReason] = useState('');
 
   const load = useCallback(async () => {
     if (!currentUser) return;
@@ -53,51 +66,96 @@ export default function TransactionsPage() {
     void load();
   }, [load]);
 
-  const toggleExpand = async (txnId: string) => {
-    if (expandedId === txnId) {
-      setExpandedId(null);
-      return;
-    }
-    setExpandedId(txnId);
-    if (!itemsByTxn[txnId]) {
+  const ensureDetails = useCallback(
+    async (txnId: string) => {
+      if (itemsByTxn[txnId]) return;
       const [items, payments] = await Promise.all([
         getTransactionItems(txnId),
         getCreditPaymentsForTransaction(txnId),
       ]);
       setItemsByTxn((prev) => ({ ...prev, [txnId]: items }));
       setCreditPaymentsByTxn((prev) => ({ ...prev, [txnId]: payments }));
-    }
+    },
+    [itemsByTxn]
+  );
+
+  const openPreview = useCallback(
+    async (txn: LocalTransaction) => {
+      setPreviewId(txn.id);
+      setPreviewLoading(true);
+      await ensureDetails(txn.id);
+      setPreviewLoading(false);
+    },
+    [ensureDetails]
+  );
+
+  const closePreview = () => {
+    setPreviewId(null);
+    setPreviewLoading(false);
   };
 
-  const handleReprint = async (txn: LocalTransaction) => {
+  const handlePrint = useCallback(async (txn: LocalTransaction) => {
     setStatus('');
+    setStatusTone('ok');
     const printWindow = isPrinterConnected() ? undefined : openComputerPrinterWindow();
     setPrintingId(txn.id);
     const printResult = await reprintTransactionReceipt(txn, printWindow);
-    setStatus(
-      printResult.success
-        ? `Reprinted ${txn.receipt_number}`
-        : printResult.error || 'Reprint failed'
-    );
+    if (printResult.success) {
+      setStatus(`${t('sales.printedOk')} · ${txn.receipt_number}`);
+      setStatusTone('ok');
+    } else {
+      setStatus(printResult.error || t('sales.printFailed'));
+      setStatusTone('error');
+    }
     setPrintingId(null);
     setTimeout(() => setStatus(''), 4000);
-  };
+  }, [t]);
+
+  const periodResult = useMemo(
+    () => filterSalesByPeriod(transactions, period, customFrom, customTo),
+    [transactions, period, customFrom, customTo]
+  );
+  const periodFiltered = periodResult.rows;
+
+  const filtered = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return periodFiltered;
+    return periodFiltered.filter(
+      (txn) =>
+        txn.receipt_number.toLowerCase().includes(needle) ||
+        (txn.cashier_name || '').toLowerCase().includes(needle) ||
+        (txn.customer_name || '').toLowerCase().includes(needle)
+    );
+  }, [periodFiltered, search]);
+
+  const periodTotal = useMemo(
+    () => periodFiltered.reduce((sum, txn) => (
+      txn.void_status === 'voided' ? sum : sum + (txn.total_amount || 0)
+    ), 0),
+    [periodFiltered]
+  );
+
+  const previewTxn = previewId
+    ? transactions.find((txn) => txn.id === previewId) || null
+    : null;
+  const previewItems = previewId ? itemsByTxn[previewId] || [] : [];
+  const previewPayments = previewId ? creditPaymentsByTxn[previewId] || [] : [];
+  const previewCharges = previewTxn ? parseOtherCharges(previewTxn.other_charges_json) : [];
 
   return (
     <div className="page-shell">
       <div className="page-header">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-white font-bold text-lg">
-              {isOwner ? t('sales.title') : t('sales.myTitle')}
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-white font-bold text-lg truncate">
+              {isOwner ? t('sales.recordsTitle') : t('sales.myTitle')}
             </h1>
-            <p className="text-emerald-200 text-xs">
-              {isOwner
-                ? 'Store sales history — reprint any receipt'
-                : 'Your completed sales — reprint receipts'}
+            <p className="text-emerald-200 text-xs truncate">
+              {isOwner ? t('sales.recordsSubtitle') : 'Your completed sales — reprint receipts'}
             </p>
           </div>
           <button
+            type="button"
             onClick={() => void load()}
             className="bg-white/20 p-2 rounded-xl touch-target"
             title="Refresh"
@@ -108,13 +166,91 @@ export default function TransactionsPage() {
       </div>
 
       <div className="page-body no-scrollbar">
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          <div className="rounded-xl bg-white border border-gray-100 shadow-sm px-3 py-2">
+            <p className="text-[11px] text-gray-500">{t('sales.receipts')}</p>
+            <p className="text-lg font-bold text-gray-900">{periodFiltered.length}</p>
+          </div>
+          <div className="rounded-xl bg-white border border-gray-100 shadow-sm px-3 py-2">
+            <p className="text-[11px] text-gray-500">{t('sales.totalSales')}</p>
+            <p className="text-lg font-bold text-primary truncate">{money(periodTotal)}</p>
+          </div>
+        </div>
+
+        <div className="mb-3 flex items-center gap-2 rounded-xl bg-white border border-gray-100 shadow-sm px-3">
+          <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('sales.searchPlaceholder')}
+            className="w-full bg-transparent py-2.5 text-sm outline-none"
+          />
+        </div>
+
+        <div className="ux-region mb-3">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Period</div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="tablist" aria-label="Sales period">
+          {PERIODS.map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="tab"
+              aria-selected={period === option}
+              onClick={() => setPeriod(option)}
+              className={`rounded-xl px-2 py-2 text-xs font-semibold touch-target transition-colors ${
+                period === option
+                  ? 'bg-primary text-white'
+                  : 'bg-white border border-gray-100 text-gray-600 shadow-sm'
+              }`}
+            >
+              {option === 'all'
+                ? t('sales.allTime')
+                : option === 'today'
+                  ? t('sales.today')
+                  : option === 'week'
+                    ? t('sales.last7')
+                    : t('sales.custom')}
+            </button>
+          ))}
+          </div>
+          {period === 'custom' && (
+            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <label className="rounded-xl border border-gray-100 bg-white px-3 py-2 text-xs text-gray-500 shadow-sm">
+                {t('sales.from')}
+                <input
+                  type="datetime-local"
+                  value={customFrom}
+                  onChange={(event) => setCustomFrom(event.target.value)}
+                  aria-label={t('sales.from')}
+                  className="mt-1 w-full bg-transparent text-sm text-gray-900 outline-none"
+                />
+              </label>
+              <label className="rounded-xl border border-gray-100 bg-white px-3 py-2 text-xs text-gray-500 shadow-sm">
+                {t('sales.to')}
+                <input
+                  type="datetime-local"
+                  value={customTo}
+                  onChange={(event) => setCustomTo(event.target.value)}
+                  aria-label={t('sales.to')}
+                  className="mt-1 w-full bg-transparent text-sm text-gray-900 outline-none"
+                />
+              </label>
+              {periodResult.error ? (
+                <p className="text-xs text-red-700 sm:col-span-2">{t('sales.rangeInvalid')}</p>
+              ) : !customFrom || !customTo ? (
+                <p className="text-xs text-gray-500 sm:col-span-2">{t('sales.rangeHint')}</p>
+              ) : null}
+            </div>
+          )}
+        </div>
+
         {!isOwner && (
           <CloudSyncPanel hint={t('sync.cashierHint')} onSynced={() => void load()} />
         )}
 
         {status && (
           <div className={`mb-3 rounded-xl px-3 py-2 text-xs flex items-center gap-2 ${
-            status.includes('fail') || status.includes('No printer')
+            statusTone === 'error'
               ? 'bg-amber-50 text-amber-800'
               : 'bg-emerald-50 text-emerald-800'
           }`}>
@@ -129,21 +265,23 @@ export default function TransactionsPage() {
           </div>
         )}
 
-        {!loading && transactions.length === 0 && (
+        {!loading && filtered.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16 text-gray-400">
             <Receipt className="w-12 h-12 mb-3" />
-            <p className="text-sm font-medium">No completed sales yet</p>
+            <p className="text-sm font-medium">
+              {transactions.length > 0 ? t('sales.rangeEmpty') : t('sales.noSales')}
+            </p>
           </div>
         )}
 
         <div className="space-y-2">
-          {transactions.map((txn) => {
-            const expanded = expandedId === txn.id;
-            const items = itemsByTxn[txn.id] || [];
+          {filtered.map((txn) => {
+            const isPrinting = printingId === txn.id;
             return (
               <div key={txn.id} className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
                 <button
-                  onClick={() => void toggleExpand(txn.id)}
+                  type="button"
+                  onClick={() => void openPreview(txn)}
                   className="w-full px-3 py-3 flex items-center gap-3 text-left touch-target"
                 >
                   <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
@@ -152,8 +290,9 @@ export default function TransactionsPage() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-gray-900 font-mono truncate">
                       {txn.receipt_number}
+                      {txn.void_status === 'voided' ? ' · voided' : txn.void_status === 'requested' ? ' · void requested' : ''}
                     </p>
-                    <p className="text-[11px] text-gray-500">
+                    <p className="text-[11px] text-gray-500 truncate">
                       {new Date(txn.created_at).toLocaleString('en-GH')}
                       {isOwner ? ` · ${txn.cashier_name || 'Cashier'}` : ''}
                       {' · '}
@@ -162,77 +301,291 @@ export default function TransactionsPage() {
                   </div>
                   <div className="text-right flex-shrink-0">
                     <p className="text-sm font-bold text-gray-900">{money(txn.total_amount)}</p>
-                    {expanded ? (
-                      <ChevronUp className="w-4 h-4 text-gray-400 ml-auto" />
-                    ) : (
-                      <ChevronDown className="w-4 h-4 text-gray-400 ml-auto" />
-                    )}
+                    <p className="text-[10px] text-gray-400">{t('sales.viewReceipt')}</p>
                   </div>
                 </button>
 
-                {expanded && (
-                  <div className="px-3 pb-3 border-t border-gray-50 pt-2 space-y-2">
-                    {items.length === 0 ? (
-                      <p className="text-xs text-gray-400">Loading items…</p>
+                <div className="flex items-center gap-2 border-t border-gray-50 px-3 py-2">
+                  <button
+                    type="button"
+                    onClick={() => void openPreview(txn)}
+                    className="flex-1 py-2 rounded-xl bg-surface-muted text-gray-700 text-xs font-semibold flex items-center justify-center gap-2 touch-target"
+                  >
+                    <Eye className="w-4 h-4" />
+                    {t('sales.viewReceipt')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handlePrint(txn)}
+                    disabled={isPrinting}
+                    className="flex-1 py-2 bg-primary/10 text-primary rounded-xl text-xs font-semibold flex items-center justify-center gap-2 touch-target disabled:opacity-50"
+                  >
+                    {isPrinting ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
                     ) : (
-                      items.map((item) => (
-                        <div key={item.id} className="flex justify-between text-xs text-gray-700">
-                          <span className="truncate pr-2">
-                            {item.quantity}× {item.product_name}
-                          </span>
-                          <span className="font-medium flex-shrink-0">{money(item.subtotal)}</span>
-                        </div>
-                      ))
+                      <Printer className="w-4 h-4" />
                     )}
-                    {txn.discount_applied > 0 && (
-                      <p className="text-xs text-red-500">Discount: -{money(txn.discount_applied)}</p>
-                    )}
-                    {parseOtherCharges(txn.other_charges_json).map((charge) => (
-                      <p key={charge.id} className="text-xs text-gray-600">
-                        {charge.label}: {money(charge.amount)}
-                      </p>
-                    ))}
-                    {txn.payment_method === 'credit' && (
-                      <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 space-y-2">
-                        <p className="text-xs text-amber-900">
-                          Customer: <span className="font-semibold">{txn.customer_name || 'Not recorded'}</span>
-                          {txn.customer_phone ? ` · ${txn.customer_phone}` : ''}
-                        </p>
-                        <p className="text-xs text-amber-900">
-                          Outstanding balance: <span className="font-bold">{money(txn.credit_balance || 0)}</span>
-                        </p>
-                        {(creditPaymentsByTxn[txn.id] || []).map((payment) => (
-                          <p key={payment.id} className="text-[11px] text-amber-800">
-                            Payment {money(payment.amount)} · {new Date(payment.created_at).toLocaleString('en-GH')}
-                            {payment.created_by ? ` · ${payment.created_by}` : ''}
-                          </p>
-                        ))}
-                      </div>
-                    )}
-                    {(txn.payment_reference || txn.paystack_reference) && (
-                      <p className="text-xs text-gray-600">
-                        Payment reference: <span className="font-mono">{txn.payment_reference || txn.paystack_reference}</span>
-                      </p>
-                    )}
-                    <button
-                      onClick={() => void handleReprint(txn)}
-                      disabled={printingId === txn.id}
-                      className="w-full mt-1 py-2.5 bg-primary/10 text-primary rounded-xl text-xs font-semibold flex items-center justify-center gap-2 touch-target disabled:opacity-50"
-                    >
-                      {printingId === txn.id ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <Printer className="w-4 h-4" />
-                      )}
-                      Reprint receipt
-                    </button>
-                  </div>
-                )}
+                    {t('sales.printReceipt')}
+                  </button>
+                </div>
+                <div className="border-t border-gray-50 px-3 py-2">
+                  <TransactionReceiptSend txn={txn} />
+                </div>
               </div>
             );
           })}
         </div>
       </div>
+
+      {previewTxn && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-900/50"
+            aria-label={t('common.close')}
+            onClick={closePreview}
+          />
+          <div className="relative w-full sm:max-w-md max-h-[90vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl bg-surface-card shadow-2xl animate-slide-up">
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-surface-muted bg-surface-card px-4 py-3 rounded-t-3xl">
+              <div className="flex items-center gap-2 min-w-0">
+                <FileText className="w-4 h-4 text-primary flex-shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-primary">
+                    {t('sales.viewReceipt')}
+                  </p>
+                  <p className="truncate text-sm font-bold text-ink font-mono">
+                    {previewTxn.receipt_number}
+                  </p>
+                </div>
+              </div>
+              <button type="button" onClick={closePreview} className="icon-btn" aria-label={t('common.close')}>
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="px-4 py-4 space-y-3">
+              <div className="rounded-xl bg-surface-muted px-3 py-2 text-xs text-gray-600 space-y-1">
+                <p className="flex justify-between gap-3">
+                  <span>{t('common.store')}</span>
+                  <span className="font-semibold text-gray-900">{currentStore?.name || 'Store'}</span>
+                </p>
+                <p className="flex justify-between gap-3">
+                  <span>Date</span>
+                  <span className="font-semibold text-gray-900">
+                    {new Date(previewTxn.created_at).toLocaleString('en-GH')}
+                  </span>
+                </p>
+                <p className="flex justify-between gap-3">
+                  <span>Cashier</span>
+                  <span className="font-semibold text-gray-900">{previewTxn.cashier_name || 'Cashier'}</span>
+                </p>
+                <p className="flex justify-between gap-3">
+                  <span>Payment</span>
+                  <span className="font-semibold text-gray-900">
+                    {getPaymentMethodLabel(previewTxn.payment_method)}
+                  </span>
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-gray-100 px-3 py-2">
+                {previewLoading && (
+                  <p className="flex items-center justify-center gap-2 py-4 text-xs text-gray-400">
+                    <Loader2 className="w-4 h-4 animate-spin" /> Loading items…
+                  </p>
+                )}
+                {!previewLoading && previewItems.length === 0 && (
+                  <p className="py-4 text-center text-xs text-gray-400">No items on this receipt.</p>
+                )}
+                {!previewLoading && previewItems.map((item) => (
+                  <div key={item.id} className="flex justify-between gap-3 py-1.5 text-xs text-gray-700 border-b border-gray-50 last:border-0">
+                    <span className="min-w-0">
+                      <span className="font-semibold text-gray-900">{item.quantity}×</span>{' '}
+                      <span className="break-words">{item.product_name}</span>
+                      {item.sale_mode && (
+                        <span className={`ml-1 inline-flex rounded px-1.5 py-0.5 text-[9px] font-semibold ${
+                          item.sale_mode === 'wholesale' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
+                        }`}>
+                          {item.sale_mode === 'wholesale' ? 'Wholesale' : 'Retail'}
+                        </span>
+                      )}
+                      <span className="block text-[10px] text-gray-400">
+                        {money(item.unit_price)} each
+                        {item.serial_number ? ` · SN ${item.serial_number}` : ''}
+                      </span>
+                    </span>
+                    <span className="font-semibold flex-shrink-0">{money(item.subtotal)}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-xl bg-surface-muted px-3 py-2 text-xs space-y-1">
+                <p className="flex justify-between gap-3 text-gray-600">
+                  <span>Subtotal</span>
+                  <span>
+                    {money(
+                      previewItems.reduce((sum, item) => sum + (item.subtotal || 0), 0)
+                    )}
+                  </span>
+                </p>
+                {previewTxn.discount_applied > 0 && (
+                  <p className="flex justify-between gap-3 text-red-500">
+                    <span>Discount</span>
+                    <span>-{money(previewTxn.discount_applied)}</span>
+                  </p>
+                )}
+                {previewCharges.map((charge) => (
+                  <p key={charge.id} className="flex justify-between gap-3 text-gray-600">
+                    <span>{charge.label}</span>
+                    <span>{money(charge.amount)}</span>
+                  </p>
+                ))}
+                <p className="flex justify-between gap-3 text-sm font-bold text-gray-900 border-t border-gray-200 pt-1.5">
+                  <span>Total</span>
+                  <span>{money(previewTxn.total_amount)}</span>
+                </p>
+              </div>
+
+              {previewTxn.payment_method === 'credit' && (
+                <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 space-y-1.5">
+                  <p className="text-xs text-amber-900">
+                    Customer: <span className="font-semibold">{previewTxn.customer_name || 'Not recorded'}</span>
+                    {previewTxn.customer_phone ? ` · ${previewTxn.customer_phone}` : ''}
+                  </p>
+                  <p className="text-xs text-amber-900">
+                    Outstanding balance:{' '}
+                    <span className="font-bold">{money(previewTxn.credit_balance || 0)}</span>
+                  </p>
+                  {previewPayments.map((payment) => (
+                    <p key={payment.id} className="text-[11px] text-amber-800">
+                      Payment {money(payment.amount)} · {new Date(payment.created_at).toLocaleString('en-GH')}
+                      {payment.created_by ? ` · ${payment.created_by}` : ''}
+                    </p>
+                  ))}
+                </div>
+              )}
+
+              {previewTxn.void_status === 'voided' && (
+                <div className="space-y-2">
+                  <p className="rounded-xl bg-gray-100 px-3 py-2 text-xs text-gray-700">
+                    Voided by {previewTxn.voided_by_name || 'owner'}. {previewTxn.void_reason}
+                  </p>
+                  {isOwner && currentUser && previewTxn.paystack_reference && (Number(previewTxn.paystack_amount) || 0) > 0 && (
+                    <button
+                      type="button"
+                      className="w-full rounded-xl border border-gray-200 bg-white py-2 text-xs font-semibold text-gray-800"
+                      onClick={() => {
+                        void markGoodsMomoPayoutReturned({
+                          storeId: currentStore?.id || previewTxn.store_id,
+                          userId: currentUser.id,
+                          reference: previewTxn.paystack_reference,
+                        }).then((result) => {
+                          setStatus(result.message);
+                          setStatusTone(result.ok ? 'ok' : 'error');
+                        });
+                      }}
+                    >
+                      Mark MoMo payout returned
+                    </button>
+                  )}
+                </div>
+              )}
+              {previewTxn.void_status !== 'voided' && currentUser && (
+                <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
+                  <p className="text-xs font-semibold text-gray-800">
+                    {isOwner ? 'Void this sale' : 'Ask the owner to void this sale'}
+                  </p>
+                  <textarea
+                    value={voidReason}
+                    onChange={(event) => setVoidReason(event.target.value)}
+                    placeholder="Reason (required)"
+                    className="w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      className="flex-1 rounded-xl bg-red-600 py-2 text-xs font-semibold text-white"
+                      onClick={() => {
+                        void requestOrVoidSale({
+                          storeId: currentStore?.id || previewTxn.store_id,
+                          transactionId: previewTxn.id,
+                          reason: voidReason,
+                          actor: currentUser,
+                          storeName: currentStore?.name,
+                        }).then(async (result) => {
+                          let note = result === 'voided' ? 'Sale voided. Stock was restored.' : 'Void request sent to the owner.';
+                          if (result === 'voided' && previewTxn.paystack_reference && (Number(previewTxn.paystack_amount) || 0) > 0 && currentUser) {
+                            const payout = await undoGoodsMomoPayout({
+                              storeId: currentStore?.id || previewTxn.store_id,
+                              userId: currentUser.id,
+                              reference: previewTxn.paystack_reference,
+                            });
+                            note = `${note} ${payout.message}`;
+                          }
+                          setStatus(note);
+                          setStatusTone('ok');
+                          setVoidReason('');
+                          await load();
+                        }).catch((error: unknown) => {
+                          setStatus(error instanceof Error ? error.message : 'Could not void the sale.');
+                          setStatusTone('error');
+                        });
+                      }}
+                    >
+                      {isOwner ? 'Void sale' : 'Request void'}
+                    </button>
+                    {isOwner && previewTxn.void_status === 'requested' && (
+                      <button
+                        type="button"
+                        className="rounded-xl bg-white px-3 py-2 text-xs font-semibold"
+                        onClick={() => {
+                          void rejectSaleVoid({
+                            storeId: currentStore?.id || previewTxn.store_id,
+                            transactionId: previewTxn.id,
+                            actor: currentUser,
+                            storeName: currentStore?.name,
+                          }).then(load);
+                        }}
+                      >
+                        Reject
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+              {(previewTxn.payment_reference || previewTxn.paystack_reference) && (
+                <p className="text-xs text-gray-600">
+                  Payment reference:{' '}
+                  <span className="font-mono">{previewTxn.payment_reference || previewTxn.paystack_reference}</span>
+                </p>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => void handlePrint(previewTxn)}
+                  disabled={printingId === previewTxn.id}
+                  className="flex-1 py-3 bg-primary text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 touch-target disabled:opacity-50"
+                >
+                  {printingId === previewTxn.id ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Printer className="w-4 h-4" />
+                  )}
+                  {t('sales.printReceipt')}
+                </button>
+                <button
+                  type="button"
+                  onClick={closePreview}
+                  className="px-4 py-3 border border-gray-200 text-gray-700 rounded-xl text-sm font-semibold touch-target"
+                >
+                  {t('common.close')}
+                </button>
+              </div>
+              <TransactionReceiptSend txn={previewTxn} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

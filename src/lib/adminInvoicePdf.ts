@@ -13,8 +13,8 @@ export const INVOICE_ISSUER = {
   address: 'Sekondi-Takoradi',
   region: 'Western Region, Ghana',
   paymentMethod: 'MTN Mobile Money',
-  accountName: 'BLAISEDRICH NDEDE ACKAH',
-  accountNumber: '0555857224',
+  accountName: 'AKATUM Technologies(BLAISEDRICH NDEDE ACKAH)',
+  accountNumber: '0593484553',
 };
 
 export interface StoreInvoiceBillTo {

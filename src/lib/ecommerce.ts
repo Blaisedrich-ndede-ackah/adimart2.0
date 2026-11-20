@@ -25,6 +25,7 @@ export interface PublicShopProduct {
 }
 
 export interface PublicShopCatalog {
+  catalogError?: string;
   store: {
     id: string;
     name: string;
@@ -183,15 +184,29 @@ export async function fetchPublicShopCatalog(slug: string): Promise<PublicShopCa
     throw new Error('This shop is not available online.');
   }
 
-  const { data: products, error: productError } = await supabase
-    .from('products')
-    .select('id, name, category, selling_price, stock_level, image_url, is_active, sell_online')
-    .eq('store_id', store.id)
-    .eq('is_active', true)
-    .eq('sell_online', true)
-    .order('name');
+  const products: Record<string, unknown>[] = [];
+  let catalogError = '';
+  const pageSize = 500;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from('products')
+      .select('id, name, category, selling_price, stock_level, image_url')
+      .eq('store_id', store.id)
+      .eq('is_active', true)
+      .eq('sell_online', true)
+      .order('name')
+      .order('id')
+      .range(from, from + pageSize - 1);
 
-  if (productError) throw new Error(productError.message);
+    if (error) {
+      catalogError = error.message;
+      break;
+    }
+
+    const rows = data || [];
+    products.push(...rows);
+    if (rows.length < pageSize) break;
+  }
 
   let links: StorefrontLink[] = [];
   try {
@@ -208,6 +223,7 @@ export async function fetchPublicShopCatalog(slug: string): Promise<PublicShopCa
   }
 
   return {
+    ...(catalogError ? { catalogError } : {}),
     store: {
       id: store.id,
       name: store.name,
@@ -219,14 +235,14 @@ export async function fetchPublicShopCatalog(slug: string): Promise<PublicShopCa
       currency_code: store.currency_code || 'GHS',
       links,
     },
-    products: (products || []).map((p) => ({
-      id: p.id,
-      name: p.name,
-      category: p.category || 'Other',
-      selling_price: Number(p.selling_price) || 0,
-      stock_level: Number(p.stock_level) || 0,
-      image_url: p.image_url || '',
-      in_stock: (Number(p.stock_level) || 0) > 0,
+    products: products.map((product) => ({
+      id: String(product.id),
+      name: String(product.name || ''),
+      category: String(product.category || 'Other'),
+      selling_price: Number(product.selling_price) || 0,
+      stock_level: Number(product.stock_level) || 0,
+      image_url: String(product.image_url || ''),
+      in_stock: (Number(product.stock_level) || 0) > 0,
     })),
   };
 }

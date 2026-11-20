@@ -113,7 +113,7 @@ export default function AdminLoginPage({ onSuccess, onBack }: AdminLoginPageProp
             <p role="alert" className="text-red-300 text-xs text-center mb-4 max-w-sm px-2">{error}</p>
           )}
 
-          <div className="grid grid-cols-3 gap-2.5 sm:gap-3 w-full max-w-xs">
+          <div className="ios-keypad">
             {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'del', '0', 'go'].map((key) => (
               <button
                 key={key}
@@ -126,7 +126,8 @@ export default function AdminLoginPage({ onSuccess, onBack }: AdminLoginPageProp
                   }
                   onKey(key);
                 }}
-                className="h-14 sm:h-16 rounded-2xl bg-white/15 text-white text-xl font-semibold active:bg-white/25 disabled:opacity-50 touch-target"
+                className={`ios-key touch-target text-[1.65rem] ${key === 'del' || key === 'go' ? 'ios-key-ghost text-[1.35rem]' : ''}`}
+                aria-label={key === 'del' ? 'Delete' : key === 'go' ? 'Sign in' : undefined}
               >
                 {key === 'del' ? '⌫' : key === 'go' ? '→' : key}
               </button>

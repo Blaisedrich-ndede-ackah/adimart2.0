@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { X, Camera, Save, AlertTriangle, StopCircle, ScanBarcode, Bluetooth, ImagePlus, Trash2, Plus } from 'lucide-react';
-import { BrowserMultiFormatReader, NotFoundException } from '@zxing/library';
+import type { BrowserMultiFormatReader } from '@zxing/library';
 import { db, generateId, LocalProduct, getCurrentStoreId } from '@/lib/dexie';
 import { setProductStockLevel } from '@/lib/warehouse';
 import { triggerPushSync } from '@/lib/sync';
@@ -15,10 +15,12 @@ import {
   type WholesaleMode,
   type WholesaleTier,
 } from '@/lib/bulkPricing';
-import { toMoneyAmount } from '@/lib/money';
+import { toMoneyAmount, vatInclusivePrice } from '@/lib/money';
 import { getStoreCurrency } from '@/lib/currency';
 import { useAuthStore } from '@/store/useAuthStore';
-import { queuePriceChange } from '@/lib/priceChangeQueue';
+import { recordActivity } from '@/lib/activityLog';
+import { MEASURE_UNITS, productAllowsDecimal, roundStockQtyAllowZero } from '@/lib/measure';
+import ProductVariantsEditor from '@/components/ProductVariantsEditor';
 
 interface AddProductProps {
   isOpen: boolean;
@@ -39,12 +41,15 @@ const WHOLESALE_MODES: { value: WholesaleMode; label: string }[] = [
 
 export default function AddProduct({ isOpen, onClose, onSaved, editProduct, initialBarcode, categories }: AddProductProps) {
   const currencySymbol = getStoreCurrency(useAuthStore((s) => s.currentStore?.currency_code)).symbol;
-  const currentUserId = useAuthStore((s) => s.currentUser?.id);
+  const vatRate = Number(useAuthStore((s) => s.currentStore?.vat_rate) || 0);
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const currentUserId = currentUser?.id;
   const [name, setName] = useState('');
   const [category, setCategory] = useState('Food');
   const [barcode, setBarcode] = useState('');
   const [costPrice, setCostPrice] = useState('');
   const [sellingPrice, setSellingPrice] = useState('');
+  const [sellingPriceTouched, setSellingPriceTouched] = useState(false);
   const [stockLevel, setStockLevel] = useState('');
   const [reorderLevel, setReorderLevel] = useState('0');
   const [skuType, setSkuType] = useState('unit');
@@ -62,6 +67,8 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
   const [scanPulse, setScanPulse] = useState(false);
   const [hardwareHint, setHardwareHint] = useState('');
   const [imageUrl, setImageUrl] = useState('');
+  const [unit, setUnit] = useState('pcs');
+  const [allowDecimal, setAllowDecimal] = useState(false);
   const [imageBusy, setImageBusy] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -96,6 +103,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         setBarcode(editProduct.barcode);
         setCostPrice(editProduct.cost_price.toString());
         setSellingPrice(editProduct.selling_price.toString());
+        setSellingPriceTouched(false);
         setStockLevel(editProduct.stock_level.toString());
         setReorderLevel(String(editProduct.reorder_level ?? 0));
         setSkuType(editProduct.sku_type);
@@ -103,6 +111,8 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         setPackSize(String(editProduct.pack_size ?? 1));
         setTrackExpiry((editProduct.track_expiry ?? 0) === 1);
         setSellOnline((editProduct.sell_online ?? 0) === 1);
+        setUnit(editProduct.unit || 'pcs');
+        setAllowDecimal(productAllowsDecimal(editProduct));
         const mode = (editProduct.wholesale_mode || 'none') as WholesaleMode;
         setWholesaleMode(
           mode === 'pack' || mode === 'unit_discount' || mode === 'tiers' ? mode : 'none'
@@ -116,11 +126,14 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         const existingTiers = parseTiers(editProduct.wholesale_tiers_json);
         setTiers(existingTiers.length > 0 ? existingTiers : [{ min_qty: 10, unit_price: 0 }]);
       } else {
+        setUnit('pcs');
+        setAllowDecimal(false);
         setName('');
         setCategory(categories.includes('Food') ? 'Food' : categories[0] || 'Other');
         setBarcode(initialBarcode?.trim() || '');
         setCostPrice('');
         setSellingPrice('');
+        setSellingPriceTouched(false);
         setStockLevel('');
         setReorderLevel('0');
         setSkuType('unit');
@@ -166,7 +179,8 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
 
   const profitMargin = (() => {
     const cost = parseFloat(costPrice);
-    const sell = parseFloat(sellingPrice);
+    const typed = parseFloat(sellingPrice);
+    const sell = vatRate > 0 && sellingPriceTouched ? vatInclusivePrice(sellingPrice, vatRate) : typed;
     if (isNaN(cost) || isNaN(sell) || cost <= 0) return null;
     return ((sell - cost) / cost * 100).toFixed(1);
   })();
@@ -176,6 +190,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
     setScannerReady(false);
 
     try {
+      const { BrowserMultiFormatReader, NotFoundException } = await import('@zxing/library');
       const reader = new BrowserMultiFormatReader();
       readerRef.current = reader;
 
@@ -243,7 +258,9 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
       return;
     }
     const cost = toMoneyAmount(costPrice);
-    const sell = toMoneyAmount(sellingPrice);
+    const sell = vatRate > 0 && sellingPriceTouched
+      ? vatInclusivePrice(sellingPrice, vatRate)
+      : toMoneyAmount(sellingPrice);
     if (!costPrice || cost < 0 || Number.isNaN(Number(costPrice))) {
       setError('Enter a valid cost price');
       return;
@@ -252,7 +269,8 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
       setError('Enter a valid selling price');
       return;
     }
-    if (!stockLevel || parseInt(stockLevel) < 0) {
+    const stockQty = allowDecimal ? roundStockQtyAllowZero(stockLevel) : Math.max(0, Math.floor(Number(stockLevel) || 0));
+    if (stockLevel === '' || !Number.isFinite(Number(stockLevel)) || Number(stockLevel) < 0) {
       setError('Enter a valid stock level');
       return;
     }
@@ -287,6 +305,8 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         pack_size: packSizeNum,
         track_expiry: trackExpiry ? 1 : 0,
         sell_online: sellOnline ? 1 : 0,
+        unit,
+        allow_decimal: allowDecimal ? 1 : 0,
         wholesale_mode: wholesaleMode,
         wholesale_pack_price:
           wholesaleMode === 'pack' ? toMoneyAmount(wholesalePackPrice) : 0,
@@ -323,7 +343,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         await setProductStockLevel({
           storeId,
           productId: editProduct.id,
-          targetQty: parseInt(stockLevel) || 0,
+          targetQty: stockQty,
           note: 'Product edit stock',
           userId: currentUserId,
         });
@@ -347,7 +367,7 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           updated_at: now,
           synced: 0,
         });
-        const openingQty = parseInt(stockLevel) || 0;
+        const openingQty = stockQty;
         if (openingQty > 0) {
           await setProductStockLevel({
             storeId,
@@ -360,6 +380,41 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
       }
 
       void triggerPushSync('product-save');
+      if (currentUser) {
+        recordActivity({
+          storeId,
+          storeName: useAuthStore.getState().currentStore?.name,
+          userId: currentUser.id,
+          username: currentUser.name,
+          role: currentUser.role,
+          activityType: 'product',
+          summary: `${editProduct ? 'Updated' : 'Added'} product ${name.trim()}`,
+        });
+        if (editProduct && Math.abs(editProduct.selling_price - sell) > 0.001) {
+          recordActivity({
+            storeId,
+            storeName: useAuthStore.getState().currentStore?.name,
+            userId: currentUser.id,
+            username: currentUser.name,
+            role: currentUser.role,
+            activityType: 'price_change',
+            summary: `${currentUser.name} changed the selling price of ${name.trim()}`,
+            details: `Old price ${editProduct.selling_price.toFixed(2)} → new price ${sell.toFixed(2)}`,
+          });
+        }
+        if (editProduct && Math.abs(editProduct.cost_price - cost) > 0.001) {
+          recordActivity({
+            storeId,
+            storeName: useAuthStore.getState().currentStore?.name,
+            userId: currentUser.id,
+            username: currentUser.name,
+            role: currentUser.role,
+            activityType: 'cost_change',
+            summary: `${currentUser.name} changed the cost of ${name.trim()}`,
+            details: `Old cost ${editProduct.cost_price.toFixed(2)} → new cost ${cost.toFixed(2)}`,
+          });
+        }
+      }
       onSaved();
       onClose();
     } catch (err: unknown) {
@@ -614,12 +669,22 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
               <input
                 type="number"
                 value={sellingPrice}
-                onChange={e => setSellingPrice(e.target.value)}
+                onChange={e => {
+                  setSellingPriceTouched(true);
+                  setSellingPrice(e.target.value);
+                }}
                 placeholder="0.00"
                 min="0"
                 step="0.01"
                 className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
               />
+              {vatRate > 0 && (
+                <p className="mt-1 text-[11px] text-gray-500">
+                  {sellingPriceTouched
+                    ? `Saved selling price ${currencySymbol}${vatInclusivePrice(sellingPrice, vatRate).toFixed(2)}. VAT is rounded into this price and is not printed on the receipt.`
+                    : 'This selling price already includes VAT. Change it only if you are entering a price before VAT. Receipts do not show a VAT line.'}
+                </p>
+              )}
             </div>
           </div>
 
@@ -636,12 +701,14 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-sm font-medium text-gray-700 mb-1.5 block">Stock Level *</label>
+              <p className="mb-1.5 text-[11px] text-gray-500">Increases are added only after a cashier confirms the items are physically present.</p>
               <input
                 type="number"
                 value={stockLevel}
                 onChange={e => setStockLevel(e.target.value)}
                 placeholder="0"
                 min="0"
+                step={allowDecimal ? '0.001' : '1'}
                 className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
               />
             </div>
@@ -658,6 +725,24 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
               />
             </div>
           </div>
+
+          <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
+            <div>
+              <label className="text-sm font-medium text-gray-700 mb-1.5 block">Sell by</label>
+              <select value={unit} onChange={(event) => setUnit(event.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm bg-white">
+                {MEASURE_UNITS.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+              <p className="mt-1 text-[11px] text-gray-500">Price is per {unit}. Whole items stay on pcs unless you allow decimals.</p>
+            </div>
+            <label className="flex items-center justify-between gap-3 text-sm">
+              <span>Allow quantities like 2.5 {unit}</span>
+              <input type="checkbox" checked={allowDecimal} onChange={(event) => setAllowDecimal(event.target.checked)} />
+            </label>
+          </div>
+
+          {editProduct && <ProductVariantsEditor product={{ ...editProduct, unit, allow_decimal: allowDecimal ? 1 : 0 }} />}
 
           <div className="rounded-xl border border-gray-200 px-4 py-3 flex items-center justify-between gap-3">
             <div className="min-w-0">

@@ -2,12 +2,14 @@ import {
   db,
   LocalExpense,
   LocalLocation,
+  LocalSaleReturn,
   LocalTransaction,
 } from './dexie';
-import { FormalPdf, formatGhsOfficial, orgFromStore, type FormalOrg } from './formalPdf';
+import { formatGhsOfficial, orgFromStore, type FormalOrg } from './formalPdfMeta';
 import { getLocationInventory, listLocations, toMoney, toQty } from './warehouse';
 import { lineBaseQty, roundMoney } from './money';
 import { getPaymentMethodLabel } from './paymentMethods';
+import { isCountedSale } from './saleStatus';
 
 export interface PeriodRange {
   start: Date;
@@ -135,7 +137,7 @@ export async function buildReportSummary(
 
   const periodTxns = transactions.filter(t => {
     const d = new Date(t.created_at);
-    return t.status === 'completed' && d >= start && d <= end;
+    return isCountedSale(t) && d >= start && d <= end;
   });
 
   const txnIds = new Set(periodTxns.map(t => t.id));
@@ -148,7 +150,8 @@ export async function buildReportSummary(
     const product = productMap.get(item.product_id);
     const unitCost = product?.cost_price ?? 0;
     const baseQty = lineBaseQty(item);
-    const existing = productStats.get(item.product_id) || {
+    const statKey = `${item.product_id}:${item.variant_id || ''}`;
+    const existing = productStats.get(statKey) || {
       product_id: item.product_id,
       product_name: item.product_name,
       quantity: 0,
@@ -161,7 +164,7 @@ export async function buildReportSummary(
     existing.revenue += roundMoney(item.subtotal);
     existing.cost += roundMoney(unitCost * baseQty);
     existing.profit = roundMoney(existing.revenue - existing.cost);
-    productStats.set(item.product_id, existing);
+    productStats.set(statKey, existing);
   }
 
   const allProductStats = [...productStats.values()].sort((a, b) => b.revenue - a.revenue);
@@ -208,7 +211,7 @@ export async function buildReportSummary(
   const periodExpenses = roundMoney(
     expenses
       .filter(e => {
-        const d = new Date(e.created_at);
+        const d = new Date(e.expense_date || e.created_at);
         return d >= start && d <= end;
       })
       .reduce((sum, e) => sum + (Number(e.amount) || 0), 0)
@@ -287,12 +290,13 @@ export function exportReportCsv(
   URL.revokeObjectURL(url);
 }
 
-export function exportReportPdf(
+export async function exportReportPdf(
   summary: ReportSummary,
   periodLabel: string,
   storeName: string,
   org?: FormalOrg
-): void {
+): Promise<void> {
+  const { FormalPdf } = await import('./formalPdf');
   const letterhead = org || orgFromStore({ name: storeName });
   const money = (n: number) => formatGhsOfficial(n, letterhead.currencyCode);
   const pdf = new FormalPdf(letterhead, {
@@ -361,6 +365,114 @@ export function exportReportPdf(
   pdf.save(`${safeFilePart(storeName)}-report-${periodLabel.toLowerCase().replace(/\s+/g, '-')}.pdf`);
 }
 
+export async function exportGraSalesRegisterPdf(
+  transactions: LocalTransaction[],
+  returns: LocalSaleReturn[],
+  periodLabel: string,
+  org: FormalOrg
+): Promise<void> {
+  const { FormalPdf } = await import('./formalPdf');
+  const money = (amount: number) => formatGhsOfficial(amount, org.currencyCode);
+  const paymentTotals = new Map<string, { count: number; total: number }>();
+  for (const transaction of transactions) {
+    const method = getPaymentMethodLabel(transaction.payment_method);
+    const current = paymentTotals.get(method) || { count: 0, total: 0 };
+    current.count += 1;
+    current.total += Number(transaction.total_amount) || 0;
+    paymentTotals.set(method, current);
+  }
+
+  const pdf = new FormalPdf(org, {
+    title: 'GRA sales register',
+    subtitle: org.name,
+    period: `Reporting period: ${periodLabel}`,
+    documentLabel: 'FILING SUPPORT',
+    notes: [
+      'This register lists recorded completed POS sales and recorded returns for reference.',
+      'Adimat does not calculate tax amounts or include tax identification and purchase-tax data here. This document is not an official GRA tax return.',
+    ],
+  });
+
+  pdf.section('Recorded sales summary');
+  pdf.kvTable([
+    { label: 'Completed POS sales', value: String(transactions.length) },
+    {
+      label: 'Recorded transaction totals',
+      value: money(transactions.reduce((sum, transaction) => sum + (Number(transaction.total_amount) || 0), 0)),
+      emphasis: 'total',
+    },
+    {
+      label: 'Recorded discounts',
+      value: money(transactions.reduce((sum, transaction) => sum + (Number(transaction.discount_applied) || 0), 0)),
+    },
+    { label: 'Recorded return entries', value: String(returns.length) },
+    {
+      label: 'Cash refunds recorded',
+      value: money(returns.reduce((sum, record) => sum + (Number(record.refund_amount) || 0), 0)),
+    },
+    {
+      label: 'Returns applied to customer debt',
+      value: money(returns.reduce((sum, record) => sum + (Number(record.debt_applied) || 0), 0)),
+    },
+    {
+      label: 'Returns credited to customer wallets',
+      value: money(returns.reduce((sum, record) => sum + (Number(record.wallet_credit) || 0), 0)),
+    },
+  ]);
+
+  if (paymentTotals.size > 0) {
+    pdf.section('Sales by recorded payment method');
+    pdf.dataTable(
+      ['Payment method', 'Receipts', 'Transaction totals'],
+      [...paymentTotals.entries()].map(([method, totals]) => [
+        method,
+        String(totals.count),
+        money(totals.total),
+      ]),
+      [4, 2, 3]
+    );
+  }
+
+  pdf.section('Completed sales register');
+  if (transactions.length === 0) {
+    pdf.paragraph('No completed POS sales were recorded for this period.');
+  } else {
+    pdf.dataTable(
+      ['Date', 'Receipt', 'Customer', 'Cashier', 'Method', 'Total', 'Discount'],
+      transactions.map((transaction) => [
+        new Date(transaction.created_at).toLocaleDateString('en-GB'),
+        transaction.receipt_number,
+        transaction.customer_name || '',
+        transaction.cashier_name || '',
+        getPaymentMethodLabel(transaction.payment_method),
+        money(Number(transaction.total_amount) || 0),
+        money(Number(transaction.discount_applied) || 0),
+      ]),
+      [1.6, 2, 2.4, 1.8, 1.8, 2.1, 2]
+    );
+  }
+
+  if (returns.length > 0) {
+    pdf.section('Recorded returns');
+    pdf.dataTable(
+      ['Date', 'Receipt', 'Product', 'Qty', 'Refund', 'Debt', 'Wallet'],
+      returns.map((record) => [
+        new Date(record.created_at).toLocaleDateString('en-GB'),
+        record.receipt_number,
+        record.product_name,
+        String(record.quantity),
+        money(Number(record.refund_amount) || 0),
+        money(Number(record.debt_applied) || 0),
+        money(Number(record.wallet_credit) || 0),
+      ]),
+      [1.5, 2, 3, 1, 1.8, 1.8, 1.8]
+    );
+  }
+
+  pdf.signatureBlock('Prepared by', 'Reviewed by');
+  pdf.save(`${safeFilePart(org.name)}-gra-sales-register-${periodLabel.toLowerCase().replace(/\s+/g, '-')}.pdf`);
+}
+
 function safeFilePart(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'store';
 }
@@ -410,7 +522,7 @@ export async function buildLocationReportSummary(
 
   const productMap = new Map(products.map((p) => [p.id, p]));
   let periodTxns = transactions.filter(
-    (t) => t.status === 'completed' && t.location_id === locationId
+    (t) => isCountedSale(t) && t.location_id === locationId
   );
 
   if (range) {
@@ -428,7 +540,8 @@ export async function buildLocationReportSummary(
   for (const item of periodItems) {
     const product = productMap.get(item.product_id);
     const unitCost = product?.cost_price ?? 0;
-    const existing = productStats.get(item.product_id) || {
+    const statKey = `${item.product_id}:${item.variant_id || ''}`;
+    const existing = productStats.get(statKey) || {
       product_id: item.product_id,
       product_name: item.product_name,
       quantity: 0,
@@ -440,7 +553,7 @@ export async function buildLocationReportSummary(
     existing.revenue += roundMoney(item.subtotal);
     existing.cost += roundMoney(unitCost * lineBaseQty(item));
     existing.profit = roundMoney(existing.revenue - existing.cost);
-    productStats.set(item.product_id, existing);
+    productStats.set(statKey, existing);
   }
 
   const sellingPrice = roundMoney(periodItems.reduce((sum, i) => sum + i.subtotal, 0));
@@ -519,7 +632,8 @@ export function exportLocationReportCsv(summary: LocationReportSummary): void {
   URL.revokeObjectURL(url);
 }
 
-export function exportLocationReportPdf(summary: LocationReportSummary, org?: FormalOrg): void {
+export async function exportLocationReportPdf(summary: LocationReportSummary, org?: FormalOrg): Promise<void> {
+  const { FormalPdf } = await import('./formalPdf');
   const locLabel = `${summary.location.name} (${summary.location.location_type})`;
   const letterhead = org || orgFromStore({ name: summary.storeName });
   const money = (n: number) => formatGhsOfficial(n, letterhead.currencyCode);

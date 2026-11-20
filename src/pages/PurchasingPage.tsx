@@ -4,10 +4,11 @@ import { db, type LocalProduct, type LocalPurchaseOrder, type LocalSupplier, typ
 import { useAuthStore } from '@/store/useAuthStore';
 import { useFormatMoney } from '@/lib/currency';
 import { ensureStoreLocations } from '@/lib/warehouse';
-import { addSupplier, cancelPurchaseOrder, createPurchaseOrder, parsePurchaseOrderLines, receivePurchaseOrder } from '@/lib/purchasing';
+import { addSupplier, cancelPurchaseOrder, createPurchaseOrder, parsePurchaseOrderLines, purchaseLineOpenQuantity, receivePurchaseOrder } from '@/lib/purchasing';
 import { triggerPushSync } from '@/lib/sync';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { syncBidirectional } from '@/lib/dexie';
+import SupplierPayablesPanel from '@/components/SupplierPayablesPanel';
 
 type OrderLineDraft = { productId: string; quantity: string; unitCost: string };
 
@@ -25,6 +26,7 @@ export default function PurchasingPage() {
   const [locationId, setLocationId] = useState('');
   const [lines, setLines] = useState<OrderLineDraft[]>([{ productId: '', quantity: '1', unitCost: '' }]);
   const [notes, setNotes] = useState('');
+  const [dueDate, setDueDate] = useState('');
   const [busy, setBusy] = useState(false);
   const [receivingId, setReceivingId] = useState<string | null>(null);
   const [receiptQuantities, setReceiptQuantities] = useState<Record<string, string>>({});
@@ -93,9 +95,10 @@ export default function PurchasingPage() {
     setBusy(true);
     setMessage('');
     try {
-      await createPurchaseOrder({ storeId: currentStore.id, supplierId, items: orderLines, notes });
+      await createPurchaseOrder({ storeId: currentStore.id, supplierId, items: orderLines, notes, dueDate });
       setLines([{ productId: '', quantity: '1', unitCost: '' }]);
       setNotes('');
+      setDueDate('');
       setOrderForm(false);
       await load();
       void triggerPushSync('purchase-order-save');
@@ -131,7 +134,7 @@ export default function PurchasingPage() {
         locationId: targetLocationId,
         userId: currentUser.id,
         quantities: orderLines.map((line, index) => {
-          const remaining = Math.max(0, line.quantity - (Number(line.received_quantity) || 0));
+          const remaining = purchaseLineOpenQuantity(line);
           return receiptQuantities[`${order.id}:${index}`] === undefined
             ? remaining
             : Number(receiptQuantities[`${order.id}:${index}`]);
@@ -142,7 +145,7 @@ export default function PurchasingPage() {
         Object.entries(previous).filter(([key]) => !key.startsWith(`${order.id}:`))
       ));
       void triggerPushSync('purchase-order-receive');
-      setMessage(`${order.order_number} receipt recorded. Stock and product cost prices have been updated.`);
+      setMessage(`${order.order_number} is waiting for a cashier to confirm the goods are present. Stock and cost prices update after that approval.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not receive purchase order.');
     } finally {
@@ -208,6 +211,8 @@ export default function PurchasingPage() {
           )}
         </section>
 
+        <SupplierPayablesPanel />
+
         <section className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2"><ClipboardList className="h-5 w-5 text-primary" /><h2 className="font-bold">Purchase orders</h2></div>
@@ -227,12 +232,16 @@ export default function PurchasingPage() {
                     <option value="">Choose product</option>
                     {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
                   </select>
-                  <input aria-label={`Quantity ${index + 1}`} type="number" min="1" step="1" value={line.quantity} onChange={(e) => setLines((current) => current.map((item, i) => i === index ? { ...item, quantity: e.target.value } : item))} placeholder="Qty" className="rounded-lg border border-gray-200 px-2 py-2 text-sm" />
+                  <input aria-label={`Quantity ${index + 1}`} type="number" min="0.001" step="0.001" value={line.quantity} onChange={(e) => setLines((current) => current.map((item, i) => i === index ? { ...item, quantity: e.target.value } : item))} placeholder="Qty" className="rounded-lg border border-gray-200 px-2 py-2 text-sm" />
                   <input aria-label={`Unit cost ${index + 1}`} type="number" min="0" step="0.01" value={line.unitCost} onChange={(e) => setLines((current) => current.map((item, i) => i === index ? { ...item, unitCost: e.target.value } : item))} placeholder="Unit cost" className="rounded-lg border border-gray-200 px-2 py-2 text-sm" />
                   {lines.length > 1 && <button type="button" onClick={() => setLines((current) => current.filter((_, i) => i !== index))} className="text-xs text-red-600 sm:col-span-4">Remove line</button>}
                 </div>
               ))}
               <button type="button" onClick={() => setLines((current) => [...current, { productId: '', quantity: '1', unitCost: '' }])} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700">Add another product</button>
+              <label className="block text-xs text-gray-600">
+                Payment due date
+                <input aria-label="Payment due date" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm" />
+              </label>
               <select aria-label="Receive into location" value={locationId} onChange={(e) => setLocationId(e.target.value)} className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
                 <option value="">Choose receiving location</option>
                 {locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
@@ -264,11 +273,12 @@ export default function PurchasingPage() {
                     <div className="mt-2 space-y-1 text-xs text-gray-700">
                       {orderLinesError && <p role="alert" className="rounded bg-red-50 p-2 text-red-800">{orderLinesError}</p>}
                       {orderLines.map((line, index) => {
-                        const remaining = Math.max(0, line.quantity - (Number(line.received_quantity) || 0));
+                        const remaining = purchaseLineOpenQuantity(line);
+                        const waiting = Number(line.pending_quantity) || 0;
                         const open = order.status === 'ordered' || order.status === 'partially_received';
                         return (
                           <div key={`${line.product_id}-${index}`} className="flex flex-wrap items-center justify-between gap-2">
-                            <p>{line.quantity} × {line.product_name} @ {money(line.unit_cost)}{(line.received_quantity || 0) > 0 ? ` · received ${line.received_quantity}` : ''}</p>
+                            <p>{line.quantity} × {line.product_name} @ {money(line.unit_cost)}{(line.received_quantity || 0) > 0 ? ` · received ${line.received_quantity}` : ''}{waiting > 0 ? ` · ${waiting} awaiting cashier approval` : ''}</p>
                             {open && remaining > 0 && (
                               <label className="flex items-center gap-1.5 text-[11px]">
                                 Receive

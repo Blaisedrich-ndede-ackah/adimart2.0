@@ -9,8 +9,8 @@ function normalizeSupabaseUrl(url: string): string {
 
   if (!normalized) return '';
 
-  // Users sometimes paste the REST endpoint instead of the project URL.
-  normalized = normalized.replace(/\/rest\/v1\/?$/, '');
+  // The dashboard also shows the REST, auth, and storage endpoints. The client adds those paths itself.
+  normalized = normalized.replace(/\/(rest|auth|storage|realtime|functions)\/v1(\/.*)?$/i, '');
   normalized = normalized.replace(/\/+$/, '');
 
   if (!normalized.startsWith('http://') && !normalized.startsWith('https://')) {

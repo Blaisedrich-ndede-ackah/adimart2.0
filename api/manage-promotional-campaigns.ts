@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 const BUCKET = 'promotional-campaigns';
 const TOKEN_LIFETIME_MS = 8 * 60 * 60 * 1000;
@@ -49,19 +49,58 @@ function objectBody(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function database() {
-  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  // Prefer the server-only service key when it is configured. The admin PIN
-  // flow also works with the project's publishable/anon key, which is the only
-  // Supabase key exposed in this Vercel project. RLS still protects database
-  // access; the service key is never read from a VITE_ variable.
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
-  if (!url || !key) {
-    throw new Error('Supabase server configuration is incomplete. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in the Vercel project environment.');
+const MIGRATION_MESSAGE =
+  'Run supabase-migrate-promotional-campaigns.sql in the Supabase SQL editor, then try again.';
+const SERVICE_ROLE_MESSAGE =
+  'Campaign changes need SUPABASE_SERVICE_ROLE_KEY on the server. Set that private key in the Vercel project environment. Do not prefix it with VITE_.';
+const LOCK_MESSAGE = 'Too many sign-in attempts. Try again in 15 minutes.';
+
+function cleanEnv(value: string | undefined): string {
+  return (value || '').trim().replace(/^["']+|["']+$/g, '');
+}
+
+function projectUrl(): string {
+  const raw = cleanEnv(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL);
+  if (!raw) return '';
+  if (/^postgres(ql)?:\/\//i.test(raw)) {
+    throw new Error('Use the Supabase project URL (https://<project-ref>.supabase.co) for VITE_SUPABASE_URL. The database connection string cannot load campaigns.');
   }
-  return createClient(url, key, {
+  const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  let parsed: URL;
+  try {
+    parsed = new URL(withProtocol);
+  } catch {
+    throw new Error('VITE_SUPABASE_URL is not a valid project URL. Use https://<project-ref>.supabase.co.');
+  }
+  const path = parsed.pathname
+    .replace(/\/(rest|auth|storage|realtime|functions)\/v1(\/.*)?$/i, '')
+    .replace(/\/+$/, '');
+  return `${parsed.origin}${path}`;
+}
+
+function serviceRoleKey(): string {
+  return cleanEnv(process.env.SUPABASE_SERVICE_ROLE_KEY);
+}
+
+function serviceClient(): SupabaseClient {
+  return createClient(projectUrl(), serviceRoleKey(), {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+}
+
+function serviceDatabase(): SupabaseClient {
+  const url = projectUrl();
+  const key = serviceRoleKey();
+  if (!url) {
+    throw new Error('Campaign changes need VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the server.');
+  }
+  if (!key) throw new Error(SERVICE_ROLE_MESSAGE);
+  return serviceClient();
+}
+
+function tryServiceDatabase(): SupabaseClient | null {
+  if (!projectUrl() || !serviceRoleKey()) return null;
+  return serviceClient();
 }
 
 function hash(value: string): string {
@@ -81,7 +120,146 @@ function clientIp(request: ApiRequest): string {
   return (value || request.socket?.remoteAddress || 'unknown').split(',')[0].trim();
 }
 
-async function validateSession(db: ReturnType<typeof database>, token: unknown): Promise<string> {
+function errorText(error: unknown): { code: string; message: string } {
+  if (error instanceof Error) {
+    const coded = error as Error & { code?: string };
+    return { code: coded.code || '', message: error.message };
+  }
+  if (typeof error === 'object' && error !== null) {
+    const value = error as { code?: unknown; message?: unknown };
+    return {
+      code: typeof value.code === 'string' ? value.code : '',
+      message: typeof value.message === 'string' ? value.message : '',
+    };
+  }
+  return { code: '', message: typeof error === 'string' ? error : '' };
+}
+
+function isMissingRelation(error: unknown): boolean {
+  const { code, message } = errorText(error);
+  const normalized = message.toLowerCase();
+  if (code === '42P01' || code === 'PGRST205') return true;
+  if (normalized.includes('supabase-migrate-promotional-campaigns.sql')) return true;
+  return normalized.includes('promotional_campaign') && (
+    normalized.includes('does not exist') ||
+    normalized.includes('schema cache') ||
+    normalized.includes('could not find the table')
+  );
+}
+
+function apiErrorMessage(error: unknown): string {
+  const { code, message } = errorText(error);
+  if (isMissingRelation(error) || /bucket not found/i.test(message)) return MIGRATION_MESSAGE;
+  if (code === 'PGRST125' || /invalid path specified in request url/i.test(message)) {
+    return 'Supabase rejected the campaign request URL. Set VITE_SUPABASE_URL to the project URL, https://<project-ref>.supabase.co, with no /rest/v1 on the end.';
+  }
+  return message || 'Campaign request failed.';
+}
+
+function isExpiredSession(error: unknown): boolean {
+  return errorText(error).message.startsWith('Admin session expired');
+}
+
+interface LoginAttemptRow {
+  failed_attempts: number;
+  window_started_at: string;
+  locked_until: string | null;
+}
+
+function attemptIsLocked(row: LoginAttemptRow | null, now: number): boolean {
+  if (!row?.locked_until) return false;
+  const until = Date.parse(row.locked_until);
+  return Number.isFinite(until) && until > now;
+}
+
+async function loginIsLocked(db: SupabaseClient, ip: string): Promise<boolean | 'unavailable'> {
+  const { data, error } = await db
+    .from('promotional_campaign_login_attempts')
+    .select('locked_until')
+    .eq('ip_hash', hash(ip))
+    .maybeSingle();
+  if (error) {
+    if (isMissingRelation(error)) return 'unavailable';
+    throw error;
+  }
+  return attemptIsLocked(data as LoginAttemptRow | null, Date.now());
+}
+
+async function recordLoginFailure(db: SupabaseClient, ip: string): Promise<boolean> {
+  const ipHash = hash(ip);
+  const now = Date.now();
+  const { data, error } = await db
+    .from('promotional_campaign_login_attempts')
+    .select('failed_attempts,window_started_at,locked_until')
+    .eq('ip_hash', ipHash)
+    .maybeSingle();
+  if (error) {
+    if (isMissingRelation(error)) return false;
+    throw error;
+  }
+  const row = data as LoginAttemptRow | null;
+  if (attemptIsLocked(row, now)) return true;
+
+  let failed = 1;
+  let windowStarted = new Date(now).toISOString();
+  const lockExpired = Boolean(
+    row?.locked_until &&
+    Number.isFinite(Date.parse(row.locked_until)) &&
+    Date.parse(row.locked_until) <= now
+  );
+  if (row && !lockExpired) {
+    const windowStart = Date.parse(row.window_started_at);
+    if (Number.isFinite(windowStart) && now - windowStart < LOGIN_WINDOW_MS) {
+      failed = Number(row.failed_attempts || 0) + 1;
+      windowStarted = row.window_started_at;
+    }
+  }
+  const lockedUntil = failed >= MAX_LOGIN_ATTEMPTS
+    ? new Date(now + LOGIN_LOCK_MS).toISOString()
+    : null;
+  const { error: writeError } = await db.from('promotional_campaign_login_attempts').upsert({
+    ip_hash: ipHash,
+    failed_attempts: failed,
+    window_started_at: windowStarted,
+    locked_until: lockedUntil,
+  });
+  if (writeError) {
+    if (isMissingRelation(writeError)) return false;
+    throw writeError;
+  }
+  return lockedUntil !== null;
+}
+
+async function clearLoginFailures(db: SupabaseClient, ip: string): Promise<void> {
+  const { error } = await db
+    .from('promotional_campaign_login_attempts')
+    .delete()
+    .eq('ip_hash', hash(ip));
+  if (error && !isMissingRelation(error)) throw error;
+}
+
+async function persistSession(db: SupabaseClient, token: string): Promise<'stored' | 'missing-table'> {
+  const nowIso = new Date().toISOString();
+  const cleanup = await db
+    .from('promotional_campaign_admin_sessions')
+    .delete()
+    .lt('expires_at', nowIso);
+  if (cleanup.error) {
+    if (isMissingRelation(cleanup.error)) return 'missing-table';
+    throw cleanup.error;
+  }
+  const { error } = await db.from('promotional_campaign_admin_sessions').insert({
+    session_hash: hash(token),
+    expires_at: new Date(Date.now() + TOKEN_LIFETIME_MS).toISOString(),
+  });
+  if (error) {
+    if (isMissingRelation(error)) return 'missing-table';
+    throw error;
+  }
+  return 'stored';
+}
+
+async function validateSession(db: SupabaseClient, token: unknown): Promise<string> {
   if (typeof token !== 'string' || token.length < 40) {
     throw new Error('Admin session expired. Sign in with the administrator PIN again.');
   }
@@ -155,31 +333,91 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     if (action === 'login') {
       const adminPin = process.env.ADMIN_PORTAL_PIN || process.env.VITE_ADMIN_PIN;
       if (!adminPin) throw new Error('The admin PIN is not configured in Vercel as ADMIN_PORTAL_PIN.');
+      const db = tryServiceDatabase();
+      const ip = clientIp(request);
+      if (db) {
+        try {
+          const locked = await loginIsLocked(db, ip);
+          if (locked === true) {
+            response.status(429).json({ error: LOCK_MESSAGE });
+            return;
+          }
+        } catch (error) {
+          console.error('Could not read campaign login attempts:', error);
+        }
+      }
       if (typeof body.pin !== 'string' || !pinMatches(body.pin, adminPin)) {
+        if (db) {
+          try {
+            const lockedNow = await recordLoginFailure(db, ip);
+            if (lockedNow) {
+              response.status(429).json({ error: LOCK_MESSAGE });
+              return;
+            }
+          } catch (error) {
+            console.error('Could not record a failed campaign login:', error);
+          }
+        }
         response.status(401).json({ error: 'Invalid administrator PIN.' });
         return;
       }
       const token = randomBytes(32).toString('base64url');
+      if (db) {
+        try {
+          const stored = await persistSession(db, token);
+          if (stored === 'stored') await clearLoginFailures(db, ip);
+        } catch (error) {
+          console.error('Could not store the admin session:', error);
+        }
+      }
       response.status(200).json({ session: token });
       return;
     }
-
-    const db = database();
 
     if (action === 'verify-session') {
       if (typeof body.session !== 'string' || body.session.length < 40) {
         response.status(401).json({ error: 'Admin session expired.' });
         return;
       }
-      response.status(200).json({ success: true });
+      const db = tryServiceDatabase();
+      if (!db) {
+        response.status(200).json({ success: true });
+        return;
+      }
+      try {
+        await validateSession(db, body.session);
+        response.status(200).json({ success: true });
+      } catch (error) {
+        if (isExpiredSession(error)) {
+          response.status(401).json({ error: 'Admin session expired.' });
+          return;
+        }
+        if (!isMissingRelation(error)) {
+          console.error('Could not verify admin session:', error);
+        }
+        response.status(200).json({ success: true });
+      }
       return;
     }
 
     if (action === 'logout') {
+      const db = tryServiceDatabase();
+      if (db && typeof body.session === 'string' && body.session.length >= 40) {
+        try {
+          const { error } = await db
+            .from('promotional_campaign_admin_sessions')
+            .delete()
+            .eq('session_hash', hash(body.session));
+          if (error && !isMissingRelation(error)) console.error('Could not end admin session:', error);
+        } catch (error) {
+          console.error('Could not end admin session:', error);
+        }
+      }
       response.status(200).json({ success: true });
       return;
     }
 
+    const db = serviceDatabase();
     await validateSession(db, body.session);
 
     if (action === 'list') {
@@ -281,9 +519,8 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     response.status(400).json({ error: 'Unknown campaign action.' });
   } catch (error) {
     console.error('Campaign API request failed:', error);
-    const status = error instanceof Error && error.message.startsWith('Admin session expired') ? 401 : 400;
-    response.status(status).json({
-      error: error instanceof Error ? error.message : 'Campaign request failed.',
-    });
+    const message = apiErrorMessage(error);
+    const status = message.startsWith('Admin session expired') ? 401 : message === LOCK_MESSAGE ? 429 : 400;
+    response.status(status).json({ error: message });
   }
 }

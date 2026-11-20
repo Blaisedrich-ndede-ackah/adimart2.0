@@ -3,8 +3,8 @@ import { v4 as uuidv4, v5 as uuidv5 } from 'uuid';
 import { isSupabaseConfigured, supabase, testSupabaseConnection } from './supabase';
 import { isAdminSuperPin } from './superPin';
 import { toMoneyAmount } from './money';
-import { formatUnknownError, isUuid, uuidOrNull } from './ids';
-import { cashbookAccessFromCloud } from './staffAccess';
+import { formatUnknownError, isUuid, openingBatchId, uuidOrNull } from './ids';
+import { cashbookAccessFromCloud, customerPaymentsAccessFromCloud } from './staffAccess';
 import { normalizeSessionTimeoutMinutes } from './sessionTimeout';
 import {
   DEFAULT_DEBT_REMINDER_INTERVAL_DAYS,
@@ -76,10 +76,24 @@ export interface LocalStore {
   sales_target_daily?: number;
   /** Owner-set monthly sales target used by the live dashboard. */
   sales_target_monthly?: number;
-  /** Loyalty points earn rate: points awarded per 1 currency unit spent. 0 disables. */
+  /** When 0, cashier sessions hide on-hand quantities. Owners always see them. Default 1. */
+  cashiers_can_view_stock?: number;
+  /** Points earned per 1 currency unit spent. 0 disables earning. */
   loyalty_earn_rate?: number;
-  /** Near-expiry alert window in days. Default 7. */
-  near_expiry_alert_days?: number;
+  /** Currency value of one loyalty point. */
+  loyalty_redeem_value?: number;
+  /** What checkout does when a credit sale would pass the customer's limit. */
+  credit_limit_action?: 'warn' | 'block';
+  /** 1 sends the owner a closing SMS at closing_sms_time. */
+  closing_sms_enabled?: number;
+  /** Local time HH:mm for the automatic closing SMS. */
+  closing_sms_time?: string;
+  /** Cashiers may record shop expenses when 1. Default on so existing floor recording stays. */
+  cashiers_can_record_expenses?: number;
+  /** VAT percent folded into selling prices. 0 leaves prices unchanged. */
+  vat_rate?: number;
+  /** Cached store SMS balance in pesewas. The server wallet is the source of truth. */
+  sms_balance_pesewas?: number;
   created_at: string;
   synced: number;
 }
@@ -99,6 +113,10 @@ export interface LocalCustomer {
   store_id: string;
   name: string;
   phone: string;
+  /** Preferred drop-off / service location (shop or warehouse) */
+  location_id?: string | null;
+  /** Freeform customer street, neighborhood, or delivery address */
+  address?: string;
   opening_balance: number;
   opening_balance_remaining: number;
   wallet_balance?: number;
@@ -107,6 +125,11 @@ export interface LocalCustomer {
   is_active: number;
   /** Customer asked not to receive automated debt reminder SMS (0/1) */
   debt_reminder_opt_out?: number;
+  loyalty_points_balance?: number;
+  /** Null or omitted means no credit limit. */
+  credit_limit?: number | null;
+  /** Days after a credit sale when payment is due. Null means no due date. */
+  credit_terms_days?: number | null;
   created_at: string;
   updated_at: string;
   synced: number;
@@ -160,12 +183,174 @@ export interface LocalUser {
   can_manage_ecommerce?: number;
   /** Cashiers may open Cash Book when 1. Missing = allowed (legacy). Owners always can. */
   can_access_cashbook?: number;
+  /** Cashiers may record a customer account payment and print its receipt when 1. Missing = off. */
+  can_record_customer_payments?: number;
   /** Owner-configured POS section order, shared across their signed-in devices. */
   pos_layout_json?: string;
+  /** Compressed JPEG data URL. Each person sets their own; missing stays empty. */
+  photo_url?: string;
   created_at: string;
   synced: number;
   /** Local only: 1 while a PIN change on this device still has to reach the cloud. */
   pin_dirty?: number;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Agent Portal local types (offline-first mirror of Supabase tables) */
+/* ------------------------------------------------------------------ */
+
+export type AgentStatus = 'active' | 'suspended' | 'inactive';
+export type ProspectStatus = 'lead' | 'contacted' | 'follow_up' | 'converted' | 'lost';
+export type FollowUpStatus = 'scheduled' | 'completed' | 'missed';
+export type FollowUpChannel = 'call' | 'sms' | 'whatsapp' | 'visit' | 'other';
+export type AgentStoreStatus = 'pending' | 'active' | 'suspended' | 'inactive';
+export type InvoiceStatus = 'issued' | 'paid' | 'partial' | 'overdue' | 'cancelled';
+export type AgentPaymentMethod = 'cash' | 'momo' | 'bank_transfer' | 'paystack';
+export type CommissionStatus = 'accrued' | 'paid' | 'withheld';
+export type WithdrawalStatus = 'pending' | 'approved' | 'rejected' | 'paid';
+
+export interface LocalAgent {
+  id: string;
+  full_name: string;
+  phone: string;
+  email: string;
+  pin_hash: string;
+  momo_number: string;
+  momo_network: string;
+  momo_account_name: string;
+  commission_percentage: number;
+  status: AgentStatus;
+  last_login_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export interface LocalProspect {
+  id: string;
+  agent_id: string;
+  store_name: string;
+  owner_full_name: string;
+  owner_phone: string;
+  owner_email: string;
+  address: string;
+  city: string;
+  business_type: string;
+  subscription_package: string;
+  source: string;
+  status: ProspectStatus;
+  notes: string;
+  last_contacted_at?: string | null;
+  next_follow_up_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export interface LocalFollowUp {
+  id: string;
+  prospect_id: string;
+  agent_id: string;
+  follow_up_at: string;
+  channel: FollowUpChannel;
+  outcome: string;
+  status: FollowUpStatus;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export interface LocalAgentStore {
+  id: string;
+  agent_id: string;
+  prospect_id?: string | null;
+  name: string;
+  owner_phone: string;
+  owner_email: string;
+  address: string;
+  city: string;
+  business_type: string;
+  subscription_package: string;
+  status: AgentStoreStatus;
+  activated_at?: string | null;
+  subscription_expires_at?: string | null;
+  momo_account_name: string;
+  momo_number: string;
+  momo_network: string;
+  access_blocked: number;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export interface LocalAgentInvoice {
+  id: string;
+  invoice_number: string;
+  prospect_id: string;
+  agent_id: string;
+  amount_ghs: number;
+  currency_code: string;
+  due_date?: string | null;
+  status: InvoiceStatus;
+  description: string;
+  paystack_reference: string;
+  pdf_url: string;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export interface LocalAgentPayment {
+  id: string;
+  invoice_id: string;
+  agent_id: string;
+  amount_ghs: number;
+  payment_method: AgentPaymentMethod;
+  reference: string;
+  paid_at: string;
+  notes: string;
+  created_at: string;
+  synced: number;
+}
+
+export interface LocalAgentCommission {
+  id: string;
+  agent_id: string;
+  invoice_id: string;
+  commission_rate_percentage: number;
+  commission_amount_ghs: number;
+  status: CommissionStatus;
+  created_at: string;
+  paid_at?: string | null;
+  synced: number;
+}
+
+export interface LocalAgentWithdrawalRequest {
+  id: string;
+  agent_id: string;
+  amount_ghs: number;
+  fee_ghs: number;
+  net_amount_ghs: number;
+  momo_number: string;
+  momo_network: string;
+  momo_account_name: string;
+  status: WithdrawalStatus;
+  rejection_reason: string;
+  payout_reference: string;
+  requested_at: string;
+  processed_at?: string | null;
+  processed_by?: string | null;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export interface LocalAgentCommissionSetting {
+  id: string;
+  default_commission_percentage: number;
+  min_withdrawal_ghs: number;
+  withdrawal_fee_ghs: number;
+  updated_at: string;
 }
 
 export interface LocalProduct {
@@ -190,6 +375,10 @@ export interface LocalProduct {
   /** List this product on the public e-commerce storefront */
   sell_online?: number;
   reorder_level?: number;
+  /** Selling unit: pcs, kg, litre, olonka, and so on. */
+  unit?: string;
+  /** 1 when the POS may sell fractional quantities such as 2.5 kg. */
+  allow_decimal?: number;
   created_at: string;
   updated_at: string;
   synced: number;
@@ -260,9 +449,25 @@ export interface LocalTransaction {
   customer_id?: string | null;
   credit_paid_amount?: number;
   credit_balance?: number;
+  /** Separate from status so older completed/pending checks keep working. */
+  void_status?: 'none' | 'requested' | 'voided';
+  void_reason?: string;
+  void_requested_by?: string | null;
+  void_requested_by_name?: string;
+  void_requested_at?: string | null;
+  voided_by?: string | null;
+  voided_by_name?: string;
+  voided_at?: string | null;
+  loyalty_points_earned?: number;
+  loyalty_points_redeemed?: number;
+  loyalty_redeem_amount?: number;
+  promotion_discount?: number;
+  promotion_summary?: string;
+  coupon_code?: string;
+  credit_due_date?: string | null;
   status: 'completed' | 'pending';
   location_id?: string;
-  sale_mode?: 'retail' | 'wholesale';
+  sale_mode?: 'retail' | 'wholesale' | 'mixed';
   created_at: string;
   updated_at?: string;
   synced: number;
@@ -280,8 +485,13 @@ export interface LocalTransactionItem {
   unit_type?: string;
   pack_size?: number;
   base_quantity?: number;
+  sale_mode?: 'retail' | 'wholesale';
   batch_id?: string;
-  variant_id?: string;
+  variant_id?: string | null;
+  measure_unit?: string;
+  list_unit_price?: number;
+  promotion_label?: string;
+  serial_number?: string;
   synced: number;
 }
 
@@ -322,7 +532,7 @@ export interface LocalSaleReturn {
   receipt_number: string;
   location_id: string;
   customer_id?: string | null;
-  refund_method: 'cash' | 'wallet' | 'account' | 'none';
+  refund_method: 'cash' | 'wallet' | 'account' | 'today_sales' | 'none';
   refund_amount: number;
   debt_applied: number;
   wallet_credit: number;
@@ -335,7 +545,7 @@ export interface LocalCustomerWalletTransaction {
   id: string;
   store_id: string;
   customer_id: string;
-  type: 'return_credit' | 'sale_debit';
+  type: 'return_credit' | 'sale_debit' | 'topup' | 'purchase' | 'refund' | 'adjustment';
   amount: number;
   balance_after: number;
   return_id?: string | null;
@@ -436,7 +646,7 @@ export interface LocalStockBatch {
   expiry_date: string | null;
   quantity: number;
   cost_price: number;
-  variant_id?: string;
+  variant_id?: string | null;
   created_at: string;
   updated_at: string;
   synced: number;
@@ -480,6 +690,8 @@ export interface PurchaseOrderLine {
   quantity: number;
   unit_cost: number;
   received_quantity: number;
+  /** Quantity already sent to a cashier and not yet approved or rejected. */
+  pending_quantity?: number;
 }
 
 export interface LocalPurchaseOrder {
@@ -491,9 +703,78 @@ export interface LocalPurchaseOrder {
   items_json: string;
   total_amount: number;
   notes: string;
+  amount_paid?: number;
+  due_date?: string | null;
   created_at: string;
   updated_at: string;
   received_at?: string;
+  synced: number;
+}
+
+export interface LocalProductVariant {
+  id: string;
+  store_id: string;
+  product_id: string;
+  variant_name: string;
+  variant_value: string;
+  sku: string;
+  barcode: string;
+  price_adjustment: number;
+  stock_level: number;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export interface LocalLoyaltyTransaction {
+  id: string;
+  store_id: string;
+  customer_id: string;
+  transaction_id: string | null;
+  type: 'earn' | 'redeem';
+  points: number;
+  balance_after: number;
+  reason: string;
+  created_at: string;
+  synced: number;
+}
+
+export interface LocalSupplierPayment {
+  id: string;
+  store_id: string;
+  supplier_id: string;
+  purchase_order_id: string | null;
+  amount: number;
+  method: 'cash' | 'momo' | 'bank';
+  note: string;
+  paid_at: string;
+  created_by: string | null;
+  created_by_name: string;
+  created_at: string;
+  synced: number;
+}
+
+export type StorePromoType = 'sale_price' | 'percent' | 'fixed' | 'multibuy' | 'coupon';
+
+export interface LocalStorePromotion {
+  id: string;
+  store_id: string;
+  name: string;
+  promo_type: StorePromoType;
+  product_id: string | null;
+  category: string;
+  sale_price: number;
+  percent_off: number;
+  amount_off: number;
+  buy_quantity: number;
+  free_quantity: number;
+  coupon_code: string;
+  starts_at: string | null;
+  ends_at: string | null;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
   synced: number;
 }
 
@@ -507,8 +788,25 @@ export interface LocalExpense {
   receipt_image_data_url?: string;
   recurring_expense_id?: string | null;
   recurrence_month?: string | null;
+  /** YYYY-MM-DD. Empty means the created_at date. */
+  expense_date?: string | null;
+  /** cash, momo, or bank. Empty on expenses recorded before this field existed. */
+  payment_method?: '' | 'cash' | 'momo' | 'bank';
   created_at: string;
   updated_at: string;
+  synced: number;
+}
+
+export interface LocalSmsOutbox {
+  id: string;
+  store_id: string;
+  kind: 'receipt' | 'closing';
+  recipient: string;
+  message: string;
+  status: 'queued' | 'sent' | 'failed';
+  error_message: string;
+  created_at: string;
+  sent_at: string | null;
   synced: number;
 }
 
@@ -559,6 +857,69 @@ export interface LocalCashBookEntry {
   updated_at: string;
   synced: number;
   account_type?: 'cash' | 'bank';
+}
+
+export type StockReceiptKind = 'receive' | 'adjust_in' | 'purchase' | 'opening' | 'count';
+
+/** Goods or stock increases waiting for a cashier to confirm they are physically present. */
+export interface LocalStockReceiptRequest {
+  id: string;
+  store_id: string;
+  product_id: string;
+  product_name: string;
+  location_id: string;
+  location_name: string;
+  quantity: number;
+  kind: StockReceiptKind;
+  note: string;
+  batch_code: string;
+  expiry_date: string | null;
+  cost_price: number | null;
+  source_id: string | null;
+  source_line: string | null;
+  requested_by: string | null;
+  requested_by_name: string;
+  requested_at: string;
+  status: 'pending' | 'approved' | 'rejected';
+  decided_by: string | null;
+  decided_by_name: string | null;
+  decided_at: string | null;
+  decision_note: string;
+  synced: number;
+}
+
+/** Owner-visible record of who approved or rejected a stock arrival. */
+export interface LocalStockApprovalLog {
+  id: string;
+  store_id: string;
+  request_id: string;
+  product_id: string;
+  product_name: string;
+  quantity: number;
+  kind: string;
+  decision: 'approved' | 'rejected';
+  note: string;
+  approved_by: string | null;
+  approved_by_name: string;
+  approved_at: string;
+  synced: number;
+}
+
+/** Local copy of a platform activity row. The admin portal reads the cloud table, not this UI. */
+export interface LocalActivityLog {
+  id: string;
+  store_id: string;
+  store_name: string;
+  user_id: string;
+  username: string;
+  role: string;
+  activity_type: string;
+  summary: string;
+  details: string;
+  logged_in_at: string | null;
+  logged_out_at: string | null;
+  created_at: string;
+  synced: number;
 }
 
 export interface SyncMeta {
@@ -620,9 +981,25 @@ class AdimatDB extends Dexie {
   sync_meta!: Table<SyncMeta, string>;
   app_config!: Table<AppConfig, string>;
   campaign_cache!: Table<CachedCampaigns, string>;
+  stock_receipt_requests!: Table<LocalStockReceiptRequest, string>;
+  stock_approval_logs!: Table<LocalStockApprovalLog, string>;
+  activity_logs!: Table<LocalActivityLog, string>;
   product_variants!: Table<LocalProductVariant, string>;
-  customer_loyalty_transactions!: Table<LocalCustomerLoyaltyTransaction, string>;
-  price_changes!: Table<PriceChange, string>;
+  customer_loyalty_transactions!: Table<LocalLoyaltyTransaction, string>;
+  supplier_payments!: Table<LocalSupplierPayment, string>;
+  store_promotions!: Table<LocalStorePromotion, string>;
+  sms_outbox!: Table<LocalSmsOutbox, string>;
+
+  /* Agent Portal tables */
+  agents!: Table<LocalAgent, string>;
+  prospects!: Table<LocalProspect, string>;
+  follow_ups!: Table<LocalFollowUp, string>;
+  agent_stores!: Table<LocalAgentStore, string>;
+  agent_invoices!: Table<LocalAgentInvoice, string>;
+  agent_payments!: Table<LocalAgentPayment, string>;
+  agent_commissions!: Table<LocalAgentCommission, string>;
+  agent_withdrawal_requests!: Table<LocalAgentWithdrawalRequest, string>;
+  agent_commission_settings!: Table<LocalAgentCommissionSetting, string>;
 
   constructor() {
     super('AdimatPOS');
@@ -847,31 +1224,97 @@ class AdimatDB extends Dexie {
             }
           });
       });
-    // v21: Customer loyalty points + product variants + expiry alert config.
-    this.version(21).stores({
-      product_variants:
-        'id, store_id, product_id, variant_name, variant_value, sku, barcode, is_active, synced, updated_at',
-      customer_loyalty_transactions:
-        'id, store_id, customer_id, transaction_id, type, created_at, synced',
-    }).upgrade(async (tx) => {
-      await tx.table('customers').toCollection().modify((customer: LocalCustomer) => {
-        if (typeof customer.loyalty_points_balance !== 'number') {
-          customer.loyalty_points_balance = 0;
-        }
+
+      /* Version 21 — Agent Portal tables */
+      this.version(21).stores({
+        agents: 'id, synced',
+        prospects: 'id, agent_id, status, next_follow_up_at, synced',
+        follow_ups: 'id, prospect_id, agent_id, status, follow_up_at, synced',
+        agent_stores: 'id, agent_id, status, prospect_id, synced',
+        agent_invoices: 'id, agent_id, prospect_id, status, due_date, invoice_number, synced',
+        agent_payments: 'id, invoice_id, agent_id, payment_method, created_at, synced',
+        agent_commissions: 'id, agent_id, invoice_id, status, synced',
+        agent_withdrawal_requests: 'id, agent_id, status, requested_at, synced',
+        agent_commission_settings: 'id',
       });
-      await tx.table('stores').toCollection().modify((store: LocalStore) => {
-        if (typeof store.loyalty_earn_rate !== 'number') {
-          store.loyalty_earn_rate = 0;
-        }
-        if (typeof store.near_expiry_alert_days !== 'number') {
-          store.near_expiry_alert_days = 7;
-        }
+      /* Version 22 — look agents up by phone at login */
+      this.version(22).stores({
+        agents: 'id, phone, status, synced',
       });
-    });
-    // v22: Local-first customer price-scan changes awaiting cloud sync.
-    this.version(22).stores({
-      price_changes: 'id, store_id, product_id, changed_at, synced, applied',
-    });
+      /* Version 23 — customer preferred location for deliveries / service */
+      this.version(23).stores({
+        customers: 'id, store_id, name, phone, location_id, is_active, synced',
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table('customers')
+          .toCollection()
+          .modify((customer: LocalCustomer) => {
+            if (typeof customer.location_id !== 'string') {
+              customer.location_id = null;
+            }
+          });
+      });
+      /* Version 24 — stock arrival approval and the platform activity log */
+      this.version(24).stores({
+        stock_receipt_requests: 'id, store_id, product_id, status, requested_at, synced',
+        stock_approval_logs: 'id, store_id, request_id, approved_at, synced',
+        activity_logs: 'id, store_id, user_id, activity_type, created_at, synced',
+      }).upgrade(async (tx) => {
+        await tx.table('stores').toCollection().modify((store: LocalStore) => {
+          if (store.cashiers_can_view_stock !== 0 && store.cashiers_can_view_stock !== 1) {
+            store.cashiers_can_view_stock = 1;
+          }
+        });
+      });
+      /* Version 25 — voids, payables, measured qty, loyalty, variants, credit, store deals.
+         New columns are optional so rows already on the device stay valid. */
+      this.version(25).stores({
+        product_variants: 'id, store_id, product_id, barcode, sku, is_active, synced',
+        customer_loyalty_transactions: 'id, store_id, customer_id, transaction_id, created_at, synced',
+        supplier_payments: 'id, store_id, supplier_id, purchase_order_id, paid_at, synced',
+        store_promotions: 'id, store_id, promo_type, coupon_code, is_active, synced',
+      }).upgrade(async (tx) => {
+        await tx.table('stores').toCollection().modify((store: LocalStore) => {
+          if (typeof store.loyalty_earn_rate !== 'number') store.loyalty_earn_rate = 0;
+          if (typeof store.loyalty_redeem_value !== 'number') store.loyalty_redeem_value = 0;
+          if (store.credit_limit_action !== 'warn' && store.credit_limit_action !== 'block') {
+            store.credit_limit_action = 'warn';
+          }
+        });
+        await tx.table('products').toCollection().modify((product: LocalProduct) => {
+          if (typeof product.unit !== 'string' || !product.unit) product.unit = 'pcs';
+          if (product.allow_decimal !== 0 && product.allow_decimal !== 1) product.allow_decimal = 0;
+        });
+        await tx.table('customers').toCollection().modify((customer: LocalCustomer) => {
+          if (typeof customer.loyalty_points_balance !== 'number') customer.loyalty_points_balance = 0;
+        });
+        await tx.table('transactions').toCollection().modify((sale: LocalTransaction) => {
+          if (!sale.void_status) sale.void_status = 'none';
+        });
+        await tx.table('purchase_orders').toCollection().modify((order: LocalPurchaseOrder) => {
+          if (typeof order.amount_paid !== 'number') order.amount_paid = 0;
+        });
+      });
+      /* Version 26 — SMS outbox, closing summary, expense date and payment method. */
+      this.version(26).stores({
+        sms_outbox: 'id, store_id, kind, status, created_at, synced',
+      }).upgrade(async (tx) => {
+        await tx.table('stores').toCollection().modify((store: LocalStore) => {
+          if (store.closing_sms_enabled !== 0 && store.closing_sms_enabled !== 1) store.closing_sms_enabled = 0;
+          if (typeof store.closing_sms_time !== 'string' || !store.closing_sms_time) store.closing_sms_time = '20:00';
+          if (store.cashiers_can_record_expenses !== 0 && store.cashiers_can_record_expenses !== 1) {
+            store.cashiers_can_record_expenses = 1;
+          }
+        });
+      });
+      this.version(27).stores({
+        stores: 'id, synced',
+      }).upgrade(async (tx) => {
+        await tx.table('stores').toCollection().modify((store: LocalStore) => {
+          if (typeof store.vat_rate !== 'number') store.vat_rate = 0;
+        });
+      });
   }
 }
 
@@ -1125,6 +1568,8 @@ export async function createStoreWithOwner(
     ownerPhone?: string;
     currencyCode?: string;
     preferredLanguage?: string;
+    /** Agent onboarding must not steal the device's current store. */
+    setAsCurrent?: boolean;
   }
 ): Promise<{ store: LocalStore; owner: LocalUser }> {
   const storeId = generateId();
@@ -1142,6 +1587,14 @@ export async function createStoreWithOwner(
     discount_allow_percentage: 1,
     discount_allow_fixed: 1,
     cashier_can_discount: 1,
+    cashiers_can_view_stock: 1,
+    loyalty_earn_rate: 0,
+    loyalty_redeem_value: 0,
+    credit_limit_action: 'warn',
+    closing_sms_enabled: 0,
+    closing_sms_time: '20:00',
+    cashiers_can_record_expenses: 1,
+    vat_rate: 0,
     session_timeout_minutes: 5,
     momo_account_name: '',
     momo_number: '',
@@ -1179,6 +1632,7 @@ export async function createStoreWithOwner(
     can_sell_from_warehouse: 1,
     can_manage_ecommerce: 1,
     can_access_cashbook: 1,
+    can_record_customer_payments: 1,
     created_at: now,
     synced: 0,
     pin_dirty: 1,
@@ -1186,7 +1640,9 @@ export async function createStoreWithOwner(
 
   await db.stores.add(store);
   await db.users.add(owner);
-  await setCurrentStoreId(storeId);
+  if (profile?.setAsCurrent !== false) {
+    await setCurrentStoreId(storeId);
+  }
 
   return { store, owner };
 }
@@ -1512,6 +1968,7 @@ export async function addUserToStore(
     can_sell_from_warehouse: role === 'owner' ? 1 : 0,
     can_manage_ecommerce: role === 'owner' ? 1 : 0,
     can_access_cashbook: role === 'owner' ? 1 : 0,
+    can_record_customer_payments: role === 'owner' ? 1 : 0,
     created_at: new Date().toISOString(),
     synced: 0,
     pin_dirty: 1,
@@ -1578,6 +2035,14 @@ export async function updateUserPhone(userId: string, phoneRaw: string): Promise
   return display;
 }
 
+/** Save this person's profile photo on this device, then let the next sync carry it. */
+export async function updateUserPhoto(userId: string, photoUrl: string): Promise<void> {
+  const existing = await db.users.get(userId);
+  if (!existing) throw new Error('This account could not be found on this device.');
+  const next = photoUrl.startsWith('data:image/') ? photoUrl : '';
+  await db.users.update(userId, { photo_url: next, synced: 0 });
+}
+
 /** Active owner for the current (or given) store — used after warehouse PIN login. */
 export async function getActiveStoreOwner(storeId?: string): Promise<LocalUser | null> {
   const id = storeId || (await getCurrentStoreId());
@@ -1619,15 +2084,20 @@ export async function getCurrentStoreCustomers(): Promise<LocalCustomer[]> {
 export async function createCustomer(
   name: string,
   phone: string,
-  openingBalance: number
+  openingBalance: number,
+  locationId: string | null = null,
+  address: string = '',
+  credit?: { creditLimit?: number | null; creditTermsDays?: number | null }
 ): Promise<LocalCustomer> {
   const storeId = await getCurrentStoreId();
   if (!storeId) throw new Error('No store selected');
   const cleanName = name.trim();
   const cleanPhone = phone.trim();
+  const cleanAddress = address.trim();
   const balance = toMoneyAmount(openingBalance);
   if (!cleanName) throw new Error('Customer name is required.');
   if (cleanName.length > 255 || cleanPhone.length > 30) throw new Error('Customer name or phone is too long.');
+  if (cleanAddress.length > 500) throw new Error('Customer address must be 500 characters or fewer.');
   if (!Number.isFinite(balance) || balance < 0) throw new Error('Opening balance must be zero or greater.');
   const existing = await db.customers.where('store_id').equals(storeId).toArray();
   if (existing.some((customer) =>
@@ -1643,9 +2113,14 @@ export async function createCustomer(
     store_id: storeId,
     name: cleanName,
     phone: cleanPhone,
+    location_id: locationId || null,
+    address: cleanAddress,
     opening_balance: balance,
     opening_balance_remaining: balance,
     is_active: 1,
+    loyalty_points_balance: 0,
+    credit_limit: credit?.creditLimit == null || credit.creditLimit <= 0 ? null : credit.creditLimit,
+    credit_terms_days: credit?.creditTermsDays == null || credit.creditTermsDays < 0 ? null : Math.floor(credit.creditTermsDays),
     created_at: now,
     updated_at: now,
     synced: 0,
@@ -1689,7 +2164,10 @@ export async function createCustomer(
 export async function updateCustomer(
   customerId: string,
   name: string,
-  phone: string
+  phone: string,
+  locationId: string | null = null,
+  address?: string,
+  credit?: { creditLimit?: number | null; creditTermsDays?: number | null }
 ): Promise<void> {
   const storeId = await getCurrentStoreId();
   if (!storeId) throw new Error('No store selected');
@@ -1697,11 +2175,21 @@ export async function updateCustomer(
   if (!customer || customer.store_id !== storeId) throw new Error('Customer not found.');
   const cleanName = name.trim();
   const cleanPhone = phone.trim();
+  const cleanAddress = address === undefined ? customer.address || '' : address.trim();
   if (!cleanName) throw new Error('Customer name is required.');
   if (cleanName.length > 255 || cleanPhone.length > 30) throw new Error('Customer name or phone is too long.');
+  if (cleanAddress.length > 500) throw new Error('Customer address must be 500 characters or fewer.');
   await db.customers.update(customerId, {
     name: cleanName,
     phone: cleanPhone,
+    location_id: locationId || null,
+    address: cleanAddress,
+    ...(credit
+      ? {
+          credit_limit: credit.creditLimit == null || credit.creditLimit <= 0 ? null : credit.creditLimit,
+          credit_terms_days: credit.creditTermsDays == null || credit.creditTermsDays < 0 ? null : Math.floor(credit.creditTermsDays),
+        }
+      : {}),
     updated_at: new Date().toISOString(),
     synced: 0,
   });
@@ -2558,42 +3046,102 @@ export async function importProductsFromRows(
     selling_price: number;
     stock_level: number;
     sku_type?: string;
+    product_id?: string;
   }>
-): Promise<{ imported: number; skipped: number }> {
+): Promise<{ imported: number; skipped: number; updated?: number; conflicts?: Array<any> }> {
   const storeId = await getCurrentStoreId();
   if (!storeId) throw new Error('No store selected');
 
-  const { setProductStockLevel } = await import('./warehouse');
+  const { setProductStockLevel, getProductTotalStock } = await import('./warehouse');
+  const { moneyEquals } = await import('./money');
   let imported = 0;
+  let updated = 0;
   let skipped = 0;
+  const conflicts: Array<any> = [];
   const now = new Date().toISOString();
 
   for (const row of rows) {
-    if (!row.name.trim()) {
+    if (!row.name || !String(row.name).trim()) {
       skipped++;
       continue;
     }
 
-    if (row.barcode) {
-      const existing = await db.products
+    let existing: any = undefined;
+    if ((row as any).product_id && typeof (row as any).product_id === 'string' && (row as any).product_id.trim()) {
+      existing = await db.products.where('store_id').equals(storeId).and(p => p.id === (row as any).product_id.trim()).first();
+    }
+    if (!existing && row.barcode && String(row.barcode).trim()) {
+      existing = await db.products
         .where('store_id')
         .equals(storeId)
-        .and(p => p.barcode === row.barcode)
+        .and(p => p.barcode === String(row.barcode).trim())
         .first();
-      if (existing) {
+    }
+
+    if (existing) {
+      const incomingName = String(row.name).trim();
+      const incomingCategory = (String(row.category || '').trim()) || existing.category || 'Other';
+      const incomingBarcode = String(row.barcode || '').trim();
+      const incomingSkuType = (String(row.sku_type || '').trim()) || existing.sku_type || 'unit';
+      const incomingCost = toMoneyAmount(row.cost_price);
+      const incomingSell = toMoneyAmount(row.selling_price);
+
+      const nameMatch = incomingName.toLowerCase() === String(existing.name || '').toLowerCase();
+      const categoryMatch = incomingCategory.toLowerCase() === String(existing.category || '').toLowerCase();
+      const skuTypeMatch = incomingSkuType === String(existing.sku_type || '');
+      const costMatch = moneyEquals ? moneyEquals(incomingCost, existing.cost_price) : Math.abs(incomingCost - existing.cost_price) < 0.01;
+      const sellMatch = moneyEquals ? moneyEquals(incomingSell, existing.selling_price) : Math.abs(incomingSell - existing.selling_price) < 0.01;
+      const barcodeChanged = incomingBarcode && incomingBarcode !== String(existing.barcode || '');
+
+      const significantDiff = !nameMatch || !categoryMatch || !skuTypeMatch || !costMatch || !sellMatch || barcodeChanged;
+      if (significantDiff) {
+        conflicts.push({
+          existing,
+          incoming: {
+            name: incomingName,
+            category: incomingCategory,
+            barcode: incomingBarcode,
+            cost_price: incomingCost,
+            selling_price: incomingSell,
+            stock_level: Math.max(0, Math.round(Number(row.stock_level) || 0)),
+            sku_type: incomingSkuType,
+          },
+        });
         skipped++;
         continue;
       }
+
+      const qtyToAdd = Math.max(0, Math.round(Number(row.stock_level) || 0));
+      if (qtyToAdd > 0) {
+        try {
+          const current = await getProductTotalStock(existing.id);
+          await setProductStockLevel({
+            storeId,
+            productId: existing.id,
+            targetQty: current + qtyToAdd,
+            note: 'CSV import stock increment',
+          });
+        } catch {
+          await setProductStockLevel({
+            storeId,
+            productId: existing.id,
+            targetQty: (Number(existing.stock_level) || 0) + qtyToAdd,
+            note: 'CSV import stock increment',
+          });
+        }
+      }
+      updated++;
+      continue;
     }
 
     const productId = generateId();
     await db.products.add({
       id: productId,
       store_id: storeId,
-      name: row.name.trim(),
-      category: row.category.trim() || 'Other',
-      sku_type: row.sku_type?.trim() || 'unit',
-      barcode: row.barcode.trim(),
+      name: String(row.name).trim(),
+      category: (String(row.category || '').trim()) || 'Other',
+      sku_type: (String(row.sku_type || '').trim()) || 'unit',
+      barcode: String(row.barcode || '').trim(),
       cost_price: toMoneyAmount(row.cost_price),
       selling_price: toMoneyAmount(row.selling_price),
       stock_level: 0,
@@ -2609,7 +3157,7 @@ export async function importProductsFromRows(
       updated_at: now,
       synced: 0,
     });
-    const openingQty = Math.max(0, Math.floor(Number(row.stock_level) || 0));
+    const openingQty = Math.max(0, Math.round(Number(row.stock_level) || 0));
     if (openingQty > 0) {
       await setProductStockLevel({
         storeId,
@@ -2621,8 +3169,10 @@ export async function importProductsFromRows(
     imported++;
   }
 
-  return { imported, skipped };
+  return { imported, skipped, updated, conflicts };
 }
+
+
 
 function formatSyncError(label: string, error: unknown): string {
   const message = formatUnknownError(error);
@@ -2635,24 +3185,96 @@ function formatSyncError(label: string, error: unknown): string {
 function asQty(value: unknown): number {
   const n = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(n) || n <= 0) return 0;
-  const floored = Math.floor(n);
-  return floored > 50_000_000 ? 0 : floored;
+  const rounded = Math.round(n * 1000) / 1000;
+  return rounded > 50_000_000 ? 0 : rounded;
 }
 
 /** PostgREST defaults to 1000 rows — page so phone and laptop pull the same full ledger. */
+const INCREMENTAL_PULL_FIELDS: Record<string, string> = {
+  users: 'updated_at',
+  product_categories: 'updated_at',
+  customers: 'updated_at',
+  products: 'updated_at',
+  transactions: 'updated_at',
+  customer_account_receipts: 'created_at',
+  transaction_items: 'created_at',
+  credit_payments: 'created_at',
+  customer_opening_payments: 'created_at',
+  sales_returns: 'created_at',
+  customer_wallet_transactions: 'created_at',
+  expenses: 'updated_at',
+  recurring_expenses: 'updated_at',
+  expense_budgets: 'updated_at',
+  cash_book_entries: 'updated_at',
+  locations: 'updated_at',
+  stock_movements: 'created_at',
+  online_orders: 'updated_at',
+  online_order_items: 'created_at',
+  suppliers: 'updated_at',
+  purchase_orders: 'updated_at',
+  bulk_sms_campaigns: 'created_at',
+  debt_reminders: 'created_at',
+  product_variants: 'updated_at',
+  customer_loyalty_transactions: 'created_at',
+  supplier_payments: 'created_at',
+  store_promotions: 'updated_at',
+  sms_outbox: 'created_at',
+};
+
+const OPTIONAL_CLOUD_TABLES = new Set([
+  'debt_reminders',
+  'product_variants',
+  'customer_loyalty_transactions',
+  'supplier_payments',
+  'store_promotions',
+  'sms_outbox',
+]);
+
+const OPTIONAL_PUSH_COLUMNS: Record<string, string[]> = {
+  stores: ['loyalty_earn_rate', 'loyalty_redeem_value', 'credit_limit_action', 'closing_sms_enabled', 'closing_sms_time', 'cashiers_can_record_expenses', 'vat_rate'],
+  expenses: ['expense_date', 'payment_method'],
+  products: ['unit', 'allow_decimal'],
+  customers: ['loyalty_points_balance', 'credit_limit', 'credit_terms_days'],
+  transactions: [
+    'void_status', 'void_reason', 'void_requested_by', 'void_requested_by_name', 'void_requested_at',
+    'voided_by', 'voided_by_name', 'voided_at', 'loyalty_points_earned', 'loyalty_points_redeemed',
+    'loyalty_redeem_amount', 'promotion_discount', 'promotion_summary', 'coupon_code', 'credit_due_date',
+  ],
+  transaction_items: ['variant_id', 'measure_unit', 'list_unit_price', 'promotion_label', 'serial_number'],
+  purchase_orders: ['amount_paid', 'due_date'],
+  stock_batches: ['variant_id'],
+  users: ['photo_url', 'can_record_customer_payments'],
+};
+export const FAST_SYNC_TABLES = Object.keys(INCREMENTAL_PULL_FIELDS)
+  .filter((table) => table !== 'debt_reminders');
+
+function pullCursorId(storeId: string, table: string): string {
+  return `pull:${storeId}:${table}`;
+}
+
 async function fetchAllStoreRows(
   table: string,
-  storeId: string
+  storeId: string,
+  cursor?: { column: string; value: string }
 ): Promise<{ data: Record<string, unknown>[] | null; error: { message: string } | null }> {
   const pageSize = 1000;
   const all: Record<string, unknown>[] = [];
   let from = 0;
   for (;;) {
-    const { data, error } = await supabase
+    let query = supabase
       .from(table)
       .select('*')
-      .eq('store_id', storeId)
-      .range(from, from + pageSize - 1);
+      .eq('store_id', storeId);
+    if (cursor) {
+      const overlapStart = new Date(Date.parse(cursor.value) - 2 * 60 * 1000).toISOString();
+      query = query
+        .gte(cursor.column, overlapStart)
+        .order(cursor.column, { ascending: true })
+        .order('id', { ascending: true });
+    } else {
+      query = query.order('id', { ascending: true });
+    }
+    const { data, error } = await query.range(from, from + pageSize - 1);
     if (error) return { data: null, error };
     const rows = (data || []) as Record<string, unknown>[];
     all.push(...rows);
@@ -2676,6 +3298,22 @@ function mapCloudBatch(row: Record<string, unknown>): LocalStockBatch {
     created_at: String(row.created_at || ''),
     updated_at: String(row.updated_at || row.created_at || ''),
     synced: 1,
+  };
+}
+
+function mapLocalBatchToCloud(batch: LocalStockBatch): Record<string, unknown> {
+  return {
+    id: batch.id,
+    store_id: batch.store_id,
+    product_id: batch.product_id,
+    location_id: batch.location_id,
+    batch_code: batch.batch_code || '',
+    expiry_date: dateOrNull(batch.expiry_date),
+    quantity: batch.quantity,
+    cost_price: batch.cost_price,
+    variant_id: batch.variant_id || null,
+    created_at: batch.created_at,
+    updated_at: batch.updated_at,
   };
 }
 
@@ -2718,6 +3356,11 @@ export async function adoptCloudStockLedger(
 
   const localBatches = await db.stock_batches.where('store_id').equals(storeId).toArray();
   const localById = new Map(localBatches.map((b) => [b.id, b]));
+  const pendingMovementBatchIds = new Set(
+    (await db.stock_movements.where('store_id').equals(storeId).and((movement) => movement.synced === 0).toArray())
+      .map((movement) => movement.batch_id)
+      .filter((id): id is string => isUuid(id))
+  );
   const remoteBatches = remoteRows.map(mapCloudBatch);
   const remoteIds = new Set(remoteBatches.map((b) => b.id));
 
@@ -2741,7 +3384,8 @@ export async function adoptCloudStockLedger(
   for (const local of localBatches) {
     if (remoteIds.has(local.id)) continue;
     if (local.synced !== 0) continue;
-    if ((local.batch_code || '').trim().toUpperCase() === 'OPENING') continue;
+    const referencedByPendingSale = pendingMovementBatchIds.has(local.id);
+    if ((local.batch_code || '').trim().toUpperCase() === 'OPENING' && !referencedByPendingSale) continue;
     if (!isUuid(local.id) || !isUuid(local.product_id) || !isUuid(local.location_id)) continue;
     nextBatches.push({ ...local, quantity: asQty(local.quantity) });
   }
@@ -2775,8 +3419,15 @@ let hydrateInFlight: Promise<{ ok: boolean; message: string }> | null = null;
 /** Last successful cloud stock adopt (ms). Used to skip duplicate pulls. */
 export let lastStockHydrateOkAt = 0;
 
-export async function refreshStockFromCloud(): Promise<{ ok: boolean; message: string }> {
+export async function refreshStockFromCloud(options?: { minIntervalMs?: number }): Promise<{ ok: boolean; message: string }> {
   if (hydrateInFlight) return hydrateInFlight;
+  if (
+    options?.minIntervalMs &&
+    lastStockHydrateOkAt > 0 &&
+    Date.now() - lastStockHydrateOkAt < options.minIntervalMs
+  ) {
+    return { ok: true, message: 'Stock was recently matched to cloud' };
+  }
 
   hydrateInFlight = (async () => {
     const storeId = await getCurrentStoreId();
@@ -2871,6 +3522,19 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
 ): Promise<number> {
   if (rows.length === 0) return 0;
 
+  // Keep large syncs below PostgREST/Postgres statement-timeout limits. Only
+  // mark local rows synced after every chunk has been accepted.
+  const chunkSize = 100;
+  if (rows.length > chunkSize) {
+    for (let offset = 0; offset < rows.length; offset += chunkSize) {
+      const chunk = rows.slice(offset, offset + chunkSize);
+      const uploaded = await upsertToSupabase(label, table, chunk, async () => {}, errors);
+      if (uploaded !== chunk.length) return 0;
+    }
+    await markSynced();
+    return rows.length;
+  }
+
   try {
     // Append-only ledgers have INSERT policies but historically no UPDATE.
     // PostgREST upsert is ON CONFLICT DO UPDATE and needs UPDATE RLS (42501).
@@ -2886,13 +3550,14 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
       ignoreDuplicates: appendOnly,
     });
     if (error) {
-      if (
+        if (
         table === 'stores' &&
-        /session_timeout_minutes/i.test(error.message)
+        /session_timeout_minutes|cashiers_can_view_stock/i.test(error.message)
       ) {
         const stripped = rows.map((row) => {
           const copy = { ...(row as Record<string, unknown>) };
-          delete copy.session_timeout_minutes;
+          if (/session_timeout_minutes/i.test(error.message)) delete copy.session_timeout_minutes;
+          if (/cashiers_can_view_stock/i.test(error.message)) delete copy.cashiers_can_view_stock;
           return copy;
         });
         const retry = await supabase.from(table).upsert(stripped, {
@@ -2949,12 +3614,22 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
       }
       if (
         table === 'transactions' &&
-        /other_charges/i.test(error.message)
+        /other_charges|updated_at|wallet_amount|credit_paid_amount|credit_balance|sale_mode/i.test(error.message)
       ) {
+        // Older Supabase projects may not have all checkout columns yet. A
+        // missing optional column must not strand an otherwise valid offline sale.
         const stripped = rows.map((row) => {
           const copy = { ...(row as Record<string, unknown>) };
-          delete copy.other_charges_json;
-          delete copy.other_charges_total;
+          const message = error.message.toLowerCase();
+          if (message.includes('other_charges')) {
+            delete copy.other_charges_json;
+            delete copy.other_charges_total;
+          }
+          if (message.includes('updated_at')) delete copy.updated_at;
+          if (message.includes('wallet_amount')) delete copy.wallet_amount;
+          if (message.includes('credit_paid_amount')) delete copy.credit_paid_amount;
+          if (message.includes('credit_balance')) delete copy.credit_balance;
+          if (message.includes('sale_mode')) delete copy.sale_mode;
           return copy;
         });
         const retry = await supabase.from(table).upsert(stripped, {
@@ -2965,6 +3640,8 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
           await markSynced();
           return rows.length;
         }
+        errors.push(formatSyncError('Transactions (retry)', retry.error));
+        return 0;
       }
       if (
         table === 'debt_reminders' &&
@@ -2987,6 +3664,22 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
         );
         return 0;
       }
+      const optionalColumns = OPTIONAL_PUSH_COLUMNS[table];
+      if (optionalColumns?.some((column) => error.message.includes(column))) {
+        const stripped = rows.map((row) => {
+          const copy = { ...(row as Record<string, unknown>) };
+          for (const column of optionalColumns) delete copy[column];
+          return copy;
+        });
+        const retry = await supabase.from(table).upsert(stripped, {
+          onConflict: 'id',
+          ignoreDuplicates: appendOnly,
+        });
+        if (!retry.error) {
+          await markSynced();
+          return rows.length;
+        }
+      }
       errors.push(formatSyncError(label, error));
       return 0;
     }
@@ -3000,7 +3693,27 @@ async function upsertToSupabase<T extends Record<string, unknown>>(
 }
 
 // Sync to Supabase
-export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ success: boolean; message: string }> {
+async function fetchCloudIds(
+  table: 'stock_batches' | 'locations' | 'products',
+  storeId: string,
+  ids: string[],
+): Promise<{ present: Set<string>; failed: boolean }> {
+  const present = new Set<string>();
+  const unique = [...new Set(ids.filter((id) => isUuid(id)))];
+  for (let offset = 0; offset < unique.length; offset += 200) {
+    const slice = unique.slice(offset, offset + 200);
+    const { data, error } = await supabase
+      .from(table)
+      .select('id')
+      .eq('store_id', storeId)
+      .in('id', slice);
+    if (error) return { present, failed: true };
+    for (const row of data || []) present.add(String(row.id));
+  }
+  return { present, failed: false };
+}
+
+export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicalize?: boolean }): Promise<{ success: boolean; message: string }> {
   if (!isSupabaseConfigured()) {
     return { success: false, message: 'Supabase not configured. Add environment variables to enable cloud sync.' };
   }
@@ -3021,11 +3734,13 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
   let syncedCount = 0;
 
   try {
-    try {
-      const { canonicalizeStoreStock } = await import('@/lib/warehouse');
-      await canonicalizeStoreStock(storeId);
-    } catch {
-      // Push remaining UUID-safe rows even if heal fails
+    if (!opts?.skipCanonicalize) {
+      try {
+        const { canonicalizeStoreStock } = await import('@/lib/warehouse');
+        await canonicalizeStoreStock(storeId);
+      } catch {
+        // Push remaining UUID-safe rows even if heal fails
+      }
     }
 
     // Push hard-deletes first so cloud rows (and CASCADE children) are removed
@@ -3070,6 +3785,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
           discount_allow_percentage: (store.discount_allow_percentage ?? 1) === 1,
           discount_allow_fixed: (store.discount_allow_fixed ?? 1) === 1,
           cashier_can_discount: (store.cashier_can_discount ?? 1) === 1,
+          cashiers_can_view_stock: (store.cashiers_can_view_stock ?? 1) === 1,
           session_timeout_minutes: normalizeSessionTimeoutMinutes(store.session_timeout_minutes),
           momo_account_name: store.momo_account_name || '',
           momo_number: store.momo_number || '',
@@ -3084,6 +3800,13 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
           debt_reminder_message: store.debt_reminder_message || DEFAULT_DEBT_REMINDER_TEMPLATE,
           sales_target_daily: Math.max(0, Number(store.sales_target_daily) || 0),
           sales_target_monthly: Math.max(0, Number(store.sales_target_monthly) || 0),
+          loyalty_earn_rate: Math.max(0, Math.floor(Number(store.loyalty_earn_rate) || 0)),
+          loyalty_redeem_value: Math.max(0, Number(store.loyalty_redeem_value) || 0),
+          credit_limit_action: store.credit_limit_action === 'block' ? 'block' : 'warn',
+          closing_sms_enabled: (store.closing_sms_enabled ?? 0) === 1,
+          closing_sms_time: store.closing_sms_time || '20:00',
+          cashiers_can_record_expenses: (store.cashiers_can_record_expenses ?? 1) === 1,
+          vat_rate: Math.max(0, Math.min(100, Number(store.vat_rate) || 0)),
           created_at: store.created_at,
         }],
         async () => { await db.stores.update(storeId, { synced: 1 }); },
@@ -3112,7 +3835,9 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         can_sell_from_warehouse: (u.can_sell_from_warehouse ?? 0) === 1,
         can_manage_ecommerce: (u.can_manage_ecommerce ?? (u.role === 'owner' ? 1 : 0)) === 1,
         can_access_cashbook: u.role === 'owner' ? true : (u.can_access_cashbook ?? 1) === 1,
+        can_record_customer_payments: u.role === 'owner' ? true : (u.can_record_customer_payments ?? 0) === 1,
         pos_layout_json: u.role === 'owner' ? u.pos_layout_json || null : null,
+        photo_url: u.photo_url || '',
         created_at: u.created_at,
       })),
       async () => {
@@ -3226,6 +3951,8 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         wholesale_tiers_json: p.wholesale_tiers_json || '[]',
         sell_online: (p.sell_online ?? 0) === 1,
         reorder_level: Number(p.reorder_level) || 0,
+        unit: p.unit || 'pcs',
+        allow_decimal: (p.allow_decimal ?? 0) === 1,
         created_at: p.created_at,
         updated_at: p.updated_at,
       })),
@@ -3273,19 +4000,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
     syncedCount += await upsertToSupabase(
       'Stock batches',
       'stock_batches',
-      batchesToPush.map(b => ({
-        id: b.id,
-        store_id: b.store_id,
-        product_id: b.product_id,
-        location_id: b.location_id,
-        batch_code: b.batch_code || '',
-        expiry_date: dateOrNull(b.expiry_date),
-        quantity: b.quantity,
-        cost_price: b.cost_price,
-        variant_id: uuidOrNull(b.variant_id),
-        created_at: b.created_at,
-        updated_at: b.updated_at,
-      })),
+      batchesToPush.map(mapLocalBatchToCloud),
       async () => { await Promise.all(batchesToPush.map(b => db.stock_batches.update(b.id, { synced: 1 }))); },
       errors
     );
@@ -3293,9 +4008,60 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
     const unsyncedMovements = await db.stock_movements.where('store_id').equals(storeId).and(m => m.synced === 0).toArray();
     const movementsToPush: LocalStockMovement[] = [];
     if (unsyncedMovements.length > 0) {
+      const movementBatchIds = [...new Set(
+        unsyncedMovements
+          .map((movement) => movement.batch_id)
+          .filter((id): id is string => isUuid(id))
+      )];
+      const cloudBatches = await fetchCloudIds('stock_batches', storeId, movementBatchIds);
+      const cloudBatchIds = cloudBatches.present;
+      const batchLookupFailed = cloudBatches.failed;
+      if (batchLookupFailed) {
+        errors.push('Stock batch references: could not check which batches are already in the cloud.');
+      }
+
+      if (!batchLookupFailed) {
+        const localReferencedBatches = movementBatchIds.length > 0
+          ? await db.stock_batches.where('id').anyOf(movementBatchIds).toArray()
+          : [];
+        const batchesToRepair = localReferencedBatches.filter((batch) =>
+          batch.store_id === storeId &&
+          !cloudBatchIds.has(batch.id) &&
+          isUuid(batch.id) &&
+          isUuid(batch.store_id) &&
+          isUuid(batch.product_id) &&
+          isUuid(batch.location_id)
+        );
+        if (batchesToRepair.length > 0) {
+          const repairCount = await upsertToSupabase(
+            'Stock batches (movement references)',
+            'stock_batches',
+            batchesToRepair.map(mapLocalBatchToCloud),
+            async () => {
+              await Promise.all(batchesToRepair.map((batch) =>
+                db.stock_batches.update(batch.id, { synced: 1 })
+              ));
+            },
+            errors
+          );
+          if (repairCount > 0) {
+            const confirmed = await fetchCloudIds(
+              'stock_batches',
+              storeId,
+              batchesToRepair.map((batch) => batch.id),
+            );
+            if (!confirmed.failed) {
+              for (const id of confirmed.present) cloudBatchIds.add(id);
+            }
+          }
+        }
+      }
+
+      // Ensure products referenced by movements exist in cloud before pushing movements.
+      // Products are pushed earlier in this sync; re-upserting referenced products guards
+      // against rows marked synced locally yet missing from cloud (FK violation 23503).
       const referencedProductIds = [...new Set(unsyncedMovements.map(m => m.product_id).filter((id): id is string => typeof id === 'string' && id.length > 0))];
       const referencedProducts = await db.products.where('id').anyOf(referencedProductIds).toArray();
-      const localProductIds = new Set(referencedProducts.filter(p => p.store_id === storeId).map(p => p.id));
       if (referencedProducts.length > 0) {
         await upsertToSupabase(
           'Products (movement references)',
@@ -3319,40 +4085,119 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
             wholesale_unit_price: p.wholesale_unit_price ?? 0,
             wholesale_tiers_json: p.wholesale_tiers_json || '[]',
             sell_online: (p.sell_online ?? 0) === 1,
-            reorder_level: Number(p.reorder_level) || 0,
-            created_at: p.created_at,
-            updated_at: p.updated_at,
-          })),
-          async () => {},
+        reorder_level: Number(p.reorder_level) || 0,
+        unit: p.unit || 'pcs',
+        allow_decimal: (p.allow_decimal ?? 0) === 1,
+        created_at: p.created_at,
+        updated_at: p.updated_at,
+      })),
+      async () => {},
           errors
         );
       }
+      const resolvedMovements: LocalStockMovement[] = [];
+      const stockToApply = new Map<string, LocalStockBatch>();
       for (const movement of unsyncedMovements) {
         if (!isUuid(movement.id) || !isUuid(movement.store_id) || !isUuid(movement.product_id)) {
-        await db.stock_movements.delete(movement.id);
-        continue;
+          await db.stock_movements.delete(movement.id);
+          continue;
+        }
+        const batchMissing = isUuid(movement.batch_id) && !batchLookupFailed && !cloudBatchIds.has(movement.batch_id!);
+        if (!batchMissing) {
+          resolvedMovements.push(movement);
+          continue;
+        }
+        const localBatches = await db.stock_batches.where('product_id').equals(movement.product_id).toArray();
+        const preferredId = openingBatchId(storeId, movement.product_id);
+        const target = localBatches.find((batch) => batch.id === preferredId && batch.store_id === storeId)
+          || localBatches.find((batch) => batch.store_id === storeId && batch.location_id === movement.from_location_id)
+          || localBatches.find((batch) => batch.store_id === storeId);
+        let nextBatchId: string | null = null;
+        if (target) {
+          nextBatchId = target.id;
+          if (movement.movement_type === 'sale' && target.id !== movement.batch_id) {
+            const current = stockToApply.get(target.id) || target;
+            stockToApply.set(target.id, {
+              ...current,
+              quantity: Math.max(0, asQty(current.quantity) - asQty(movement.quantity)),
+              updated_at: new Date().toISOString(),
+              synced: 0,
+            });
+          }
+        }
+        const resolved = { ...movement, batch_id: nextBatchId };
+        await db.stock_movements.update(movement.id, { batch_id: nextBatchId });
+        resolvedMovements.push(resolved);
       }
-      movementsToPush.push(movement);
-    }
-    syncedCount += await upsertToSupabase(
-      'Stock movements',
-      'stock_movements',
-      movementsToPush.map(m => ({
-        id: m.id,
-        store_id: m.store_id,
-        product_id: m.product_id,
-        batch_id: uuidOrNull(m.batch_id),
-        from_location_id: uuidOrNull(m.from_location_id),
-        to_location_id: uuidOrNull(m.to_location_id),
-        movement_type: m.movement_type,
-        quantity: m.quantity,
-        note: m.note || '',
-        user_id: uuidOrNull(m.user_id),
-        created_at: m.created_at,
-      })),
-      async () => { await Promise.all(movementsToPush.map(m => db.stock_movements.update(m.id, { synced: 1 }))); },
-      errors
-    );
+      if (stockToApply.size > 0) {
+        const applied = [...stockToApply.values()];
+        await db.stock_batches.bulkPut(applied);
+        const pushed = await upsertToSupabase(
+          'Stock batches (sold quantities)',
+          'stock_batches',
+          applied.map(mapLocalBatchToCloud),
+          async () => {
+            await Promise.all(applied.map((batch) => db.stock_batches.update(batch.id, { synced: 1 })));
+          },
+          errors,
+        );
+        if (pushed > 0) {
+          const confirmed = await fetchCloudIds('stock_batches', storeId, applied.map((batch) => batch.id));
+          if (!confirmed.failed) {
+            for (const id of confirmed.present) cloudBatchIds.add(id);
+          }
+        }
+      }
+      for (const movement of resolvedMovements) {
+        const batchId = movement.batch_id;
+        const batchUnconfirmed = typeof batchId === 'string' && isUuid(batchId) && !cloudBatchIds.has(batchId);
+        if (batchUnconfirmed && !batchLookupFailed) {
+          await db.stock_movements.update(movement.id, { batch_id: null });
+          movementsToPush.push({ ...movement, batch_id: null });
+          continue;
+        }
+        if (batchUnconfirmed && batchLookupFailed) continue;
+        movementsToPush.push(movement);
+      }
+      const locationIds = movementsToPush.flatMap((movement) => [movement.from_location_id, movement.to_location_id]);
+      const cloudLocations = await fetchCloudIds('locations', storeId, locationIds.filter((id): id is string => isUuid(id)));
+      if (!cloudLocations.failed) {
+        for (let index = 0; index < movementsToPush.length; index += 1) {
+          const movement = movementsToPush[index];
+          const fromOk = !isUuid(movement.from_location_id) || cloudLocations.present.has(movement.from_location_id!);
+          const toOk = !isUuid(movement.to_location_id) || cloudLocations.present.has(movement.to_location_id!);
+          if (fromOk && toOk) continue;
+          const next = {
+            ...movement,
+            from_location_id: fromOk ? movement.from_location_id : null,
+            to_location_id: toOk ? movement.to_location_id : null,
+          };
+          movementsToPush[index] = next;
+          await db.stock_movements.update(movement.id, {
+            from_location_id: next.from_location_id,
+            to_location_id: next.to_location_id,
+          });
+        }
+      }
+      syncedCount += await upsertToSupabase(
+        'Stock movements',
+        'stock_movements',
+        movementsToPush.map(m => ({
+          id: m.id,
+          store_id: m.store_id,
+          product_id: m.product_id,
+          batch_id: uuidOrNull(m.batch_id),
+          from_location_id: uuidOrNull(m.from_location_id),
+          to_location_id: uuidOrNull(m.to_location_id),
+          movement_type: m.movement_type,
+          quantity: m.quantity,
+          note: m.note || '',
+          user_id: uuidOrNull(m.user_id),
+          created_at: m.created_at,
+        })),
+        async () => { await Promise.all(movementsToPush.map(m => db.stock_movements.update(m.id, { synced: 1 }))); },
+        errors
+      );
     }
 
     const unsyncedCustomers = await db.customers
@@ -3368,11 +4213,16 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         store_id: customer.store_id,
         name: customer.name,
         phone: customer.phone,
+        location_id: uuidOrNull(customer.location_id),
+        address: customer.address || '',
         opening_balance: customer.opening_balance,
         opening_balance_remaining: customer.opening_balance_remaining,
         wallet_balance: Number(customer.wallet_balance) || 0,
         is_active: customer.is_active === 1,
         debt_reminder_opt_out: (customer.debt_reminder_opt_out ?? 0) === 1,
+        loyalty_points_balance: Math.max(0, Math.floor(Number(customer.loyalty_points_balance) || 0)),
+        credit_limit: customer.credit_limit == null ? null : Math.max(0, Number(customer.credit_limit) || 0),
+        credit_terms_days: customer.credit_terms_days == null ? null : Math.max(0, Math.floor(Number(customer.credit_terms_days) || 0)),
         created_at: customer.created_at,
         updated_at: customer.updated_at,
       })),
@@ -3506,6 +4356,21 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         status: t.status,
         location_id: uuidOrNull(t.location_id),
         sale_mode: t.sale_mode || 'retail',
+        void_status: t.void_status || 'none',
+        void_reason: t.void_reason || '',
+        void_requested_by: t.void_requested_by || null,
+        void_requested_by_name: t.void_requested_by_name || '',
+        void_requested_at: t.void_requested_at || null,
+        voided_by: t.voided_by || null,
+        voided_by_name: t.voided_by_name || '',
+        voided_at: t.voided_at || null,
+        loyalty_points_earned: Math.max(0, Math.floor(Number(t.loyalty_points_earned) || 0)),
+        loyalty_points_redeemed: Math.max(0, Math.floor(Number(t.loyalty_points_redeemed) || 0)),
+        loyalty_redeem_amount: Number(t.loyalty_redeem_amount) || 0,
+        promotion_discount: Number(t.promotion_discount) || 0,
+        promotion_summary: t.promotion_summary || '',
+        coupon_code: t.coupon_code || '',
+        credit_due_date: t.credit_due_date || null,
         created_at: t.created_at,
         updated_at: t.updated_at || t.created_at,
       })),
@@ -3623,11 +4488,15 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         quantity: i.quantity,
         unit_price: i.unit_price,
         subtotal: i.subtotal,
+        sale_mode: i.sale_mode === 'wholesale' ? 'wholesale' : 'retail',
         unit_type: i.unit_type || 'base',
         pack_size: i.pack_size ?? 1,
         base_quantity: i.base_quantity ?? i.quantity,
         batch_id: uuidOrNull(i.batch_id),
         variant_id: uuidOrNull(i.variant_id),
+        measure_unit: i.measure_unit || '',
+        list_unit_price: Number(i.list_unit_price) || Number(i.unit_price) || 0,
+        promotion_label: i.promotion_label || '',
       })),
       async () => { await Promise.all(unsyncedItems.map(i => db.transaction_items.update(i.id, { synced: 1 }))); },
       errors
@@ -3717,6 +4586,8 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         receipt_image_data_url: e.receipt_image_data_url || '',
         recurring_expense_id: uuidOrNull(e.recurring_expense_id),
         recurrence_month: e.recurrence_month || null,
+        expense_date: e.expense_date || null,
+        payment_method: e.payment_method || '',
         created_at: e.created_at,
         updated_at: e.updated_at,
       })),
@@ -3897,6 +4768,8 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         items_json: o.items_json,
         total_amount: o.total_amount,
         notes: o.notes,
+        amount_paid: Number(o.amount_paid) || 0,
+        due_date: o.due_date || null,
         created_at: o.created_at,
         updated_at: o.updated_at,
         received_at: o.received_at || null,
@@ -3904,6 +4777,19 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
       async () => { await Promise.all(unsyncedPurchaseOrders.map((o) => db.purchase_orders.update(o.id, { synced: 1 }))); },
       errors
     );
+
+    const approvalSync = await import('./stockApprovals').then((mod) => mod.pushStockApprovalRecords(storeId));
+    syncedCount += approvalSync.synced;
+    if (approvalSync.error) errors.push(approvalSync.error);
+    const activitySync = await import('./activityLog').then((mod) => mod.pushActivityLogs(storeId));
+    syncedCount += activitySync.synced;
+    if (activitySync.error) errors.push(activitySync.error);
+    const extensionSync = await import('./shopSync').then((mod) => mod.pushShopExtensions(storeId));
+    syncedCount += extensionSync.synced;
+    if (extensionSync.error) errors.push(extensionSync.error);
+    const smsSync = await import('./smsOutbox').then((mod) => mod.pushSmsOutbox(storeId));
+    syncedCount += smsSync.synced;
+    if (smsSync.error) errors.push(smsSync.error);
 
     if (errors.length > 0) {
       return { success: false, message: `Partial sync. Errors: ${errors.join('; ')}` };
@@ -3949,6 +4835,8 @@ export async function syncFromSupabase(opts?: {
   onlyTables?: string[];
   skipCatalogAlign?: boolean;
   includeHistory?: boolean;
+  skipPing?: boolean;
+  incremental?: boolean;
 }): Promise<{ success: boolean; message: string; pulledCount: number }> {
   if (!isSupabaseConfigured()) {
     return { success: false, message: 'Supabase not configured.', pulledCount: 0 };
@@ -3959,14 +4847,19 @@ export async function syncFromSupabase(opts?: {
     return { success: false, message: 'No store selected', pulledCount: 0 };
   }
 
-  const connection = await testSupabaseConnection();
-  if (!connection.ok) {
-    return { success: false, message: connection.error || 'Could not connect to Supabase.', pulledCount: 0 };
+  if (!opts?.skipPing) {
+    const connection = await testSupabaseConnection();
+    if (!connection.ok) {
+      return { success: false, message: connection.error || 'Could not connect to Supabase.', pulledCount: 0 };
+    }
   }
 
   let pulledCount = 0;
   const errors: string[] = [];
-  const deletedProductIds = await getDeletedProductIds(storeId);
+  const deletedProductIds = opts?.onlyTables
+    ? new Set<string>()
+    : await getDeletedProductIds(storeId);
+  const pullStartedAt = new Date().toISOString();
 
   try {
     if (!opts?.onlyTables) {
@@ -3991,6 +4884,12 @@ export async function syncFromSupabase(opts?: {
         discount_allow_percentage: remoteStore.discount_allow_percentage === false ? 0 : 1,
         discount_allow_fixed: remoteStore.discount_allow_fixed === false ? 0 : 1,
         cashier_can_discount: remoteStore.cashier_can_discount === false ? 0 : 1,
+        cashiers_can_view_stock:
+          remoteStore.cashiers_can_view_stock == null
+            ? (localStore?.cashiers_can_view_stock ?? 1)
+            : remoteStore.cashiers_can_view_stock === false
+              ? 0
+              : 1,
         session_timeout_minutes:
           remoteStore.session_timeout_minutes == null
             ? (localStore?.session_timeout_minutes ?? 5)
@@ -4055,11 +4954,31 @@ export async function syncFromSupabase(opts?: {
         loyalty_earn_rate:
           remoteStore.loyalty_earn_rate == null
             ? (localStore?.loyalty_earn_rate ?? 0)
-            : Math.max(0, Number(remoteStore.loyalty_earn_rate) || 0),
-        near_expiry_alert_days:
-          remoteStore.near_expiry_alert_days == null
-            ? (localStore?.near_expiry_alert_days ?? 7)
-            : Math.max(0, Math.min(90, Number(remoteStore.near_expiry_alert_days) || 7)),
+            : Math.max(0, Math.floor(Number(remoteStore.loyalty_earn_rate) || 0)),
+        loyalty_redeem_value:
+          remoteStore.loyalty_redeem_value == null
+            ? (localStore?.loyalty_redeem_value ?? 0)
+            : Math.max(0, Number(remoteStore.loyalty_redeem_value) || 0),
+        credit_limit_action:
+          remoteStore.credit_limit_action === 'block' || remoteStore.credit_limit_action === 'warn'
+            ? remoteStore.credit_limit_action
+            : (localStore?.credit_limit_action ?? 'warn'),
+        closing_sms_enabled:
+          remoteStore.closing_sms_enabled == null
+            ? (localStore?.closing_sms_enabled ?? 0)
+            : remoteStore.closing_sms_enabled ? 1 : 0,
+        closing_sms_time:
+          typeof remoteStore.closing_sms_time === 'string' && remoteStore.closing_sms_time
+            ? remoteStore.closing_sms_time
+            : (localStore?.closing_sms_time || '20:00'),
+        cashiers_can_record_expenses:
+          remoteStore.cashiers_can_record_expenses == null
+            ? (localStore?.cashiers_can_record_expenses ?? 1)
+            : remoteStore.cashiers_can_record_expenses ? 1 : 0,
+        vat_rate:
+          remoteStore.vat_rate == null
+            ? (localStore?.vat_rate ?? 0)
+            : Math.max(0, Math.min(100, Number(remoteStore.vat_rate) || 0)),
         created_at: remoteStore.created_at,
         synced: localStore?.synced === 0 ? 0 : 1,
       });
@@ -4088,9 +5007,11 @@ export async function syncFromSupabase(opts?: {
           can_sell_from_warehouse: row.can_sell_from_warehouse ? 1 : 0,
           can_manage_ecommerce: (row.can_manage_ecommerce || row.role === 'owner') ? 1 : 0,
           can_access_cashbook: cashbookAccessFromCloud(row.role, row.can_access_cashbook),
+          can_record_customer_payments: customerPaymentsAccessFromCloud(row.role, row.can_record_customer_payments),
           pos_layout_json: row.role === 'owner' && typeof row.pos_layout_json === 'string'
             ? row.pos_layout_json
             : undefined,
+          photo_url: typeof row.photo_url === 'string' ? row.photo_url : undefined,
           created_at: row.created_at as string,
           synced: 1,
         }),
@@ -4117,7 +5038,9 @@ export async function syncFromSupabase(opts?: {
                 local.can_sell_from_warehouse ?? remote.can_sell_from_warehouse,
               can_manage_ecommerce: local.can_manage_ecommerce ?? remote.can_manage_ecommerce,
               can_access_cashbook: local.can_access_cashbook ?? remote.can_access_cashbook,
+              can_record_customer_payments: local.can_record_customer_payments ?? remote.can_record_customer_payments,
               pos_layout_json: local.pos_layout_json ?? remote.pos_layout_json,
+              photo_url: local.photo_url ?? remote.photo_url,
               synced: 0,
             };
           }
@@ -4125,6 +5048,7 @@ export async function syncFromSupabase(opts?: {
           return {
             ...remote,
             phone: (remote.phone || '').trim() || local.phone || '',
+            photo_url: typeof remote.photo_url === 'string' ? remote.photo_url : (local.photo_url || ''),
           };
         },
       },
@@ -4154,19 +5078,49 @@ export async function syncFromSupabase(opts?: {
           store_id: String(row.store_id),
           name: String(row.name || ''),
           phone: String(row.phone || ''),
+          location_id:
+            typeof row.location_id === 'string'
+              ? row.location_id
+              : row.location_id === null
+                ? null
+                : undefined,
+          address: typeof row.address === 'string' ? row.address : undefined,
           opening_balance: Number(row.opening_balance) || 0,
           opening_balance_remaining: Number(row.opening_balance_remaining) || 0,
           wallet_balance: Number(row.wallet_balance) || 0,
           loyalty_points_balance: Number(row.loyalty_points_balance) || 0,
           is_active: row.is_active === false ? 0 : 1,
           debt_reminder_opt_out: row.debt_reminder_opt_out === true ? 1 : 0,
+          loyalty_points_balance: 'loyalty_points_balance' in row
+            ? Math.max(0, Math.floor(Number(row.loyalty_points_balance) || 0))
+            : undefined,
+          credit_limit: 'credit_limit' in row
+            ? (row.credit_limit == null || row.credit_limit === '' ? null : Math.max(0, Number(row.credit_limit) || 0))
+            : undefined,
+          credit_terms_days: 'credit_terms_days' in row
+            ? (row.credit_terms_days == null || row.credit_terms_days === ''
+              ? null
+              : Math.max(0, Math.floor(Number(row.credit_terms_days) || 0)))
+            : undefined,
           created_at: String(row.created_at || ''),
           updated_at: String(row.updated_at || row.created_at || ''),
           synced: 1,
         }),
         dbTable: db.customers,
         merge: async (remote: LocalCustomer, local: LocalCustomer | undefined) => {
-          if (!local || local.synced !== 0) return remote;
+          if (!local || local.synced !== 0) {
+            return {
+              ...remote,
+              location_id:
+                remote.location_id === undefined
+                  ? local?.location_id ?? null
+                  : remote.location_id,
+              address: remote.address === undefined ? local?.address ?? '' : remote.address,
+              loyalty_points_balance: remote.loyalty_points_balance ?? local?.loyalty_points_balance ?? 0,
+              credit_limit: remote.credit_limit === undefined ? (local?.credit_limit ?? null) : remote.credit_limit,
+              credit_terms_days: remote.credit_terms_days === undefined ? (local?.credit_terms_days ?? null) : remote.credit_terms_days,
+            };
+          }
           return { ...remote, ...local, synced: 0 };
         },
       },
@@ -4195,6 +5149,12 @@ export async function syncFromSupabase(opts?: {
             wholesale_tiers_json: (local.wholesale_tiers_json as string) || '[]',
             sell_online: local.sell_online ? 1 : 0,
             reorder_level: Math.max(0, Math.floor(Number(local.reorder_level) || 0)),
+            unit: 'unit' in local
+              ? (typeof local.unit === 'string' && local.unit ? local.unit : 'pcs')
+              : undefined,
+            allow_decimal: 'allow_decimal' in local
+              ? (local.allow_decimal === true || local.allow_decimal === 1 ? 1 : 0)
+              : undefined,
             created_at: local.created_at as string,
             updated_at: (local.updated_at as string) || (local.created_at as string),
             synced: 1,
@@ -4203,7 +5163,13 @@ export async function syncFromSupabase(opts?: {
         dbTable: db.products,
         merge: async (remote: LocalProduct, local: LocalProduct | undefined) => {
           if (!local) return remote;
-          if (local.synced !== 0) return remote;
+          if (local.synced !== 0) {
+            return {
+              ...remote,
+              unit: remote.unit || local.unit || 'pcs',
+              allow_decimal: remote.allow_decimal ?? local.allow_decimal ?? 0,
+            };
+          }
           // Keep unsynced name/price edits, but stock always follows cloud then batch align
           return {
             ...local,
@@ -4239,16 +5205,53 @@ export async function syncFromSupabase(opts?: {
           customer_id: (row.customer_id as string) || null,
           credit_paid_amount: Number(row.credit_paid_amount) || 0,
           credit_balance: Number(row.credit_balance) || 0,
+          credit_due_date: typeof row.credit_due_date === 'string' ? row.credit_due_date.slice(0, 10) : null,
+          void_status: 'void_status' in row
+            ? (row.void_status === 'voided' || row.void_status === 'requested' ? row.void_status : 'none')
+            : undefined,
+          void_reason: 'void_reason' in row ? String(row.void_reason || '') : undefined,
+          void_requested_by: (row.void_requested_by as string) || null,
+          void_requested_by_name: String(row.void_requested_by_name || ''),
+          void_requested_at: (row.void_requested_at as string) || null,
+          voided_by: (row.voided_by as string) || null,
+          voided_by_name: String(row.voided_by_name || ''),
+          voided_at: (row.voided_at as string) || null,
+          loyalty_points_earned: 'loyalty_points_earned' in row ? Math.max(0, Math.floor(Number(row.loyalty_points_earned) || 0)) : undefined,
+          loyalty_points_redeemed: 'loyalty_points_redeemed' in row ? Math.max(0, Math.floor(Number(row.loyalty_points_redeemed) || 0)) : undefined,
+          loyalty_redeem_amount: 'loyalty_redeem_amount' in row ? Number(row.loyalty_redeem_amount) || 0 : undefined,
+          promotion_discount: 'promotion_discount' in row ? Number(row.promotion_discount) || 0 : undefined,
+          promotion_summary: 'promotion_summary' in row ? String(row.promotion_summary || '') : undefined,
+          coupon_code: 'coupon_code' in row ? String(row.coupon_code || '') : undefined,
           status: row.status as 'completed' | 'pending',
           location_id: (row.location_id as string) || undefined,
-          sale_mode: ((row.sale_mode as 'retail' | 'wholesale') || 'retail'),
+          sale_mode:
+            row.sale_mode === 'wholesale' || row.sale_mode === 'mixed' || row.sale_mode === 'retail'
+              ? row.sale_mode
+              : 'retail',
           created_at: row.created_at as string,
           updated_at: (row.updated_at as string) || (row.created_at as string),
           synced: 1,
         }),
         dbTable: db.transactions,
         merge: async (remote: LocalTransaction, local: LocalTransaction | undefined) => {
-          if (!local || local.synced !== 0) return remote;
+          if (!local) return remote;
+          if (local.synced !== 0) {
+            return {
+              ...remote,
+              void_status: remote.void_status ?? local.void_status ?? 'none',
+              void_reason: remote.void_reason ?? local.void_reason ?? '',
+              voided_by: remote.voided_by ?? local.voided_by ?? null,
+              voided_by_name: remote.voided_by_name || local.voided_by_name || '',
+              voided_at: remote.voided_at ?? local.voided_at ?? null,
+              loyalty_points_earned: remote.loyalty_points_earned ?? local.loyalty_points_earned ?? 0,
+              loyalty_points_redeemed: remote.loyalty_points_redeemed ?? local.loyalty_points_redeemed ?? 0,
+              loyalty_redeem_amount: remote.loyalty_redeem_amount ?? local.loyalty_redeem_amount ?? 0,
+              promotion_discount: remote.promotion_discount ?? local.promotion_discount ?? 0,
+              promotion_summary: remote.promotion_summary ?? local.promotion_summary ?? '',
+              coupon_code: remote.coupon_code ?? local.coupon_code ?? '',
+              credit_due_date: remote.credit_due_date ?? local.credit_due_date ?? null,
+            };
+          }
           return {
             ...remote,
             ...local,
@@ -4351,10 +5354,21 @@ export async function syncFromSupabase(opts?: {
           quantity: Number(row.quantity) || 0,
           unit_price: Number(row.unit_price) || 0,
           subtotal: Number(row.subtotal) || 0,
+          sale_mode:
+            row.sale_mode === 'wholesale'
+              ? 'wholesale'
+              : row.sale_mode === 'retail'
+                ? 'retail'
+                : undefined,
           unit_type: (row.unit_type as string) || 'base',
           pack_size: Number(row.pack_size) || 1,
           base_quantity: Number(row.base_quantity) || Number(row.quantity) || 0,
           batch_id: (row.batch_id as string) || undefined,
+          variant_id: (row.variant_id as string) || null,
+          measure_unit: String(row.measure_unit || ''),
+          list_unit_price: Number(row.list_unit_price) || Number(row.unit_price) || 0,
+          promotion_label: String(row.promotion_label || ''),
+          serial_number: String(row.serial_number || ''),
           synced: 1,
         }),
         dbTable: db.transaction_items,
@@ -4376,9 +5390,13 @@ export async function syncFromSupabase(opts?: {
           receipt_number: String(row.receipt_number || ''),
           location_id: String(row.location_id || ''),
           customer_id: String(row.customer_id || '') || null,
-          refund_method: row.refund_method === 'cash' || row.refund_method === 'wallet' || row.refund_method === 'account'
-            ? row.refund_method
-            : 'none',
+          refund_method:
+            row.refund_method === 'cash' ||
+            row.refund_method === 'wallet' ||
+            row.refund_method === 'account' ||
+            row.refund_method === 'today_sales'
+              ? row.refund_method
+              : 'none',
           refund_amount: Number(row.refund_amount) || 0,
           debt_applied: Number(row.debt_applied) || 0,
           wallet_credit: Number(row.wallet_credit) || 0,
@@ -4399,7 +5417,9 @@ export async function syncFromSupabase(opts?: {
           id: String(row.id),
           store_id: String(row.store_id),
           customer_id: String(row.customer_id),
-          type: row.type === 'sale_debit' ? 'sale_debit' : 'return_credit',
+          type: row.type === 'sale_debit' || row.type === 'topup' || row.type === 'purchase' || row.type === 'refund' || row.type === 'adjustment'
+            ? row.type
+            : 'return_credit',
           amount: Number(row.amount) || 0,
           balance_after: Number(row.balance_after) || 0,
           return_id: String(row.return_id || '') || null,
@@ -4431,6 +5451,10 @@ export async function syncFromSupabase(opts?: {
           receipt_image_data_url: (row.receipt_image_data_url as string) || undefined,
           recurring_expense_id: (row.recurring_expense_id as string) || null,
           recurrence_month: (row.recurrence_month as string) || null,
+          expense_date: 'expense_date' in row && typeof row.expense_date === 'string' ? row.expense_date.slice(0, 10) : undefined,
+          payment_method: 'payment_method' in row
+            ? (row.payment_method === 'cash' || row.payment_method === 'momo' || row.payment_method === 'bank' ? row.payment_method : '')
+            : undefined,
           created_at: row.created_at as string,
           updated_at: (row.updated_at as string) || (row.created_at as string),
           synced: 1,
@@ -4438,6 +5462,13 @@ export async function syncFromSupabase(opts?: {
         dbTable: db.expenses,
         merge: async (remote: LocalExpense, local: LocalExpense | undefined) => {
           if (!local) return remote;
+          if (local.synced !== 0) {
+            return {
+              ...remote,
+              expense_date: remote.expense_date ?? local.expense_date ?? null,
+              payment_method: remote.payment_method ?? local.payment_method ?? '',
+            };
+          }
           if (local.synced === 0) {
             const remoteTime = new Date(remote.updated_at).getTime();
             const localTime = new Date(local.updated_at).getTime();
@@ -4552,6 +5583,7 @@ export async function syncFromSupabase(opts?: {
           batch_code: (row.batch_code as string) || '',
           expiry_date: (row.expiry_date as string) || null,
           quantity: asQty(row.quantity),
+          variant_id: (row.variant_id as string) || null,
           cost_price: Number(row.cost_price) || 0,
           created_at: row.created_at as string,
           updated_at: (row.updated_at as string) || (row.created_at as string),
@@ -4670,6 +5702,8 @@ export async function syncFromSupabase(opts?: {
           items_json: String(row.items_json || '[]'),
           total_amount: Number(row.total_amount) || 0,
           notes: String(row.notes || ''),
+          amount_paid: Number(row.amount_paid) || 0,
+          due_date: typeof row.due_date === 'string' ? row.due_date.slice(0, 10) : null,
           created_at: String(row.created_at || ''),
           updated_at: String(row.updated_at || row.created_at || ''),
           received_at: typeof row.received_at === 'string' ? row.received_at : undefined,
@@ -4761,45 +5795,124 @@ export async function syncFromSupabase(opts?: {
         },
       },
       {
-        label: 'Customer loyalty transactions',
+        label: 'Loyalty points',
         table: 'customer_loyalty_transactions',
         map: (row: Record<string, unknown>) => ({
           id: String(row.id),
           store_id: String(row.store_id),
           customer_id: String(row.customer_id),
           transaction_id: (row.transaction_id as string) || null,
-          type: (row.type as 'earn' | 'redeem') || 'earn',
-          points: Number(row.points) || 0,
-          balance_after: Number(row.balance_after) || 0,
+          type: row.type === 'redeem' ? 'redeem' : 'earn',
+          points: Math.max(0, Math.floor(Number(row.points) || 0)),
+          balance_after: Math.max(0, Math.floor(Number(row.balance_after) || 0)),
           reason: String(row.reason || ''),
           created_at: String(row.created_at || ''),
-          synced: row.synced === true ? 1 : 0,
+          synced: 1,
         }),
         dbTable: db.customer_loyalty_transactions,
-        merge: async (
-          remote: LocalCustomerLoyaltyTransaction,
-          local: LocalCustomerLoyaltyTransaction | undefined
-        ) => {
-          // Loyalty ledger rows are append-only audit rows.
+        merge: async (remote: LocalLoyaltyTransaction, local: LocalLoyaltyTransaction | undefined) => {
+          if (!local || local.synced !== 0) return remote;
+          return local;
+        },
+      },
+      {
+        label: 'Supplier payments',
+        table: 'supplier_payments',
+        map: (row: Record<string, unknown>) => ({
+          id: String(row.id),
+          store_id: String(row.store_id),
+          supplier_id: String(row.supplier_id),
+          purchase_order_id: (row.purchase_order_id as string) || null,
+          amount: Number(row.amount) || 0,
+          method: row.method === 'momo' || row.method === 'bank' ? row.method : 'cash',
+          note: String(row.note || ''),
+          paid_at: String(row.paid_at || row.created_at || ''),
+          created_by: (row.created_by as string) || null,
+          created_by_name: String(row.created_by_name || ''),
+          created_at: String(row.created_at || ''),
+          synced: 1,
+        }),
+        dbTable: db.supplier_payments,
+        merge: async (remote: LocalSupplierPayment, local: LocalSupplierPayment | undefined) => {
+          if (!local || local.synced !== 0) return remote;
+          return local;
+        },
+      },
+      {
+        label: 'Store deals',
+        table: 'store_promotions',
+        map: (row: Record<string, unknown>) => ({
+          id: String(row.id),
+          store_id: String(row.store_id),
+          name: String(row.name || ''),
+          promo_type: (['sale_price', 'percent', 'fixed', 'multibuy', 'coupon'].includes(String(row.promo_type))
+            ? row.promo_type
+            : 'percent') as LocalStorePromotion['promo_type'],
+          product_id: (row.product_id as string) || null,
+          category: String(row.category || ''),
+          sale_price: Number(row.sale_price) || 0,
+          percent_off: Number(row.percent_off) || 0,
+          amount_off: Number(row.amount_off) || 0,
+          buy_quantity: Math.max(0, Math.floor(Number(row.buy_quantity) || 0)),
+          free_quantity: Math.max(0, Math.floor(Number(row.free_quantity) || 0)),
+          coupon_code: String(row.coupon_code || ''),
+          starts_at: (row.starts_at as string) || null,
+          ends_at: (row.ends_at as string) || null,
+          is_active: row.is_active === false ? 0 : 1,
+          created_at: String(row.created_at || ''),
+          updated_at: String(row.updated_at || row.created_at || ''),
+          synced: 1,
+        }),
+        dbTable: db.store_promotions,
+        merge: async (remote: LocalStorePromotion, local: LocalStorePromotion | undefined) => {
+          if (!local || local.synced !== 0) return remote;
+          return new Date(remote.updated_at).getTime() >= new Date(local.updated_at).getTime() ? remote : local;
+        },
+      },
+      {
+        label: 'SMS outbox',
+        table: 'sms_outbox',
+        map: (row: Record<string, unknown>) => ({
+          id: String(row.id),
+          store_id: String(row.store_id),
+          kind: row.kind === 'closing' ? 'closing' : 'receipt',
+          recipient: String(row.recipient || ''),
+          message: String(row.message || ''),
+          status: row.status === 'sent' || row.status === 'failed' ? row.status : 'queued',
+          error_message: String(row.error_message || ''),
+          created_at: String(row.created_at || ''),
+          sent_at: typeof row.sent_at === 'string' ? row.sent_at : null,
+          synced: 1,
+        }),
+        dbTable: db.sms_outbox,
+        merge: async (remote: LocalSmsOutbox, local: LocalSmsOutbox | undefined) => {
           if (!local || local.synced !== 0) return remote;
           return local;
         },
       },
     ] as const;
+    const fullyPulledTables = new Set<string>();
 
     for (const config of tables) {
       if (opts?.onlyTables && !opts.onlyTables.includes(config.table)) continue;
       if (!opts?.includeHistory && config.table === 'stock_movements') continue;
 
-      const { data, error } = await fetchAllStoreRows(config.table, storeId);
+      const cursorField = opts?.incremental ? INCREMENTAL_PULL_FIELDS[config.table] : undefined;
+      const cursorId = cursorField ? pullCursorId(storeId, config.table) : null;
+      const previousCursor = cursorId ? await db.sync_meta.get(cursorId) : undefined;
+      const { data, error } = await fetchAllStoreRows(
+        config.table,
+        storeId,
+        cursorField && previousCursor
+          ? { column: cursorField, value: previousCursor.last_synced_at }
+          : undefined
+      );
 
       if (error) {
         // The following tables only exist after their migrations have been run.
         // Skip them quietly until then instead of failing the whole pull.
         if (
-          (config.table === 'debt_reminders' ||
-            config.table === 'product_variants' ||
-            config.table === 'customer_loyalty_transactions') &&
+          OPTIONAL_CLOUD_TABLES.has(config.table) &&
           /does not exist|PGRST205|schema cache/i.test(error.message || '')
         ) {
           continue;
@@ -4838,11 +5951,26 @@ export async function syncFromSupabase(opts?: {
           if (!existing) pulledCount++;
         }
       }
+      if (cursorId) {
+        await db.sync_meta.put({ id: cursorId, last_synced_at: pullStartedAt });
+      } else {
+        fullyPulledTables.add(config.table);
+      }
     }
 
     const { refreshRemoteLedgerClearAndApply } = await import('./storeLedgerClear');
     const ledgerAfterPull = await refreshRemoteLedgerClearAndApply(storeId);
     const droppedSales = ledgerAfterPull.dropped.transactions;
+
+    try {
+      const { pullStockApprovalRecords } = await import('./stockApprovals');
+      pulledCount += await pullStockApprovalRecords(storeId);
+    } catch (pullError) {
+      const message = pullError instanceof Error ? pullError.message : String(pullError);
+      if (!/does not exist|PGRST205|schema cache|permission denied|42501/i.test(message)) {
+        errors.push(`Stock approvals: ${message}`);
+      }
+    }
 
     if (errors.length > 0) {
       return { success: false, message: `Partial pull. Errors: ${errors.join('; ')}`, pulledCount };
@@ -4853,6 +5981,16 @@ export async function syncFromSupabase(opts?: {
       id: 'last_sync',
       last_synced_at: completedSyncAt,
     });
+    if (!opts?.onlyTables) {
+      await Promise.all(
+        [...fullyPulledTables].filter((table) => table in INCREMENTAL_PULL_FIELDS).map((table) =>
+          db.sync_meta.put({
+            id: pullCursorId(storeId, table),
+            last_synced_at: completedSyncAt,
+          })
+        )
+      );
+    }
     if (isSupabaseConfigured() && !opts?.onlyTables) {
       const { error: syncMarkerError } = await supabase
         .from('stores')
@@ -4910,17 +6048,50 @@ export async function pullStockLedgerFromCloud(storeId?: string): Promise<boolea
   return adopted.ok;
 }
 
-export async function syncStockFast(): Promise<{ success: boolean; message: string }> {
-  const push = await syncToSupabase({ skipPing: true });
-  const adopted = await refreshStockFromCloud();
-  if (adopted.ok) {
-    if (!push.success) return { success: false, message: `${adopted.message}. ${push.message}` };
-    return { success: true, message: adopted.message };
+export async function syncStockFast(options?: {
+  tables?: string[];
+  push?: boolean;
+  refreshStock?: boolean;
+  forceStockRefresh?: boolean;
+}): Promise<{ success: boolean; message: string }> {
+  // POS/autosync must both push local sales and pull sales created on another
+  // device. Stock-only refreshes leave the phone and machine with different totals.
+  const pullTables = options?.tables ?? FAST_SYNC_TABLES;
+  const push = options?.push === false
+    ? { success: true, message: '' }
+    : await syncToSupabase({ skipPing: true, skipCanonicalize: true });
+  const salesPull = pullTables.length > 0
+    ? await syncFromSupabase({
+      onlyTables: pullTables,
+      skipCatalogAlign: true,
+      skipPing: true,
+      incremental: true,
+      includeHistory: true,
+    })
+    : { success: true, message: 'No table changes to pull', pulledCount: 0 };
+  const adopted = options?.refreshStock === false
+    ? { ok: true, message: 'Stock refresh skipped' }
+    : await refreshStockFromCloud(options?.forceStockRefresh
+      ? undefined
+      : { minIntervalMs: 60_000 });
+
+  const syncMessages = [
+    push.success ? '' : push.message,
+    salesPull.success ? '' : salesPull.message,
+    adopted.ok ? '' : adopted.message,
+  ].filter(Boolean);
+
+  if (syncMessages.length > 0) {
+    return {
+      success: false,
+      message: syncMessages.join(' '),
+    };
   }
-  if (push.success) {
-    return { success: false, message: `Pushed local sales. Pull issue: ${adopted.message}` };
-  }
-  return { success: false, message: adopted.message || push.message };
+
+  return {
+    success: true,
+    message: `${adopted.message} Sales reconciled (${salesPull.pulledCount} cloud rows checked).`,
+  };
 }
 
 export async function syncBidirectional(): Promise<{ success: boolean; message: string }> {
@@ -5127,4 +6298,289 @@ export async function addStoreFromCloud(
 export async function getLastSyncTime(): Promise<string | null> {
   const meta = await db.sync_meta.get('last_sync');
   return meta?.last_synced_at ?? null;
+}
+
+/* ========================================================================
+   Agent Portal CRUD operations (local IndexedDB, queued for Supabase sync)
+   ======================================================================== */
+
+/** ---- Agents ---- */
+
+export async function listLocalAgents(): Promise<LocalAgent[]> {
+  return db.agents.toArray();
+}
+
+export async function getLocalAgent(agentId: string): Promise<LocalAgent | undefined> {
+  return db.agents.get(agentId);
+}
+
+export async function createLocalAgent(agent: Omit<LocalAgent, 'synced'>): Promise<void> {
+  await db.agents.add({ ...agent, synced: 0 });
+}
+
+export async function updateLocalAgent(
+  agentId: string,
+  patch: Partial<LocalAgent>
+): Promise<void> {
+  await db.agents.update(agentId, { ...patch, updated_at: new Date().toISOString(), synced: 0 });
+}
+
+export async function deleteLocalAgent(agentId: string): Promise<void> {
+  await db.agents.delete(agentId);
+}
+
+/** ---- Prospects ---- */
+
+export async function listLocalProspects(agentId?: string): Promise<LocalProspect[]> {
+  if (agentId) {
+    return db.prospects.where('agent_id').equals(agentId).toArray();
+  }
+  return db.prospects.toArray();
+}
+
+export async function getLocalProspect(prospectId: string): Promise<LocalProspect | undefined> {
+  return db.prospects.get(prospectId);
+}
+
+export async function createLocalProspect(
+  prospect: Omit<LocalProspect, 'synced'>
+): Promise<void> {
+  await db.prospects.add({ ...prospect, synced: 0 });
+}
+
+export async function updateLocalProspect(
+  prospectId: string,
+  patch: Partial<LocalProspect>
+): Promise<void> {
+  await db.prospects.update(prospectId, {
+    ...patch,
+    updated_at: new Date().toISOString(),
+    synced: 0,
+  });
+}
+
+export async function deleteLocalProspect(prospectId: string): Promise<void> {
+  await db.prospects.delete(prospectId);
+}
+
+/** ---- Follow-ups ---- */
+
+export async function listLocalFollowUps(
+  filters?: { prospectId?: string; agentId?: string; status?: FollowUpStatus }
+): Promise<LocalFollowUp[]> {
+  const rows = await db.follow_ups.toArray();
+  return rows
+    .filter((row) => {
+      if (filters?.prospectId && row.prospect_id !== filters.prospectId) return false;
+      if (filters?.agentId && row.agent_id !== filters.agentId) return false;
+      if (filters?.status && row.status !== filters.status) return false;
+      return true;
+    })
+    .sort((a, b) => a.follow_up_at.localeCompare(b.follow_up_at));
+}
+
+export async function getLocalFollowUp(followUpId: string): Promise<LocalFollowUp | undefined> {
+  return db.follow_ups.get(followUpId);
+}
+
+export async function createLocalFollowUp(
+  followUp: Omit<LocalFollowUp, 'synced'>
+): Promise<void> {
+  await db.follow_ups.add({ ...followUp, synced: 0 });
+}
+
+export async function updateLocalFollowUp(
+  followUpId: string,
+  patch: Partial<LocalFollowUp>
+): Promise<void> {
+  await db.follow_ups.update(followUpId, {
+    ...patch,
+    updated_at: new Date().toISOString(),
+    synced: 0,
+  });
+}
+
+export async function deleteLocalFollowUp(followUpId: string): Promise<void> {
+  await db.follow_ups.delete(followUpId);
+}
+
+/** ---- Agent Stores ---- */
+
+export async function listLocalAgentStores(agentId?: string): Promise<LocalAgentStore[]> {
+  if (agentId) {
+    return db.agent_stores.where('agent_id').equals(agentId).toArray();
+  }
+  return db.agent_stores.toArray();
+}
+
+export async function getLocalAgentStore(storeId: string): Promise<LocalAgentStore | undefined> {
+  return db.agent_stores.get(storeId);
+}
+
+export async function createLocalAgentStore(
+  store: Omit<LocalAgentStore, 'synced'>
+): Promise<void> {
+  await db.agent_stores.add({ ...store, synced: 0 });
+}
+
+export async function updateLocalAgentStore(
+  storeId: string,
+  patch: Partial<LocalAgentStore>
+): Promise<void> {
+  await db.agent_stores.update(storeId, {
+    ...patch,
+    updated_at: new Date().toISOString(),
+    synced: 0,
+  });
+}
+
+export async function deleteLocalAgentStore(storeId: string): Promise<void> {
+  await db.agent_stores.delete(storeId);
+}
+
+/** ---- Agent Invoices ---- */
+
+export async function listLocalAgentInvoices(agentId?: string): Promise<LocalAgentInvoice[]> {
+  if (agentId) {
+    return db.agent_invoices.where('agent_id').equals(agentId).toArray();
+  }
+  return db.agent_invoices.toArray();
+}
+
+export async function getLocalAgentInvoice(invoiceId: string): Promise<LocalAgentInvoice | undefined> {
+  return db.agent_invoices.get(invoiceId);
+}
+
+export async function createLocalAgentInvoice(
+  invoice: Omit<LocalAgentInvoice, 'synced'>
+): Promise<void> {
+  await db.agent_invoices.add({ ...invoice, synced: 0 });
+}
+
+export async function updateLocalAgentInvoice(
+  invoiceId: string,
+  patch: Partial<LocalAgentInvoice>
+): Promise<void> {
+  await db.agent_invoices.update(invoiceId, {
+    ...patch,
+    updated_at: new Date().toISOString(),
+    synced: 0,
+  });
+}
+
+export async function deleteLocalAgentInvoice(invoiceId: string): Promise<void> {
+  await db.agent_invoices.delete(invoiceId);
+}
+
+/** ---- Agent Payments ---- */
+
+export async function listLocalAgentPayments(invoiceId?: string): Promise<LocalAgentPayment[]> {
+  if (invoiceId) {
+    return db.agent_payments.where('invoice_id').equals(invoiceId).toArray();
+  }
+  return db.agent_payments.toArray();
+}
+
+export async function createLocalAgentPayment(
+  payment: Omit<LocalAgentPayment, 'synced'>
+): Promise<void> {
+  await db.agent_payments.add({ ...payment, synced: 0 });
+}
+
+export async function updateLocalAgentPayment(
+  paymentId: string,
+  patch: Partial<LocalAgentPayment>
+): Promise<void> {
+  await db.agent_payments.update(paymentId, { ...patch, synced: 0 });
+}
+
+export async function deleteLocalAgentPayment(paymentId: string): Promise<void> {
+  await db.agent_payments.delete(paymentId);
+}
+
+/** ---- Agent Commissions ---- */
+
+export async function listLocalAgentCommissions(agentId?: string): Promise<LocalAgentCommission[]> {
+  if (agentId) {
+    return db.agent_commissions.where('agent_id').equals(agentId).toArray();
+  }
+  return db.agent_commissions.toArray();
+}
+
+export async function createLocalAgentCommission(
+  commission: Omit<LocalAgentCommission, 'synced'>
+): Promise<void> {
+  await db.agent_commissions.add({ ...commission, synced: 0 });
+}
+
+export async function updateLocalAgentCommission(
+  commissionId: string,
+  patch: Partial<LocalAgentCommission>
+): Promise<void> {
+  await db.agent_commissions.update(commissionId, { ...patch, synced: 0 });
+}
+
+/** ---- Agent Withdrawal Requests ---- */
+
+export async function listLocalAgentWithdrawalRequests(
+  agentId?: string
+): Promise<LocalAgentWithdrawalRequest[]> {
+  if (agentId) {
+    return db.agent_withdrawal_requests.where('agent_id').equals(agentId).toArray();
+  }
+  return db.agent_withdrawal_requests.toArray();
+}
+
+export async function getLocalAgentWithdrawalRequest(
+  id: string
+): Promise<LocalAgentWithdrawalRequest | undefined> {
+  return db.agent_withdrawal_requests.get(id);
+}
+
+export async function createLocalAgentWithdrawalRequest(
+  request: Omit<LocalAgentWithdrawalRequest, 'synced'>
+): Promise<void> {
+  await db.agent_withdrawal_requests.add({ ...request, synced: 0 });
+}
+
+export async function updateLocalAgentWithdrawalRequest(
+  id: string,
+  patch: Partial<LocalAgentWithdrawalRequest>
+): Promise<void> {
+  await db.agent_withdrawal_requests.update(id, {
+    ...patch,
+    updated_at: new Date().toISOString(),
+    synced: 0,
+  });
+}
+
+/** ---- Agent Commission Settings ---- */
+
+export async function getLocalCommissionSettings(): Promise<LocalAgentCommissionSetting | undefined> {
+  return db.agent_commission_settings.get('main');
+}
+
+export async function saveLocalCommissionSettings(
+  settings: LocalAgentCommissionSetting
+): Promise<void> {
+  await db.agent_commission_settings.put(settings);
+}
+
+/** ---- Agent PIN verify (local) ---- */
+
+export async function verifyAgentPin(
+  phone: string,
+  pin: string
+): Promise<LocalAgent | null> {
+  const { normalizeGhanaPhone } = await import('./platformSettings');
+  const target = normalizeGhanaPhone(phone);
+  if (!target) return null;
+  const agents = await db.agents.toArray();
+  for (const agent of agents) {
+    if (normalizeGhanaPhone(agent.phone) !== target) continue;
+    if (await verifyUserPin(pin, agent.pin_hash)) {
+      return agent;
+    }
+  }
+  return null;
 }

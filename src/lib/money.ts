@@ -11,6 +11,17 @@ export function toMoneyAmount(value: unknown): number {
   return Math.max(0, roundMoney(value));
 }
 
+/**
+ * Fold VAT into a price and round to the nearest pesewa.
+ * The result is the selling price. Receipts charge this amount and do not print a VAT line.
+ */
+export function vatInclusivePrice(amount: unknown, ratePercent: unknown): number {
+  const base = toMoneyAmount(amount);
+  const rate = Number(ratePercent);
+  if (!Number.isFinite(rate) || rate <= 0) return base;
+  return toMoneyAmount(base * (1 + rate / 100));
+}
+
 /** Integer base units for stock (never fractional shelf units). */
 export function lineBaseQty(item: { quantity: number; base_quantity?: number | null }): number {
   const base = Number(item.base_quantity);

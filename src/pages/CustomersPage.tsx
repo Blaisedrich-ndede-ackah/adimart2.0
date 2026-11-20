@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle,
   Loader2,
   Pencil,
   Plus,
+  Search,
   Send,
   Users,
   X,
@@ -14,6 +15,7 @@ import {
   History,
   Clock,
   BellRing,
+  MapPin,
 } from 'lucide-react';
 import {
   createCustomer,
@@ -25,6 +27,7 @@ import {
   LocalCustomer,
   LocalCustomerOpeningPayment,
   LocalCustomerWalletTransaction,
+  type LocalLocation,
   LocalSaleReturn,
   LocalCreditPayment,
   LocalTransaction,
@@ -34,12 +37,17 @@ import {
   setCustomerActive,
   updateCustomer,
 } from '@/lib/dexie';
+import { listLocations } from '@/lib/warehouse';
 import { useAuthStore } from '@/store/useAuthStore';
+import { isOverdueCreditSale } from '@/lib/creditMath';
+import CustomerStatementPanel from '@/components/CustomerStatementPanel';
 import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
 import { triggerPushSync } from '@/lib/sync';
 import { shareReceipt, downloadReceipt, type PDFReceiptData } from '@/lib/receiptGenerator';
 import { printReceipt } from '@/lib/printService';
+import ReceiptSendActions from '@/components/ReceiptSendActions';
+import { canRecordCustomerPayments } from '@/lib/staffAccess';
 import {
   countCurrentStoreCustomerRecipients,
   sendBulkSmsToCurrentStoreCustomers,
@@ -48,6 +56,12 @@ import {
 } from '@/lib/bulkSms';
 import DebtRemindersPanel from '@/components/DebtRemindersPanel';
 import { setCustomerDebtReminderOptOut } from '@/lib/debtReminders';
+import { shopOwnerLedger, type ShopTransaction } from '@/lib/shopClient';
+import {
+  formatCustomerAddress,
+  joinCustomerAddress,
+  splitCustomerAddress,
+} from '@/lib/customerAddress';
 
 interface CustomersPageProps {
   onNavigate?: (page: string) => void;
@@ -55,6 +69,8 @@ interface CustomersPageProps {
 
 export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
   const { currentUser, currentStore } = useAuthStore();
+  const isOwner = currentUser?.role === 'owner';
+  const canTakeCustomerPayment = canRecordCustomerPayments(currentUser);
   const money = useFormatMoney();
   const [customers, setCustomers] = useState<LocalCustomer[]>([]);
   const [transactions, setTransactions] = useState<LocalTransaction[]>([]);
@@ -79,8 +95,40 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
   const [editing, setEditing] = useState<LocalCustomer | null>(null);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [street, setStreet] = useState('');
+  const [city, setCity] = useState('');
+  const [region, setRegion] = useState('');
   const [openingBalance, setOpeningBalance] = useState('');
+  const [creditLimit, setCreditLimit] = useState('');
+  const [creditTermsDays, setCreditTermsDays] = useState('');
+  const [locationId, setLocationId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [locations, setLocations] = useState<LocalLocation[]>([]);
   const [paymentAmounts, setPaymentAmounts] = useState<Record<string, string>>({});
+
+  const locationNameById = useMemo(
+    () => new Map(locations.map((location) => [location.id, location.name] as const)),
+    [locations]
+  );
+  const filteredCustomers = useMemo(() => {
+    const query = searchQuery.trim().toLocaleLowerCase();
+    if (!query) return customers;
+    return customers.filter((customer) => {
+      const preferredLocation = customer.location_id
+        ? locationNameById.get(customer.location_id) || ''
+        : '';
+      const searchableText = [
+        customer.name,
+        customer.phone,
+        formatCustomerAddress(customer.address),
+        customer.address || '',
+        preferredLocation,
+      ]
+        .join(' ')
+        .toLocaleLowerCase();
+      return searchableText.includes(query);
+    });
+  }, [customers, searchQuery, locationNameById]);
   const [repaymentMethods, setRepaymentMethods] = useState<Record<string, 'cash' | 'momo' | 'cheque' | 'split'>>({});
   const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null);
   const [smsMessage, setSmsMessage] = useState('');
@@ -89,8 +137,26 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
   const [smsNotice, setSmsNotice] = useState('');
   const [smsCampaigns, setSmsCampaigns] = useState<LocalBulkSmsCampaign[]>([]);
   const [recipientCount, setRecipientCount] = useState(0);
+  const [onlineByCustomer, setOnlineByCustomer] = useState<Record<string, ShopTransaction[]>>({});
+  const [onlineBalance, setOnlineBalance] = useState<Record<string, number>>({});
+  const [onlineError, setOnlineError] = useState('');
 
   const t = useT();
+
+  useEffect(() => {
+    if (!expandedCustomerId || currentUser?.role !== 'owner' || !currentStore?.id) return;
+    const customerId = expandedCustomerId;
+    void shopOwnerLedger(currentStore.id, currentUser.id, customerId)
+      .then((result) => {
+        setOnlineByCustomer((prev) => ({ ...prev, [customerId]: result.transactions }));
+        const account = result.accounts[0];
+        if (account) setOnlineBalance((prev) => ({ ...prev, [customerId]: account.balance }));
+        setOnlineError('');
+      })
+      .catch((err: unknown) => {
+        setOnlineError(err instanceof Error ? err.message : 'Online wallet unavailable');
+      });
+  }, [expandedCustomerId, currentUser?.id, currentUser?.role, currentStore?.id]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -101,6 +167,11 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
         getCurrentStoreBulkSmsCampaigns(),
         countCurrentStoreCustomerRecipients(),
       ]);
+      const storeId = await getCurrentStoreId();
+      if (storeId) {
+        const locs = await listLocations(storeId);
+        setLocations(locs.filter((l) => l.is_active === 1));
+      }
       const activeAndArchived = allCustomers.sort((a, b) =>
         Number(b.is_active) - Number(a.is_active) || a.name.localeCompare(b.name)
       );
@@ -132,7 +203,6 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
         ] as const)
       );
       setWalletTransactionsByCustomer(Object.fromEntries(walletEntries));
-      const storeId = await getCurrentStoreId();
       const allReturns = storeId
         ? await db.sales_returns.where('store_id').equals(storeId).toArray()
         : [];
@@ -165,16 +235,29 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
     setEditing(null);
     setName('');
     setPhone('');
+    setStreet('');
+    setCity('');
+    setRegion('');
     setOpeningBalance('');
+    setCreditLimit('');
+    setCreditTermsDays('');
+    setLocationId(null);
     setError('');
   };
 
   const startEdit = (customer: LocalCustomer) => {
     setIsFormOpen(true);
     setEditing(customer);
+    const parts = splitCustomerAddress(customer.address);
     setName(customer.name);
     setPhone(customer.phone);
+    setStreet(parts.street);
+    setCity(parts.city);
+    setRegion(parts.region);
     setOpeningBalance('');
+    setCreditLimit(customer.credit_limit ? String(customer.credit_limit) : '');
+    setCreditTermsDays(customer.credit_terms_days == null ? '' : String(customer.credit_terms_days));
+    setLocationId(customer.location_id ?? null);
     setError('');
   };
 
@@ -183,14 +266,25 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
     setError('');
     setSaving(true);
     try {
+      const address = joinCustomerAddress({ street, city, region });
+      const credit = {
+        creditLimit: creditLimit.trim() ? Number(creditLimit) : null,
+        creditTermsDays: creditTermsDays.trim() ? Number(creditTermsDays) : null,
+      };
+      if (credit.creditLimit != null && (!Number.isFinite(credit.creditLimit) || credit.creditLimit < 0)) {
+        throw new Error('Enter a valid credit limit, or leave it blank.');
+      }
+      if (credit.creditTermsDays != null && (!Number.isFinite(credit.creditTermsDays) || credit.creditTermsDays < 0)) {
+        throw new Error('Enter payment terms in days, or leave them blank.');
+      }
       if (editing) {
-        await updateCustomer(editing.id, name, phone);
+        await updateCustomer(editing.id, name, phone, locationId, address, credit);
       } else {
         const amount = openingBalance.trim() ? Number(openingBalance) : 0;
         if (!Number.isFinite(amount) || amount < 0) {
           throw new Error('Enter a valid opening balance.');
         }
-        await createCustomer(name, phone, amount);
+        await createCustomer(name, phone, amount, locationId, address, credit);
       }
       resetForm();
       setStatus(editing ? 'Customer details updated.' : 'Customer registered.');
@@ -363,13 +457,15 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
               Registered customers, credit sales, and account balances
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => { resetForm(); setIsFormOpen(true); }}
-            className="inline-flex items-center gap-2 rounded-xl bg-white px-3.5 py-2 text-sm font-semibold text-emerald-800 shadow-sm hover:bg-emerald-50 transition-all"
-          >
-            <Plus className="h-4 w-4" /> Add customer
-          </button>
+          {isOwner && (
+            <button
+              type="button"
+              onClick={() => { resetForm(); setIsFormOpen(true); }}
+              className="inline-flex items-center gap-2 rounded-xl bg-white px-3.5 py-2 text-sm font-semibold text-emerald-800 shadow-sm hover:bg-emerald-50 transition-all"
+            >
+              <Plus className="h-4 w-4" /> Add customer
+            </button>
+          )}
         </div>
       </div>
 
@@ -439,7 +535,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
         )}
 
         {/* Bulk SMS composer — owner-only promotional broadcast */}
-        <section className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-5 shadow-sm">
+        {isOwner && <section className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-5 shadow-sm">
           <div className="flex items-center gap-2.5 mb-1">
             <div className="rounded-lg bg-emerald-100 p-1.5">
               <Send className="h-4 w-4 text-emerald-600" />
@@ -516,14 +612,16 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
               </div>
             </div>
           )}
-        </section>
+        </section>}
 
-        <DebtRemindersPanel onOpenSettings={onNavigate ? () => onNavigate('settings') : undefined} />
+        {isOwner && <DebtRemindersPanel onOpenSettings={onNavigate ? () => onNavigate('settings') : undefined} />}
 
-        {isFormOpen && (
+        {isOwner && isFormOpen && (
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center" onClick={resetForm}>
           <form
+            onClick={(event) => event.stopPropagation()}
             onSubmit={(event) => void handleSaveCustomer(event)}
-            className="space-y-4 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm"
+            className="max-h-[90vh] w-full max-w-lg space-y-4 overflow-y-auto rounded-2xl border border-gray-100 bg-white p-5 shadow-sm"
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -556,6 +654,96 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                 className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
               />
             </label>
+            <fieldset className="space-y-3 rounded-xl border border-gray-100 p-3">
+              <legend className="px-1 text-sm font-medium text-gray-700">
+                Customer address <span className="text-gray-400 text-xs">(optional)</span>
+              </legend>
+              <label className="block text-sm font-medium text-gray-700">
+                Street, house, or area
+                <input
+                  maxLength={200}
+                  autoComplete="street-address"
+                  value={street}
+                  onChange={(event) => setStreet(event.target.value)}
+                  placeholder="House number, street, or neighborhood"
+                  className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
+                />
+              </label>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  City / town
+                  <input
+                    maxLength={80}
+                    autoComplete="address-level2"
+                    value={city}
+                    onChange={(event) => setCity(event.target.value)}
+                    placeholder="Accra"
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
+                  />
+                </label>
+                <label className="block text-sm font-medium text-gray-700">
+                  Region
+                  <input
+                    maxLength={80}
+                    autoComplete="address-level1"
+                    value={region}
+                    onChange={(event) => setRegion(event.target.value)}
+                    placeholder="Greater Accra"
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
+                  />
+                </label>
+              </div>
+              <p className="text-xs text-gray-400">
+                Saved on the customer record. Search and checkout can find it by street, city, or region.
+              </p>
+            </fieldset>
+            {locations.length > 0 && (
+              <label className="block text-sm font-medium text-gray-700">
+                Preferred location
+                <select
+                  value={locationId || ''}
+                  onChange={(event) => setLocationId(event.target.value || null)}
+                  className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 transition-all"
+                >
+                  <option value="">None (default)</option>
+                  {locations.map((loc) => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.name} ({loc.location_type})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">
+                  The shop or warehouse where this customer prefers to collect
+                  or receive deliveries.
+                </p>
+              </label>
+            )}
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block text-sm font-medium text-gray-700">
+                Credit limit <span className="text-gray-400 text-xs">(optional)</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={creditLimit}
+                  onChange={(event) => setCreditLimit(event.target.value)}
+                  placeholder="No limit"
+                  className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5"
+                />
+              </label>
+              <label className="block text-sm font-medium text-gray-700">
+                Payment terms (days)
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={creditTermsDays}
+                  onChange={(event) => setCreditTermsDays(event.target.value)}
+                  placeholder="No due date"
+                  className="mt-1.5 w-full rounded-xl border border-gray-200 px-3.5 py-2.5"
+                />
+              </label>
+            </div>
             {!editing && (
               <>
                 <label className="block text-sm font-medium text-gray-700">
@@ -584,6 +772,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
               {saving ? 'Saving…' : editing ? 'Save customer' : 'Register customer'}
             </button>
           </form>
+          </div>
         )}
 
         {loading ? (
@@ -610,7 +799,45 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
           </div>
         ) : (
           <div className="space-y-3">
-            {customers.map((customer) => {
+            <div className="relative">
+              <label className="sr-only" htmlFor="customer-search">
+                Search customers by name, phone, address, or preferred location
+              </label>
+              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
+              <input
+                id="customer-search"
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search name, phone, address, or location…"
+                className="w-full pl-9 pr-10 py-2 bg-white border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  aria-label="Clear customer search"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+            {filteredCustomers.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-gray-200 bg-white p-8 text-center shadow-sm" aria-live="polite">
+                <h3 className="font-semibold text-gray-900">No matching customers</h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Try another name, phone number, address, or preferred location.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="mt-4 rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  Clear search
+                </button>
+              </div>
+            ) : filteredCustomers.map((customer) => {
               const customerSales = creditByCustomer.get(customer.id) || [];
               const salesBalance = customerSales.reduce(
                 (balance, transaction) => balance + (Number(transaction.credit_balance) || 0),
@@ -624,6 +851,9 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                 .join('')
                 .toUpperCase()
                 .slice(0, 2);
+              const preferredLocationName = customer.location_id
+                ? locationNameById.get(customer.location_id) || ''
+                : '';
               return (
                 <section key={customer.id} className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm transition-all hover:shadow-md">
                   <div className="p-4">
@@ -649,9 +879,24 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                             <span className="mt-1 block text-xs text-teal-700 font-medium">
                               <Wallet className="h-3 w-3 mr-1" /> Wallet {money(customer.wallet_balance || 0)}
                             </span>
+                            <span className="mt-0.5 block text-xs text-gray-600">
+                              Loyalty points {Math.max(0, Math.floor(Number(customer.loyalty_points_balance) || 0))}
+                              {customer.credit_limit ? ` · limit ${money(customer.credit_limit)}` : ''}
+                            </span>
+                            {customerSales.some((sale) => isOverdueCreditSale(sale)) && (
+                              <span className="mt-0.5 block text-xs font-semibold text-amber-800">Overdue debt</span>
+                            )}
                             <span className="mt-0.5 block text-xs text-gray-500">
                               <Phone className="h-3 w-3 mr-1" /> {customer.phone || 'No phone number'}
                             </span>
+                            {(customer.address || preferredLocationName) && (
+                              <span className="mt-0.5 flex items-start gap-1 text-xs text-gray-500">
+                                <MapPin className="mt-0.5 h-3 w-3 shrink-0 text-gray-400" />
+                                <span className="min-w-0 break-words">
+                                  {[formatCustomerAddress(customer.address), preferredLocationName].filter(Boolean).join(' · ')}
+                                </span>
+                              </span>
+                            )}
                           </div>
                         </div>
                       </button>
@@ -662,7 +907,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                         </p>
                       </div>
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
+                    {isOwner && <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
                         onClick={() => startEdit(customer)}
@@ -691,12 +936,13 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                           ? 'Reminders off'
                           : 'Reminders on'}
                       </button>
-                    </div>
+                    </div>}
                   </div>
 
                   {expanded && (
                     <div className="space-y-3 border-t border-gray-100 bg-gray-50/50 p-4 backdrop-blur-sm">
-                      {customer.is_active === 1 && balance > 0 && (
+                      {isOwner && currentStore && <CustomerStatementPanel customer={customer} store={currentStore} />}
+                      {canTakeCustomerPayment && customer.is_active === 1 && balance > 0 && (
                         <div className="space-y-3 rounded-xl border border-amber-100 bg-amber-50 p-4 shadow-sm">
                           <div className="flex items-center gap-2">
                             <div className="rounded-lg bg-amber-100 p-1.5">
@@ -860,14 +1106,33 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                               Share
                             </button>
                           </div>
+                          <div className="mt-2">
+                            <ReceiptSendActions
+                              data={buildAccountReceiptData(receipt, customer.name)}
+                              defaultPhone={customer.phone || ''}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                      {onlineBalance[customer.id] !== undefined ? (
+                        <p className="text-sm font-semibold text-teal-800">Online shop wallet {money(onlineBalance[customer.id] || 0)}</p>
+                      ) : null}
+                      {onlineError && expanded ? <p className="text-xs text-amber-700">{onlineError}</p> : null}
+                      {(onlineByCustomer[customer.id] || []).map((entry) => (
+                        <div key={entry.id} className="flex items-center justify-between gap-3 text-sm">
+                          <span className="text-gray-700">{entry.description || entry.entry_type}</span>
+                          <span className="text-xs text-gray-400">{new Date(entry.created_at).toLocaleDateString()}</span>
+                          <span className={`font-semibold ${entry.direction === 'debit' ? 'text-teal-700' : 'text-emerald-700'}`}>
+                            {entry.direction === 'debit' ? '−' : '+'}{money(Number(entry.amount) || 0)}
+                          </span>
                         </div>
                       ))}
                       {(walletTransactionsByCustomer[customer.id] || []).map((entry) => (
                         <div key={entry.id} className="flex items-center justify-between gap-3 text-sm text-teal-700">
                           <span className="text-gray-700">{entry.description}</span>
                           <span className="text-xs text-gray-400">{new Date(entry.created_at).toLocaleDateString()}</span>
-                          <span className={`font-semibold ${entry.type === 'return_credit' ? 'text-emerald-700' : 'text-teal-700'}`}>
-                            {entry.type === 'return_credit' ? '+' : '−'}{money(entry.amount)}
+                          <span className={`font-semibold ${entry.type === 'return_credit' || entry.type === 'topup' || entry.type === 'refund' ? 'text-emerald-700' : 'text-teal-700'}`}>
+                            {entry.type === 'return_credit' || entry.type === 'topup' || entry.type === 'refund' || (entry.type === 'adjustment' && !entry.description.startsWith('Debit')) ? '+' : '−'}{money(entry.amount)}
                           </span>
                           <span className="text-xs text-gray-400">wallet {money(entry.balance_after)}</span>
                         </div>

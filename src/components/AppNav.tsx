@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, House,
-  CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare,
+  ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, House, Search, ClipboardCheck,
+  Sparkles, CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare, Moon, Sun,
   ShoppingCart, RotateCcw,
-  ContactRound, ArrowLeftRight, Building2,
+  ContactRound, ArrowLeftRight, Building2, Megaphone, Tag,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -13,7 +13,7 @@ import { COMMUNITY_CHAT_URL } from '@/lib/community';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
 import AccessibilityControls from '@/components/AccessibilityControls';
 import { useT } from '@/lib/i18n';
-import { canAccessCashbook } from '@/lib/staffAccess';
+import { canAccessCashbook, canRecordCustomerPayments } from '@/lib/staffAccess';
 
 interface AppNavProps {
   currentPage: string;
@@ -23,6 +23,8 @@ interface AppNavProps {
 interface NavItem {
   id: string;
   label: string;
+  /** Compact label used in the mobile bottom bar. */
+  shortLabel?: string;
   icon: LucideIcon;
   show: boolean;
   /** External destination opened in a new tab instead of in-app navigation. */
@@ -34,12 +36,22 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const t = useT();
   const [moreOpen, setMoreOpen] = useState(false);
   const [storeCount, setStoreCount] = useState(1);
+  const [darkMode, setDarkMode] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    return window.localStorage.getItem('adimat-theme') !== 'light';
+  });
   const leftHanded = useAccessibilityStore((state) => state.leftHanded);
   const isOwner = currentUser?.role === 'owner';
   const ecommerceEnabled = (currentStore?.ecommerce_enabled ?? 0) === 1;
   const canManageEcommerce =
     isOwner || (currentUser?.can_manage_ecommerce ?? 0) === 1;
   const cashbookOk = canAccessCashbook(currentUser);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', darkMode);
+    document.documentElement.style.colorScheme = darkMode ? 'dark' : 'light';
+    window.localStorage.setItem('adimat-theme', darkMode ? 'dark' : 'light');
+  }, [darkMode]);
 
   useEffect(() => {
     let active = true;
@@ -54,15 +66,26 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const navItems = useMemo<NavItem[]>(
     () =>
       [
-        { id: 'home', label: 'Home', icon: House, show: isOwner },
+        { id: 'home', label: t('nav.dashboard'), icon: House, show: isOwner },
         { id: 'pos', label: t('nav.pos'), icon: ScanBarcode, show: true },
-        { id: 'transactions', label: isOwner ? t('nav.sales') : t('nav.mySales'), icon: Receipt, show: true },
-        { id: 'customers', label: 'Customers', icon: ContactRound, show: isOwner },
+        { id: 'search', label: 'Search', icon: Search, show: true },
+        { id: 'adimat-ai', label: t('nav.adimatAi'), shortLabel: 'AI', icon: Sparkles, show: isOwner },
+        { id: 'stock-approvals', label: 'Stock approvals', shortLabel: 'Approvals', icon: ClipboardCheck, show: true },
+        {
+          id: 'transactions',
+          label: isOwner ? t('nav.salesRecords') : t('nav.mySales'),
+          shortLabel: isOwner ? t('nav.sales') : t('nav.mySales'),
+          icon: Receipt,
+          show: true,
+        },
+        { id: 'customers', label: 'Customers', icon: ContactRound, show: isOwner || canRecordCustomerPayments(currentUser) },
         { id: 'returns', label: 'Returns', icon: RotateCcw, show: isOwner },
         { id: 'expenses', label: t('nav.expenses'), icon: PiggyBank, show: true },
         { id: 'cashbook', label: t('nav.cashbook'), icon: BookOpen, show: cashbookOk },
         { id: 'devices', label: t('nav.devices'), icon: Bluetooth, show: true },
         { id: 'learn', label: 'Learn Adimat', icon: BookOpen, show: true },
+        { id: 'campaigns', label: 'Promotions', icon: Megaphone, show: true },
+        { id: 'store-deals', label: 'Deals & coupons', shortLabel: 'Deals', icon: Tag, show: isOwner },
         { id: 'subscription', label: t('nav.plan'), icon: CalendarClock, show: isOwner },
         { id: 'inventory', label: t('nav.inventory'), icon: Package, show: isOwner },
         { id: 'warehouse', label: 'Branch inventory', icon: ArrowLeftRight, show: isOwner },
@@ -98,6 +121,21 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const moreItems = navItems.filter((item) => !primaryIds.includes(item.id));
   const moreActive = moreItems.some((item) => item.id === currentPage);
 
+  // Group secondary items into logical sections for the mobile More sheet.
+  type NavGroup = { label: string; ids: string[] };
+  const navGroups: NavGroup[] = [
+    { label: t('nav.main'), ids: ['home', 'pos', 'search', 'adimat-ai', 'stock-approvals', 'transactions'] },
+    { label: 'Shop', ids: ['inventory', 'purchasing', 'warehouse', 'ecommerce', 'multistore', 'store-deals'] },
+    { label: 'Operations', ids: ['reports', 'expenses', 'cashbook', 'devices', 'subscription', 'returns', 'customers'] },
+    { label: 'Help', ids: ['learn', 'campaigns', 'community', 'settings'] },
+  ];
+  const groupedMoreItems = navGroups
+    .map((group) => ({
+      group,
+      items: navItems.filter((item) => group.ids.includes(item.id)),
+    }))
+    .filter((entry) => entry.items.length > 0);
+
   useEffect(() => {
     if (!moreOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -115,64 +153,82 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className={`hidden lg:flex w-56 xl:w-64 shrink-0 flex-col self-stretch bg-primary text-white border-primary-dark ${
-        leftHanded ? 'lg:order-2 border-l border-r-0' : 'border-r'
+      <aside className={`food-rail ios-pane hidden lg:flex w-[104px] shrink-0 flex-col self-stretch text-ink ${
+        leftHanded ? 'lg:order-2' : ''
       }`}>
-        <div className="px-4 py-5 border-b border-white/10">
-          <p className="text-emerald-200 text-[10px] font-semibold uppercase tracking-[0.14em]">Adimat</p>
-          <p className="font-bold text-xl tracking-tight truncate mt-1">{currentStore?.name || 'Store'}</p>
-          <p className="text-emerald-100/80 text-xs mt-1 truncate capitalize">
-            {currentUser?.name} · {currentUser?.role === 'owner' ? t('role.owner') : t('role.cashier')}
-          </p>
+        <div className="food-rail-logo" aria-hidden="true">
+          {currentUser?.photo_url?.startsWith('data:image/') ? (
+            <img src={currentUser.photo_url} alt="" />
+          ) : (
+            <span>{(currentUser?.name || 'A').slice(0, 1).toUpperCase()}</span>
+          )}
         </div>
-        <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-1">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = !item.href && currentPage === item.id;
-            const className = `w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors touch-target ${
-              isActive
-                ? 'bg-white text-primary shadow-sm'
-                : 'text-emerald-50 hover:bg-white/10'
-            }`;
-            const content = (
-              <>
-                <Icon className="w-5 h-5 flex-shrink-0" />
-                <span className="truncate">{item.label}</span>
-              </>
-            );
-            if (item.href) {
-              return (
-                <a
-                  key={item.id}
-                  href={item.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label={t('community.aria')}
-                  className={className}
-                >
-                  {content}
-                </a>
-              );
-            }
+        <p className="sr-only">{currentUser?.name || 'Signed in'} · {currentStore?.name || 'Store'}</p>
+        <nav className="flex-1 overflow-y-auto py-1 px-2 space-y-1">
+          {navGroups.map((group) => {
+            const groupItems = navItems.filter((item) => group.ids.includes(item.id));
+            if (groupItems.length === 0) return null;
             return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => onNavigate(item.id)}
-                className={className}
-              >
-                {content}
-              </button>
+              <div key={group.label} className="pt-1">
+                <p className="px-3 pb-1 pt-3 text-[13px] font-semibold text-muted">
+                  {group.label}
+                </p>
+                {groupItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = !item.href && currentPage === item.id;
+                  const className = `food-rail-item touch-target ${isActive ? 'is-active' : ''}`;
+                  const content = (
+                    <>
+                      <Icon className="w-5 h-5 flex-shrink-0" />
+                      <span className="truncate">{item.label}</span>
+                    </>
+                  );
+                  if (item.href) {
+                    return (
+                      <a
+                        key={item.id}
+                        href={item.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={t('community.aria')}
+                        className={className}
+                      >
+                        {content}
+                      </a>
+                    );
+                  }
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => onNavigate(item.id)}
+                      className={className}
+                    >
+                      {content}
+                    </button>
+                  );
+                })}
+              </div>
             );
           })}
         </nav>
-        <div className="p-2 border-t border-white/10 space-y-2">
+        <div className="food-rail-foot p-2 border-t border-white/10 space-y-1">
           <AccessibilityControls variant="sidebar" />
-          <LanguageSwitcher variant="onPrimary" compact />
+          <LanguageSwitcher variant="light" compact />
+          <button
+            type="button"
+            onClick={() => setDarkMode((enabled) => !enabled)}
+            aria-pressed={darkMode}
+            aria-label={darkMode ? 'Light mode' : 'Dark mode'}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-emerald-50 hover:bg-white/10 touch-target"
+          >
+            {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            {darkMode ? 'Light mode' : 'Dark mode'}
+          </button>
           <button
             type="button"
             onClick={switchUser}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-emerald-50 hover:bg-white/10 touch-target"
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-[12px] text-[15px] font-medium text-ink hover:bg-black/[0.04] touch-target"
           >
             <LogOut className="w-5 h-5" />
             {t('nav.switchUser')}
@@ -182,14 +238,14 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
 
       {/* Mobile bottom nav — primary destinations only */}
       <nav
-        className="lg:hidden fixed bottom-0 z-40 border-t border-emerald-100 bg-white/95 backdrop-blur-md shadow-[0_-8px_24px_rgba(15,23,42,0.06)]"
+        className="ios-tabbar lg:hidden fixed bottom-0 z-40"
         style={{
           left: 'env(safe-area-inset-left)',
           right: 'env(safe-area-inset-right)',
           paddingBottom: 'env(safe-area-inset-bottom)',
         }}
       >
-        <div className="mx-auto flex w-full max-w-3xl items-stretch justify-between gap-1 px-2 py-1.5">
+        <div className="mx-auto flex w-full max-w-lg items-stretch justify-around px-1 pt-1.5 pb-1">
           {primaryItems.map((item) => {
             const Icon = item.icon;
             const isActive = currentPage === item.id && !moreOpen;
@@ -198,15 +254,12 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
                 key={item.id}
                 type="button"
                 onClick={() => go(item.id)}
-                className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-2xl px-2 py-2.5 touch-target transition-colors ${
-                  isActive
-                    ? 'bg-emerald-50 text-primary'
-                    : 'text-slate-500 active:bg-slate-50'
-                }`}
+                data-active={isActive}
+                className="ios-tab-item flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-1 touch-target"
               >
-                <Icon className={`h-5 w-5 ${isActive ? 'stroke-[2.5]' : ''}`} />
-                <span className={`text-[11px] leading-none ${isActive ? 'font-bold' : 'font-medium'}`}>
-                  {item.label}
+                <Icon className="h-[22px] w-[22px]" strokeWidth={isActive ? 2.4 : 1.8} />
+                <span className={`max-w-full truncate text-[10px] leading-none tracking-tight ${isActive ? 'font-semibold' : 'font-medium'}`}>
+                  {item.shortLabel || item.label}
                 </span>
               </button>
             );
@@ -214,119 +267,129 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
           <button
             type="button"
             onClick={() => setMoreOpen((v) => !v)}
-            className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-2xl px-2 py-2.5 touch-target transition-colors ${
-              moreOpen || moreActive
-                ? 'bg-emerald-50 text-primary'
-                : 'text-slate-500 active:bg-slate-50'
-            }`}
+            data-active={moreOpen || moreActive}
+            className="ios-tab-item flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-1 touch-target"
             aria-expanded={moreOpen}
             aria-label={t('nav.moreMenu')}
           >
-            <MoreHorizontal className={`h-5 w-5 ${moreOpen || moreActive ? 'stroke-[2.5]' : ''}`} />
-            <span className={`text-[11px] leading-none ${moreOpen || moreActive ? 'font-bold' : 'font-medium'}`}>
+            <MoreHorizontal className="h-[22px] w-[22px]" strokeWidth={moreOpen || moreActive ? 2.4 : 1.8} />
+            <span className={`text-[10px] leading-none tracking-tight ${moreOpen || moreActive ? 'font-semibold' : 'font-medium'}`}>
               {t('common.more')}
             </span>
           </button>
         </div>
       </nav>
 
-      {/* Mobile More sheet */}
+      {/* Mobile More sheet — grouped vertical list for 12+ items */}
       {moreOpen && (
         <div className="lg:hidden fixed inset-0 z-50 flex flex-col justify-end">
           <button
             type="button"
-            className="absolute inset-0 bg-slate-900/40"
+            className="absolute inset-0 bg-black/40"
             aria-label={t('common.close')}
             onClick={() => setMoreOpen(false)}
           />
           <div
-            className="relative max-h-[75vh] overflow-y-auto rounded-t-3xl bg-white shadow-2xl animate-slide-up"
-            style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+            className="ios-glass relative max-h-[82vh] max-h-[82dvh] overflow-y-auto rounded-t-[20px] shadow-2xl animate-slide-up"
+            style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
           >
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white px-4 py-3 rounded-t-3xl">
-              <div className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-primary">
-                  {t('common.menu')}
-                </p>
-                <p className="truncate text-sm font-bold text-slate-900">
-                  {currentStore?.name || t('common.store')}
-                </p>
+            <div className="ios-pane sticky top-0 z-10 px-4 pb-2 pt-2">
+              <div className="mx-auto mb-2 h-[5px] w-9 rounded-full bg-black/20" />
+              <div className="flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-[13px] font-semibold text-muted">
+                    {t('common.menu')}
+                  </p>
+                  <p className="truncate text-[17px] font-bold tracking-tight text-ink">
+                    {currentStore?.name || t('common.store')}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMoreOpen(false)}
+                  className="icon-btn"
+                  aria-label="Close"
+                >
+                  <X className="h-5 w-5" />
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setMoreOpen(false)}
-                className="rounded-full bg-slate-100 p-2 text-slate-600 touch-target"
-                aria-label="Close"
-              >
-                <X className="h-5 w-5" />
-              </button>
             </div>
 
-            <div className="grid grid-cols-3 gap-2 p-4">
-              {moreItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = !item.href && currentPage === item.id;
-                const className = `flex flex-col items-center justify-center gap-2 rounded-2xl border px-2 py-4 touch-target transition-colors ${
-                  isActive
-                    ? 'border-emerald-200 bg-emerald-50 text-primary'
-                    : 'border-slate-100 bg-slate-50 text-slate-700 active:bg-emerald-50'
-                }`;
-                const content = (
-                  <>
-                    <span
-                      className={`flex h-11 w-11 items-center justify-center rounded-2xl ${
-                        isActive ? 'bg-primary text-white' : 'bg-white text-primary shadow-sm'
-                      }`}
-                    >
-                      <Icon className="h-5 w-5" />
-                    </span>
-                    <span className={`text-xs ${isActive ? 'font-bold' : 'font-semibold'}`}>
-                      {item.label}
-                    </span>
-                  </>
-                );
-                if (item.href) {
-                  return (
-                    <a
-                      key={item.id}
-                      href={item.href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      aria-label={t('community.aria')}
-                      onClick={() => setMoreOpen(false)}
-                      className={className}
-                    >
-                      {content}
-                    </a>
-                  );
-                }
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => go(item.id)}
-                    className={className}
-                  >
-                    {content}
-                  </button>
-                );
-              })}
-            </div>
+            <div className="space-y-4 px-4 py-2">
+              {groupedMoreItems.map(({ group, items }) => (
+                <div key={group.label}>
+                  <div className="px-3 pb-1.5 text-[13px] font-semibold text-muted">
+                    {group.label}
+                  </div>
+                  <div className="overflow-hidden rounded-[14px] bg-white shadow-[0_0_0_0.5px_rgba(60,60,67,0.12)]">
+                    {items.map((item) => {
+                      const Icon = item.icon;
+                      const isActive = !item.href && currentPage === item.id;
+                      const className = `flex w-full items-center gap-3 border-b border-black/[0.06] px-3 py-2.5 text-left touch-target last:border-b-0 ${
+                        isActive ? 'text-primary' : 'text-ink active:bg-black/[0.04]'
+                      }`;
+                      const content = (
+                        <>
+                          <Icon className="h-5 w-5 flex-shrink-0" strokeWidth={isActive ? 2.4 : 1.8} />
+                          <span className={`text-[17px] tracking-tight ${isActive ? 'font-semibold' : 'font-normal'}`}>
+                            {item.label}
+                          </span>
+                        </>
+                      );
+                      if (item.href) {
+                        return (
+                          <a
+                            key={item.id}
+                            href={item.href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={t('community.aria')}
+                            onClick={() => setMoreOpen(false)}
+                            className={className}
+                          >
+                            {content}
+                          </a>
+                        );
+                      }
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => go(item.id)}
+                          className={className}
+                        >
+                          {content}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
 
-            <div className="px-4 pb-2 space-y-2">
-              <AccessibilityControls variant="menu" />
-              <LanguageSwitcher compact />
-              <button
-                type="button"
-                onClick={() => {
-                  setMoreOpen(false);
-                  switchUser();
-                }}
-                className="flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3.5 text-sm font-semibold text-rose-700 touch-target"
-              >
-                <LogOut className="h-4 w-4" />
-                {t('nav.switchUser')}
-              </button>
+              <div className="space-y-2 pt-1">
+                <AccessibilityControls variant="menu" />
+  <LanguageSwitcher compact />
+  <button
+  type="button"
+  onClick={() => setDarkMode((enabled) => !enabled)}
+  aria-pressed={darkMode}
+  className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 touch-target dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+  >
+  {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+  {darkMode ? 'Light mode' : 'Dark mode'}
+  </button>
+  <button
+  type="button"
+  onClick={() => {
+                    setMoreOpen(false);
+                    switchUser();
+                  }}
+                  className="flex w-full items-center justify-center gap-2 rounded-[14px] bg-white px-4 py-3 text-[17px] font-normal text-[#FF3B30] touch-target shadow-[0_0_0_0.5px_rgba(60,60,67,0.12)]"
+                >
+                  <LogOut className="h-4 w-4" />
+                  {t('nav.switchUser')}
+                </button>
+              </div>
             </div>
           </div>
         </div>

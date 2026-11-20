@@ -1,59 +1,85 @@
 import { lazy, Suspense, useState, useEffect, type ReactNode } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { initAutoSync, startLiveStockSync, stopAutoSync, triggerPushSync } from '@/lib/sync';
+import { sendDeviceHeartbeat } from '@/lib/devicePresence';
 import { autoReconnectPeripherals } from '@/lib/bluetoothPeripherals';
 import { clearAdminSession, restoreAdminSession } from '@/lib/adminAuth';
 import { isValidGhanaPhone } from '@/lib/platformSettings';
 import { getUnlockedWarehouseLocationId } from '@/lib/warehouseAccess';
-import PWAInstallBanner from '@/components/PWAInstallBanner';
 import SubscriptionWarningBanner from '@/components/SubscriptionWarningBanner';
 import StoreBrandingBar from '@/components/StoreBrandingBar';
+import { SyncStatusBanner } from '@/components/ui/SyncStatusBanner';
+import { SyncToast } from '@/components/ui/Toast';
 import AppNav from '@/components/AppNav';
 import AddPhonePrompt from '@/components/AddPhonePrompt';
 import SessionTimeoutGuard from '@/components/SessionTimeoutGuard';
-import StoreSetupPage from '@/pages/StoreSetupPage';
-import LoginPage from '@/pages/LoginPage';
-import CashierBlockedPage from '@/pages/CashierBlockedPage';
-import StoreAccessBlockedPage from '@/pages/StoreAccessBlockedPage';
-import POSPage from '@/pages/POSPage';
-import InventoryPage from '@/pages/InventoryPage';
-import ReportsPage from '@/pages/ReportsPage';
-import ExpensesPage from '@/pages/ExpensesPage';
-import CashBookPage from '@/pages/CashBookPage';
-import SettingsPage from '@/pages/SettingsPage';
-import DevicesPage from '@/pages/DevicesPage';
-import TransactionsPage from '@/pages/TransactionsPage';
-import CustomersPage from '@/pages/CustomersPage';
-import ReturnsPage from '@/pages/ReturnsPage';
-import SubscriptionPage from '@/pages/SubscriptionPage';
-import WarehousePage from '@/pages/WarehousePage';
-import EcommercePage from '@/pages/EcommercePage';
-import PurchasingPage from '@/pages/PurchasingPage';
-import OwnerHomePage from '@/pages/OwnerHomePage';
-import MultiStorePage from '@/pages/MultiStorePage';
-import LearnAdimatPage from '@/pages/LearnAdimatPage';
-import PublicShopPage from '@/pages/PublicShopPage';
-import TermsPage from '@/pages/TermsPage';
-import NotFoundPage from '@/pages/NotFoundPage';
-const PriceScanPage = lazy(() => import('@/pages/PriceScanPage'));
-import AdminLoginPage from '@/pages/AdminLoginPage';
-import AdminDashboardPage from '@/pages/AdminDashboardPage';
+const StoreSetupPage = lazy(() => import('@/pages/StoreSetupPage'));
+const LoginPage = lazy(() => import('@/pages/LoginPage'));
+const CashierBlockedPage = lazy(() => import('@/pages/CashierBlockedPage'));
+const StoreAccessBlockedPage = lazy(() => import('@/pages/StoreAccessBlockedPage'));
+const POSPage = lazy(() => import('@/pages/POSPage'));
+const CustomerDisplayPage = lazy(() => import('@/pages/CustomerDisplayPage'));
+const SearchPage = lazy(() => import('@/pages/SearchPage'));
+const InventoryPage = lazy(() => import('@/pages/InventoryPage'));
+const ReportsPage = lazy(() => import('@/pages/ReportsPage'));
+const ExpensesPage = lazy(() => import('@/pages/ExpensesPage'));
+const CashBookPage = lazy(() => import('@/pages/CashBookPage'));
+const SettingsPage = lazy(() => import('@/pages/SettingsPage'));
+const DevicesPage = lazy(() => import('@/pages/DevicesPage'));
+const TransactionsPage = lazy(() => import('@/pages/TransactionsPage'));
+const CustomersPage = lazy(() => import('@/pages/CustomersPage'));
+const ReturnsPage = lazy(() => import('@/pages/ReturnsPage'));
+const SubscriptionPage = lazy(() => import('@/pages/SubscriptionPage'));
+const WarehousePage = lazy(() => import('@/pages/WarehousePage'));
+const EcommercePage = lazy(() => import('@/pages/EcommercePage'));
+const PurchasingPage = lazy(() => import('@/pages/PurchasingPage'));
+const StockApprovalsPage = lazy(() => import('@/pages/StockApprovalsPage'));
+const AdimatAiPage = lazy(() => import('@/pages/AdimatAiPage'));
+const OwnerHomePage = lazy(() => import('@/pages/OwnerHomePage'));
+const MultiStorePage = lazy(() => import('@/pages/MultiStorePage'));
+const LearnAdimatPage = lazy(() => import('@/pages/LearnAdimatPage'));
+const CampaignsPage = lazy(() => import('@/pages/CampaignsPage'));
+const StoreDealsPage = lazy(() => import('@/pages/StoreDealsPage'));
+const PublicShopPage = lazy(() => import('@/pages/PublicShopPage'));
+const TermsPage = lazy(() => import('@/pages/TermsPage'));
+const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
+const AdminLoginPage = lazy(() => import('@/pages/AdminLoginPage'));
+const AdminDashboardPage = lazy(() => import('@/pages/AdminDashboardPage'));
+const AgentLoginPage = lazy(() => import('@/pages/AgentLoginPage'));
+const AgentShell = lazy(() => import('@/components/AgentShell'));
+import { useAgentAuthStore } from '@/store/useAgentAuthStore';
 import { isStoreAccessBlocked } from '@/lib/subscription';
 import { checkAndSendSubscriptionExpirySms } from '@/lib/subscriptionReminders';
 import { checkAndSendDebtReminders } from '@/lib/debtReminders';
-import { canAccessCashbook } from '@/lib/staffAccess';
+import { flushSmsOutbox, sendClosingSummary } from '@/lib/smsOutbox';
+import { canAccessCashbook, canRecordCustomerPayments } from '@/lib/staffAccess';
 import { createAutomaticStoreBackup, recordBackupIssue } from '@/lib/storeBackup';
 import { createDueRecurringExpenses } from '@/lib/dexie';
 import { flushPriceChanges } from '@/lib/priceChangeQueue';
 import { useAccessibilityStore } from '@/lib/accessibility';
 
-type AppMode = 'store' | 'admin-login' | 'admin';
+type AppMode = 'store' | 'admin-login' | 'admin' | 'agent-login' | 'agent';
 
 function readPublicShopSlug(): string | null {
   if (typeof window === 'undefined') return null;
   const hash = window.location.hash.replace(/^#/, '');
   const match = hash.match(/^\/?shop\/([^/?#]+)/i);
-  return match?.[1] ? decodeURIComponent(match[1]).trim().toLowerCase() : null;
+  if (match?.[1]) return decodeURIComponent(match[1]).trim().toLowerCase();
+  const recovery = new URLSearchParams(window.location.search).get('shop_recovery');
+  return recovery ? decodeURIComponent(recovery).trim().toLowerCase() : null;
+}
+
+function readAgentHash(): boolean {
+  if (typeof window === 'undefined') return false;
+  const hash = window.location.hash.replace(/^#/, '').replace(/^\//, '').replace(/\/$/, '');
+  return hash.toLowerCase() === 'agent';
+}
+
+function isCustomerDisplayRoute(): boolean {
+  if (typeof window === 'undefined') return false;
+  const hash = window.location.hash.replace(/^#/, '').replace(/\/$/, '').toLowerCase();
+  const path = window.location.pathname.replace(/\/$/, '').toLowerCase();
+  return hash === '/pos/customer-display' || path === '/pos/customer-display';
 }
 
 function readPriceScanSlug(): string | null {
@@ -68,9 +94,21 @@ function readPublicUtilityRoute(): 'terms' | '404' | null {
   const hash = window.location.hash.replace(/^#/, '').replace(/^\//, '').replace(/\/$/, '');
   if (!hash) return null;
   if (hash.toLowerCase() === 'terms') return 'terms';
+  if (hash.toLowerCase() === 'agent') return null;
   if (/^shop\//i.test(hash)) return null;
   if (/^price-scan\//i.test(hash)) return null;
   return '404';
+}
+
+function openAgentHash(): void {
+  if (readAgentHash()) return;
+  window.location.hash = '#/agent';
+}
+
+function clearAgentHash(): void {
+  if (!readAgentHash()) return;
+  const next = `${window.location.pathname}${window.location.search}`;
+  window.history.replaceState(null, '', next);
 }
 
 function userNeedsPhone(user: { phone?: string | null } | null | undefined): boolean {
@@ -79,12 +117,26 @@ function userNeedsPhone(user: { phone?: string | null } | null | undefined): boo
 }
 
 export default function App() {
+  if (isCustomerDisplayRoute()) return <CustomerDisplayRoute />;
+  return <AuthenticatedApp />;
+}
+
+function CustomerDisplayRoute() {
+  const initialize = useAuthStore((state) => state.initialize);
+  useEffect(() => {
+    void initialize(true);
+  }, [initialize]);
+  return <Suspense fallback={<div className="min-h-screen bg-slate-950" />}><CustomerDisplayPage /></Suspense>;
+}
+
+function AuthenticatedApp() {
   const { isAuthenticated, currentUser, currentStore, isStoreSetup, isLoading, initialize, switchUser } =
     useAuthStore();
+  const initializeAgent = useAgentAuthStore((state) => state.initialize);
   const leftHanded = useAccessibilityStore((state) => state.leftHanded);
   const [currentPage, setCurrentPage] = useState('home');
   const [quickAction, setQuickAction] = useState<'add-product' | 'add-expense' | null>(null);
-  const [appMode, setAppMode] = useState<AppMode>('store');
+  const [appMode, setAppMode] = useState<AppMode>(() => (readAgentHash() ? 'agent-login' : 'store'));
   const [adminSessionResolved, setAdminSessionResolved] = useState(false);
   const [publicShopSlug, setPublicShopSlug] = useState<string | null>(() => readPublicShopSlug());
   const [priceScanSlug, setPriceScanSlug] = useState<string | null>(() => readPriceScanSlug());
@@ -94,7 +146,7 @@ export default function App() {
     let active = true;
     void restoreAdminSession()
       .then((isActive) => {
-        if (active && isActive) setAppMode('admin');
+        if (active && isActive && !readAgentHash()) setAppMode('admin');
       })
       .catch((error) => {
         console.error('Could not restore administrator session', error);
@@ -123,10 +175,21 @@ export default function App() {
 
   useEffect(() => {
     initialize();
+    void initializeAgent();
     initAutoSync();
     void autoReconnectPeripherals();
     return () => stopAutoSync();
-  }, [initialize]);
+  }, [initialize, initializeAgent]);
+
+  useEffect(() => {
+    const onAgentHash = () => {
+      if (!readAgentHash()) return;
+      setPublicUtilityRoute(null);
+      setAppMode((mode) => (mode === 'agent' ? mode : 'agent-login'));
+    };
+    window.addEventListener('hashchange', onAgentHash);
+    return () => window.removeEventListener('hashchange', onAgentHash);
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated || !currentStore?.id) return;
@@ -144,6 +207,44 @@ export default function App() {
     if (!isAuthenticated || !currentStore?.id) return;
     return startLiveStockSync(currentStore.id);
   }, [isAuthenticated, currentStore?.id]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentStore?.id || !currentUser?.id) return;
+    let active = true;
+    let heartbeatInProgress = false;
+    let hasLoggedFailure = false;
+
+    const sendHeartbeat = async () => {
+      if (!active || heartbeatInProgress || navigator.onLine === false) return;
+      heartbeatInProgress = true;
+      try {
+        await sendDeviceHeartbeat(currentStore.id, currentUser.id);
+        hasLoggedFailure = false;
+      } catch (error) {
+        if (!hasLoggedFailure) {
+          console.warn('[Presence] Could not update this device session:', error);
+          hasLoggedFailure = true;
+        }
+      } finally {
+        heartbeatInProgress = false;
+      }
+    };
+
+    void sendHeartbeat();
+    const interval = window.setInterval(() => void sendHeartbeat(), 60_000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void sendHeartbeat();
+    };
+    const onOnline = () => void sendHeartbeat();
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', onOnline);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', onOnline);
+    };
+  }, [isAuthenticated, currentStore?.id, currentUser?.id]);
 
   useEffect(() => {
     if (!isAuthenticated || !currentStore?.id) return;
@@ -199,11 +300,13 @@ export default function App() {
   useEffect(() => {
     // Cashiers cannot stay on owner-only pages after switch/login
     if (currentUser?.role !== 'cashier') return;
-    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'customers', 'returns', 'multistore'];
+    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'returns', 'multistore', 'adimat-ai', 'store-deals'];
     const ecommerceOk = (currentUser.can_manage_ecommerce ?? 0) === 1;
     const cashbookOk = canAccessCashbook(currentUser);
+    const customerPaymentsOk = canRecordCustomerPayments(currentUser);
     if (
       ownerOnly.includes(currentPage) ||
+      (currentPage === 'customers' && !customerPaymentsOk) ||
       (currentPage === 'ecommerce' && !ecommerceOk) ||
       (currentPage === 'cashbook' && !cashbookOk)
     ) {
@@ -237,6 +340,21 @@ export default function App() {
     const timer = window.setInterval(() => void checkAndSendDebtReminders(), 6 * 60 * 60 * 1000);
     return () => window.clearInterval(timer);
   }, [isAuthenticated, currentStore?.id, currentUser?.role]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentStore?.id) return;
+    const run = () => {
+      void flushSmsOutbox(currentStore.id);
+      if (currentUser?.role === 'owner') void sendClosingSummary(currentStore);
+    };
+    run();
+    const timer = window.setInterval(run, 60_000);
+    window.addEventListener('online', run);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('online', run);
+    };
+  }, [isAuthenticated, currentStore, currentUser?.role]);
 
   if (publicShopSlug) {
     return <PublicShopPage slug={publicShopSlug} />;
@@ -279,6 +397,37 @@ export default function App() {
     );
   }
 
+  if (appMode === 'agent-login') {
+    return (
+      <div className="h-full flex flex-col">
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <AgentLoginPage
+            onOpenStore={() => {
+              clearAgentHash();
+              setAppMode('store');
+            }}
+            onAgentLogin={() => setAppMode('agent')}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (appMode === 'agent') {
+    return (
+      <div className="h-full flex flex-col">
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <AgentShell
+            onLogout={() => {
+              clearAgentHash();
+              setAppMode('agent-login');
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   if (isLoading) {
     return (
       <div className="h-full bg-primary flex items-center justify-center">
@@ -295,9 +444,14 @@ export default function App() {
   if (!isStoreSetup) {
     return (
       <div className="h-full flex flex-col">
-        <PWAInstallBanner />
         <div className="flex-1 min-h-0 overflow-y-auto">
-          <StoreSetupPage onOpenAdmin={() => setAppMode('admin-login')} />
+          <StoreSetupPage
+            onOpenAdmin={() => setAppMode('admin-login')}
+            onOpenAgent={() => {
+              openAgentHash();
+              setAppMode('agent-login');
+            }}
+          />
         </div>
       </div>
     );
@@ -306,10 +460,13 @@ export default function App() {
   if (!isAuthenticated) {
     return (
       <div className="h-full flex flex-col">
-        <PWAInstallBanner />
         <div className="flex-1 min-h-0 overflow-y-auto">
           <LoginPage
             onOpenAdmin={() => setAppMode('admin-login')}
+            onOpenAgent={() => {
+              openAgentHash();
+              setAppMode('agent-login');
+            }}
             onWarehouseLoginSuccess={() => setCurrentPage('warehouse')}
           />
         </div>
@@ -327,7 +484,6 @@ export default function App() {
   if (isStoreAccessBlocked(currentStore)) {
     return authenticatedChrome(
       <div className="h-full flex flex-col">
-        <PWAInstallBanner />
         <div className="flex-1 min-h-0 overflow-y-auto">
           <StoreAccessBlockedPage />
         </div>
@@ -338,7 +494,6 @@ export default function App() {
   if (currentUser?.role === 'cashier' && currentUser.is_active === 0) {
     return authenticatedChrome(
       <div className="h-full flex flex-col">
-        <PWAInstallBanner />
         <div className="flex-1 min-h-0 overflow-y-auto">
           <CashierBlockedPage />
         </div>
@@ -363,10 +518,12 @@ export default function App() {
         }} /> : <POSPage />;
       case 'pos':
         return <POSPage onNavigate={setCurrentPage} />;
+      case 'search':
+        return <SearchPage onNavigate={setCurrentPage} />;
       case 'transactions':
         return <TransactionsPage />;
       case 'customers':
-        return role === 'owner' ? <CustomersPage onNavigate={setCurrentPage} /> : <POSPage />;
+        return canRecordCustomerPayments(currentUser) ? <CustomersPage onNavigate={setCurrentPage} /> : <POSPage />;
       case 'multistore':
         return role === 'owner' ? <MultiStorePage onNavigate={setCurrentPage} /> : <POSPage />;
       case 'returns':
@@ -375,12 +532,20 @@ export default function App() {
         return <DevicesPage />;
       case 'learn':
         return currentUser ? <LearnAdimatPage onNavigate={setCurrentPage} /> : <POSPage />;
+      case 'campaigns':
+        return currentUser ? <CampaignsPage /> : <POSPage />;
+      case 'store-deals':
+        return role === 'owner' ? <StoreDealsPage /> : <POSPage />;
       case 'subscription':
         return role === 'owner' ? <SubscriptionPage /> : <POSPage />;
       case 'inventory':
         return role === 'owner' ? <InventoryPage openAddOnLoad={quickAction === 'add-product'} onQuickActionHandled={() => setQuickAction(null)} /> : <POSPage />;
       case 'purchasing':
         return role === 'owner' ? <PurchasingPage /> : <POSPage />;
+      case 'stock-approvals':
+        return <StockApprovalsPage />;
+      case 'adimat-ai':
+        return role === 'owner' ? <AdimatAiPage onNavigate={setCurrentPage} /> : <POSPage />;
       case 'warehouse':
         return role === 'owner' ? (
           <WarehousePage onBackToSettings={leaveWarehouse} />
@@ -410,7 +575,7 @@ export default function App() {
 
   return authenticatedChrome(
     <div
-      className="h-full w-full min-w-0 flex flex-col lg:flex-row overflow-hidden bg-[var(--color-surface)]"
+      className="ios-canvas h-full w-full min-w-0 flex flex-col lg:flex-row overflow-hidden"
       style={{
         paddingTop: 'env(safe-area-inset-top)',
         paddingLeft: 'env(safe-area-inset-left)',
@@ -419,15 +584,24 @@ export default function App() {
     >
       <AppNav currentPage={currentPage} onNavigate={setCurrentPage} />
       <div className={`flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden ${leftHanded ? 'lg:order-1' : ''}`}>
-        <PWAInstallBanner />
+        <SyncStatusBanner />
+        <SyncToast />
         <SubscriptionWarningBanner
           onOpenPlan={
             currentUser?.role === 'owner' ? () => setCurrentPage('subscription') : undefined
           }
         />
-        <StoreBrandingBar />
+        {currentPage !== 'pos' && <StoreBrandingBar />}
         <div className="flex-1 min-h-0 overflow-hidden pb-[calc(4.75rem+env(safe-area-inset-bottom))] lg:pb-0">
-          {renderPage()}
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center" role="status">
+                <p className="text-sm font-medium text-muted">Loading…</p>
+              </div>
+            }
+          >
+            {renderPage()}
+          </Suspense>
         </div>
       </div>
       {needsPhone && <AddPhonePrompt />}

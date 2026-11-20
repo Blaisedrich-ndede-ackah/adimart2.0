@@ -5,6 +5,8 @@
 
 import { isSupabaseConfigured, supabase } from './supabase';
 import { generateId, hashUserPin } from './dexie';
+import { parseOtherCharges } from './otherCharges';
+import type { ReceiptData } from './printService';
 import {
   getSubscriptionInfo,
   type SubscriptionStatus,
@@ -102,6 +104,25 @@ export interface AdminTransactionRow {
   status: string;
   created_at: string;
   receipt_number: string;
+  cashier_name: string;
+  discount_applied: number;
+  customer_name: string;
+  customer_phone: string;
+  credit_balance: number;
+  manual_payment_amount: number;
+  wallet_amount: number;
+  payment_reference: string;
+  paystack_reference: string;
+  other_charges_json: string;
+}
+
+export interface AdminTransactionItemRow {
+  id: string;
+  transaction_id: string;
+  product_name: string;
+  quantity: number;
+  unit_price: number;
+  subtotal: number;
 }
 
 export interface AdminPayoutRow {
@@ -221,6 +242,75 @@ async function fetchAllRows<T>(table: string, select = '*'): Promise<T[]> {
   return rows;
 }
 
+/**
+ * Line items for the given transactions so the admin portal can show and print
+ * the real receipt. The cloud keeps them in `transaction_items`.
+ */
+export async function loadAdminTransactionItems(
+  transactionIds: string[]
+): Promise<AdminTransactionItemRow[]> {
+  if (!isSupabaseConfigured() || transactionIds.length === 0) return [];
+  const rows: AdminTransactionItemRow[] = [];
+  const chunkSize = 50;
+
+  for (let i = 0; i < transactionIds.length; i += chunkSize) {
+    const chunk = transactionIds.slice(i, i + chunkSize);
+    const { data, error } = await supabase
+      .from('transaction_items')
+      .select('id, transaction_id, product_name, quantity, unit_price, subtotal')
+      .in('transaction_id', chunk);
+    if (error) throw new Error(error.message);
+    for (const row of (data || []) as Record<string, unknown>[]) {
+      rows.push({
+        id: String(row.id),
+        transaction_id: String(row.transaction_id),
+        product_name: String(row.product_name || ''),
+        quantity: Number(row.quantity) || 0,
+        unit_price: Number(row.unit_price) || 0,
+        subtotal: Number(row.subtotal) || 0,
+      });
+    }
+  }
+
+  return rows;
+}
+
+/** Build a printable receipt for a cloud transaction. */
+export function buildAdminReceiptData(
+  tx: AdminTransactionRow,
+  items: AdminTransactionItemRow[],
+  store?: { name: string; address?: string; support_number?: string }
+): ReceiptData {
+  const lineSubtotal = items.reduce((sum, item) => sum + (item.subtotal || 0), 0);
+
+  return {
+    storeName: store?.name || 'Store',
+    storeAddress: store?.address || '',
+    supportNumber: store?.support_number || '',
+    receiptNumber: tx.receipt_number,
+    cashierName: tx.cashier_name || '',
+    dateTime: new Date(tx.created_at).toLocaleString('en-GH'),
+    items: items.map((item) => ({
+      name: item.product_name,
+      quantity: item.quantity,
+      unitPrice: item.unit_price,
+      subtotal: item.subtotal,
+    })),
+    subtotal: Math.round(lineSubtotal * 100) / 100,
+    discount: tx.discount_applied || 0,
+    otherCharges: parseOtherCharges(tx.other_charges_json),
+    total: tx.total_amount,
+    paymentMethod: tx.payment_method,
+    cashAmount: tx.cash_amount,
+    paystackAmount: tx.paystack_amount,
+    manualPaymentAmount: tx.manual_payment_amount,
+    walletAmount: tx.wallet_amount,
+    paymentReference: tx.payment_reference || tx.paystack_reference,
+    customerName: tx.customer_name,
+    outstandingBalance: tx.credit_balance,
+  };
+}
+
 export async function loadAdminDashboard(weekStart = getWeekStart()): Promise<AdminDashboardData> {
   if (!isSupabaseConfigured()) {
     throw new Error('Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY so the admin portal can load cloud data.');
@@ -306,6 +396,16 @@ export async function loadAdminDashboard(weekStart = getWeekStart()): Promise<Ad
       status: String(t.status || ''),
       created_at: String(t.created_at || ''),
       receipt_number: String(t.receipt_number || ''),
+      cashier_name: String(t.cashier_name || ''),
+      discount_applied: Number(t.discount_applied) || 0,
+      customer_name: String(t.customer_name || ''),
+      customer_phone: String(t.customer_phone || ''),
+      credit_balance: Number(t.credit_balance) || 0,
+      manual_payment_amount: Number(t.manual_payment_amount) || 0,
+      wallet_amount: Number(t.wallet_amount) || 0,
+      payment_reference: String(t.payment_reference || ''),
+      paystack_reference: String(t.paystack_reference || ''),
+      other_charges_json: String(t.other_charges_json || ''),
     }));
 
   const payouts: AdminPayoutRow[] = payoutsRaw.map((p) => ({

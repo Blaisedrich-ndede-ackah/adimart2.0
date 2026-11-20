@@ -30,7 +30,8 @@ import { useT } from '@/lib/i18n';
 import { toQty } from '@/lib/warehouse';
 import { buildCustomerBalances } from '@/lib/customerBalances';
 import { useLiveStoreSales } from '@/hooks/useLiveStoreSales';
-import { getPendingPriceChanges } from '@/lib/priceChangeQueue';
+import DailyBriefCard from '@/components/DailyBriefCard';
+import SmsWalletCard from '@/components/SmsWalletCard';
 
 interface OwnerHomePageProps {
   onNavigate: (page: string, quickAdd?: boolean) => void;
@@ -73,13 +74,17 @@ function timeAgo(iso: string): string {
 }
 
 export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
-  const { currentStore } = useAuthStore();
+  const { currentStore, currentUser } = useAuthStore();
   const money = useFormatMoney();
   const t = useT();
   const [transactions, setTransactions] = useState<LocalTransaction[]>([]);
   const [monthSales, setMonthSales] = useState(0);
   const [lowStockCount, setLowStockCount] = useState(0);
+  const [outOfStockCount, setOutOfStockCount] = useState(0);
   const [outstandingCredit, setOutstandingCredit] = useState(0);
+  const [todayExpenses, setTodayExpenses] = useState(0);
+  const [todayNet, setTodayNet] = useState(0);
+  const [cashAfterExpenses, setCashAfterExpenses] = useState(0);
   const [dailyTarget, setDailyTarget] = useState(0);
   const [monthlyTarget, setMonthlyTarget] = useState(0);
   const [linkedStoreCount, setLinkedStoreCount] = useState(1);
@@ -108,20 +113,38 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
     try {
       const start = startOfToday().getTime();
       const monthStart = startOfMonth().getTime();
-      const [allTransactions, products, storeRow, balances, stores] = await Promise.all([
+      const [allTransactions, products, storeRow, balances, stores, expenseRows, itemRows] = await Promise.all([
         db.transactions.where('store_id').equals(storeId).toArray(),
         db.products.where('store_id').equals(storeId).and((product) => product.is_active === 1).toArray(),
         db.stores.get(storeId),
         buildCustomerBalances(storeId),
         listLocalStores(),
+        db.expenses.where('store_id').equals(storeId).toArray(),
+        db.transaction_items.where('store_id').equals(storeId).toArray(),
       ]);
 
-      const completed = allTransactions.filter((transaction) => transaction.status === 'completed');
-      setTransactions(
-        completed.filter((transaction) =>
-          new Date(transaction.created_at).getTime() >= start
-        )
+      const completed = allTransactions.filter((transaction) => transaction.status === 'completed' && transaction.void_status !== 'voided');
+      const todaySales = completed.filter((transaction) =>
+        new Date(transaction.created_at).getTime() >= start
       );
+      setTransactions(todaySales);
+      const todayKey = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
+      const dayExpenses = expenseRows.filter((expense) => (expense.expense_date || expense.created_at).slice(0, 10) === todayKey || (
+        !expense.expense_date && new Date(expense.created_at).getTime() >= start
+      ));
+      const expenseTotal = dayExpenses.reduce((sum, expense) => sum + toNumber(expense.amount), 0);
+      const cashSpent = dayExpenses.reduce((sum, expense) => sum + (expense.payment_method === 'cash' ? toNumber(expense.amount) : 0), 0);
+      const productCost = new Map(products.map((product) => [product.id, toNumber(product.cost_price)]));
+      const todayIds = new Set(todaySales.map((sale) => sale.id));
+      const cogs = itemRows.reduce((sum, item) => (
+        todayIds.has(item.transaction_id)
+          ? sum + (toNumber(item.base_quantity || item.quantity) * (productCost.get(item.product_id) || 0))
+          : sum
+      ), 0);
+      const salesTotal = todaySales.reduce((sum, sale) => sum + toNumber(sale.total_amount), 0);
+      setTodayExpenses(expenseTotal);
+      setTodayNet(salesTotal - cogs - expenseTotal);
+      setCashAfterExpenses(todaySales.reduce((sum, sale) => sum + toNumber(sale.cash_amount), 0) - cashSpent);
       setMonthSales(
         completed.reduce(
           (total, transaction) =>
@@ -135,6 +158,7 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
         const level = toNumber(product.reorder_level) > 0 ? toNumber(product.reorder_level) : 5;
         return toQty(product.stock_level) <= level;
       }).length);
+      setOutOfStockCount(products.filter((product: LocalProduct) => toQty(product.stock_level) <= 0).length);
 
       let credit = 0;
       for (const balance of balances.values()) credit += balance.total;
@@ -190,7 +214,9 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
 
   const actions: QuickAction[] = [
     { label: 'New sale', detail: 'Open the till', page: 'pos', icon: ShoppingCart, className: 'bg-primary text-white' },
+    { label: 'Sales records', detail: 'View and print receipts', page: 'transactions', icon: Receipt, className: 'bg-white text-primary border border-emerald-100' },
     { label: 'Add product', detail: 'Update your catalog', page: 'inventory', quickAdd: true, icon: Package, className: 'bg-white text-primary border border-emerald-100' },
+    { label: 'Restock', detail: 'Replenish low stock', page: 'inventory', icon: Package, className: 'bg-white text-primary border border-amber-100' },
     { label: 'Add expense', detail: 'Record a store cost', page: 'expenses', quickAdd: true, icon: Plus, className: 'bg-white text-primary border border-emerald-100' },
     { label: t('priceScan.ownerQrAction'), detail: t('priceScan.ownerQrDetail'), page: 'settings', icon: QrCode, className: 'bg-white text-primary border border-emerald-100' },
     { label: t('priceScan.manageQueue'), detail: t('priceScan.queueActionDetail', { count: pendingPriceChangeCount }), page: 'settings', icon: RefreshCw, className: 'bg-amber-50 text-amber-900 border border-amber-100' },
@@ -245,7 +271,12 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
               <Banknote className="h-4 w-4 text-emerald-600" />
               <span className="text-xs font-medium">Cash received</span>
             </div>
-            {loading ? <div className="mt-2 h-6 w-24 animate-pulse rounded bg-gray-100" /> : <p className="mt-2 text-lg font-bold">{money(cashTotal)}</p>}
+            {loading ? <div className="mt-2 h-6 w-24 animate-pulse rounded bg-gray-100" /> : (
+              <>
+                <p className="mt-2 text-lg font-bold">{money(cashTotal)}</p>
+                <p className="mt-1 text-[10px] text-gray-500">On hand after cash expenses {money(cashAfterExpenses)}</p>
+              </>
+            )}
           </article>
           <article className="rounded-2xl bg-white p-4 shadow-sm border border-gray-100">
             <div className="flex items-center gap-2 text-gray-500">
@@ -270,7 +301,33 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
             </span>
             <p className="mt-2 text-lg font-bold text-amber-950">{loading ? '…' : lowStockCount}</p>
           </button>
+          <button type="button" onClick={() => onNavigate('inventory')} className="rounded-2xl border border-red-100 bg-red-50 p-4 text-left touch-target">
+            <span className="flex items-center gap-2 text-gray-500">
+              <Package className="h-4 w-4 text-red-600" />
+              <span className="text-xs font-medium">Out of stock</span>
+            </span>
+            <p className="mt-2 text-lg font-bold text-red-950">{loading ? '…' : outOfStockCount}</p>
+          </button>
+          <article className="rounded-2xl bg-white p-4 shadow-sm border border-gray-100">
+            <span className="text-xs font-medium text-gray-500">Today’s expenses</span>
+            {loading ? <div className="mt-2 h-6 w-24 animate-pulse rounded bg-gray-100" /> : <p className="mt-2 text-lg font-bold text-red-600">{money(todayExpenses)}</p>}
+          </article>
+          <article className="rounded-2xl bg-white p-4 shadow-sm border border-gray-100">
+            <span className="text-xs font-medium text-gray-500">Net profit</span>
+            <p className="mt-1 text-[10px] text-gray-400">Gross profit minus expenses</p>
+            {loading ? <div className="mt-2 h-6 w-24 animate-pulse rounded bg-gray-100" /> : <p className="mt-2 text-lg font-bold">{money(todayNet)}</p>}
+          </article>
         </section>
+
+        {currentStore && currentUser && (
+          <SmsWalletCard
+            storeId={currentStore.id}
+            userId={currentUser.id}
+            localBalancePesewas={Number(currentStore.sms_balance_pesewas) || 0}
+          />
+        )}
+
+        <DailyBriefCard onNavigate={onNavigate} />
 
         {/* Sales targets */}
         {(dailyTarget > 0 || monthlyTarget > 0) && (
@@ -330,11 +387,20 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
         <section className="rounded-2xl bg-white p-4 shadow-sm border border-gray-100" aria-label="Latest sales">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-bold text-gray-900">{t('dashboard.latestSales')}</h2>
-            {liveStatus === 'live' && (
-              <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-emerald-600">
-                <Radio className="h-3 w-3" /> {t('dashboard.live')}
-              </span>
-            )}
+            <div className="flex items-center gap-3">
+              {liveStatus === 'live' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-emerald-600">
+                  <Radio className="h-3 w-3" /> {t('dashboard.live')}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => onNavigate('transactions')}
+                className="text-[11px] font-semibold text-primary hover:underline"
+              >
+                {t('sales.recordsTitle')}
+              </button>
+            </div>
           </div>
           {loading ? (
             <div className="mt-3 space-y-2">
@@ -366,7 +432,7 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
           <h2 className="mb-2 text-sm font-bold text-gray-900">Quick actions</h2>
           <div className="grid gap-2 sm:grid-cols-3">
             {actions.map(({ label, detail, page, quickAdd, icon: Icon, className }) => (
-              <button key={label} type="button" onClick={() => onNavigate(page, quickAdd)} className={`flex items-center gap-3 rounded-xl p-3 text-left shadow-sm touch-target ${className}`}>
+              <button key={`${page}-${label}`} type="button" onClick={() => onNavigate(page, quickAdd)} className={`flex items-center gap-3 rounded-xl p-3 text-left shadow-sm touch-target ${className}`}>
                 <Icon className="h-5 w-5 shrink-0" />
                 <span><span className="block text-sm font-semibold">{label}</span><span className="block text-[11px] opacity-75">{detail}</span></span>
               </button>
@@ -392,7 +458,7 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
         )}
 
         <button type="button" onClick={() => onNavigate('transactions')} className="flex w-full items-center justify-between rounded-xl bg-white p-4 text-left shadow-sm touch-target">
-          <span><span className="block text-sm font-semibold text-gray-900">Sales history</span><span className="block text-xs text-gray-500">Review receipts and transactions</span></span>
+          <span><span className="block text-sm font-semibold text-gray-900">Sales Records</span><span className="block text-xs text-gray-500">See every receipt and print it again</span></span>
           <Receipt className="h-5 w-5 text-primary" />
         </button>
       </div>

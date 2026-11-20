@@ -4,6 +4,8 @@ import { getCurrentStoreId, getCurrentStoreActiveProducts, getTransactionItems, 
 import ProductImage from '@/components/ProductImage';
 import { useFormatMoney } from '@/lib/currency';
 import { toQty } from '@/lib/warehouse';
+import { useAuthStore } from '@/store/useAuthStore';
+import { canViewStockQuantities } from '@/lib/stockVisibility';
 
 interface ProductWithFrequency {
   product: LocalProduct;
@@ -14,6 +16,10 @@ export default function FrequentItems({ onAddProduct }: { onAddProduct?: (produc
   const [frequentItems, setFrequentItems] = useState<ProductWithFrequency[]>([]);
   const [loading, setLoading] = useState(true);
   const money = useFormatMoney();
+  const showStockQty = canViewStockQuantities(
+    useAuthStore((state) => state.currentUser),
+    useAuthStore((state) => state.currentStore)
+  );
 
   useEffect(() => {
     async function loadFrequentItems() {
@@ -30,7 +36,7 @@ export default function FrequentItems({ onAddProduct }: { onAddProduct?: (produc
         const transactions = await db.transactions
           .where('store_id')
           .equals(storeId)
-          .filter((t) => Boolean(t.created_at && t.created_at > thirtyDaysAgo && t.status === 'completed'))
+          .filter((t) => Boolean(t.created_at && t.created_at > thirtyDaysAgo && t.status === 'completed' && t.void_status !== 'voided'))
           .toArray();
 
         // Count product frequency
@@ -75,7 +81,7 @@ export default function FrequentItems({ onAddProduct }: { onAddProduct?: (produc
   }
 
   return (
-    <div className="px-3 md:px-4 py-3 bg-gradient-to-r from-orange-50 to-amber-50 border-b border-amber-200 flex-shrink-0">
+    <div className="hidden md:block px-3 md:px-4 py-3 bg-gradient-to-r from-orange-50 to-amber-50 border-b border-amber-200 flex-shrink-0">
       <div className="flex items-center gap-2 mb-2">
         <Flame className="w-4 h-4 text-amber-600 flex-shrink-0" />
         <p className="text-xs font-bold text-amber-900">TOP 10 FREQUENTLY BOUGHT</p>
@@ -107,7 +113,7 @@ export default function FrequentItems({ onAddProduct }: { onAddProduct?: (produc
               <div className="p-1.5 space-y-0.5">
                 <p className="text-[10px] font-semibold text-gray-800 truncate">{product.name}</p>
                 <p className="text-[9px] text-amber-700 font-bold">{money(product.selling_price || 0)}</p>
-                {outOfStock && <p className="text-[8px] text-red-600 font-bold">Out of stock</p>}
+                {outOfStock && showStockQty && <p className="text-[8px] text-red-600 font-bold">Out of stock</p>}
               </div>
             </button>
           );
