@@ -45,6 +45,26 @@ if (savedTheme !== 'light') {
   document.documentElement.style.colorScheme = 'dark';
 }
 
+const PRELOAD_RETRY_KEY = 'adimat-vite-preload-retry';
+window.addEventListener('vite:preloadError', (event) => {
+  event.preventDefault();
+  let alreadyRetried = false;
+  try {
+    alreadyRetried = window.sessionStorage.getItem(PRELOAD_RETRY_KEY) === '1';
+    window.sessionStorage.setItem(PRELOAD_RETRY_KEY, '1');
+  } catch {
+    // Continue with the in-app error boundary if session storage is unavailable.
+  }
+  if (!alreadyRetried) window.location.reload();
+});
+window.addEventListener('load', () => {
+  try {
+    window.sessionStorage.removeItem(PRELOAD_RETRY_KEY);
+  } catch {
+    // Ignore unavailable session storage.
+  }
+}, { once: true });
+
 // Register Service Worker for PWA
 if (
   'serviceWorker' in navigator &&
