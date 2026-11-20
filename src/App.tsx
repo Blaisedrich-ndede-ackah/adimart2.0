@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode } from 'react';
+import { lazy, Suspense, useState, useEffect, type ReactNode } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { initAutoSync, startLiveStockSync, stopAutoSync, triggerPushSync } from '@/lib/sync';
 import { autoReconnectPeripherals } from '@/lib/bluetoothPeripherals';
@@ -35,6 +35,7 @@ import LearnAdimatPage from '@/pages/LearnAdimatPage';
 import PublicShopPage from '@/pages/PublicShopPage';
 import TermsPage from '@/pages/TermsPage';
 import NotFoundPage from '@/pages/NotFoundPage';
+const PriceScanPage = lazy(() => import('@/pages/PriceScanPage'));
 import AdminLoginPage from '@/pages/AdminLoginPage';
 import AdminDashboardPage from '@/pages/AdminDashboardPage';
 import { isStoreAccessBlocked } from '@/lib/subscription';
@@ -43,6 +44,7 @@ import { checkAndSendDebtReminders } from '@/lib/debtReminders';
 import { canAccessCashbook } from '@/lib/staffAccess';
 import { createAutomaticStoreBackup, recordBackupIssue } from '@/lib/storeBackup';
 import { createDueRecurringExpenses } from '@/lib/dexie';
+import { flushPriceChanges } from '@/lib/priceChangeQueue';
 import { useAccessibilityStore } from '@/lib/accessibility';
 
 type AppMode = 'store' | 'admin-login' | 'admin';
@@ -54,12 +56,20 @@ function readPublicShopSlug(): string | null {
   return match?.[1] ? decodeURIComponent(match[1]).trim().toLowerCase() : null;
 }
 
+function readPriceScanSlug(): string | null {
+  if (typeof window === 'undefined') return null;
+  const hash = window.location.hash.replace(/^#/, '');
+  const match = hash.match(/^\/?price-scan\/([^/?#]+)/i);
+  return match?.[1] ? decodeURIComponent(match[1]).trim().toLowerCase() : null;
+}
+
 function readPublicUtilityRoute(): 'terms' | '404' | null {
   if (typeof window === 'undefined') return null;
   const hash = window.location.hash.replace(/^#/, '').replace(/^\//, '').replace(/\/$/, '');
   if (!hash) return null;
   if (hash.toLowerCase() === 'terms') return 'terms';
   if (/^shop\//i.test(hash)) return null;
+  if (/^price-scan\//i.test(hash)) return null;
   return '404';
 }
 
@@ -77,6 +87,7 @@ export default function App() {
   const [appMode, setAppMode] = useState<AppMode>('store');
   const [adminSessionResolved, setAdminSessionResolved] = useState(false);
   const [publicShopSlug, setPublicShopSlug] = useState<string | null>(() => readPublicShopSlug());
+  const [priceScanSlug, setPriceScanSlug] = useState<string | null>(() => readPriceScanSlug());
   const [publicUtilityRoute, setPublicUtilityRoute] = useState<'terms' | '404' | null>(() => readPublicUtilityRoute());
 
   useEffect(() => {
@@ -98,11 +109,14 @@ export default function App() {
 
   useEffect(() => {
     const onHashChange = () => setPublicShopSlug(readPublicShopSlug());
+    const onPriceScanHashChange = () => setPriceScanSlug(readPriceScanSlug());
     const onUtilityHashChange = () => setPublicUtilityRoute(readPublicUtilityRoute());
     window.addEventListener('hashchange', onHashChange);
+    window.addEventListener('hashchange', onPriceScanHashChange);
     window.addEventListener('hashchange', onUtilityHashChange);
     return () => {
       window.removeEventListener('hashchange', onHashChange);
+      window.removeEventListener('hashchange', onPriceScanHashChange);
       window.removeEventListener('hashchange', onUtilityHashChange);
     };
   }, []);
@@ -113,6 +127,18 @@ export default function App() {
     void autoReconnectPeripherals();
     return () => stopAutoSync();
   }, [initialize]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentStore?.id) return;
+    const flush = () => { void flushPriceChanges(currentStore.id); };
+    flush();
+    window.addEventListener('online', flush);
+    const interval = window.setInterval(flush, 60_000);
+    return () => {
+      window.removeEventListener('online', flush);
+      window.clearInterval(interval);
+    };
+  }, [isAuthenticated, currentStore?.id]);
 
   useEffect(() => {
     if (!isAuthenticated || !currentStore?.id) return;
@@ -214,6 +240,10 @@ export default function App() {
 
   if (publicShopSlug) {
     return <PublicShopPage slug={publicShopSlug} />;
+  }
+
+  if (priceScanSlug) {
+    return <Suspense fallback={<div className="flex min-h-screen items-center justify-center">Loadingâ€¦</div>}><PriceScanPage slug={priceScanSlug} /></Suspense>;
   }
 
   if (publicUtilityRoute === 'terms') return <TermsPage />;

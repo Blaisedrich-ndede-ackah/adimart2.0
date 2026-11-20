@@ -13,6 +13,8 @@ import {
   Users,
   Building2,
   ArrowRightLeft,
+  QrCode,
+  RefreshCw,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -28,6 +30,7 @@ import { useT } from '@/lib/i18n';
 import { toQty } from '@/lib/warehouse';
 import { buildCustomerBalances } from '@/lib/customerBalances';
 import { useLiveStoreSales } from '@/hooks/useLiveStoreSales';
+import { getPendingPriceChanges } from '@/lib/priceChangeQueue';
 
 interface OwnerHomePageProps {
   onNavigate: (page: string, quickAdd?: boolean) => void;
@@ -82,6 +85,21 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
   const [linkedStoreCount, setLinkedStoreCount] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [pendingPriceChangeCount, setPendingPriceChangeCount] = useState(0);
+
+  const loadPendingPriceChangeCount = useCallback(async () => {
+    if (!currentStore?.id) {
+      setPendingPriceChangeCount(0);
+      return;
+    }
+    setPendingPriceChangeCount((await getPendingPriceChanges(currentStore.id)).length);
+  }, [currentStore?.id]);
+
+  useEffect(() => {
+    void loadPendingPriceChangeCount();
+    const interval = window.setInterval(() => void loadPendingPriceChangeCount(), 30_000);
+    return () => window.clearInterval(interval);
+  }, [loadPendingPriceChangeCount]);
 
   const load = useCallback(async () => {
     const storeId = await getCurrentStoreId();
@@ -174,6 +192,8 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
     { label: 'New sale', detail: 'Open the till', page: 'pos', icon: ShoppingCart, className: 'bg-primary text-white' },
     { label: 'Add product', detail: 'Update your catalog', page: 'inventory', quickAdd: true, icon: Package, className: 'bg-white text-primary border border-emerald-100' },
     { label: 'Add expense', detail: 'Record a store cost', page: 'expenses', quickAdd: true, icon: Plus, className: 'bg-white text-primary border border-emerald-100' },
+    { label: t('priceScan.ownerQrAction'), detail: t('priceScan.ownerQrDetail'), page: 'settings', icon: QrCode, className: 'bg-white text-primary border border-emerald-100' },
+    { label: t('priceScan.manageQueue'), detail: t('priceScan.queueActionDetail', { count: pendingPriceChangeCount }), page: 'settings', icon: RefreshCw, className: 'bg-amber-50 text-amber-900 border border-amber-100' },
   ];
 
   return (
@@ -346,7 +366,7 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
           <h2 className="mb-2 text-sm font-bold text-gray-900">Quick actions</h2>
           <div className="grid gap-2 sm:grid-cols-3">
             {actions.map(({ label, detail, page, quickAdd, icon: Icon, className }) => (
-              <button key={page} type="button" onClick={() => onNavigate(page, quickAdd)} className={`flex items-center gap-3 rounded-xl p-3 text-left shadow-sm touch-target ${className}`}>
+              <button key={label} type="button" onClick={() => onNavigate(page, quickAdd)} className={`flex items-center gap-3 rounded-xl p-3 text-left shadow-sm touch-target ${className}`}>
                 <Icon className="h-5 w-5 shrink-0" />
                 <span><span className="block text-sm font-semibold">{label}</span><span className="block text-[11px] opacity-75">{detail}</span></span>
               </button>

@@ -5,11 +5,13 @@ import { Camera, CameraOff, Keyboard, RefreshCw } from 'lucide-react';
 interface BarcodeScannerProps {
   onScan: (barcode: string) => void;
   active: boolean;
+  large?: boolean;
 }
 
-export default function BarcodeScanner({ onScan, active }: BarcodeScannerProps) {
+export default function BarcodeScanner({ onScan, active, large = false }: BarcodeScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+  const restartTimerRef = useRef<number | null>(null);
   const lastScannedRef = useRef<string>('');
   const lastScanTimeRef = useRef<number>(0);
 
@@ -100,6 +102,14 @@ export default function BarcodeScanner({ onScan, active }: BarcodeScannerProps) 
     }
   }, [onScan]);
 
+  const scheduleRestart = useCallback((deviceId?: string) => {
+    if (restartTimerRef.current !== null) window.clearTimeout(restartTimerRef.current);
+    restartTimerRef.current = window.setTimeout(() => {
+      restartTimerRef.current = null;
+      void startCamera(deviceId);
+    }, 100);
+  }, [startCamera]);
+
   const switchCamera = useCallback(() => {
     if (availableCameras.length <= 1) return;
     
@@ -108,8 +118,8 @@ export default function BarcodeScanner({ onScan, active }: BarcodeScannerProps) 
     const nextCamera = availableCameras[nextIndex];
     
     stopCamera();
-    setTimeout(() => startCamera(nextCamera.deviceId), 100);
-  }, [availableCameras, selectedCameraId, stopCamera, startCamera]);
+    scheduleRestart(nextCamera.deviceId);
+  }, [availableCameras, selectedCameraId, stopCamera, scheduleRestart]);
 
   useEffect(() => {
     if (active) {
@@ -117,7 +127,13 @@ export default function BarcodeScanner({ onScan, active }: BarcodeScannerProps) 
     } else {
       stopCamera();
     }
-    return () => stopCamera();
+    return () => {
+      if (restartTimerRef.current !== null) {
+        window.clearTimeout(restartTimerRef.current);
+        restartTimerRef.current = null;
+      }
+      stopCamera();
+    };
   }, [active, startCamera, stopCamera]);
 
   const handleManualSubmit = () => {
@@ -130,13 +146,13 @@ export default function BarcodeScanner({ onScan, active }: BarcodeScannerProps) 
 
   const handleRetry = () => {
     stopCamera();
-    setTimeout(() => startCamera(), 100);
+    scheduleRestart();
   };
 
   return (
     <div className="relative bg-black rounded-xl overflow-hidden">
       {cameraError ? (
-        <div className="flex flex-col items-center justify-center h-40 bg-gray-900 p-4">
+        <div className={`flex flex-col items-center justify-center ${large ? 'min-h-[68vh]' : 'h-40'} bg-gray-900 p-4`}>
           <CameraOff className="w-8 h-8 text-gray-500 mb-2" />
           <p className="text-gray-400 text-xs text-center mb-3">{cameraError}</p>
           <button
@@ -148,7 +164,7 @@ export default function BarcodeScanner({ onScan, active }: BarcodeScannerProps) 
           </button>
         </div>
       ) : (
-        <div className="relative h-44">
+        <div className={`relative ${large ? 'h-[68vh]' : 'h-44'}`}>
           <video
             ref={videoRef}
             className="w-full h-full object-cover"

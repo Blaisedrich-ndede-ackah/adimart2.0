@@ -51,6 +51,10 @@ CREATE TABLE IF NOT EXISTS stores (
   /** Owner sales targets used by the live dashboard progress bars */
   sales_target_daily NUMERIC DEFAULT 0 CHECK (sales_target_daily >= 0),
   sales_target_monthly NUMERIC DEFAULT 0 CHECK (sales_target_monthly >= 0),
+  /** Loyalty points earn rate: points awarded per 1 currency unit spent. 0 disables. */
+  loyalty_earn_rate INTEGER NOT NULL DEFAULT 0 CHECK (loyalty_earn_rate >= 0),
+  /** Near-expiry alert window in days. Default 7. */
+  near_expiry_alert_days INTEGER NOT NULL DEFAULT 7 CHECK (near_expiry_alert_days >= 0 AND near_expiry_alert_days <= 90),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -154,6 +158,37 @@ CREATE POLICY "product_categories_delete" ON product_categories FOR DELETE USING
 CREATE INDEX IF NOT EXISTS idx_product_categories_store ON product_categories(store_id, is_active);
 
 -- ============================================================
+-- PRODUCT VARIANTS (size, color, flavor)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS product_variants (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  variant_name VARCHAR(50) NOT NULL DEFAULT '',
+  variant_value VARCHAR(100) NOT NULL DEFAULT '',
+  sku VARCHAR(100) DEFAULT '',
+  barcode VARCHAR(100) DEFAULT '',
+  price_adjustment DECIMAL(12,2) NOT NULL DEFAULT 0,
+  stock_level INTEGER NOT NULL DEFAULT 0 CHECK (stock_level >= 0),
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (store_id, product_id, variant_name, variant_value)
+);
+
+ALTER TABLE product_variants ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "product_variants_select" ON product_variants FOR SELECT USING (true);
+CREATE POLICY "product_variants_insert" ON product_variants FOR INSERT WITH CHECK (true);
+CREATE POLICY "product_variants_update" ON product_variants FOR UPDATE USING (true);
+CREATE POLICY "product_variants_delete" ON product_variants FOR DELETE USING (true);
+
+CREATE INDEX IF NOT EXISTS idx_product_variants_store ON product_variants(store_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_product_variants_product ON product_variants(product_id);
+CREATE INDEX IF NOT EXISTS idx_product_variants_sku ON product_variants(store_id, sku);
+CREATE INDEX IF NOT EXISTS idx_product_variants_barcode ON product_variants(store_id, barcode);
+
+-- ============================================================
 -- SUPPLIERS AND PURCHASE ORDERS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS suppliers (
@@ -210,6 +245,8 @@ CREATE TABLE IF NOT EXISTS customers (
   opening_balance DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (opening_balance >= 0),
   opening_balance_remaining DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (opening_balance_remaining >= 0),
   wallet_balance DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (wallet_balance >= 0),
+  /** Accumulated loyalty/rewards points balance. */
+  loyalty_points_balance INTEGER NOT NULL DEFAULT 0 CHECK (loyalty_points_balance >= 0),
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   /** Customer asked not to receive automated debt reminder SMS */
   debt_reminder_opt_out BOOLEAN NOT NULL DEFAULT FALSE,
@@ -245,6 +282,33 @@ CREATE POLICY "customer_account_receipts_update" ON customer_account_receipts FO
 CREATE POLICY "customer_account_receipts_delete" ON customer_account_receipts FOR DELETE USING (true);
 CREATE INDEX IF NOT EXISTS idx_customer_account_receipts_store ON customer_account_receipts(store_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_customer_account_receipts_customer ON customer_account_receipts(customer_id, created_at);
+
+-- ============================================================
+-- CUSTOMER LOYALTY TRANSACTIONS (points earn / redeem ledger)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS customer_loyalty_transactions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  transaction_id UUID REFERENCES transactions(id) ON DELETE SET NULL,
+  type VARCHAR(10) NOT NULL CHECK (type IN ('earn', 'redeem')),
+  points INTEGER NOT NULL CHECK (points > 0),
+  balance_after INTEGER NOT NULL CHECK (balance_after >= 0),
+  reason TEXT DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  synced BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+ALTER TABLE customer_loyalty_transactions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "customer_loyalty_transactions_select" ON customer_loyalty_transactions FOR SELECT USING (true);
+CREATE POLICY "customer_loyalty_transactions_insert" ON customer_loyalty_transactions FOR INSERT WITH CHECK (true);
+CREATE POLICY "customer_loyalty_transactions_update" ON customer_loyalty_transactions FOR UPDATE USING (true);
+CREATE POLICY "customer_loyalty_transactions_delete" ON customer_loyalty_transactions FOR DELETE USING (true);
+
+CREATE INDEX IF NOT EXISTS idx_customer_loyalty_transactions_store ON customer_loyalty_transactions(store_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_customer_loyalty_transactions_customer ON customer_loyalty_transactions(customer_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_customer_loyalty_transactions_txn ON customer_loyalty_transactions(transaction_id);
 
 CREATE TABLE IF NOT EXISTS customer_opening_payments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -349,6 +413,7 @@ CREATE TABLE IF NOT EXISTS transaction_items (
   pack_size INTEGER DEFAULT 1,
   base_quantity INTEGER DEFAULT 0,
   batch_id UUID,
+  variant_id UUID REFERENCES product_variants(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -361,6 +426,7 @@ CREATE POLICY "transaction_items_delete" ON transaction_items FOR DELETE USING (
 
 CREATE INDEX IF NOT EXISTS idx_transaction_items_store ON transaction_items(store_id);
 CREATE INDEX IF NOT EXISTS idx_transaction_items_txn ON transaction_items(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_transaction_items_variant ON transaction_items(variant_id);
 
 CREATE TABLE IF NOT EXISTS credit_payments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -538,6 +604,7 @@ CREATE TABLE IF NOT EXISTS stock_batches (
   expiry_date DATE,
   quantity INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0),
   cost_price DECIMAL(12,2) DEFAULT 0,
+  variant_id UUID REFERENCES product_variants(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -553,6 +620,7 @@ CREATE INDEX IF NOT EXISTS idx_stock_batches_store ON stock_batches(store_id);
 CREATE INDEX IF NOT EXISTS idx_stock_batches_product ON stock_batches(product_id);
 CREATE INDEX IF NOT EXISTS idx_stock_batches_location ON stock_batches(location_id);
 CREATE INDEX IF NOT EXISTS idx_stock_batches_expiry ON stock_batches(expiry_date);
+CREATE INDEX IF NOT EXISTS idx_stock_batches_variant ON stock_batches(variant_id);
 
 -- ============================================================
 -- STOCK MOVEMENTS (receive / transfer / sale / adjust)

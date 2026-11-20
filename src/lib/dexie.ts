@@ -76,6 +76,10 @@ export interface LocalStore {
   sales_target_daily?: number;
   /** Owner-set monthly sales target used by the live dashboard. */
   sales_target_monthly?: number;
+  /** Loyalty points earn rate: points awarded per 1 currency unit spent. 0 disables. */
+  loyalty_earn_rate?: number;
+  /** Near-expiry alert window in days. Default 7. */
+  near_expiry_alert_days?: number;
   created_at: string;
   synced: number;
 }
@@ -98,6 +102,8 @@ export interface LocalCustomer {
   opening_balance: number;
   opening_balance_remaining: number;
   wallet_balance?: number;
+  /** Accumulated loyalty/rewards points balance. */
+  loyalty_points_balance?: number;
   is_active: number;
   /** Customer asked not to receive automated debt reminder SMS (0/1) */
   debt_reminder_opt_out?: number;
@@ -189,6 +195,17 @@ export interface LocalProduct {
   synced: number;
 }
 
+export interface PriceChange {
+  id: string;
+  store_id: string;
+  product_id: string;
+  previous_price: number;
+  new_price: number;
+  changed_at: string;
+  synced: number;
+  applied: number;
+}
+
 export type OnlineOrderStatus = 'new' | 'confirmed' | 'fulfilled' | 'cancelled';
 
 export interface LocalOnlineOrder {
@@ -264,6 +281,7 @@ export interface LocalTransactionItem {
   pack_size?: number;
   base_quantity?: number;
   batch_id?: string;
+  variant_id?: string;
   synced: number;
 }
 
@@ -328,6 +346,37 @@ export interface LocalCustomerWalletTransaction {
   synced: number;
 }
 
+/** A product variant (e.g. Size=Large, Color=Red) tied to a base product. */
+export interface LocalProductVariant {
+  id: string;
+  store_id: string;
+  product_id: string;
+  variant_name: string;   // e.g. 'Size', 'Color', 'Flavor'
+  variant_value: string;  // e.g. 'Large', 'Red', 'Vanilla'
+  sku: string;
+  barcode: string;
+  price_adjustment: number; // added to base selling price
+  stock_level: number;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+/** Loyalty points ledger: earn on sales, redeem on discounts. */
+export interface LocalCustomerLoyaltyTransaction {
+  id: string;
+  store_id: string;
+  customer_id: string;
+  transaction_id: string | null;
+  type: 'earn' | 'redeem';
+  points: number;
+  balance_after: number;
+  reason: string;
+  created_at: string;
+  synced: number;
+}
+
 /** Audit row for a store-owner bulk SMS campaign. */
 export interface LocalBulkSmsCampaign {
   id: string;
@@ -387,6 +436,7 @@ export interface LocalStockBatch {
   expiry_date: string | null;
   quantity: number;
   cost_price: number;
+  variant_id?: string;
   created_at: string;
   updated_at: string;
   synced: number;
@@ -570,6 +620,9 @@ class AdimatDB extends Dexie {
   sync_meta!: Table<SyncMeta, string>;
   app_config!: Table<AppConfig, string>;
   campaign_cache!: Table<CachedCampaigns, string>;
+  product_variants!: Table<LocalProductVariant, string>;
+  customer_loyalty_transactions!: Table<LocalCustomerLoyaltyTransaction, string>;
+  price_changes!: Table<PriceChange, string>;
 
   constructor() {
     super('AdimatPOS');
@@ -794,6 +847,31 @@ class AdimatDB extends Dexie {
             }
           });
       });
+    // v21: Customer loyalty points + product variants + expiry alert config.
+    this.version(21).stores({
+      product_variants:
+        'id, store_id, product_id, variant_name, variant_value, sku, barcode, is_active, synced, updated_at',
+      customer_loyalty_transactions:
+        'id, store_id, customer_id, transaction_id, type, created_at, synced',
+    }).upgrade(async (tx) => {
+      await tx.table('customers').toCollection().modify((customer: LocalCustomer) => {
+        if (typeof customer.loyalty_points_balance !== 'number') {
+          customer.loyalty_points_balance = 0;
+        }
+      });
+      await tx.table('stores').toCollection().modify((store: LocalStore) => {
+        if (typeof store.loyalty_earn_rate !== 'number') {
+          store.loyalty_earn_rate = 0;
+        }
+        if (typeof store.near_expiry_alert_days !== 'number') {
+          store.near_expiry_alert_days = 7;
+        }
+      });
+    });
+    // v22: Local-first customer price-scan changes awaiting cloud sync.
+    this.version(22).stores({
+      price_changes: 'id, store_id, product_id, changed_at, synced, applied',
+    });
   }
 }
 
@@ -1655,6 +1733,162 @@ export async function setCustomerActive(customerId: string, isActive: boolean): 
   });
 }
 
+export async function getCurrentStoreProductVariants(): Promise<LocalProductVariant[]> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) return [];
+  return db.product_variants
+    .where('store_id')
+    .equals(storeId)
+    .filter((v) => v.is_active === 1)
+    .sortBy(['variant_name', 'variant_value']);
+}
+
+export async function getProductVariants(productId: string): Promise<LocalProductVariant[]> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) return [];
+  return db.product_variants
+    .where('store_id')
+    .equals(storeId)
+    .filter((v) => v.product_id === productId && v.is_active === 1)
+    .sortBy(['variant_name', 'variant_value']);
+}
+
+export async function addProductVariant(
+  productId: string,
+  variantName: string,
+  variantValue: string,
+  priceAdjustment: number,
+  sku: string,
+  barcode: string
+): Promise<LocalProductVariant> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) throw new Error('No store selected');
+  const now = new Date().toISOString();
+  const variant: LocalProductVariant = {
+    id: generateId(),
+    store_id: storeId,
+    product_id: productId,
+    variant_name: variantName.trim(),
+    variant_value: variantValue.trim(),
+    sku: sku.trim(),
+    barcode: barcode.trim(),
+    price_adjustment: Math.max(0, Number(priceAdjustment) || 0),
+    stock_level: 0,
+    is_active: 1,
+    created_at: now,
+    updated_at: now,
+    synced: 0,
+  };
+  await db.product_variants.add(variant);
+  return variant;
+}
+
+export async function updateProductVariantStock(
+  variantId: string,
+  stockLevel: number
+): Promise<void> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) throw new Error('No store selected');
+  await db.product_variants.update(variantId, {
+    stock_level: Math.max(0, Math.floor(Number(stockLevel) || 0)),
+    updated_at: new Date().toISOString(),
+    synced: 0,
+  });
+}
+
+export async function getCustomerLoyaltyBalance(customerId: string): Promise<number> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) return 0;
+  const customer = await db.customers.get(customerId);
+  if (!customer || customer.store_id !== storeId) return 0;
+  return Number(customer.loyalty_points_balance || 0);
+}
+
+export async function getCustomerLoyaltyTransactions(customerId: string): Promise<LocalCustomerLoyaltyTransaction[]> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) return [];
+  return db.customer_loyalty_transactions
+    .where('store_id')
+    .equals(storeId)
+    .filter((t) => t.customer_id === customerId)
+    .sortBy('created_at');
+}
+
+export async function awardLoyaltyPoints(
+  customerId: string,
+  transactionId: string | null,
+  points: number,
+  reason: string
+): Promise<LocalCustomerLoyaltyTransaction> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) throw new Error('No store selected');
+  if (!Number.isFinite(points) || points <= 0) throw new Error('Points must be greater than zero.');
+  const customer = await db.customers.get(customerId);
+  if (!customer || customer.store_id !== storeId) throw new Error('Customer not found.');
+  const currentBalance = Number(customer.loyalty_points_balance || 0);
+  const balanceAfter = currentBalance + points;
+  const now = new Date().toISOString();
+  const loyaltyTx: LocalCustomerLoyaltyTransaction = {
+    id: generateId(),
+    store_id: storeId,
+    customer_id: customerId,
+    transaction_id: transactionId,
+    type: 'earn',
+    points,
+    balance_after: balanceAfter,
+    reason,
+    created_at: now,
+    synced: 0,
+  };
+  await db.transaction('rw', [db.customers, db.customer_loyalty_transactions], async () => {
+    await db.customers.update(customerId, {
+      loyalty_points_balance: balanceAfter,
+      updated_at: now,
+      synced: 0,
+    });
+    await db.customer_loyalty_transactions.add(loyaltyTx);
+  });
+  return loyaltyTx;
+}
+
+export async function redeemLoyaltyPoints(
+  customerId: string,
+  transactionId: string | null,
+  points: number,
+  reason: string
+): Promise<LocalCustomerLoyaltyTransaction> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId) throw new Error('No store selected');
+  if (!Number.isFinite(points) || points <= 0) throw new Error('Points must be greater than zero.');
+  const customer = await db.customers.get(customerId);
+  if (!customer || customer.store_id !== storeId) throw new Error('Customer not found.');
+  const currentBalance = Number(customer.loyalty_points_balance || 0);
+  if (points > currentBalance) throw new Error('Insufficient loyalty points balance.');
+  const balanceAfter = currentBalance - points;
+  const now = new Date().toISOString();
+  const loyaltyTx: LocalCustomerLoyaltyTransaction = {
+    id: generateId(),
+    store_id: storeId,
+    customer_id: customerId,
+    transaction_id: transactionId,
+    type: 'redeem',
+    points,
+    balance_after: balanceAfter,
+    reason,
+    created_at: now,
+    synced: 0,
+  };
+  await db.transaction('rw', [db.customers, db.customer_loyalty_transactions], async () => {
+    await db.customers.update(customerId, {
+      loyalty_points_balance: balanceAfter,
+      updated_at: now,
+      synced: 0,
+    });
+    await db.customer_loyalty_transactions.add(loyaltyTx);
+  });
+  return loyaltyTx;
+}
+
 export async function getCustomerOpeningPayments(customerId: string): Promise<LocalCustomerOpeningPayment[]> {
   return db.customer_opening_payments
     .where('customer_id')
@@ -2489,7 +2723,11 @@ export async function adoptCloudStockLedger(
 
   const nextBatches: LocalStockBatch[] = remoteBatches.map((remote) => {
     const local = localById.get(remote.id);
-    if (local && local.synced === 0 && asQty(local.quantity) < asQty(remote.quantity)) {
+    if (local && local.synced === 0) {
+      // Preserve ALL unsynced local changes — both sales/deductions (local < remote)
+      // and stock receives (local > remote). Without this, an unsynced receive on this
+      // device would be silently overwritten by a lower cloud value, and a synced batch
+      // with a higher cloud value would spuriously inflate local stock on auto-sync.
       return {
         ...remote,
         quantity: asQty(local.quantity),
@@ -3044,6 +3282,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         expiry_date: dateOrNull(b.expiry_date),
         quantity: b.quantity,
         cost_price: b.cost_price,
+        variant_id: uuidOrNull(b.variant_id),
         created_at: b.created_at,
         updated_at: b.updated_at,
       })),
@@ -3053,8 +3292,43 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
 
     const unsyncedMovements = await db.stock_movements.where('store_id').equals(storeId).and(m => m.synced === 0).toArray();
     const movementsToPush: LocalStockMovement[] = [];
-    for (const movement of unsyncedMovements) {
-      if (!isUuid(movement.id) || !isUuid(movement.store_id) || !isUuid(movement.product_id)) {
+    if (unsyncedMovements.length > 0) {
+      const referencedProductIds = [...new Set(unsyncedMovements.map(m => m.product_id).filter((id): id is string => typeof id === 'string' && id.length > 0))];
+      const referencedProducts = await db.products.where('id').anyOf(referencedProductIds).toArray();
+      const localProductIds = new Set(referencedProducts.filter(p => p.store_id === storeId).map(p => p.id));
+      if (referencedProducts.length > 0) {
+        await upsertToSupabase(
+          'Products (movement references)',
+          'products',
+          referencedProducts.filter(p => p.store_id === storeId).map(p => ({
+            id: p.id,
+            store_id: p.store_id,
+            name: p.name,
+            category: p.category,
+            sku_type: p.sku_type,
+            barcode: p.barcode,
+            cost_price: p.cost_price,
+            selling_price: p.selling_price,
+            stock_level: p.stock_level,
+            is_active: p.is_active === 1,
+            image_url: p.image_url || '',
+            pack_size: p.pack_size ?? 1,
+            track_expiry: (p.track_expiry ?? 0) === 1,
+            wholesale_mode: p.wholesale_mode || 'none',
+            wholesale_pack_price: p.wholesale_pack_price ?? 0,
+            wholesale_unit_price: p.wholesale_unit_price ?? 0,
+            wholesale_tiers_json: p.wholesale_tiers_json || '[]',
+            sell_online: (p.sell_online ?? 0) === 1,
+            reorder_level: Number(p.reorder_level) || 0,
+            created_at: p.created_at,
+            updated_at: p.updated_at,
+          })),
+          async () => {},
+          errors
+        );
+      }
+      for (const movement of unsyncedMovements) {
+        if (!isUuid(movement.id) || !isUuid(movement.store_id) || !isUuid(movement.product_id)) {
         await db.stock_movements.delete(movement.id);
         continue;
       }
@@ -3079,6 +3353,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
       async () => { await Promise.all(movementsToPush.map(m => db.stock_movements.update(m.id, { synced: 1 }))); },
       errors
     );
+    }
 
     const unsyncedCustomers = await db.customers
       .where('store_id')
@@ -3135,6 +3410,64 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
       async () => {
         await Promise.all(unsyncedDebtReminders.map((reminder) =>
           db.debt_reminders.update(reminder.id, { synced: 1 })
+        ));
+      },
+      errors
+    );
+
+    const unsyncedVariants = await db.product_variants
+      .where('store_id')
+      .equals(storeId)
+      .and((v) => v.synced === 0)
+      .toArray();
+    syncedCount += await upsertToSupabase(
+      'Product variants',
+      'product_variants',
+      unsyncedVariants.map((v) => ({
+        id: v.id,
+        store_id: v.store_id,
+        product_id: v.product_id,
+        variant_name: v.variant_name,
+        variant_value: v.variant_value,
+        sku: v.sku,
+        barcode: v.barcode,
+        price_adjustment: v.price_adjustment,
+        stock_level: v.stock_level,
+        is_active: v.is_active === 1,
+        created_at: v.created_at,
+        updated_at: v.updated_at,
+      })),
+      async () => {
+        await Promise.all(unsyncedVariants.map((v) =>
+          db.product_variants.update(v.id, { synced: 1 })
+        ));
+      },
+      errors
+    );
+
+    const unsyncedLoyalty = await db.customer_loyalty_transactions
+      .where('store_id')
+      .equals(storeId)
+      .and((t) => t.synced === 0)
+      .toArray();
+    syncedCount += await upsertToSupabase(
+      'Customer loyalty transactions',
+      'customer_loyalty_transactions',
+      unsyncedLoyalty.map((t) => ({
+        id: t.id,
+        store_id: t.store_id,
+        customer_id: t.customer_id,
+        transaction_id: t.transaction_id,
+        type: t.type,
+        points: t.points,
+        balance_after: t.balance_after,
+        reason: t.reason,
+        created_at: t.created_at,
+        synced: t.synced === 1,
+      })),
+      async () => {
+        await Promise.all(unsyncedLoyalty.map((t) =>
+          db.customer_loyalty_transactions.update(t.id, { synced: 1 })
         ));
       },
       errors
@@ -3294,6 +3627,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean }): Promise<{ s
         pack_size: i.pack_size ?? 1,
         base_quantity: i.base_quantity ?? i.quantity,
         batch_id: uuidOrNull(i.batch_id),
+        variant_id: uuidOrNull(i.variant_id),
       })),
       async () => { await Promise.all(unsyncedItems.map(i => db.transaction_items.update(i.id, { synced: 1 }))); },
       errors
@@ -3718,6 +4052,14 @@ export async function syncFromSupabase(opts?: {
           remoteStore.sales_target_monthly == null
             ? (localStore?.sales_target_monthly ?? 0)
             : Math.max(0, Number(remoteStore.sales_target_monthly) || 0),
+        loyalty_earn_rate:
+          remoteStore.loyalty_earn_rate == null
+            ? (localStore?.loyalty_earn_rate ?? 0)
+            : Math.max(0, Number(remoteStore.loyalty_earn_rate) || 0),
+        near_expiry_alert_days:
+          remoteStore.near_expiry_alert_days == null
+            ? (localStore?.near_expiry_alert_days ?? 7)
+            : Math.max(0, Math.min(90, Number(remoteStore.near_expiry_alert_days) || 7)),
         created_at: remoteStore.created_at,
         synced: localStore?.synced === 0 ? 0 : 1,
       });
@@ -3815,6 +4157,7 @@ export async function syncFromSupabase(opts?: {
           opening_balance: Number(row.opening_balance) || 0,
           opening_balance_remaining: Number(row.opening_balance_remaining) || 0,
           wallet_balance: Number(row.wallet_balance) || 0,
+          loyalty_points_balance: Number(row.loyalty_points_balance) || 0,
           is_active: row.is_active === false ? 0 : 1,
           debt_reminder_opt_out: row.debt_reminder_opt_out === true ? 1 : 0,
           created_at: String(row.created_at || ''),
@@ -4393,6 +4736,55 @@ export async function syncFromSupabase(opts?: {
           return local;
         },
       },
+      {
+        label: 'Product variants',
+        table: 'product_variants',
+        map: (row: Record<string, unknown>) => ({
+          id: String(row.id),
+          store_id: String(row.store_id),
+          product_id: String(row.product_id),
+          variant_name: String(row.variant_name || ''),
+          variant_value: String(row.variant_value || ''),
+          sku: String(row.sku || ''),
+          barcode: String(row.barcode || ''),
+          price_adjustment: Number(row.price_adjustment) || 0,
+          stock_level: Number(row.stock_level) || 0,
+          is_active: row.is_active === false ? 0 : 1,
+          created_at: String(row.created_at || ''),
+          updated_at: String(row.updated_at || row.created_at || ''),
+          synced: 1,
+        }),
+        dbTable: db.product_variants,
+        merge: async (remote: LocalProductVariant, local: LocalProductVariant | undefined) => {
+          if (!local || local.synced !== 0) return remote;
+          return local;
+        },
+      },
+      {
+        label: 'Customer loyalty transactions',
+        table: 'customer_loyalty_transactions',
+        map: (row: Record<string, unknown>) => ({
+          id: String(row.id),
+          store_id: String(row.store_id),
+          customer_id: String(row.customer_id),
+          transaction_id: (row.transaction_id as string) || null,
+          type: (row.type as 'earn' | 'redeem') || 'earn',
+          points: Number(row.points) || 0,
+          balance_after: Number(row.balance_after) || 0,
+          reason: String(row.reason || ''),
+          created_at: String(row.created_at || ''),
+          synced: row.synced === true ? 1 : 0,
+        }),
+        dbTable: db.customer_loyalty_transactions,
+        merge: async (
+          remote: LocalCustomerLoyaltyTransaction,
+          local: LocalCustomerLoyaltyTransaction | undefined
+        ) => {
+          // Loyalty ledger rows are append-only audit rows.
+          if (!local || local.synced !== 0) return remote;
+          return local;
+        },
+      },
     ] as const;
 
     for (const config of tables) {
@@ -4402,11 +4794,12 @@ export async function syncFromSupabase(opts?: {
       const { data, error } = await fetchAllStoreRows(config.table, storeId);
 
       if (error) {
-        // The debt_reminders table only exists after
-        // supabase-migrate-debt-reminders-dashboard.sql has been run. Skip it
-        // quietly until then instead of failing the whole pull.
+        // The following tables only exist after their migrations have been run.
+        // Skip them quietly until then instead of failing the whole pull.
         if (
-          config.table === 'debt_reminders' &&
+          (config.table === 'debt_reminders' ||
+            config.table === 'product_variants' ||
+            config.table === 'customer_loyalty_transactions') &&
           /does not exist|PGRST205|schema cache/i.test(error.message || '')
         ) {
           continue;
@@ -4424,7 +4817,9 @@ export async function syncFromSupabase(opts?: {
           continue;
         }
         if (
-          (config.table === 'stock_batches' || config.table === 'stock_movements') &&
+          (config.table === 'stock_batches' ||
+            config.table === 'stock_movements' ||
+            config.table === 'product_variants') &&
           deletedProductIds.has(mapped.product_id as string)
         ) {
           continue;
