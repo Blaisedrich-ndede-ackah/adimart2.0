@@ -174,10 +174,10 @@ input[type="number"] {
 
 /* Consistent 44px touch target for icon-only controls */
 .icon-btn {
-  @apply touch-target inline-flex items-center justify-center rounded-lg text-muted hover:bg-surface-muted hover:text-ink transition-colors;
+  @apply min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg text-muted hover:bg-surface-muted hover:text-ink transition-colors;
 }
 .icon-btn-primary {
-  @apply touch-target inline-flex items-center justify-center rounded-lg bg-primary-subtle text-primary hover:bg-primary hover:text-white transition-colors;
+  @apply min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg bg-primary-subtle text-primary hover:bg-primary hover:text-white transition-colors;
 }
 
 /* Surface card — shared across pages */
