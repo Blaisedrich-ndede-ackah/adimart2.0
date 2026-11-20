@@ -29,6 +29,7 @@ import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
 import { toQty } from '@/lib/warehouse';
 import { buildCustomerBalances } from '@/lib/customerBalances';
+import { getPendingPriceChanges } from '@/lib/priceChangeQueue';
 import { useLiveStoreSales } from '@/hooks/useLiveStoreSales';
 import DailyBriefCard from '@/components/DailyBriefCard';
 import SmsWalletCard from '@/components/SmsWalletCard';
