@@ -41,6 +41,7 @@ const LearnAdimatPage = lazy(() => import('@/pages/LearnAdimatPage'));
 const CampaignsPage = lazy(() => import('@/pages/CampaignsPage'));
 const StoreDealsPage = lazy(() => import('@/pages/StoreDealsPage'));
 const PublicShopPage = lazy(() => import('@/pages/PublicShopPage'));
+const PriceScanPage = lazy(() => import('@/pages/PriceScanPage'));
 const TermsPage = lazy(() => import('@/pages/TermsPage'));
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
 const AdminLoginPage = lazy(() => import('@/pages/AdminLoginPage'));
