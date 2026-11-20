@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, Minus, Plus, ShoppingCart, Trash2, Wifi, WifiOff } from 'lucide-react';
+import { CheckCircle2, Minus, Plus, ShoppingCart, Trash2, Wifi, WifiOff, X } from 'lucide-react';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import { db, generateId, type LocalProduct } from '@/lib/dexie';
 import { flushPendingPickupOrders, formatMoney, getSimilarProducts, lookupProductByBarcodeWithSource, resolvePriceScanStore, type PriceScanStore } from '@/lib/priceScan';
@@ -45,11 +45,27 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
   const [pickupCode, setPickupCode] = useState('');
   const [orderPendingSync, setOrderPendingSync] = useState(false);
   const scanBusy = useRef(false);
+  const closeProductDialogRef = useRef<HTMLButtonElement>(null);
 
   const money = useCallback((amount: number) => formatMoney(amount, store?.currency_code || 'GHS', language), [store?.currency_code, language]);
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
   const cartTotal = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
   const canPaystack = isPaystackConfigured() && !isOffline && store?.currency_code.toUpperCase() === 'GHS';
+
+  useEffect(() => {
+    if (!scannedProduct) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    closeProductDialogRef.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setScannedProduct(null);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [scannedProduct]);
 
   useEffect(() => {
     let active = true;
@@ -300,27 +316,10 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
       <div className="mx-auto max-w-3xl space-y-4 px-4 py-5">
         <section className="rounded-2xl bg-white p-4 shadow-sm">
           <h2 className="mb-3 text-lg font-bold">{t('priceScan.scanBarcode')}</h2>
-          <BarcodeScanner onScan={scanBarcode} active={!pickupCode} large />
+          <BarcodeScanner onScan={scanBarcode} active={!pickupCode && !scannedProduct && !cartOpen} large />
           {scanLoading && <p className="mt-3 text-sm text-primary" role="status">{t('priceScan.lookingUp')}</p>}
           {scanError && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900" role="status">{scanError}</p>}
         </section>
-
-        {scannedProduct && (
-          <section className="rounded-2xl bg-white p-4 shadow-sm" aria-live="polite">
-            {isCachedPrice && <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">{t('priceScan.offlineCached')}</p>}
-            <div className="flex items-center gap-4">
-              {scannedProduct.image_url && <img src={scannedProduct.image_url} alt="" className="h-20 w-20 rounded-xl object-cover" />}
-              <div className="min-w-0 flex-1">
-                <h2 className="break-words text-lg font-bold">{scannedProduct.name}</h2>
-                <p className="mt-1 text-2xl font-bold text-primary">{money(scannedProduct.selling_price)}</p>
-                <StockBadge product={scannedProduct} t={t} />
-              </div>
-            </div>
-            <button type="button" onClick={() => addToCart(scannedProduct)} disabled={scannedProduct.stock_level <= 0} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-semibold text-white touch-target disabled:bg-gray-300">
-              <Plus className="h-5 w-5" />{t('priceScan.addToCart')}
-            </button>
-          </section>
-        )}
 
         {visibleSimilar.length > 0 && (
           <section className="rounded-2xl bg-white p-4 shadow-sm">
@@ -347,6 +346,68 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
           <span className="inline-flex items-center gap-2 font-semibold"><ShoppingCart className="h-5 w-5" />{t('priceScan.cart')} ({cartCount})</span>
           <span className="font-bold">{money(cartTotal)}</span>
         </button>
+      )}
+
+      {scannedProduct && (
+        <div
+          className="fixed inset-0 z-40 flex items-end justify-center bg-slate-950/65 p-0 backdrop-blur-sm sm:items-center sm:p-5"
+          onClick={(event) => { if (event.target === event.currentTarget) setScannedProduct(null); }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="price-scan-product-title"
+            aria-describedby="price-scan-product-price"
+            className="max-h-[92dvh] w-full max-w-lg overflow-y-auto rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl"
+          >
+            <div className="relative flex h-52 items-center justify-center overflow-hidden bg-gradient-to-br from-emerald-50 via-white to-teal-100 sm:h-60">
+              {scannedProduct.image_url ? (
+                <img src={scannedProduct.image_url} alt="" className="h-full w-full object-contain p-5" />
+              ) : (
+                <div className="flex h-24 w-24 items-center justify-center rounded-3xl bg-white text-4xl font-bold text-primary shadow-sm" aria-hidden="true">
+                  {scannedProduct.name.trim().charAt(0).toUpperCase()}
+                </div>
+              )}
+              <button
+                ref={closeProductDialogRef}
+                type="button"
+                onClick={() => setScannedProduct(null)}
+                aria-label={t('common.close')}
+                className="absolute right-4 top-4 flex h-11 w-11 items-center justify-center rounded-full bg-white/95 text-gray-700 shadow-md touch-target hover:bg-white"
+              >
+                <X className="h-5 w-5" aria-hidden="true" />
+              </button>
+              {isCachedPrice && <span className="absolute left-4 top-4 rounded-full bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-900">{t('priceScan.offlineCached')}</span>}
+            </div>
+
+            <div className="p-5 sm:p-6">
+              {scannedProduct.category && <p className="text-xs font-bold uppercase tracking-[0.14em] text-emerald-700">{scannedProduct.category}</p>}
+              <h2 id="price-scan-product-title" className="mt-1 break-words text-2xl font-bold leading-tight text-gray-950">{scannedProduct.name}</h2>
+              <p id="price-scan-product-price" className="mt-3 text-4xl font-extrabold tracking-tight text-primary">{money(scannedProduct.selling_price)}</p>
+              <div className="mt-3 flex items-center justify-between gap-3 rounded-2xl bg-gray-50 px-4 py-3">
+                <span className="text-sm font-medium text-gray-600">{t('pos.stock')}</span>
+                <StockBadge product={scannedProduct} t={t} />
+              </div>
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => { addToCart(scannedProduct); setScannedProduct(null); }}
+                  disabled={scannedProduct.stock_level <= 0}
+                  className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-bold text-white shadow-md shadow-emerald-900/15 touch-target hover:bg-primary-dark disabled:cursor-not-allowed disabled:bg-gray-300 disabled:shadow-none"
+                >
+                  <Plus className="h-5 w-5" aria-hidden="true" />{t('priceScan.addToCart')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScannedProduct(null)}
+                  className="min-h-12 rounded-xl border border-gray-200 bg-white px-4 py-3 font-semibold text-gray-700 touch-target hover:bg-gray-50"
+                >
+                  {t('common.close')}
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
       )}
 
       {cartOpen && (
