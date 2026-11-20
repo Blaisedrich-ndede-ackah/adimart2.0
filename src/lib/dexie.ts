@@ -990,6 +990,7 @@ class AdimatDB extends Dexie {
   supplier_payments!: Table<LocalSupplierPayment, string>;
   store_promotions!: Table<LocalStorePromotion, string>;
   sms_outbox!: Table<LocalSmsOutbox, string>;
+  price_changes!: Table<PriceChange, string>;
 
   /* Agent Portal tables */
   agents!: Table<LocalAgent, string>;
@@ -1315,6 +1316,10 @@ class AdimatDB extends Dexie {
         await tx.table('stores').toCollection().modify((store: LocalStore) => {
           if (typeof store.vat_rate !== 'number') store.vat_rate = 0;
         });
+      });
+      /* Version 28 — durable offline queue for product selling price changes. */
+      this.version(28).stores({
+        price_changes: 'id, store_id, product_id, changed_at, synced, applied',
       });
   }
 }
