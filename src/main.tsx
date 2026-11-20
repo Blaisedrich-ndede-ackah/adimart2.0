@@ -4,7 +4,12 @@ import "./index.css";
 import App from "./App";
 
 // Apply the saved theme before React paints to avoid a light-mode flash.
-const savedTheme = window.localStorage.getItem('adimat-theme');
+let savedTheme: string | null = null;
+try {
+  savedTheme = window.localStorage.getItem('adimat-theme');
+} catch {
+  // Storage can be unavailable in private or restricted browser contexts.
+}
 if (savedTheme !== 'light') {
   document.documentElement.classList.add('dark');
   document.documentElement.style.colorScheme = 'dark';
