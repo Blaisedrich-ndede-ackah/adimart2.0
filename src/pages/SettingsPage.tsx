@@ -33,7 +33,7 @@ import LanguageSwitcher from '@/components/LanguageSwitcher';
 import CurrencySelect from '@/components/CurrencySelect';
 import { useI18nStore, useT } from '@/lib/i18n';
 import { isCustomerDisplayEnabled, setCustomerDisplayEnabled } from '@/lib/cfdChannel';
-import { DEFAULT_CURRENCY, normalizeCurrencyCode, getStoreCurrency } from '@/lib/currency';
+import { DEFAULT_CURRENCY, normalizeCurrencyCode, getStoreCurrency, useFormatMoney } from '@/lib/currency';
 import { canAccessCashbook, canRecordCustomerPayments } from '@/lib/staffAccess';
 import {
   DEFAULT_SESSION_TIMEOUT_MINUTES,
