@@ -339,6 +339,19 @@ export async function updateOnlineOrderStatus(
   const now = new Date().toISOString();
   const orderRef = order.order_number || orderId;
 
+  if (status === 'fulfilled' && order.status === 'cancelled') {
+    throw new Error('A cancelled pickup order cannot be completed.');
+  }
+
+  if (status === 'fulfilled' && previousStatus !== 'fulfilled' && order.order_number.startsWith('PS-')) {
+    if (order.payment_method === 'paystack') {
+      const paymentVerified = await verifyPriceScanPayment(order.store_id, order.id);
+      if (!paymentVerified) throw new Error('Online payment is not verified for this pickup order.');
+    } else if (order.payment_method !== 'cash') {
+      throw new Error('Record payment before completing this pickup order.');
+    }
+  }
+
   // Deduct stock once when the order is fulfilled (idempotent)
   if (status === 'fulfilled' && previousStatus !== 'fulfilled') {
     const items = await db.online_order_items

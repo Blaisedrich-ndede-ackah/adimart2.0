@@ -50,7 +50,7 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
   const money = useCallback((amount: number) => formatMoney(amount, store?.currency_code || 'GHS', language), [store?.currency_code, language]);
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
   const cartTotal = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
-  const canPaystack = isPaystackConfigured() && !isOffline && store?.currency_code.toUpperCase() === 'GHS';
+  const canPaystack = isPaystackConfigured() && isSupabaseConfigured() && !isOffline && store?.currency_code.toUpperCase() === 'GHS';
 
   useEffect(() => {
     if (!scannedProduct) return;

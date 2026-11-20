@@ -45,6 +45,13 @@ export default function PriceScanPickupDesk({ open, onClose, store, cashierName 
 
   useEffect(() => {
     if (!open) return;
+    setCode('');
+    setOrder(null);
+    setCheckedItems(new Set());
+    setCashReceived('');
+    setPaymentVerification('idle');
+    setError('');
+    setMessage('');
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     closeButtonRef.current?.focus();
@@ -102,7 +109,7 @@ export default function PriceScanPickupDesk({ open, onClose, store, cashierName 
     }
   };
 
-  const verifyOnlinePayment = async (found: LocalOnlineOrder) => {
+  async function verifyOnlinePayment(found: LocalOnlineOrder): Promise<void> {
     setPaymentVerification('checking');
     setError('');
     try {
@@ -113,7 +120,7 @@ export default function PriceScanPickupDesk({ open, onClose, store, cashierName 
       setPaymentVerification('failed');
       setError(t('pickup.onlinePaymentCheckFailed'));
     }
-  };
+  }
 
   const retryOnlinePaymentVerification = async () => {
     if (!order || !needsOnlineVerification) return;
@@ -185,6 +192,7 @@ export default function PriceScanPickupDesk({ open, onClose, store, cashierName 
         paymentMethod: order.payment_method,
         cashAmount: paidCash ? total : 0,
         paystackAmount: paidOnline ? total : 0,
+        paymentReference: paidOnline ? order.notes.replace(/^price-scan-paystack:/, '') : undefined,
         currencyCode: store.currency_code || 'GHS',
       });
       if (!result.success) throw new Error(result.error || t('pickup.printFailed'));

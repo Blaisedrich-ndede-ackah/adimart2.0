@@ -388,7 +388,7 @@ export default function EcommercePage() {
                     ))}
                   </ul>
 
-                  {order.notes ? (
+                  {order.notes && !order.notes.startsWith('price-scan-paystack:') ? (
                     <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
                       Note: {order.notes}
                     </p>
@@ -400,7 +400,7 @@ export default function EcommercePage() {
                   ) : null}
 
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {STATUS_FLOW.filter((s) => s !== order.status).map((status) => (
+                    {STATUS_FLOW.filter((s) => s !== order.status && !(order.order_number.startsWith('PS-') && s === 'fulfilled')).map((status) => (
                       <button
                         key={status}
                         type="button"

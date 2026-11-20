@@ -46,6 +46,15 @@ export async function handlePriceScanPaymentVerification(req: ApiRequest, res: A
 
     const referenceMatch = /^price-scan-paystack:([A-Za-z0-9_-]{4,80})$/.exec(String(order.notes || ''));
     if (!referenceMatch) return reply(res, 409, { error: 'This order has no payment reference to verify.' });
+    const { data: sameReferenceOrders, error: duplicateError } = await supabase
+      .from('online_orders')
+      .select('id')
+      .eq('store_id', storeId)
+      .eq('notes', `price-scan-paystack:${referenceMatch[1]}`);
+    if (duplicateError) throw new Error(duplicateError.message);
+    if (!sameReferenceOrders || sameReferenceOrders.length !== 1 || sameReferenceOrders[0].id !== orderId) {
+      return reply(res, 409, { error: 'This payment reference is linked to more than one order.' });
+    }
 
     const verifyResponse = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(referenceMatch[1])}`, {
       headers: { Authorization: `Bearer ${paystackSecret}` },
