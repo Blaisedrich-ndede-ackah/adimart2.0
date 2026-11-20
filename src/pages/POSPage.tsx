@@ -2,10 +2,11 @@ import { useState, useEffect, useCallback, useMemo, useRef, type KeyboardEvent a
 import {
   ShoppingCart, Minus, Plus, Trash2, Search, Package, AlertCircle, Bluetooth,
   ScanBarcode, MapPin, X, Settings2, GripVertical, MoveUp, MoveDown, Mic, Pause, Play,
-  CircleCheck, CircleX,
+  CircleCheck, CircleX, PackageCheck,
   MonitorUp,
 } from 'lucide-react';
 import BarcodeScanner from '@/components/BarcodeScanner';
+import PriceScanPickupDesk from '@/components/PriceScanPickupDesk';
 import CheckoutOverlay from '@/components/CheckoutOverlay';
 import FrequentItems from '@/components/FrequentItems';
 import { useCartStore } from '@/store/useCartStore';
@@ -132,6 +133,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   const [posTab, setPosTab] = useState<PosTab>('products');
   const [scannerActive, setScannerActive] = useState(true);
   const [showCameraScanner, setShowCameraScanner] = useState(false);
+  const [pickupDeskOpen, setPickupDeskOpen] = useState(false);
   const [showCheckout, setShowCheckout] = useState(false);
   const [optionProduct, setOptionProduct] = useState<LocalProduct | null>(null);
   const [productOptions, setProductOptions] = useState<LocalProductVariant[]>([]);
@@ -208,6 +210,8 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
     displayUrl.hash = '/pos/customer-display';
     window.open(displayUrl.toString(), '_blank', 'popup=yes,width=1280,height=800');
   };
+
+  const closePickupDesk = useCallback(() => setPickupDeskOpen(false), []);
 
   const canWholesale = canUserSellWholesale(currentUser);
   const isStoreOwner = currentUser?.role === 'owner';
@@ -731,6 +735,14 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
 
   return (
     <div className="page-shell relative">
+      {currentStore && currentUser && (
+        <PriceScanPickupDesk
+          open={pickupDeskOpen}
+          onClose={closePickupDesk}
+          store={currentStore}
+          cashierName={currentUser.name || ''}
+        />
+      )}
       {(scanFeedback || stockError) && (
         <div
           role="status"
@@ -793,6 +805,16 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
               <span className="hidden sm:inline">{t('cfd.openCustomerDisplay')}</span>
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setPickupDeskOpen(true)}
+            aria-label={t('pickup.title')}
+            title={t('pickup.title')}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-white/20 px-2.5 py-2 text-xs font-semibold text-white touch-target hover:bg-white/30"
+          >
+            <PackageCheck className="h-4 w-4" />
+            <span className="hidden sm:inline">{t('pickup.shortTitle')}</span>
+          </button>
           {(btStatus.hidScannerEnabled || btStatus.scannerConnected) && (
             <div
               className="bg-white/15 px-2 py-1 rounded-lg flex items-center gap-1"

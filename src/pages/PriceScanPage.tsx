@@ -162,7 +162,7 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
       .filter((item) => item.quantity > 0));
   };
 
-  const saveOrder = useCallback(async (paymentMethod: 'paystack' | 'pay_on_delivery') => {
+  const saveOrder = useCallback(async (paymentMethod: 'paystack' | 'pay_on_delivery', paymentReference = '') => {
     if (!store || cart.length === 0) throw new Error(t('priceScan.cartEmpty'));
     const now = new Date().toISOString();
     const orderId = generateId();
@@ -180,6 +180,9 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
       created_at: now,
       synced: 0,
     }));
+    const paymentNote = paymentMethod === 'paystack' && paymentReference
+      ? `price-scan-paystack:${paymentReference}`
+      : '';
     let synced = 0;
     if (navigator.onLine !== false && isSupabaseConfigured()) {
       try {
@@ -190,7 +193,7 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
           customer_name: '',
           customer_phone: '',
           customer_address: '',
-          notes: '',
+          notes: paymentNote,
           status: 'new',
           payment_method: paymentMethod,
           total_amount: orderTotal,
@@ -223,7 +226,7 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
         customer_name: '',
         customer_phone: '',
         customer_address: '',
-        notes: '',
+        notes: paymentNote,
         status: 'new',
         payment_method: paymentMethod,
         total_amount: orderTotal,
@@ -262,8 +265,8 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
         amount: Math.round(cartTotal * 100),
         reference,
         paymentFor: 'Price-scan pickup order',
-        onSuccess: () => {
-          void saveOrder('paystack').catch((error: unknown) => {
+        onSuccess: (paymentReference) => {
+          void saveOrder('paystack', paymentReference).catch((error: unknown) => {
             setCheckoutError(error instanceof Error ? error.message : t('priceScan.orderFailed'));
           }).finally(() => setSubmitting(false));
         },

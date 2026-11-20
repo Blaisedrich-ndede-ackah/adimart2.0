@@ -427,6 +427,41 @@ export async function updateOnlineOrderStatus(
   }, 0);
 }
 
+export async function recordOnlineOrderCashPayment(orderId: string): Promise<void> {
+  const order = await db.online_orders.get(orderId);
+  if (!order) throw new Error('Order not found');
+  if (order.status === 'cancelled') throw new Error('A cancelled order cannot be paid.');
+  if (order.payment_method === 'paystack' || order.payment_method === 'wallet_paystack') {
+    throw new Error('This order is already marked as paid online.');
+  }
+
+  const now = new Date().toISOString();
+  await db.online_orders.update(orderId, {
+    payment_method: 'cash',
+    updated_at: now,
+    synced: 0,
+  });
+  const { triggerPushSync } = await import('@/lib/sync');
+  window.setTimeout(() => void triggerPushSync('order'), 0);
+}
+
+export async function verifyPriceScanPayment(storeId: string, orderId: string): Promise<boolean> {
+  const response = await fetch('/api/price-scan-payment', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ storeId, orderId }),
+  });
+  const payload: unknown = await response.json().catch(() => null);
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    throw new Error('The payment verification service returned an invalid response.');
+  }
+  const result = payload as Record<string, unknown>;
+  if (!response.ok) {
+    throw new Error(typeof result.error === 'string' ? result.error : 'Could not verify the online payment.');
+  }
+  return result.verified === true;
+}
+
 export async function pullOnlineOrdersFromCloud(storeId: string): Promise<number> {
   if (!isSupabaseConfigured()) return 0;
 
