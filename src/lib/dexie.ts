@@ -126,7 +126,6 @@ export interface LocalCustomer {
   is_active: number;
   /** Customer asked not to receive automated debt reminder SMS (0/1) */
   debt_reminder_opt_out?: number;
-  loyalty_points_balance?: number;
   /** Null or omitted means no credit limit. */
   credit_limit?: number | null;
   /** Days after a credit sale when payment is due. Null means no due date. */
@@ -5095,7 +5094,6 @@ export async function syncFromSupabase(opts?: {
           opening_balance: Number(row.opening_balance) || 0,
           opening_balance_remaining: Number(row.opening_balance_remaining) || 0,
           wallet_balance: Number(row.wallet_balance) || 0,
-          loyalty_points_balance: Number(row.loyalty_points_balance) || 0,
           is_active: row.is_active === false ? 0 : 1,
           debt_reminder_opt_out: row.debt_reminder_opt_out === true ? 1 : 0,
           loyalty_points_balance: 'loyalty_points_balance' in row
