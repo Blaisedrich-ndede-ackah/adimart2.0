@@ -15,6 +15,8 @@ const devApiModules: Record<string, string> = {
   "/api/shop-owner": "api/shop-owner.ts",
   "/api/paystack-webhook": "api/paystack-webhook.ts",
   "/api/paystack-return": "api/paystack-return.ts",
+  "/api/admin-active-devices": "api/admin-monitoring.ts",
+  "/api/admin-activity-log": "api/admin-monitoring.ts",
   "/api/store-momo-payout": "api/shop-checkout.ts",
 };
 

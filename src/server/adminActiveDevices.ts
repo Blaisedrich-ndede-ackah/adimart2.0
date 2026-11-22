@@ -66,7 +66,7 @@ function serviceErrorMessage(message: string): string {
   return message || 'Could not load active device sessions.';
 }
 
-export default async function handler(request: ApiRequest, response: ApiResponse): Promise<void> {
+export async function handleAdminActiveDevices(request: ApiRequest, response: ApiResponse): Promise<void> {
   response.setHeader('Cache-Control', 'no-store');
   if (request.method !== 'POST') {
     response.status(405).json({ error: 'Method not allowed.' });

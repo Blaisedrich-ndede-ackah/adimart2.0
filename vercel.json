@@ -1,6 +1,14 @@
 {
   "rewrites": [
     {
+      "source": "/api/admin-active-devices",
+      "destination": "/api/admin-monitoring?action=active-devices"
+    },
+    {
+      "source": "/api/admin-activity-log",
+      "destination": "/api/admin-monitoring?action=activity-log"
+    },
+    {
       "source": "/api/store-momo-payout",
       "destination": "/api/shop-checkout?action=store-momo-payout"
     }
