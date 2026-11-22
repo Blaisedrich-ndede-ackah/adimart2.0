@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, Minus, Plus, ShoppingCart, Trash2, Wifi, WifiOff, X } from 'lucide-react';
+import { CheckCircle2, Download, Minus, Plus, ShoppingCart, Trash2, Wifi, WifiOff, X } from 'lucide-react';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import { db, generateId, type LocalProduct } from '@/lib/dexie';
 import { flushPendingPickupOrders, formatMoney, getSimilarProducts, lookupProductByBarcodeWithSource, resolvePriceScanStore, type PriceScanStore } from '@/lib/priceScan';
 import { useI18nStore, useT } from '@/lib/i18n';
 import { generatePaystackReference, initializePaystack, isPaystackConfigured, resolvePaystackEmail } from '@/lib/paystack';
+import { createPickupPassImage, downloadPickupPass } from '@/lib/pickupPass';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 
 interface PriceScanPageProps {
@@ -43,6 +44,8 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
   const [submitting, setSubmitting] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
   const [pickupCode, setPickupCode] = useState('');
+  const [pickupPassImage, setPickupPassImage] = useState('');
+  const [pickupPassError, setPickupPassError] = useState('');
   const [orderPendingSync, setOrderPendingSync] = useState(false);
   const scanBusy = useRef(false);
   const closeProductDialogRef = useRef<HTMLButtonElement>(null);
@@ -238,6 +241,20 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
     setCartOpen(false);
     setOrderPendingSync(synced === 0);
     setPickupCode(orderNumber);
+    setPickupPassImage('');
+    setPickupPassError('');
+    try {
+      const passImage = await createPickupPassImage(
+        store.name,
+        orderNumber,
+        t('priceScan.pickupPassTitle'),
+        t('priceScan.showCode'),
+      );
+      setPickupPassImage(passImage);
+      downloadPickupPass(passImage, orderNumber);
+    } catch (error: unknown) {
+      setPickupPassError(error instanceof Error ? error.message : t('priceScan.pickupPassFailed'));
+    }
   }, [store, cart, t]);
 
   const payWithPaystack = async () => {
@@ -281,6 +298,18 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
         <p className="mt-3 text-gray-600">{t('priceScan.pickupCode')}</p>
         <p className="mt-2 rounded-2xl bg-white px-6 py-4 font-mono text-3xl font-bold tracking-wider text-primary shadow-sm">{pickupCode}</p>
         <p className="mt-4 max-w-sm text-sm text-gray-600">{t('priceScan.showCode')}</p>
+        {pickupPassImage ? (
+          <div className="mt-6 w-full max-w-sm rounded-2xl bg-white p-4 shadow-sm">
+            <img src={pickupPassImage} alt={`${t('priceScan.pickupPassTitle')} ${pickupCode}`} className="mx-auto w-full rounded-lg" />
+            <a href={pickupPassImage} download={`Adimat-pickup-${pickupCode}.png`} className="mt-3 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-semibold text-white touch-target">
+              <Download className="h-5 w-5" aria-hidden="true" />{t('priceScan.downloadPickupPass')}
+            </a>
+          </div>
+        ) : pickupPassError ? (
+          <p className="mt-4 max-w-sm rounded-xl bg-amber-50 p-3 text-sm text-amber-900" role="status">{pickupPassError}</p>
+        ) : (
+          <p className="mt-4 text-sm text-gray-500" role="status">{t('priceScan.preparingPickupPass')}</p>
+        )}
         {orderPendingSync && <p className="mt-4 max-w-sm rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{t('priceScan.orderSavedOffline')}</p>}
       </main>
     );
