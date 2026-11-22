@@ -5,8 +5,9 @@ export async function createPickupPassImage(
   pickupCode: string,
   title: string,
   instruction: string,
+  qrPayload = pickupCode,
 ): Promise<string> {
-  const qrDataUrl = await QRCode.toDataURL(pickupCode, {
+  const qrDataUrl = await QRCode.toDataURL(qrPayload, {
     width: 640,
     margin: 2,
     errorCorrectionLevel: 'H',

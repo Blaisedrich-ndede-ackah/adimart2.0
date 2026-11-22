@@ -42,6 +42,7 @@ const CampaignsPage = lazy(() => import('@/pages/CampaignsPage'));
 const StoreDealsPage = lazy(() => import('@/pages/StoreDealsPage'));
 const PublicShopPage = lazy(() => import('@/pages/PublicShopPage'));
 const PriceScanPage = lazy(() => import('@/pages/PriceScanPage'));
+const VerifyPickupPage = lazy(() => import('@/pages/VerifyPickupPage'));
 const TermsPage = lazy(() => import('@/pages/TermsPage'));
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
 const AdminLoginPage = lazy(() => import('@/pages/AdminLoginPage'));
@@ -91,12 +92,18 @@ function readPriceScanSlug(): string | null {
   return match?.[1] ? decodeURIComponent(match[1]).trim().toLowerCase() : null;
 }
 
+function readVerifyPickupRoute(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.location.hash.replace(/^#\/?/, '').replace(/\/$/, '').toLowerCase() === 'verify-pickup';
+}
+
 function readPublicUtilityRoute(): 'terms' | '404' | null {
   if (typeof window === 'undefined') return null;
   const hash = window.location.hash.replace(/^#/, '').replace(/^\//, '').replace(/\/$/, '');
   if (!hash) return null;
   if (hash.toLowerCase() === 'terms') return 'terms';
   if (hash.toLowerCase() === 'agent') return null;
+  if (hash.toLowerCase() === 'verify-pickup') return null;
   if (/^shop\//i.test(hash)) return null;
   if (/^price-scan\//i.test(hash)) return null;
   return '404';
@@ -137,7 +144,7 @@ function AuthenticatedApp() {
   const t = useT();
   const initializeAgent = useAgentAuthStore((state) => state.initialize);
   const leftHanded = useAccessibilityStore((state) => state.leftHanded);
-  const [currentPage, setCurrentPage] = useState('home');
+  const [currentPage, setCurrentPage] = useState(() => readVerifyPickupRoute() ? 'verify-pickup' : 'home');
   const [quickAction, setQuickAction] = useState<'add-product' | 'add-expense' | null>(null);
   const [appMode, setAppMode] = useState<AppMode>(() => (readAgentHash() ? 'agent-login' : 'store'));
   const [adminSessionResolved, setAdminSessionResolved] = useState(false);
@@ -166,13 +173,18 @@ function AuthenticatedApp() {
     const onHashChange = () => setPublicShopSlug(readPublicShopSlug());
     const onPriceScanHashChange = () => setPriceScanSlug(readPriceScanSlug());
     const onUtilityHashChange = () => setPublicUtilityRoute(readPublicUtilityRoute());
+    const onVerifyPickupHashChange = () => {
+      if (readVerifyPickupRoute()) setCurrentPage('verify-pickup');
+    };
     window.addEventListener('hashchange', onHashChange);
     window.addEventListener('hashchange', onPriceScanHashChange);
     window.addEventListener('hashchange', onUtilityHashChange);
+    window.addEventListener('hashchange', onVerifyPickupHashChange);
     return () => {
       window.removeEventListener('hashchange', onHashChange);
       window.removeEventListener('hashchange', onPriceScanHashChange);
       window.removeEventListener('hashchange', onUtilityHashChange);
+      window.removeEventListener('hashchange', onVerifyPickupHashChange);
     };
   }, []);
 
@@ -274,7 +286,7 @@ function AuthenticatedApp() {
 
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return;
-    setCurrentPage(currentUser.role === 'owner' ? 'home' : 'pos');
+    setCurrentPage(readVerifyPickupRoute() ? 'verify-pickup' : currentUser.role === 'owner' ? 'home' : 'pos');
   }, [isAuthenticated, currentUser?.id, currentUser?.role]);
 
   useEffect(() => {
@@ -589,6 +601,8 @@ function AuthenticatedApp() {
         ) : (
           <POSPage />
         );
+      case 'verify-pickup':
+        return role === 'owner' || role === 'cashier' ? <VerifyPickupPage /> : <POSPage />;
       default:
         return <POSPage />;
     }

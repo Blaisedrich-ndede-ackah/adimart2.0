@@ -220,6 +220,7 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
     { label: 'Restock', detail: 'Replenish low stock', page: 'inventory', icon: Package, className: 'bg-white text-primary border border-amber-100' },
     { label: 'Add expense', detail: 'Record a store cost', page: 'expenses', quickAdd: true, icon: Plus, className: 'bg-white text-primary border border-emerald-100' },
     { label: t('priceScan.ownerQrAction'), detail: t('priceScan.ownerQrDetail'), page: 'settings', icon: QrCode, className: 'bg-white text-primary border border-emerald-100' },
+    { label: t('pickup.verify'), detail: t('pickup.scanCode'), page: 'verify-pickup', icon: QrCode, className: 'bg-emerald-50 text-emerald-900 border border-emerald-100' },
     { label: t('priceScan.manageQueue'), detail: t('priceScan.queueActionDetail', { count: pendingPriceChangeCount }), page: 'settings', icon: RefreshCw, className: 'bg-amber-50 text-amber-900 border border-amber-100' },
   ];
 

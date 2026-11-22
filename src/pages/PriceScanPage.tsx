@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, Download, Minus, Plus, ShoppingCart, Trash2, Wifi, WifiOff, X } from 'lucide-react';
 import BarcodeScanner from '@/components/BarcodeScanner';
+import PickupCodeDisplay from '@/components/PickupCodeDisplay';
 import { db, generateId, type LocalProduct } from '@/lib/dexie';
 import { flushPendingPickupOrders, formatMoney, getSimilarProducts, lookupProductByBarcodeWithSource, resolvePriceScanStore, type PriceScanStore } from '@/lib/priceScan';
 import { useI18nStore, useT } from '@/lib/i18n';
 import { generatePaystackReference, initializePaystack, isPaystackConfigured, resolvePaystackEmail } from '@/lib/paystack';
 import { createPickupPassImage, downloadPickupPass } from '@/lib/pickupPass';
+import { generatePickupToken, type PickupToken } from '@/lib/pickupTokens';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 
 interface PriceScanPageProps {
@@ -44,6 +46,9 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
   const [submitting, setSubmitting] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
   const [pickupCode, setPickupCode] = useState('');
+  const [pickupToken, setPickupToken] = useState<PickupToken | null>(null);
+  const [pendingTokenOrder, setPendingTokenOrder] = useState<{ id: string; orderNumber: string } | null>(null);
+  const [issuingPickupToken, setIssuingPickupToken] = useState(false);
   const [pickupPassImage, setPickupPassImage] = useState('');
   const [pickupPassError, setPickupPassError] = useState('');
   const [orderPendingSync, setOrderPendingSync] = useState(false);
@@ -239,10 +244,52 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
     });
     setCart([]);
     setCartOpen(false);
-    setOrderPendingSync(synced === 0);
+    let orderSynced = synced;
+    setOrderPendingSync(orderSynced === 0);
     setPickupCode(orderNumber);
+    setPickupToken(null);
     setPickupPassImage('');
     setPickupPassError('');
+    setPendingTokenOrder(store.pickup_verification_enabled ? { id: orderId, orderNumber } : null);
+
+    if (store.pickup_verification_enabled) {
+      setIssuingPickupToken(true);
+      try {
+        if (orderSynced === 0) {
+          await flushPendingPickupOrders(store.id);
+          orderSynced = (await db.online_orders.get(orderId))?.synced ?? 0;
+          setOrderPendingSync(orderSynced === 0);
+        }
+        if (orderSynced !== 1) throw new Error(t('pickup.tokenIssueFailed'));
+        const token = await generatePickupToken(
+          store.id,
+          orderId,
+          orderNumber,
+          store.pickup_token_ttl_minutes,
+        );
+        if (token.status !== 'issued' || Date.parse(token.expires_at) <= Date.now()) {
+          throw new Error(t('pickup.tokenIssueFailed'));
+        }
+        const passImage = await createPickupPassImage(
+          store.name,
+          token.token_code,
+          t('priceScan.pickupPassTitle'),
+          t('pickup.showAtExit'),
+          token.qr_payload,
+        );
+        setPickupToken(token);
+        setPickupPassImage(passImage);
+        downloadPickupPass(passImage, token.token_code);
+        setPendingTokenOrder(null);
+      } catch (error: unknown) {
+        setPickupPassError(error instanceof Error ? error.message : t('pickup.tokenIssueFailed'));
+      } finally {
+        setIssuingPickupToken(false);
+      }
+      return;
+    }
+
+    setPendingTokenOrder(null);
     try {
       const passImage = await createPickupPassImage(
         store.name,
@@ -256,6 +303,42 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
       setPickupPassError(error instanceof Error ? error.message : t('priceScan.pickupPassFailed'));
     }
   }, [store, cart, t]);
+
+  const retryPickupToken = async () => {
+    if (!store || !pendingTokenOrder || issuingPickupToken) return;
+    setIssuingPickupToken(true);
+    setPickupPassError('');
+    try {
+      await flushPendingPickupOrders(store.id);
+      const localOrder = await db.online_orders.get(pendingTokenOrder.id);
+      if (!localOrder || localOrder.synced !== 1) throw new Error(t('pickup.tokenIssueFailed'));
+      const token = await generatePickupToken(
+        store.id,
+        pendingTokenOrder.id,
+        pendingTokenOrder.orderNumber,
+        store.pickup_token_ttl_minutes,
+      );
+      if (token.status !== 'issued' || Date.parse(token.expires_at) <= Date.now()) {
+        throw new Error(t('pickup.tokenIssueFailed'));
+      }
+      const passImage = await createPickupPassImage(
+        store.name,
+        token.token_code,
+        t('priceScan.pickupPassTitle'),
+        t('pickup.showAtExit'),
+        token.qr_payload,
+      );
+      setPickupToken(token);
+      setPickupPassImage(passImage);
+      downloadPickupPass(passImage, token.token_code);
+      setPendingTokenOrder(null);
+      setOrderPendingSync(false);
+    } catch (error: unknown) {
+      setPickupPassError(error instanceof Error ? error.message : t('pickup.tokenIssueFailed'));
+    } finally {
+      setIssuingPickupToken(false);
+    }
+  };
 
   const payWithPaystack = async () => {
     if (!store || cart.length === 0) return;
@@ -290,25 +373,67 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
     return <main className="flex min-h-screen items-center justify-center bg-emerald-50 p-6 text-center text-gray-700"><p role="alert">{pageError || t('priceScan.storeUnavailable')}</p></main>;
   }
 
+  if (pickupCode && store.pickup_verification_enabled && !pickupToken) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center bg-emerald-50 px-6 py-10 text-center" aria-live="polite">
+        <CheckCircle2 className="mb-4 h-16 w-16 text-emerald-600" aria-hidden="true" />
+        <h1 className="text-2xl font-bold text-gray-900">{t('pickup.paymentConfirmedHint')}</h1>
+        <p className="mt-3 max-w-sm text-sm text-gray-600">{t('pickup.showAtExit')}</p>
+        {pickupPassError ? (
+          <div className="mt-4 max-w-sm rounded-xl bg-amber-50 p-3 text-sm text-amber-900" role="alert">
+            <p>{pickupPassError}</p>
+            <button type="button" onClick={() => void retryPickupToken()} disabled={issuingPickupToken} className="mt-3 min-h-11 rounded-lg bg-amber-900 px-4 py-2 font-semibold text-white touch-target disabled:opacity-50">{issuingPickupToken ? t('common.loading') : t('common.retry')}</button>
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-gray-500" role="status">{issuingPickupToken ? t('common.loading') : t('priceScan.preparingPickupPass')}</p>
+        )}
+        {orderPendingSync && <p className="mt-4 max-w-sm rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{t('priceScan.orderSavedOffline')}</p>}
+      </main>
+    );
+  }
+
   if (pickupCode) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center bg-emerald-50 px-6 py-10 text-center">
         <CheckCircle2 className="mb-4 h-16 w-16 text-emerald-600" aria-hidden="true" />
         <h1 className="text-2xl font-bold text-gray-900">{t('priceScan.orderPlaced')}</h1>
-        <p className="mt-3 text-gray-600">{t('priceScan.pickupCode')}</p>
-        <p className="mt-2 rounded-2xl bg-white px-6 py-4 font-mono text-3xl font-bold tracking-wider text-primary shadow-sm">{pickupCode}</p>
-        <p className="mt-4 max-w-sm text-sm text-gray-600">{t('priceScan.showCode')}</p>
-        {pickupPassImage ? (
+        {pickupToken ? (
+          <>
+            <p className="mt-3 text-gray-600">{t('pickup.token')}</p>
+            <p className="mt-2 rounded-2xl bg-white px-6 py-4 font-mono text-3xl font-bold tracking-wider text-primary shadow-sm">{pickupToken.token_code}</p>
+            <p className="mt-4 max-w-sm text-sm text-gray-600">{t('pickup.showAtExit')}</p>
+            <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-gray-500">{t('pickup.orderNumber')}</p>
+            <p className="mt-1 font-mono text-lg font-bold text-gray-800">{pickupCode}</p>
+          </>
+        ) : (
+          <>
+            <p className="mt-3 text-gray-600">{t('priceScan.pickupCode')}</p>
+            <p className="mt-2 rounded-2xl bg-white px-6 py-4 font-mono text-3xl font-bold tracking-wider text-primary shadow-sm">{pickupCode}</p>
+            <p className="mt-4 max-w-sm text-sm text-gray-600">{t('priceScan.showCode')}</p>
+          </>
+        )}
+        {pickupToken && pickupPassImage ? (
+          <PickupCodeDisplay
+            storeName={store.name}
+            tokenCode={pickupToken.token_code}
+            orderNumber={pickupCode}
+            qrImage={pickupPassImage}
+            expiresAt={pickupToken.expires_at}
+          />
+        ) : pickupPassImage ? (
           <div className="mt-6 w-full max-w-sm rounded-2xl bg-white p-4 shadow-sm">
             <img src={pickupPassImage} alt={`${t('priceScan.pickupPassTitle')} ${pickupCode}`} className="mx-auto w-full rounded-lg" />
-            <a href={pickupPassImage} download={`Adimat-pickup-${pickupCode}.png`} className="mt-3 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-semibold text-white touch-target">
+            <a href={pickupPassImage} download={`Adimat-pickup-${pickupToken?.token_code || pickupCode}.png`} className="mt-3 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-semibold text-white touch-target">
               <Download className="h-5 w-5" aria-hidden="true" />{t('priceScan.downloadPickupPass')}
             </a>
           </div>
         ) : pickupPassError ? (
-          <p className="mt-4 max-w-sm rounded-xl bg-amber-50 p-3 text-sm text-amber-900" role="status">{pickupPassError}</p>
+          <div className="mt-4 w-full max-w-sm rounded-xl bg-amber-50 p-3 text-sm text-amber-900" role="status">
+            <p>{pickupPassError}</p>
+            {pendingTokenOrder && <button type="button" onClick={() => void retryPickupToken()} disabled={issuingPickupToken} className="mt-3 min-h-11 rounded-lg bg-amber-900 px-4 py-2 font-semibold text-white touch-target disabled:opacity-50">{issuingPickupToken ? t('common.loading') : t('common.retry')}</button>}
+          </div>
         ) : (
-          <p className="mt-4 text-sm text-gray-500" role="status">{t('priceScan.preparingPickupPass')}</p>
+          <p className="mt-4 text-sm text-gray-500" role="status">{issuingPickupToken ? t('common.loading') : t('priceScan.preparingPickupPass')}</p>
         )}
         {orderPendingSync && <p className="mt-4 max-w-sm rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{t('priceScan.orderSavedOffline')}</p>}
       </main>

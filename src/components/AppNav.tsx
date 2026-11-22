@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, House, Search, ClipboardCheck,
   Sparkles, CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare, Moon, Sun,
-  ShoppingCart, RotateCcw,
+  ShoppingCart, RotateCcw, QrCode,
   ContactRound, ArrowLeftRight, Building2, Megaphone, Tag,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -91,6 +91,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         { id: 'expenses', label: t('nav.expenses'), icon: PiggyBank, show: true },
         { id: 'cashbook', label: t('nav.cashbook'), icon: BookOpen, show: cashbookOk },
         { id: 'devices', label: t('nav.devices'), icon: Bluetooth, show: true },
+        { id: 'verify-pickup', label: t('pickup.verify'), shortLabel: t('pickup.verify'), icon: QrCode, show: true },
         { id: 'learn', label: 'Learn Adimat', icon: BookOpen, show: true },
         { id: 'campaigns', label: 'Promotions', icon: Megaphone, show: true },
         { id: 'store-deals', label: 'Deals & coupons', shortLabel: 'Deals', icon: Tag, show: isOwner },
@@ -134,7 +135,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const navGroups: NavGroup[] = [
     { label: t('nav.main'), ids: ['home', 'pos', 'search', 'adimat-ai', 'stock-approvals', 'transactions'] },
     { label: 'Shop', ids: ['inventory', 'purchasing', 'warehouse', 'ecommerce', 'multistore', 'store-deals'] },
-    { label: 'Operations', ids: ['reports', 'expenses', 'cashbook', 'devices', 'subscription', 'returns', 'customers'] },
+    { label: 'Operations', ids: ['reports', 'expenses', 'cashbook', 'devices', 'verify-pickup', 'subscription', 'returns', 'customers'] },
     { label: 'Help', ids: ['learn', 'campaigns', 'community', 'settings'] },
   ];
   const groupedMoreItems = navGroups

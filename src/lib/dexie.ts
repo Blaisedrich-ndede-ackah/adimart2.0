@@ -95,6 +95,10 @@ export interface LocalStore {
   vat_rate?: number;
   /** Cached store SMS balance in pesewas. The server wallet is the source of truth. */
   sms_balance_pesewas?: number;
+  /** Require a paid, one-time pickup token at the store exit (0/1). */
+  pickup_verification_enabled?: number;
+  /** Pickup token lifetime in minutes. */
+  pickup_token_ttl_minutes?: number;
   created_at: string;
   synced: number;
 }
@@ -422,6 +426,40 @@ export interface LocalOnlineOrderItem {
   unit_price: number;
   quantity: number;
   subtotal: number;
+  created_at: string;
+  synced: number;
+}
+
+export type PickupTokenStatus = 'issued' | 'redeemed' | 'expired';
+
+export interface LocalPickupToken {
+  id: string;
+  store_id: string;
+  order_id: string;
+  order_number: string;
+  token_code: string;
+  qr_payload: string;
+  status: PickupTokenStatus;
+  issued_at: string;
+  expires_at: string;
+  redeemed_at: string | null;
+  redeemed_by: string | null;
+  redeemed_by_name: string | null;
+  redeemed_method?: 'scan' | 'override' | null;
+  synced: number;
+}
+
+export interface LocalPickupVerificationLog {
+  id: string;
+  store_id: string;
+  token_id: string | null;
+  order_id: string | null;
+  order_number: string;
+  scanned_code: string;
+  event_type: 'redeemed' | 'override';
+  verified_by: string;
+  verified_by_name: string;
+  details?: string;
   created_at: string;
   synced: number;
 }
@@ -990,6 +1028,8 @@ class AdimatDB extends Dexie {
   store_promotions!: Table<LocalStorePromotion, string>;
   sms_outbox!: Table<LocalSmsOutbox, string>;
   price_changes!: Table<PriceChange, string>;
+  pickup_tokens!: Table<LocalPickupToken, string>;
+  pickup_verification_logs!: Table<LocalPickupVerificationLog, string>;
 
   /* Agent Portal tables */
   agents!: Table<LocalAgent, string>;
@@ -1319,6 +1359,20 @@ class AdimatDB extends Dexie {
       /* Version 28 — durable offline queue for product selling price changes. */
       this.version(28).stores({
         price_changes: 'id, store_id, product_id, changed_at, synced, applied',
+      });
+      /* Version 29 — one-time paid pickup tokens and exit audit records. */
+      this.version(29).stores({
+        pickup_tokens: 'id, store_id, order_id, token_code, status, issued_at, synced',
+        pickup_verification_logs: 'id, store_id, token_id, event_type, created_at, synced',
+      }).upgrade(async (tx) => {
+        await tx.table('stores').toCollection().modify((store: LocalStore) => {
+          if (store.pickup_verification_enabled !== 0 && store.pickup_verification_enabled !== 1) {
+            store.pickup_verification_enabled = 1;
+          }
+          if (!Number.isFinite(Number(store.pickup_token_ttl_minutes))) {
+            store.pickup_token_ttl_minutes = 30;
+          }
+        });
       });
   }
 }
@@ -3237,7 +3291,7 @@ const OPTIONAL_CLOUD_TABLES = new Set([
 ]);
 
 const OPTIONAL_PUSH_COLUMNS: Record<string, string[]> = {
-  stores: ['loyalty_earn_rate', 'loyalty_redeem_value', 'credit_limit_action', 'closing_sms_enabled', 'closing_sms_time', 'cashiers_can_record_expenses', 'vat_rate'],
+  stores: ['loyalty_earn_rate', 'loyalty_redeem_value', 'credit_limit_action', 'closing_sms_enabled', 'closing_sms_time', 'cashiers_can_record_expenses', 'vat_rate', 'pickup_verification_enabled', 'pickup_token_ttl_minutes'],
   expenses: ['expense_date', 'payment_method'],
   products: ['unit', 'allow_decimal'],
   customers: ['loyalty_points_balance', 'credit_limit', 'credit_terms_days'],
@@ -3813,6 +3867,8 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
           closing_sms_time: store.closing_sms_time || '20:00',
           cashiers_can_record_expenses: (store.cashiers_can_record_expenses ?? 1) === 1,
           vat_rate: Math.max(0, Math.min(100, Number(store.vat_rate) || 0)),
+          pickup_verification_enabled: (store.pickup_verification_enabled ?? 1) === 1,
+          pickup_token_ttl_minutes: Math.max(5, Math.min(240, Math.floor(Number(store.pickup_token_ttl_minutes) || 30))),
           created_at: store.created_at,
         }],
         async () => { await db.stores.update(storeId, { synced: 1 }); },
@@ -4985,6 +5041,14 @@ export async function syncFromSupabase(opts?: {
           remoteStore.vat_rate == null
             ? (localStore?.vat_rate ?? 0)
             : Math.max(0, Math.min(100, Number(remoteStore.vat_rate) || 0)),
+        pickup_verification_enabled:
+          remoteStore.pickup_verification_enabled == null
+            ? (localStore?.pickup_verification_enabled ?? 1)
+            : remoteStore.pickup_verification_enabled ? 1 : 0,
+        pickup_token_ttl_minutes:
+          remoteStore.pickup_token_ttl_minutes == null
+            ? (localStore?.pickup_token_ttl_minutes ?? 30)
+            : Math.max(5, Math.min(240, Math.floor(Number(remoteStore.pickup_token_ttl_minutes) || 30))),
         created_at: remoteStore.created_at,
         synced: localStore?.synced === 0 ? 0 : 1,
       });

@@ -125,6 +125,8 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [locations, setLocations] = useState<LocalLocation[]>([]);
   const [permUserId, setPermUserId] = useState<string | null>(null);
   const [priceScanEnabled, setPriceScanEnabledState] = useState(isPriceScanPortalEnabled);
+  const [pickupVerificationEnabled, setPickupVerificationEnabled] = useState(true);
+  const [pickupTokenTtlMinutes, setPickupTokenTtlMinutes] = useState('30');
   const [pendingPriceChanges, setPendingPriceChanges] = useState<PendingPriceChangeView[]>([]);
   const [syncingPriceChanges, setSyncingPriceChanges] = useState(false);
   const [priceQueueMessage, setPriceQueueMessage] = useState('');
@@ -202,6 +204,8 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
       );
       setSalesTargetDaily(String(Number(currentStore.sales_target_daily) || 0));
       setSalesTargetMonthly(String(Number(currentStore.sales_target_monthly) || 0));
+      setPickupVerificationEnabled((currentStore.pickup_verification_enabled ?? 1) === 1);
+      setPickupTokenTtlMinutes(String(Math.max(5, Math.min(240, Math.floor(Number(currentStore.pickup_token_ttl_minutes) || 30)))));
       await ensureStoreLocations(currentStore.id);
       setLocations(await listLocations(currentStore.id));
     }
@@ -288,6 +292,8 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         debt_reminder_message: normalizeDebtReminderTemplate(debtReminderMessage),
         sales_target_daily: Math.max(0, Number(salesTargetDaily) || 0),
         sales_target_monthly: Math.max(0, Number(salesTargetMonthly) || 0),
+        pickup_verification_enabled: pickupVerificationEnabled ? 1 : 0,
+        pickup_token_ttl_minutes: Math.max(5, Math.min(240, Math.floor(Number(pickupTokenTtlMinutes) || 30))),
         synced: 0,
       });
       
@@ -511,6 +517,39 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
                 />
               )}
             </div>
+          )}
+        </section>
+
+        <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3" aria-labelledby="pickup-verification-settings-title">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 id="pickup-verification-settings-title" className="font-bold text-gray-900">{t('settings.exitVerification')}</h3>
+              <p className="mt-1 text-xs text-gray-500">{t('pickup.settingsHint')}</p>
+            </div>
+            <label className="inline-flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                checked={pickupVerificationEnabled}
+                onChange={(event) => setPickupVerificationEnabled(event.target.checked)}
+                className="h-5 w-5 accent-emerald-600"
+                aria-label={t('settings.exitVerification')}
+              />
+              <span className="text-sm font-medium text-gray-700">{pickupVerificationEnabled ? t('common.on') : t('common.off')}</span>
+            </label>
+          </div>
+          {pickupVerificationEnabled && (
+            <label className="mt-4 block max-w-xs text-sm font-medium text-gray-800">
+              {t('pickup.expiryMinutes')}
+              <input
+                type="number"
+                min={5}
+                max={240}
+                step={5}
+                value={pickupTokenTtlMinutes}
+                onChange={(event) => setPickupTokenTtlMinutes(event.target.value)}
+                className="mt-2 min-h-11 w-full rounded-lg border border-gray-300 px-3 py-2"
+              />
+            </label>
           )}
         </section>
 
