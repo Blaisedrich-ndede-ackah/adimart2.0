@@ -851,6 +851,21 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
         </div>
       </div>
 
+      {currentStore && currentUser && (
+        <section className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b border-emerald-100 bg-emerald-50 px-4 py-3" aria-label={t('pickup.title')}>
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-primary shadow-sm"><PackageCheck className="h-5 w-5" /></span>
+            <div className="min-w-0">
+              <h2 className="font-bold text-gray-900">{t('pickup.title')}</h2>
+              <p className="text-xs text-gray-600">{t('pickup.posHint')}</p>
+            </div>
+          </div>
+          <button type="button" onClick={() => setPickupDeskOpen(true)} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white shadow-sm touch-target hover:bg-primary-dark">
+            <PackageCheck className="h-4 w-4" />{t('pickup.openDesk')}
+          </button>
+        </section>
+      )}
+
       {showLayoutEditor && isStoreOwner && (
         <section className="flex-shrink-0 border-b border-emerald-100 bg-white px-3 py-3 md:px-4" aria-label="Customize POS layout">
           <div className="mb-3 flex items-center justify-between gap-3">

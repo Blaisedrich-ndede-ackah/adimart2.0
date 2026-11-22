@@ -162,7 +162,7 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
       .filter((item) => item.quantity > 0));
   };
 
-  const saveOrder = useCallback(async (paymentMethod: 'paystack' | 'pay_on_delivery', paymentReference = '') => {
+  const saveOrder = useCallback(async (paymentReference: string) => {
     if (!store || cart.length === 0) throw new Error(t('priceScan.cartEmpty'));
     const now = new Date().toISOString();
     const orderId = generateId();
@@ -180,9 +180,7 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
       created_at: now,
       synced: 0,
     }));
-    const paymentNote = paymentMethod === 'paystack' && paymentReference
-      ? `price-scan-paystack:${paymentReference}`
-      : '';
+    const paymentNote = `price-scan-paystack:${paymentReference}`;
     let synced = 0;
     if (navigator.onLine !== false && isSupabaseConfigured()) {
       try {
@@ -195,7 +193,7 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
           customer_address: '',
           notes: paymentNote,
           status: 'new',
-          payment_method: paymentMethod,
+          payment_method: 'paystack',
           total_amount: orderTotal,
           created_at: now,
           updated_at: now,
@@ -228,7 +226,7 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
         customer_address: '',
         notes: paymentNote,
         status: 'new',
-        payment_method: paymentMethod,
+        payment_method: 'paystack',
         total_amount: orderTotal,
         created_at: now,
         updated_at: now,
@@ -242,18 +240,6 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
     setPickupCode(orderNumber);
   }, [store, cart, t]);
 
-  const payAtCounter = async () => {
-    setSubmitting(true);
-    setCheckoutError('');
-    try {
-      await saveOrder('pay_on_delivery');
-    } catch (error: unknown) {
-      setCheckoutError(error instanceof Error ? error.message : t('priceScan.orderFailed'));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const payWithPaystack = async () => {
     if (!store || cart.length === 0) return;
     setSubmitting(true);
@@ -266,7 +252,7 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
         reference,
         paymentFor: 'Price-scan pickup order',
         onSuccess: (paymentReference) => {
-          void saveOrder('paystack', paymentReference).catch((error: unknown) => {
+          void saveOrder(paymentReference).catch((error: unknown) => {
             setCheckoutError(error instanceof Error ? error.message : t('priceScan.orderFailed'));
           }).finally(() => setSubmitting(false));
         },
@@ -437,11 +423,13 @@ export default function PriceScanPage({ slug }: PriceScanPageProps) {
             )}
             <div className="mt-4 flex justify-between border-t pt-4 text-lg font-bold"><span>{t('priceScan.total')}</span><span>{money(cartTotal)}</span></div>
             {checkoutError && <p className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800" role="alert">{checkoutError}</p>}
-            <div className="mt-4 grid gap-2 sm:grid-cols-2">
-              {canPaystack && <button type="button" onClick={() => void payWithPaystack()} disabled={submitting || cart.length === 0} className="rounded-xl bg-primary px-4 py-3 font-semibold text-white touch-target disabled:opacity-50">{submitting ? t('priceScan.processing') : t('priceScan.payNow')}</button>}
-              <button type="button" onClick={() => void payAtCounter()} disabled={submitting || cart.length === 0} className="rounded-xl border border-primary px-4 py-3 font-semibold text-primary touch-target disabled:opacity-50">{t('priceScan.payAtCounter')}</button>
+            <div className="mt-4">
+              {canPaystack ? (
+                <button type="button" onClick={() => void payWithPaystack()} disabled={submitting || cart.length === 0} className="w-full rounded-xl bg-primary px-4 py-3 font-semibold text-white touch-target disabled:opacity-50">{submitting ? t('priceScan.processing') : t('priceScan.payNow')}</button>
+              ) : (
+                <p role="status" className="rounded-xl bg-amber-50 p-3 text-sm font-medium text-amber-900">{isOffline ? t('priceScan.offlineCheckoutHint') : t('priceScan.paystackUnavailable')}</p>
+              )}
             </div>
-            {!canPaystack && <p className="mt-2 text-xs text-gray-500">{isOffline ? t('priceScan.offlineCheckoutHint') : t('priceScan.payAtCounterHint')}</p>}
           </section>
         </div>
       )}

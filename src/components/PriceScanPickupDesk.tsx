@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { Banknote, Check, CheckCircle2, CircleAlert, LoaderCircle, PackageCheck, Printer, Search, X } from 'lucide-react';
+import { Check, CheckCircle2, CircleAlert, LoaderCircle, PackageCheck, Printer, Search, X } from 'lucide-react';
 import { db, type LocalOnlineOrder, type LocalOnlineOrderItem, type LocalStore } from '@/lib/dexie';
-import { listLocalOnlineOrderItems, pullOnlineOrdersFromCloud, recordOnlineOrderCashPayment, updateOnlineOrderStatus, verifyPriceScanPayment } from '@/lib/ecommerce';
+import { listLocalOnlineOrderItems, pullOnlineOrdersFromCloud, updateOnlineOrderStatus, verifyPriceScanPayment } from '@/lib/ecommerce';
 import { printReceipt } from '@/lib/printService';
 import { useFormatMoney } from '@/lib/currency';
 import { useT } from '@/lib/i18n';
@@ -23,7 +23,6 @@ export default function PriceScanPickupDesk({ open, onClose, store, cashierName 
   const [code, setCode] = useState('');
   const [order, setOrder] = useState<PickupOrder | null>(null);
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
-  const [cashReceived, setCashReceived] = useState('');
   const [busy, setBusy] = useState(false);
   const [paymentVerification, setPaymentVerification] = useState<'idle' | 'checking' | 'verified' | 'failed'>('idle');
   const [error, setError] = useState('');
@@ -33,14 +32,11 @@ export default function PriceScanPickupDesk({ open, onClose, store, cashierName 
   busyRef.current = busy;
 
   const total = Math.max(0, Number(order?.total_amount) || 0);
-  const changeDue = Math.max(0, (Number(cashReceived.replace(',', '.')) || 0) - total);
   const allItemsChecked = Boolean(order?.items.length) && order?.items.every((item) => checkedItems.has(item.id));
   const needsOnlineVerification = order?.payment_method === 'paystack';
   const paidOnline = needsOnlineVerification && paymentVerification === 'verified';
-  const paidCash = order?.payment_method === 'cash';
-  const isPaid = paidOnline || paidCash;
+  const isPaid = paidOnline;
   const canComplete = Boolean(order && allItemsChecked && isPaid && order.status !== 'fulfilled' && order.status !== 'cancelled');
-  const normalizedCash = Number(cashReceived.replace(',', '.')) || 0;
   const inspectedCount = useMemo(() => checkedItems.size, [checkedItems]);
 
   useEffect(() => {
@@ -48,7 +44,6 @@ export default function PriceScanPickupDesk({ open, onClose, store, cashierName 
     setCode('');
     setOrder(null);
     setCheckedItems(new Set());
-    setCashReceived('');
     setPaymentVerification('idle');
     setError('');
     setMessage('');
@@ -71,6 +66,10 @@ export default function PriceScanPickupDesk({ open, onClose, store, cashierName 
     event.preventDefault();
     const requestedCode = code.trim().toUpperCase();
     if (!requestedCode) return;
+    if (!requestedCode.startsWith('PS-')) {
+      setError(t('pickup.priceScanCodeOnly'));
+      return;
+    }
     setBusy(true);
     setError('');
     setMessage('');
@@ -94,14 +93,17 @@ export default function PriceScanPickupDesk({ open, onClose, store, cashierName 
         setError(t('pickup.orderNotFound'));
         return;
       }
+      if (found.payment_method !== 'paystack') {
+        setError(t('pickup.paystackOnly'));
+        return;
+      }
       const items = await listLocalOnlineOrderItems(store.id, found.id);
       if (items.length === 0) {
         setError(t('pickup.itemsUnavailable'));
         return;
       }
       setOrder({ ...found, items });
-      setCashReceived(String(Math.max(0, Number(found.total_amount) || 0).toFixed(2)));
-      if (found.payment_method === 'paystack') await verifyOnlinePayment(found);
+      await verifyOnlinePayment(found);
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : t('pickup.lookupFailed'));
     } finally {
@@ -127,23 +129,6 @@ export default function PriceScanPickupDesk({ open, onClose, store, cashierName 
     setBusy(true);
     try {
       await verifyOnlinePayment(order);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const collectCash = async () => {
-    if (!order || !allItemsChecked || normalizedCash < total) return;
-    setBusy(true);
-    setError('');
-    setMessage('');
-    try {
-      await recordOnlineOrderCashPayment(order.id);
-      const updated = await db.online_orders.get(order.id);
-      if (updated) setOrder((current) => current ? { ...current, ...updated } : current);
-      setMessage(t('pickup.cashRecorded'));
-    } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : t('pickup.paymentFailed'));
     } finally {
       setBusy(false);
     }
@@ -190,7 +175,7 @@ export default function PriceScanPickupDesk({ open, onClose, store, cashierName 
         discount: 0,
         total,
         paymentMethod: order.payment_method,
-        cashAmount: paidCash ? total : 0,
+        cashAmount: 0,
         paystackAmount: paidOnline ? total : 0,
         paymentReference: paidOnline ? order.notes.replace(/^price-scan-paystack:/, '') : undefined,
         currencyCode: store.currency_code || 'GHS',
@@ -218,7 +203,6 @@ export default function PriceScanPickupDesk({ open, onClose, store, cashierName 
     setCode('');
     setOrder(null);
     setCheckedItems(new Set());
-    setCashReceived('');
     setPaymentVerification('idle');
     setError('');
     setMessage('');
@@ -270,19 +254,15 @@ export default function PriceScanPickupDesk({ open, onClose, store, cashierName 
                   ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" />
                   : needsOnlineVerification && paymentVerification === 'checking'
                     ? <LoaderCircle className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-sky-700" />
-                    : needsOnlineVerification
-                      ? <CircleAlert className="mt-0.5 h-5 w-5 shrink-0 text-sky-700" />
-                      : <Banknote className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />}
+                    : <CircleAlert className="mt-0.5 h-5 w-5 shrink-0 text-sky-700" />}
                 <div>
                   <p className={`font-bold ${isPaid ? 'text-emerald-900' : needsOnlineVerification ? 'text-sky-950' : 'text-amber-950'}`}>
                     {isPaid
-                      ? t(paidOnline ? 'pickup.paidOnline' : 'pickup.paidCash')
-                      : needsOnlineVerification
-                        ? t(paymentVerification === 'checking' ? 'pickup.verifyingOnline' : 'pickup.onlinePaymentUnverified')
-                        : t('pickup.paymentDue')}
+                      ? t('pickup.paidOnline')
+                      : t(paymentVerification === 'checking' ? 'pickup.verifyingOnline' : 'pickup.onlinePaymentUnverified')}
                   </p>
                   <p className={`mt-0.5 text-xs ${isPaid ? 'text-emerald-800' : needsOnlineVerification ? 'text-sky-800' : 'text-amber-800'}`}>
-                    {isPaid ? t('pickup.paymentConfirmedHint') : needsOnlineVerification ? t('pickup.onlinePaymentVerifyHint') : t('pickup.paymentDueHint')}
+                    {isPaid ? t('pickup.paymentConfirmedHint') : t('pickup.onlinePaymentVerifyHint')}
                   </p>
                 </div>
               </div>
@@ -316,26 +296,6 @@ export default function PriceScanPickupDesk({ open, onClose, store, cashierName 
                   })}
                 </ul>
               </div>
-
-              {!isPaid && !needsOnlineVerification && order.status !== 'fulfilled' && order.status !== 'cancelled' && (
-                <div className="mx-4 mb-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
-                  <label htmlFor="pickup-cash" className="block text-sm font-bold text-amber-950">{t('pickup.cashReceived')}</label>
-                  <div className="mt-2 flex items-center gap-3">
-                    <div className="relative min-w-0 flex-1">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-gray-500">{store.currency_code || 'GHS'}</span>
-                      <input id="pickup-cash" type="number" min={total} step="0.01" inputMode="decimal" value={cashReceived} onChange={(event) => setCashReceived(event.target.value)} className="w-full rounded-xl border border-amber-300 bg-white py-3 pl-14 pr-3 font-bold outline-none focus:ring-2 focus:ring-amber-200" />
-                    </div>
-                    <div className="text-right">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-800">{t('pickup.changeDue')}</p>
-                      <p className="font-bold text-amber-950">{money(changeDue)}</p>
-                    </div>
-                  </div>
-                  <button type="button" onClick={() => void collectCash()} disabled={busy || !allItemsChecked || normalizedCash < total || order.payment_method === 'cash'} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-amber-700 px-4 py-3 font-bold text-white touch-target disabled:cursor-not-allowed disabled:bg-gray-300">
-                    {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Banknote className="h-4 w-4" />}{t(order.payment_method === 'cash' ? 'pickup.cashRecorded' : 'pickup.confirmCash')}
-                  </button>
-                  {!allItemsChecked && <p className="mt-2 text-xs text-amber-900">{t('pickup.inspectBeforePayment')}</p>}
-                </div>
-              )}
 
               {order.status !== 'fulfilled' && order.status !== 'cancelled' ? (
                 <div className="border-t border-gray-100 p-4">

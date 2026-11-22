@@ -344,12 +344,9 @@ export async function updateOnlineOrderStatus(
   }
 
   if (status === 'fulfilled' && previousStatus !== 'fulfilled' && order.order_number.startsWith('PS-')) {
-    if (order.payment_method === 'paystack') {
-      const paymentVerified = await verifyPriceScanPayment(order.store_id, order.id);
-      if (!paymentVerified) throw new Error('Online payment is not verified for this pickup order.');
-    } else if (order.payment_method !== 'cash') {
-      throw new Error('Record payment before completing this pickup order.');
-    }
+    if (order.payment_method !== 'paystack') throw new Error('Price Scan pickup orders must be paid with Paystack.');
+    const paymentVerified = await verifyPriceScanPayment(order.store_id, order.id);
+    if (!paymentVerified) throw new Error('Online payment is not verified for this pickup order.');
   }
 
   // Deduct stock once when the order is fulfilled (idempotent)
