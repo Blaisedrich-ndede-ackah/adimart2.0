@@ -95,7 +95,7 @@ export default function CustomerDisplayPage() {
         : 'bg-white/80 text-slate-600 ring-slate-200';
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#f4f8f6] px-4 py-5 text-slate-900 sm:px-8 sm:py-7 lg:px-12">
+    <main className="customer-facing-display relative min-h-screen overflow-hidden bg-[#f4f8f6] px-4 py-5 text-slate-900 sm:px-8 sm:py-7 lg:px-12">
       <div aria-hidden="true" className="pointer-events-none absolute -right-40 -top-48 h-[34rem] w-[34rem] rounded-full bg-emerald-200/45 blur-3xl" />
       <div aria-hidden="true" className="pointer-events-none absolute -bottom-64 -left-40 h-[34rem] w-[34rem] rounded-full bg-teal-100/70 blur-3xl" />
       <div className="relative mx-auto flex min-h-[calc(100vh-2.5rem)] w-full max-w-[1500px] flex-col sm:min-h-[calc(100vh-3.5rem)]">

@@ -230,6 +230,19 @@ body {
   color: #fda4af;
 }
 
+/* Keep the customer display light and readable when the cashier POS uses dark mode. */
+html.dark .customer-facing-display .bg-white { background-color: #fff !important; }
+html.dark .customer-facing-display .bg-slate-50 { background-color: #f8fafc !important; }
+html.dark .customer-facing-display .bg-emerald-50 { background-color: #ecfdf5 !important; }
+html.dark .customer-facing-display .bg-emerald-600 { background-color: #059669 !important; }
+html.dark .customer-facing-display .text-slate-900 { color: #0f172a !important; }
+html.dark .customer-facing-display .text-slate-800 { color: #1e293b !important; }
+html.dark .customer-facing-display .text-slate-600 { color: #475569 !important; }
+html.dark .customer-facing-display .text-slate-500 { color: #64748b !important; }
+html.dark .customer-facing-display .text-slate-400 { color: #64748b !important; }
+html.dark .customer-facing-display .text-emerald-700 { color: #047857 !important; }
+html.dark .customer-facing-display .text-emerald-800 { color: #065f46 !important; }
+
 .dark .border-gray-100,
 .dark .border-gray-200,
 .dark .border-slate-200 {

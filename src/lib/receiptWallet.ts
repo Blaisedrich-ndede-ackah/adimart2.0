@@ -37,7 +37,6 @@ export function getPublicReceiptUrl(token: string): string {
 export async function generateReceiptToken(transactionId: string, receiptNumber: string, ttlHours: number): Promise<ReceiptToken> {
   const transaction = await db.transactions.get(transactionId);
   if (!transaction || !receiptNumber || transaction.receipt_number !== receiptNumber) throw new Error('Sale receipt could not be found.');
-  await triggerPushSync('digital-receipt-sale');
   const token = randomToken();
   const createdAt = new Date().toISOString();
   const hours = Math.max(1, Math.min(8760, Math.floor(Number(ttlHours) || 720)));
@@ -47,21 +46,59 @@ export async function generateReceiptToken(transactionId: string, receiptNumber:
     created_at: createdAt, expires_at: new Date(Date.now() + hours * 3_600_000).toISOString(), synced: 0,
   };
   await db.receipt_tokens.add(row);
-  await Promise.race([
-    syncReceipts(row.store_id).catch(() => 0),
-    new Promise<number>((resolve) => window.setTimeout(() => resolve(0), 3_000)),
-  ]);
+
+  // Push the completed sale and its items before publishing the bearer token.
+  // The public receipt lookup joins all three cloud tables, so inserting the
+  // token first can make a just-issued QR open as not found on another phone.
+  if (isSupabaseConfigured() && (typeof navigator === 'undefined' || navigator.onLine)) {
+    await triggerPushSync('digital-receipt-sale');
+
+    // triggerPushSync can return while a different tab owns the sync lock.
+    // Wait briefly for this sale's local synced marker before inserting the
+    // token, otherwise the database's completed-sale policy rejects it. The
+    // receipt lookup also needs the sale items, so wait for those as well.
+    const syncDeadline = Date.now() + 8_000;
+    let syncedTransaction = await db.transactions.get(transactionId);
+    let saleItems = await db.transaction_items.where('transaction_id').equals(transactionId).toArray();
+    while ((syncedTransaction?.synced !== 1 || saleItems.some((item) => item.synced !== 1)) && Date.now() < syncDeadline) {
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+      syncedTransaction = await db.transactions.get(transactionId);
+      saleItems = await db.transaction_items.where('transaction_id').equals(transactionId).toArray();
+    }
+    if (syncedTransaction?.synced !== 1 || saleItems.some((item) => item.synced !== 1)) {
+      throw new Error('Sale completed, but the digital receipt is waiting for cloud sync. Keep the POS online and try again shortly.');
+    }
+
+    await syncReceipts(row.store_id);
+    let saved = await db.receipt_tokens.get(row.id);
+    if (saved?.synced !== 1) {
+      // A concurrent sync may queue the first push instead of waiting for it.
+      await triggerPushSync('digital-receipt-sale-retry');
+      await syncReceipts(row.store_id);
+      saved = await db.receipt_tokens.get(row.id);
+    }
+    if (saved?.synced !== 1) {
+      throw new Error('Sale completed, but the digital receipt could not be published. Check the Supabase receipt setup and retry.');
+    }
+    return saved || row;
+  }
   return (await db.receipt_tokens.get(row.id)) || row;
 }
 
 export async function validateReceiptToken(token: string): Promise<ValidatedReceipt> {
   const normalized = token.trim().toUpperCase();
   if (!normalized) return { valid: false };
-  let row = await db.receipt_tokens.where('token').equals(normalized).first();
+  const row = await db.receipt_tokens.where('token').equals(normalized).first();
   if (!row && isSupabaseConfigured() && (typeof navigator === 'undefined' || navigator.onLine)) {
-    const { data, error } = await supabase.rpc('get_public_receipt', { receipt_token: normalized });
-    if (!error && data && typeof data === 'object') {
-      return { valid: true, receipt: data as PublicReceipt };
+    // The cashier may still be publishing the token when the customer scans
+    // immediately. Retry empty results briefly so a just-paid receipt opens.
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const { data, error } = await supabase.rpc('get_public_receipt', { receipt_token: normalized });
+      if (!error && data && typeof data === 'object') {
+        return { valid: true, receipt: data as PublicReceipt };
+      }
+      if (error) return { valid: false };
+      if (attempt < 3) await new Promise((resolve) => window.setTimeout(resolve, 700 * (attempt + 1)));
     }
     return { valid: false };
   }
