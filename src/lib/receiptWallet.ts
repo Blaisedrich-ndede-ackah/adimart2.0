@@ -1,6 +1,5 @@
 import { db, generateId, type LocalReceiptToken, type LocalTransaction, type LocalTransactionItem } from '@/lib/dexie';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
-import { triggerPushSync } from '@/lib/sync';
 
 export type ReceiptToken = LocalReceiptToken;
 export interface PublicReceipt {
@@ -46,43 +45,50 @@ export async function generateReceiptToken(transactionId: string, receiptNumber:
     created_at: createdAt, expires_at: new Date(Date.now() + hours * 3_600_000).toISOString(), synced: 0,
   };
   await db.receipt_tokens.add(row);
-
-  // Push the completed sale and its items before publishing the bearer token.
-  // The public receipt lookup joins all three cloud tables, so inserting the
-  // token first can make a just-issued QR open as not found on another phone.
   if (isSupabaseConfigured() && (typeof navigator === 'undefined' || navigator.onLine)) {
-    await triggerPushSync('digital-receipt-sale');
-
-    // triggerPushSync can return while a different tab owns the sync lock.
-    // Wait briefly for this sale's local synced marker before inserting the
-    // token, otherwise the database's completed-sale policy rejects it. The
-    // receipt lookup also needs the sale items, so wait for those as well.
-    const syncDeadline = Date.now() + 8_000;
-    let syncedTransaction = await db.transactions.get(transactionId);
-    let saleItems = await db.transaction_items.where('transaction_id').equals(transactionId).toArray();
-    while ((syncedTransaction?.synced !== 1 || saleItems.some((item) => item.synced !== 1)) && Date.now() < syncDeadline) {
-      await new Promise((resolve) => window.setTimeout(resolve, 250));
-      syncedTransaction = await db.transactions.get(transactionId);
-      saleItems = await db.transaction_items.where('transaction_id').equals(transactionId).toArray();
-    }
-    if (syncedTransaction?.synced !== 1 || saleItems.some((item) => item.synced !== 1)) {
-      throw new Error('Sale completed, but the digital receipt is waiting for cloud sync. Keep the POS online and try again shortly.');
-    }
-
-    await syncReceipts(row.store_id);
-    let saved = await db.receipt_tokens.get(row.id);
-    if (saved?.synced !== 1) {
-      // A concurrent sync may queue the first push instead of waiting for it.
-      await triggerPushSync('digital-receipt-sale-retry');
-      await syncReceipts(row.store_id);
-      saved = await db.receipt_tokens.get(row.id);
-    }
-    if (saved?.synced !== 1) {
-      throw new Error('Sale completed, but the digital receipt could not be published. Check the Supabase receipt setup and retry.');
-    }
-    return saved || row;
+    void publishReceiptToCloud(row, transaction).catch((error: unknown) => {
+      console.warn('Digital receipt cloud publish is pending:', error);
+    });
   }
-  return (await db.receipt_tokens.get(row.id)) || row;
+  return row;
+}
+
+async function publishReceiptToCloud(row: ReceiptToken, transaction: LocalTransaction): Promise<void> {
+  if (!isSupabaseConfigured() || (typeof navigator !== 'undefined' && !navigator.onLine)) return;
+  const items = await db.transaction_items.where('transaction_id').equals(transaction.id).toArray();
+
+  // Upload the minimum public receipt fields in dependency order. Normal POS
+  // sync later enriches these same rows with the rest of the sale metadata.
+  const { error: transactionError } = await supabase.from('transactions').upsert({
+    id: transaction.id,
+    store_id: transaction.store_id,
+    receipt_number: transaction.receipt_number,
+    cashier_name: transaction.cashier_name || '',
+    total_amount: transaction.total_amount,
+    discount_applied: transaction.discount_applied,
+    payment_method: transaction.payment_method,
+    status: 'completed',
+    created_at: transaction.created_at,
+  }, { onConflict: 'id' });
+  if (transactionError) throw transactionError;
+
+  const { error: itemsError } = await supabase.from('transaction_items').upsert(
+    items.map((item) => ({
+      id: item.id,
+      store_id: item.store_id,
+      transaction_id: item.transaction_id,
+      product_name: item.product_name,
+      quantity: item.quantity,
+      unit_price: item.unit_price,
+      subtotal: item.subtotal,
+    })),
+    { onConflict: 'id' },
+  );
+  if (itemsError) throw itemsError;
+
+  await syncReceipts(row.store_id);
+  const published = await db.receipt_tokens.get(row.id);
+  if (published?.synced !== 1) throw new Error('Receipt token is still waiting for Supabase publication.');
 }
 
 export async function validateReceiptToken(token: string): Promise<ValidatedReceipt> {
@@ -92,13 +98,13 @@ export async function validateReceiptToken(token: string): Promise<ValidatedRece
   if (!row && isSupabaseConfigured() && (typeof navigator === 'undefined' || navigator.onLine)) {
     // The cashier may still be publishing the token when the customer scans
     // immediately. Retry empty results briefly so a just-paid receipt opens.
-    for (let attempt = 0; attempt < 4; attempt += 1) {
+    for (let attempt = 0; attempt < 7; attempt += 1) {
       const { data, error } = await supabase.rpc('get_public_receipt', { receipt_token: normalized });
       if (!error && data && typeof data === 'object') {
         return { valid: true, receipt: data as PublicReceipt };
       }
       if (error) return { valid: false };
-      if (attempt < 3) await new Promise((resolve) => window.setTimeout(resolve, 700 * (attempt + 1)));
+      if (attempt < 6) await new Promise((resolve) => window.setTimeout(resolve, Math.min(500 + attempt * 250, 1_750)));
     }
     return { valid: false };
   }
