@@ -507,6 +507,27 @@ input[type="number"] {
   padding: 0.85rem 1rem 1.15rem;
 }
 
+/* Public pages render inside the app's fixed, overflow-hidden root. Give the
+   scanned receipt route its own native scrolling surface, including on iOS. */
+.public-receipt-scroll {
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 0px));
+}
+
+@media print {
+  .public-receipt-scroll {
+    height: auto;
+    overflow: visible;
+    padding-bottom: 0;
+  }
+}
+
 @supports not (overscroll-behavior: none) {
   body {
     position: static;

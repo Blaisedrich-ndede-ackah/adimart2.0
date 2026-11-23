@@ -16,8 +16,8 @@ export default function ReceiptPage({ token }: { token: string }) {
     return () => { active = false; };
   }, [token]);
 
-  if (loading) return <main className="min-h-screen bg-gray-50 p-6 text-center text-gray-600">{t('common.loading')}</main>;
-  if (!receipt) return <main className="flex min-h-screen items-center justify-center bg-gray-50 p-6"><section className="rounded-2xl bg-white p-8 text-center shadow"><h1 className="text-xl font-bold">{t('receipt.notFound')}</h1></section></main>;
+  if (loading) return <main className="public-receipt-scroll bg-gray-50 p-6 text-center text-gray-600">{t('common.loading')}</main>;
+  if (!receipt) return <main className="public-receipt-scroll flex items-center justify-center bg-gray-50 p-6"><section className="rounded-2xl bg-white p-8 text-center shadow"><h1 className="text-xl font-bold">{t('receipt.notFound')}</h1></section></main>;
   const money = (amount: number) => new Intl.NumberFormat(undefined, { style: 'currency', currency: getStoreCurrency(receipt.currency_code).code }).format(amount || 0);
   const url = window.location.href;
   const saveContact = () => {
@@ -28,7 +28,7 @@ export default function ReceiptPage({ token }: { token: string }) {
     link.click(); URL.revokeObjectURL(link.href);
   };
   const share = () => window.open(`https://wa.me/?text=${encodeURIComponent(`${receipt.store_name} · ${receipt.receipt_number} · ${money(receipt.total_amount)}\n${url}`)}`, '_blank', 'noopener,noreferrer');
-  return <main className="min-h-screen bg-gray-50 px-3 py-6 print:bg-white sm:px-6">
+  return <main className="public-receipt-scroll bg-gray-50 px-3 py-6 print:bg-white sm:px-6">
     <article className="mx-auto max-w-xl rounded-2xl border bg-white p-5 shadow-sm print:border-0 print:shadow-none sm:p-8">
       {receipt.store_logo_url && <img src={receipt.store_logo_url} alt="" className="mx-auto mb-3 h-16 max-w-40 object-contain" />}
       <p className="text-center text-sm text-gray-500">{receipt.store_name}</p>
