@@ -167,7 +167,7 @@ export async function getTodayPickupVerifications(storeId: string): Promise<Loca
 
 /** Push pending redemptions and warm this device's local cache for offline checks. */
 export async function syncPickupTokens(storeId: string): Promise<void> {
-  if (!storeId || !isSupabaseConfigured() || navigator.onLine === false) return;
+  if (!storeId || !isSupabaseConfigured() || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
   const unsyncedTokens = await db.pickup_tokens.where('store_id').equals(storeId)
     .filter((token) => token.synced === 0)
     .toArray();

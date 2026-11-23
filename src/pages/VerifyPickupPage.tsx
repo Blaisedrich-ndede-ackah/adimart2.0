@@ -84,13 +84,26 @@ export default function VerifyPickupPage() {
     setBusy(true);
     setError('');
     try {
-      await redeemPickupToken(token.id, currentUser.id, currentUser.name);
+      // Refresh the local cache before releasing so a token redeemed on another
+      // checkout device cannot be released a second time while this device is online.
+      await syncPickupTokens(currentStore?.id || '');
+      const latest = await validatePickupToken(token.store_id, token.token_code);
+      setValidation(latest);
+      if (!latest.valid || !latest.token) {
+        throw new Error(t(latest.reason === 'expired'
+          ? 'pickup.expired'
+          : latest.reason === 'alreadyRedeemed'
+            ? 'pickup.alreadyRedeemed'
+            : 'pickup.invalid'));
+      }
+      await redeemPickupToken(latest.token.id, currentUser.id, currentUser.name);
       setReleased(true);
-      setMessage(t('pickup.overrideSuccess'));
+      setMessage(t('pickup.releaseSuccess'));
       await refreshAudit();
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : t('pickup.invalid'));
-      await checkCode(token.token_code);
+      const latest = await validatePickupToken(token.store_id, token.token_code).catch(() => null);
+      if (latest) setValidation(latest);
     } finally {
       setBusy(false);
     }

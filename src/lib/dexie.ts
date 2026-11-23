@@ -6252,6 +6252,8 @@ export async function restoreStoreFromCloud(
       db.stock_movements,
       db.online_orders,
       db.online_order_items,
+      db.pickup_tokens,
+      db.pickup_verification_logs,
       db.suppliers,
       db.purchase_orders,
       db.bulk_sms_campaigns,
@@ -6276,6 +6278,8 @@ export async function restoreStoreFromCloud(
       await db.stock_movements.clear();
       await db.online_orders.clear();
       await db.online_order_items.clear();
+      await db.pickup_tokens.clear();
+      await db.pickup_verification_logs.clear();
       await db.suppliers.clear();
       await db.purchase_orders.clear();
       await db.bulk_sms_campaigns.clear();
