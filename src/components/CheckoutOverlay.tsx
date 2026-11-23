@@ -31,7 +31,7 @@ import { recordActivity } from '@/lib/activityLog';
 import { queueSms, receiptSmsText } from '@/lib/smsOutbox';
 import { parseGhanaPhone } from '@/lib/ghanaPhone';
 import { routeGoodsPaymentToStoreMomo } from '@/lib/storeMomoPayout';
-import { broadcastCfdMessage } from '@/lib/cfdChannel';
+import { broadcastCfdMessage, type CfdReceiptPayload } from '@/lib/cfdChannel';
 import ReceiptQRDisplay from '@/components/ReceiptQRDisplay';
 import { generateReceiptToken, type ReceiptToken } from '@/lib/receiptWallet';
 
@@ -360,13 +360,21 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         loyaltyRedeemAmount: result.loyaltyRedeemAmount,
       };
       setSaleResult(completed);
+      let customerReceipt: CfdReceiptPayload | undefined;
       if ((currentStore?.digital_receipt_enabled ?? 1) === 1) {
         try {
-          setReceiptToken(await generateReceiptToken(
+          const generatedToken = await generateReceiptToken(
             result.transactionId,
             result.receiptNumber,
             currentStore?.receipt_token_ttl_hours ?? 720,
-          ));
+          );
+          setReceiptToken(generatedToken);
+          customerReceipt = {
+            receiptNumber: generatedToken.receipt_number,
+            token: generatedToken.token,
+            qrPayload: generatedToken.qr_payload,
+            expiresAt: generatedToken.expires_at,
+          };
         } catch (receiptError: unknown) {
           setReceiptTokenError(receiptError instanceof Error ? receiptError.message : 'Digital receipt could not be created.');
         }
@@ -383,7 +391,9 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       setSmsPhone(customerPhone || creditCustomers.find((customer) => customer.id === (customerId || cart.loyaltyCustomerId))?.phone || '');
       setSmsNote('');
       setStep('success');
-      broadcastCfdMessage({ type: 'PaymentSuccess' });
+      broadcastCfdMessage(customerReceipt
+        ? { type: 'PaymentSuccess', payload: customerReceipt }
+        : { type: 'PaymentSuccess' });
       if (currentStore?.id) {
         recordActivity({
           storeId: currentStore.id,

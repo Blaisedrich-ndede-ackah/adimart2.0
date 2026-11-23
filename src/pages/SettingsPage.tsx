@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Store, Shield, Percent,
   Save, Loader2, CheckCircle2, UserPlus,
   Trash2, Users, Fingerprint, AlertCircle, Key, Smartphone, Ban, ImagePlus, Timer,
-  BellRing, Target, Eye
+  BellRing, Target, Eye, Monitor, Package, ReceiptText
 } from 'lucide-react';
 import ChangePinModal from '@/components/ChangePinModal';
 import ResetUserPinModal from '@/components/ResetUserPinModal';
@@ -478,14 +478,18 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
           <p className="text-[11px] text-gray-500 mt-2">{t('settings.currencyHint')}</p>
         </div>
 
-        <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3" aria-labelledby="cfd-settings-title">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h3 id="cfd-settings-title" className="font-bold text-gray-900">{t('cfd.settings.label')}</h3>
-              <p className="mt-1 text-xs text-gray-500">{t('cfd.settings.hint')}</p>
+        <section className="relative mb-4 overflow-hidden rounded-2xl border border-emerald-100 bg-gradient-to-br from-white via-white to-emerald-50/70 p-5 shadow-sm sm:p-6" aria-labelledby="cfd-settings-title">
+          <div className="absolute -right-10 -top-16 h-40 w-40 rounded-full bg-emerald-100/60 blur-2xl" aria-hidden="true" />
+          <div className="relative flex flex-wrap items-center justify-between gap-5">
+            <div className="flex min-w-0 items-center gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-md shadow-emerald-900/10"><Monitor className="h-6 w-6" /></div>
+              <div>
+                <h3 id="cfd-settings-title" className="font-bold text-gray-900 sm:text-lg">{t('cfd.settings.label')}</h3>
+                <p className="mt-1 max-w-2xl text-sm leading-relaxed text-gray-500">{t('cfd.settings.hint')}</p>
+              </div>
             </div>
-            <label className="inline-flex cursor-pointer items-center gap-3">
-              <span className="sr-only">{t('cfd.settings.label')}</span>
+            <label className="inline-flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border border-gray-200 bg-white px-4 py-2 shadow-sm transition hover:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-500/30">
+              <span className="text-sm font-semibold text-gray-700">{customerDisplayEnabled ? t('common.on') : t('common.off')}</span>
               <input
                 type="checkbox"
                 checked={customerDisplayEnabled}
@@ -493,20 +497,35 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
                   setCustomerDisplayEnabledState(event.target.checked);
                   setCustomerDisplayEnabled(event.target.checked);
                 }}
-                className="h-5 w-5 accent-emerald-600"
+                className="peer sr-only"
+                aria-label={t('cfd.settings.label')}
               />
-              <span className="text-sm font-medium text-gray-700">{customerDisplayEnabled ? t('common.on') : t('common.off')}</span>
+              <span aria-hidden="true" className={`relative h-6 w-11 rounded-full transition-colors after:absolute after:left-1 after:top-1 after:h-4 after:w-4 after:rounded-full after:bg-white after:shadow after:transition-transform ${customerDisplayEnabled ? 'bg-emerald-600 after:translate-x-5' : 'bg-gray-300'}`} />
             </label>
           </div>
         </section>
 
-        <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3" aria-labelledby="new-pos-features-title">
-          <h3 id="new-pos-features-title" className="font-bold text-gray-900">{t('settings.newFeatures')}</h3>
-          <div className="mt-3 space-y-3">
-            <label className="flex items-center justify-between gap-3 text-sm"><span>{t('settings.writeoffEnabled')}</span><input type="checkbox" checked={writeoffEnabled} onChange={(event) => setWriteoffEnabled(event.target.checked)} className="h-5 w-5 accent-emerald-600" /></label>
-            <label className="flex items-center justify-between gap-3 text-sm"><span>{t('settings.bundlesEnabled')}</span><input type="checkbox" checked={bundlesEnabled} onChange={(event) => setBundlesEnabled(event.target.checked)} className="h-5 w-5 accent-emerald-600" /></label>
-            <label className="flex items-center justify-between gap-3 text-sm"><span>{t('settings.digitalReceiptEnabled')}</span><input type="checkbox" checked={digitalReceiptEnabled} onChange={(event) => setDigitalReceiptEnabled(event.target.checked)} className="h-5 w-5 accent-emerald-600" /></label>
-            {digitalReceiptEnabled && <label className="block max-w-xs text-sm font-medium">{t('receipt.tokenExpiry')} ({t('common.hours')})<input type="number" min={1} max={8760} value={receiptTokenTtlHours} onChange={(event) => setReceiptTokenTtlHours(event.target.value)} className="mt-1 min-h-11 w-full rounded-lg border px-3" /></label>}
+        <section className="mb-4 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="new-pos-features-title">
+          <div className="mb-5">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Adimat POS</p>
+            <h3 id="new-pos-features-title" className="mt-1 text-lg font-bold text-gray-900 sm:text-xl">{t('settings.newFeatures')}</h3>
+          </div>
+          <div className="grid gap-3 lg:grid-cols-3">
+            <label className="flex min-h-[92px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/70 p-4 transition hover:border-emerald-200 hover:bg-emerald-50/50 focus-within:ring-2 focus-within:ring-emerald-500/30">
+              <span className="flex min-w-0 items-center gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700"><Package className="h-5 w-5" /></span><span className="text-sm font-semibold leading-snug text-gray-800">{t('settings.writeoffEnabled')}</span></span>
+              <input type="checkbox" checked={writeoffEnabled} onChange={(event) => setWriteoffEnabled(event.target.checked)} className="h-5 w-5 shrink-0 accent-emerald-600" />
+            </label>
+            <label className="flex min-h-[92px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/70 p-4 transition hover:border-emerald-200 hover:bg-emerald-50/50 focus-within:ring-2 focus-within:ring-emerald-500/30">
+              <span className="flex min-w-0 items-center gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-100 text-sky-700"><Package className="h-5 w-5" /></span><span className="text-sm font-semibold leading-snug text-gray-800">{t('settings.bundlesEnabled')}</span></span>
+              <input type="checkbox" checked={bundlesEnabled} onChange={(event) => setBundlesEnabled(event.target.checked)} className="h-5 w-5 shrink-0 accent-emerald-600" />
+            </label>
+            <div className="rounded-xl border border-gray-100 bg-gray-50/70 p-4 transition hover:border-emerald-200 hover:bg-emerald-50/50">
+              <label className="flex min-h-[56px] cursor-pointer items-center justify-between gap-3 focus-within:rounded-lg focus-within:ring-2 focus-within:ring-emerald-500/30">
+                <span className="flex min-w-0 items-center gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700"><ReceiptText className="h-5 w-5" /></span><span className="text-sm font-semibold leading-snug text-gray-800">{t('settings.digitalReceiptEnabled')}</span></span>
+                <input type="checkbox" checked={digitalReceiptEnabled} onChange={(event) => setDigitalReceiptEnabled(event.target.checked)} className="h-5 w-5 shrink-0 accent-emerald-600" />
+              </label>
+              {digitalReceiptEnabled && <label className="mt-3 block border-t border-gray-200 pt-3 text-xs font-semibold text-gray-600">{t('receipt.tokenExpiry')} ({t('common.hours')})<input type="number" min={1} max={8760} value={receiptTokenTtlHours} onChange={(event) => setReceiptTokenTtlHours(event.target.value)} className="mt-1.5 min-h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm font-medium text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20" /></label>}
+            </div>
           </div>
         </section>
 

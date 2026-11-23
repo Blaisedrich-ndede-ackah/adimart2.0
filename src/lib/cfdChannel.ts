@@ -12,6 +12,13 @@ export interface CfdCartItem {
   image_url?: string;
 }
 
+export interface CfdReceiptPayload {
+  receiptNumber: string;
+  token: string;
+  qrPayload: string;
+  expiresAt: string;
+}
+
 export type CfdMessage =
   | {
       type: 'CartUpdated';
@@ -24,7 +31,7 @@ export type CfdMessage =
       };
     }
   | { type: 'PaymentStarted' }
-  | { type: 'PaymentSuccess' }
+  | { type: 'PaymentSuccess'; payload?: CfdReceiptPayload }
   | { type: 'PaymentFailed' }
   | { type: 'Reset' }
   | { type: 'SetMessage'; payload: { message: string } }
@@ -67,11 +74,17 @@ function isCfdMessage(value: unknown): value is CfdMessage {
   const message = value as { type?: unknown; payload?: unknown };
   switch (message.type) {
     case 'PaymentStarted':
-    case 'PaymentSuccess':
     case 'PaymentFailed':
     case 'Reset':
     case 'DisplayReady':
       return true;
+    case 'PaymentSuccess': {
+      if (message.payload === undefined) return true;
+      if (!message.payload || typeof message.payload !== 'object') return false;
+      const payload = message.payload as Record<string, unknown>;
+      return typeof payload.receiptNumber === 'string' && typeof payload.token === 'string' &&
+        typeof payload.qrPayload === 'string' && typeof payload.expiresAt === 'string';
+    }
     case 'SetMessage':
       return typeof message.payload === 'object' && message.payload !== null &&
         'message' in message.payload && typeof message.payload.message === 'string';
