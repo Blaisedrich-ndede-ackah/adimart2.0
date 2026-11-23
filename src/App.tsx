@@ -43,6 +43,9 @@ const StoreDealsPage = lazy(() => import('@/pages/StoreDealsPage'));
 const PublicShopPage = lazy(() => import('@/pages/PublicShopPage'));
 const PriceScanPage = lazy(() => import('@/pages/PriceScanPage'));
 const VerifyPickupPage = lazy(() => import('@/pages/VerifyPickupPage'));
+const WriteOffPage = lazy(() => import('@/pages/WriteOffPage'));
+const BundlesPage = lazy(() => import('@/pages/BundlesPage'));
+const ReceiptPage = lazy(() => import('@/pages/ReceiptPage'));
 const TermsPage = lazy(() => import('@/pages/TermsPage'));
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
 const AdminLoginPage = lazy(() => import('@/pages/AdminLoginPage'));
@@ -60,6 +63,9 @@ import { createDueRecurringExpenses } from '@/lib/dexie';
 import { flushPriceChanges } from '@/lib/priceChangeQueue';
 import { useAccessibilityStore } from '@/lib/accessibility';
 import { useT } from '@/lib/i18n';
+import { syncWriteOffs } from '@/lib/writeOff';
+import { syncBundles } from '@/lib/bundle';
+import { syncReceipts } from '@/lib/receiptWallet';
 
 type AppMode = 'store' | 'admin-login' | 'admin' | 'agent-login' | 'agent';
 
@@ -97,6 +103,19 @@ function readVerifyPickupRoute(): boolean {
   return window.location.hash.replace(/^#\/?/, '').replace(/\/$/, '').toLowerCase() === 'verify-pickup';
 }
 
+function readReceiptToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  const match = window.location.hash.replace(/^#/, '').match(/^\/?receipt\/([^/?#]+)/i);
+  if (!match?.[1]) return null;
+  try { return decodeURIComponent(match[1]); } catch { return null; }
+}
+
+function readStaffFeatureRoute(): 'write-offs' | 'bundles' | null {
+  if (typeof window === 'undefined') return null;
+  const route = window.location.hash.replace(/^#\/?/, '').replace(/\/$/, '').toLowerCase();
+  return route === 'write-offs' || route === 'bundles' ? route : null;
+}
+
 function readPublicUtilityRoute(): 'terms' | '404' | null {
   if (typeof window === 'undefined') return null;
   const hash = window.location.hash.replace(/^#/, '').replace(/^\//, '').replace(/\/$/, '');
@@ -104,6 +123,8 @@ function readPublicUtilityRoute(): 'terms' | '404' | null {
   if (hash.toLowerCase() === 'terms') return 'terms';
   if (hash.toLowerCase() === 'agent') return null;
   if (hash.toLowerCase() === 'verify-pickup') return null;
+  if (hash.toLowerCase() === 'write-offs' || hash.toLowerCase() === 'bundles') return null;
+  if (/^receipt\//i.test(hash)) return null;
   if (/^shop\//i.test(hash)) return null;
   if (/^price-scan\//i.test(hash)) return null;
   return '404';
@@ -127,6 +148,8 @@ function userNeedsPhone(user: { phone?: string | null } | null | undefined): boo
 
 export default function App() {
   if (isCustomerDisplayRoute()) return <CustomerDisplayRoute />;
+  const receiptToken = readReceiptToken();
+  if (receiptToken) return <Suspense fallback={<div className="min-h-screen bg-gray-50" />}><ReceiptPage token={receiptToken} /></Suspense>;
   return <AuthenticatedApp />;
 }
 
@@ -144,7 +167,7 @@ function AuthenticatedApp() {
   const t = useT();
   const initializeAgent = useAgentAuthStore((state) => state.initialize);
   const leftHanded = useAccessibilityStore((state) => state.leftHanded);
-  const [currentPage, setCurrentPage] = useState(() => readVerifyPickupRoute() ? 'verify-pickup' : 'home');
+  const [currentPage, setCurrentPage] = useState(() => readVerifyPickupRoute() ? 'verify-pickup' : readStaffFeatureRoute() || 'home');
   const [quickAction, setQuickAction] = useState<'add-product' | 'add-expense' | null>(null);
   const [appMode, setAppMode] = useState<AppMode>(() => (readAgentHash() ? 'agent-login' : 'store'));
   const [adminSessionResolved, setAdminSessionResolved] = useState(false);
@@ -176,15 +199,21 @@ function AuthenticatedApp() {
     const onVerifyPickupHashChange = () => {
       if (readVerifyPickupRoute()) setCurrentPage('verify-pickup');
     };
+    const onStaffFeatureHashChange = () => {
+      const route = readStaffFeatureRoute();
+      if (route) setCurrentPage(route);
+    };
     window.addEventListener('hashchange', onHashChange);
     window.addEventListener('hashchange', onPriceScanHashChange);
     window.addEventListener('hashchange', onUtilityHashChange);
     window.addEventListener('hashchange', onVerifyPickupHashChange);
+    window.addEventListener('hashchange', onStaffFeatureHashChange);
     return () => {
       window.removeEventListener('hashchange', onHashChange);
       window.removeEventListener('hashchange', onPriceScanHashChange);
       window.removeEventListener('hashchange', onUtilityHashChange);
       window.removeEventListener('hashchange', onVerifyPickupHashChange);
+      window.removeEventListener('hashchange', onStaffFeatureHashChange);
     };
   }, []);
 
@@ -221,6 +250,22 @@ function AuthenticatedApp() {
   useEffect(() => {
     if (!isAuthenticated || !currentStore?.id) return;
     return startLiveStockSync(currentStore.id);
+  }, [isAuthenticated, currentStore?.id]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentStore?.id) return;
+    const syncFeatureRecords = () => {
+      void syncWriteOffs(currentStore.id).catch(() => undefined);
+      void syncBundles(currentStore.id).catch(() => undefined);
+      void syncReceipts(currentStore.id).catch(() => undefined);
+    };
+    syncFeatureRecords();
+    const interval = window.setInterval(syncFeatureRecords, 60_000);
+    window.addEventListener('online', syncFeatureRecords);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('online', syncFeatureRecords);
+    };
   }, [isAuthenticated, currentStore?.id]);
 
   useEffect(() => {
@@ -315,7 +360,7 @@ function AuthenticatedApp() {
   useEffect(() => {
     // Cashiers cannot stay on owner-only pages after switch/login
     if (currentUser?.role !== 'cashier') return;
-    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'returns', 'multistore', 'adimat-ai', 'store-deals'];
+    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'returns', 'multistore', 'adimat-ai', 'store-deals', 'bundles'];
     const ecommerceOk = (currentUser.can_manage_ecommerce ?? 0) === 1;
     const cashbookOk = canAccessCashbook(currentUser);
     const customerPaymentsOk = canRecordCustomerPayments(currentUser);
@@ -603,6 +648,10 @@ function AuthenticatedApp() {
         );
       case 'verify-pickup':
         return role === 'owner' || role === 'cashier' ? <VerifyPickupPage /> : <POSPage />;
+      case 'write-offs':
+        return role === 'owner' || (role === 'cashier' && currentStore?.cashiers_can_record_expenses === 1) ? <WriteOffPage /> : <POSPage />;
+      case 'bundles':
+        return role === 'owner' ? <BundlesPage /> : <POSPage />;
       default:
         return <POSPage />;
     }

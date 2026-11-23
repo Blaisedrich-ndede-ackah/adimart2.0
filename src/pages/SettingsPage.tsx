@@ -127,6 +127,10 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [priceScanEnabled, setPriceScanEnabledState] = useState(isPriceScanPortalEnabled);
   const [pickupVerificationEnabled, setPickupVerificationEnabled] = useState(true);
   const [pickupTokenTtlMinutes, setPickupTokenTtlMinutes] = useState('30');
+  const [writeoffEnabled, setWriteoffEnabled] = useState(true);
+  const [bundlesEnabled, setBundlesEnabled] = useState(true);
+  const [digitalReceiptEnabled, setDigitalReceiptEnabled] = useState(true);
+  const [receiptTokenTtlHours, setReceiptTokenTtlHours] = useState('720');
   const [pendingPriceChanges, setPendingPriceChanges] = useState<PendingPriceChangeView[]>([]);
   const [syncingPriceChanges, setSyncingPriceChanges] = useState(false);
   const [priceQueueMessage, setPriceQueueMessage] = useState('');
@@ -206,6 +210,10 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
       setSalesTargetMonthly(String(Number(currentStore.sales_target_monthly) || 0));
       setPickupVerificationEnabled((currentStore.pickup_verification_enabled ?? 1) === 1);
       setPickupTokenTtlMinutes(String(Math.max(5, Math.min(240, Math.floor(Number(currentStore.pickup_token_ttl_minutes) || 30)))));
+      setWriteoffEnabled((currentStore.writeoff_enabled ?? 1) === 1);
+      setBundlesEnabled((currentStore.bundles_enabled ?? 1) === 1);
+      setDigitalReceiptEnabled((currentStore.digital_receipt_enabled ?? 1) === 1);
+      setReceiptTokenTtlHours(String(Math.max(1, Math.min(8760, Math.floor(Number(currentStore.receipt_token_ttl_hours) || 720)))));
       await ensureStoreLocations(currentStore.id);
       setLocations(await listLocations(currentStore.id));
     }
@@ -294,6 +302,10 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         sales_target_monthly: Math.max(0, Number(salesTargetMonthly) || 0),
         pickup_verification_enabled: pickupVerificationEnabled ? 1 : 0,
         pickup_token_ttl_minutes: Math.max(5, Math.min(240, Math.floor(Number(pickupTokenTtlMinutes) || 30))),
+        writeoff_enabled: writeoffEnabled ? 1 : 0,
+        bundles_enabled: bundlesEnabled ? 1 : 0,
+        digital_receipt_enabled: digitalReceiptEnabled ? 1 : 0,
+        receipt_token_ttl_hours: Math.max(1, Math.min(8760, Math.floor(Number(receiptTokenTtlHours) || 720))),
         synced: 0,
       });
       
@@ -485,6 +497,16 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
               />
               <span className="text-sm font-medium text-gray-700">{customerDisplayEnabled ? t('common.on') : t('common.off')}</span>
             </label>
+          </div>
+        </section>
+
+        <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3" aria-labelledby="new-pos-features-title">
+          <h3 id="new-pos-features-title" className="font-bold text-gray-900">{t('settings.newFeatures')}</h3>
+          <div className="mt-3 space-y-3">
+            <label className="flex items-center justify-between gap-3 text-sm"><span>{t('settings.writeoffEnabled')}</span><input type="checkbox" checked={writeoffEnabled} onChange={(event) => setWriteoffEnabled(event.target.checked)} className="h-5 w-5 accent-emerald-600" /></label>
+            <label className="flex items-center justify-between gap-3 text-sm"><span>{t('settings.bundlesEnabled')}</span><input type="checkbox" checked={bundlesEnabled} onChange={(event) => setBundlesEnabled(event.target.checked)} className="h-5 w-5 accent-emerald-600" /></label>
+            <label className="flex items-center justify-between gap-3 text-sm"><span>{t('settings.digitalReceiptEnabled')}</span><input type="checkbox" checked={digitalReceiptEnabled} onChange={(event) => setDigitalReceiptEnabled(event.target.checked)} className="h-5 w-5 accent-emerald-600" /></label>
+            {digitalReceiptEnabled && <label className="block max-w-xs text-sm font-medium">{t('receipt.tokenExpiry')} ({t('common.hours')})<input type="number" min={1} max={8760} value={receiptTokenTtlHours} onChange={(event) => setReceiptTokenTtlHours(event.target.value)} className="mt-1 min-h-11 w-full rounded-lg border px-3" /></label>}
           </div>
         </section>
 

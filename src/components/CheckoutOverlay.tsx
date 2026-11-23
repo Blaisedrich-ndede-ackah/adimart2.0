@@ -32,6 +32,8 @@ import { queueSms, receiptSmsText } from '@/lib/smsOutbox';
 import { parseGhanaPhone } from '@/lib/ghanaPhone';
 import { routeGoodsPaymentToStoreMomo } from '@/lib/storeMomoPayout';
 import { broadcastCfdMessage } from '@/lib/cfdChannel';
+import ReceiptQRDisplay from '@/components/ReceiptQRDisplay';
+import { generateReceiptToken, type ReceiptToken } from '@/lib/receiptWallet';
 
 interface CheckoutOverlayProps {
   isOpen: boolean;
@@ -43,6 +45,7 @@ interface CheckoutOverlayProps {
 type Step = 'method' | 'discount' | 'charges' | 'pin-verify' | 'cash-input' | 'split-input' | 'manual-payment' | 'credit-input' | 'wallet-input' | 'paystack' | 'processing' | 'success';
 
 interface SaleResult {
+  transactionId: string;
   receiptNumber: string;
   items: CartItem[];
   subtotal: number;
@@ -86,6 +89,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
   const [creditCustomers, setCreditCustomers] = useState<LocalCustomer[]>([]);
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [saleResult, setSaleResult] = useState<SaleResult | null>(null);
+  const [receiptToken, setReceiptToken] = useState<ReceiptToken | null>(null);
+  const [receiptTokenError, setReceiptTokenError] = useState('');
   const [error, setError] = useState('');
   const [isPrinting, setIsPrinting] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
@@ -127,6 +132,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       setWalletUseAmount('');
       setCreditCustomers([]);
       setSaleResult(null);
+      setReceiptToken(null);
+      setReceiptTokenError('');
       setError('');
       setPaystackError('');
       setPrintError('');
@@ -328,6 +335,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       );
       
       const completed: SaleResult = {
+        transactionId: result.transactionId,
         receiptNumber: result.receiptNumber,
         items: result.items,
         subtotal: result.subtotal,
@@ -352,6 +360,17 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         loyaltyRedeemAmount: result.loyaltyRedeemAmount,
       };
       setSaleResult(completed);
+      if ((currentStore?.digital_receipt_enabled ?? 1) === 1) {
+        try {
+          setReceiptToken(await generateReceiptToken(
+            result.transactionId,
+            result.receiptNumber,
+            currentStore?.receipt_token_ttl_hours ?? 720,
+          ));
+        } catch (receiptError: unknown) {
+          setReceiptTokenError(receiptError instanceof Error ? receiptError.message : 'Digital receipt could not be created.');
+        }
+      }
       if (currentStore?.id && paystackRef && (paystackAmt || 0) > 0) {
         void routeGoodsPaymentToStoreMomo({
           storeId: currentStore.id,
@@ -1566,6 +1585,9 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                   Credit for {saleResult.customerName}; account balance {money(saleResult.customerBalance ?? saleResult.creditBalance ?? 0)}
                 </p>
               )}
+
+              {receiptToken && <ReceiptQRDisplay token={receiptToken} onDone={() => onComplete(saleResult.receiptNumber)} />}
+              {receiptTokenError && <p role="status" className="mb-3 w-full rounded-lg bg-amber-50 p-2 text-center text-xs text-amber-900">{receiptTokenError}</p>}
 
               {isPrinting && (
                 <div className="flex items-center gap-2 text-gray-500 text-sm mb-4">

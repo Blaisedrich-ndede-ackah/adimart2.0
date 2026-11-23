@@ -40,6 +40,7 @@ import { findVariantByCode, variantLabel, variantSellingPrice } from '@/lib/vari
 import type { LocalProductVariant } from '@/lib/dexie';
 import { recordActivity } from '@/lib/activityLog';
 import { broadcastCfdMessage } from '@/lib/cfdChannel';
+import { getBundleWithComponents, validateBundleStock } from '@/lib/bundle';
 
 export interface CartItem {
   id: string;
@@ -63,6 +64,8 @@ export interface CartItem {
   promotion_label?: string;
   promotion_discount?: number;
   serial_number?: string;
+  bundle_id?: string;
+  is_bundle?: boolean;
 }
 
 export type CartDiscountKind = 'none' | 'percentage' | 'fixed';
@@ -118,6 +121,7 @@ interface CartState {
     product: LocalProduct,
     opts?: { unitType?: UnitType; quantity?: number; saleMode?: SaleMode; variant?: LocalProductVariant }
   ) => Promise<{ success: boolean; error?: string }>;
+  addBundle: (bundleId: string, locationId?: string | null) => Promise<{ success: boolean; error?: string }>;
   removeItem: (itemId: string) => void;
   updateQuantity: (itemId: string, quantity: number) => Promise<{ success: boolean; error?: string }>;
   incrementItem: (itemId: string) => Promise<{ success: boolean; error?: string }>;
@@ -165,6 +169,7 @@ interface CartState {
     loyaltyPointsEarned?: number;
     loyaltyPointsRedeemed?: number;
     loyaltyRedeemAmount?: number;
+    transactionId: string;
   }>;
 }
 
@@ -558,6 +563,29 @@ export const useCartStore = create<CartState>((set, get) => ({
     return { success: true };
   },
 
+  addBundle: async (bundleId, locationId) => {
+    const state = get();
+    const bundle = await getBundleWithComponents(bundleId);
+    if (!bundle || bundle.bundle.is_active !== 1) return { success: false, error: 'Bundle is unavailable.' };
+    const validation = await validateBundleStock(bundle.bundle.store_id, bundleId, 1, locationId ?? state.locationId);
+    if (!validation.ok) return { success: false, error: `Not enough stock for ${validation.missing || 'a bundle product'}.` };
+    const existing = state.items.find((item) => item.is_bundle && item.bundle_id === bundleId);
+    const quantity = (existing?.quantity || 0) + 1;
+    const totalValidation = await validateBundleStock(bundle.bundle.store_id, bundleId, quantity, locationId ?? state.locationId);
+    if (!totalValidation.ok) return { success: false, error: `Not enough stock for ${totalValidation.missing || 'a bundle product'}.` };
+    const line: CartItem = {
+      id: existing?.id || generateId(), product_id: '', bundle_id: bundle.bundle.id,
+      is_bundle: true, name: bundle.bundle.name, unit_price: bundle.bundle.combo_price,
+      quantity, base_quantity: quantity, unit_type: 'base', sale_mode: 'retail', pack_size: 1,
+      subtotal: roundMoney(bundle.bundle.combo_price * quantity), category: '',
+      list_unit_price: bundle.bundle.combo_price, promotion_discount: 0,
+    };
+    const items = existing ? state.items.map((item) => item.id === existing.id ? line : item) : [...state.items, line];
+    const dealt = await applyDeals(items, state.couponCode);
+    set((current) => ({ ...withDiscount(current, dealt.items), items: dealt.items, promotionDiscount: dealt.promotionDiscount, promotionSummary: dealt.promotionSummary }));
+    return { success: true };
+  },
+
   removeItem: (itemId) => {
     const state = get();
     const items = state.items.filter((item) => item.id !== itemId);
@@ -581,6 +609,19 @@ export const useCartStore = create<CartState>((set, get) => ({
     const state = get();
     const item = state.items.find((i) => i.id === itemId);
     if (!item) return { success: false, error: 'Item not found' };
+    if (item.is_bundle && item.bundle_id) {
+      const bundle = await getBundleWithComponents(item.bundle_id);
+      if (!bundle) return { success: false, error: 'Bundle is no longer available.' };
+      const validation = await validateBundleStock(bundle.bundle.store_id, item.bundle_id, qty, state.locationId);
+      if (!validation.ok) return { success: false, error: `Not enough stock for ${validation.missing || 'a bundle product'}.` };
+      const draft = state.items.map((line) => line.id === itemId ? {
+        ...line, quantity: qty, base_quantity: qty,
+        subtotal: roundMoney((line.list_unit_price ?? line.unit_price) * qty),
+      } : line);
+      const dealt = await applyDeals(draft, state.couponCode);
+      set((current) => ({ ...withDiscount(current, dealt.items), items: dealt.items, promotionDiscount: dealt.promotionDiscount, promotionSummary: dealt.promotionSummary }));
+      return { success: true };
+    }
     const product = await db.products.get(item.product_id);
     if (!product) return { success: false, error: 'Product not found' };
 
@@ -954,7 +995,22 @@ export const useCartStore = create<CartState>((set, get) => ({
 
     // Aggregate needed qty per product (packs + duplicate lines)
     const needByProduct = new Map<string, { qty: number; name: string }>();
+    if (store?.bundles_enabled === 0 && state.items.some((item) => item.is_bundle)) {
+      throw new Error('Product bundles are disabled for this store.');
+    }
     for (const item of state.items) {
+      if (item.is_bundle && item.bundle_id) {
+        const bundle = await getBundleWithComponents(item.bundle_id);
+        if (!bundle || bundle.bundle.store_id !== storeId || bundle.bundle.is_active !== 1) throw new Error(`Bundle "${item.name}" is no longer available.`);
+        for (const component of bundle.components) {
+          const previous = needByProduct.get(component.product_id);
+          needByProduct.set(component.product_id, {
+            qty: (previous?.qty || 0) + component.quantity * item.quantity,
+            name: component.product.name,
+          });
+        }
+        continue;
+      }
       const prev = needByProduct.get(item.product_id);
       needByProduct.set(item.product_id, {
         qty: (prev?.qty || 0) + item.base_quantity,
@@ -1101,6 +1157,7 @@ export const useCartStore = create<CartState>((set, get) => ({
 
         await db.transaction_items.bulkAdd(
           state.items.map((item) => ({
+            bundle_id: item.bundle_id || null,
             id: generateId(),
             store_id: storeId,
             transaction_id: txnId,
@@ -1161,6 +1218,7 @@ export const useCartStore = create<CartState>((set, get) => ({
           });
         }
         for (const item of state.items) {
+          if (item.is_bundle) continue;
           if (!item.variant_id) continue;
           const variant = await db.product_variants.get(item.variant_id);
           if (!variant || variant.store_id !== storeId) {
@@ -1199,11 +1257,16 @@ export const useCartStore = create<CartState>((set, get) => ({
         userId: cashierId,
         transactionId: txnId,
         reason: 'sale',
-        items: state.items.map((item) => ({
-          productId: item.product_id,
-          baseQty: item.base_quantity,
-          name: item.name,
-        })),
+        items: (await Promise.all(state.items.map(async (item) => {
+          if (!item.is_bundle || !item.bundle_id) return [{ productId: item.product_id, baseQty: item.base_quantity, name: item.name }];
+          const bundle = await getBundleWithComponents(item.bundle_id);
+          if (!bundle) throw new Error(`Bundle "${item.name}" is no longer available.`);
+          return bundle.components.map((component) => ({
+            productId: component.product_id,
+            baseQty: component.quantity * item.quantity,
+            name: component.product.name,
+          }));
+        }))).flat(),
       });
     } catch (err) {
       // Roll back the sale so we never sync revenue without a stock movement
@@ -1264,6 +1327,7 @@ export const useCartStore = create<CartState>((set, get) => ({
     }
 
     const saleData = {
+      transactionId: txnId,
       receiptNumber,
       items: [...state.items],
       subtotal: priced.subtotal,

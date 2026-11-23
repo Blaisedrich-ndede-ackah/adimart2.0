@@ -15,6 +15,10 @@ import {
   ArrowRightLeft,
   QrCode,
   RefreshCw,
+  Boxes,
+  ClipboardMinus,
+  Boxes,
+  ClipboardMinus,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -217,6 +221,8 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
     { label: 'New sale', detail: 'Open the till', page: 'pos', icon: ShoppingCart, className: 'bg-primary text-white' },
     { label: 'Sales records', detail: 'View and print receipts', page: 'transactions', icon: Receipt, className: 'bg-white text-primary border border-emerald-100' },
     { label: 'Add product', detail: 'Update your catalog', page: 'inventory', quickAdd: true, icon: Package, className: 'bg-white text-primary border border-emerald-100' },
+    { label: t('writeoff.action'), detail: t('writeoff.weeklyReview'), page: 'write-offs', icon: ClipboardMinus, className: 'bg-white text-primary border border-amber-100' },
+    { label: t('bundle.action'), detail: t('bundle.create'), page: 'bundles', icon: Boxes, className: 'bg-white text-primary border border-emerald-100' },
     { label: 'Restock', detail: 'Replenish low stock', page: 'inventory', icon: Package, className: 'bg-white text-primary border border-amber-100' },
     { label: 'Add expense', detail: 'Record a store cost', page: 'expenses', quickAdd: true, icon: Plus, className: 'bg-white text-primary border border-emerald-100' },
     { label: t('priceScan.ownerQrAction'), detail: t('priceScan.ownerQrDetail'), page: 'settings', icon: QrCode, className: 'bg-white text-primary border border-emerald-100' },

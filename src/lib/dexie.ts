@@ -99,6 +99,10 @@ export interface LocalStore {
   pickup_verification_enabled?: number;
   /** Pickup token lifetime in minutes. */
   pickup_token_ttl_minutes?: number;
+  writeoff_enabled?: number;
+  bundles_enabled?: number;
+  digital_receipt_enabled?: number;
+  receipt_token_ttl_hours?: number;
   created_at: string;
   synced: number;
 }
@@ -464,6 +468,53 @@ export interface LocalPickupVerificationLog {
   synced: number;
 }
 
+export interface LocalStockWriteOff {
+  id: string;
+  store_id: string;
+  product_id: string;
+  product_name: string;
+  quantity: number;
+  base_quantity: number;
+  cost_price_at_writeoff: number;
+  reason: 'expired' | 'damaged' | 'other';
+  photo_data_url: string;
+  note: string;
+  created_by: string;
+  created_by_name: string;
+  created_at: string;
+  synced: number;
+}
+
+export interface LocalProductBundle {
+  id: string;
+  store_id: string;
+  name: string;
+  combo_price: number;
+  is_active: number;
+  synced: number;
+}
+
+export interface LocalBundleComponent {
+  id: string;
+  store_id: string;
+  bundle_id: string;
+  product_id: string;
+  quantity: number;
+  synced: number;
+}
+
+export interface LocalReceiptToken {
+  id: string;
+  store_id: string;
+  transaction_id: string;
+  receipt_number: string;
+  token: string;
+  qr_payload: string;
+  created_at: string;
+  expires_at: string;
+  synced: number;
+}
+
 export interface LocalTransaction {
   id: string;
   store_id: string; // Links transaction to a store
@@ -530,6 +581,7 @@ export interface LocalTransactionItem {
   list_unit_price?: number;
   promotion_label?: string;
   serial_number?: string;
+  bundle_id?: string | null;
   synced: number;
 }
 
@@ -1030,6 +1082,10 @@ class AdimatDB extends Dexie {
   price_changes!: Table<PriceChange, string>;
   pickup_tokens!: Table<LocalPickupToken, string>;
   pickup_verification_logs!: Table<LocalPickupVerificationLog, string>;
+  stock_write_offs!: Table<LocalStockWriteOff, string>;
+  product_bundles!: Table<LocalProductBundle, string>;
+  bundle_components!: Table<LocalBundleComponent, string>;
+  receipt_tokens!: Table<LocalReceiptToken, string>;
 
   /* Agent Portal tables */
   agents!: Table<LocalAgent, string>;
@@ -1374,6 +1430,20 @@ class AdimatDB extends Dexie {
           }
         });
       });
+      /* Version 30 — write-offs, bundles and digital receipt links. */
+      this.version(30).stores({
+        stock_write_offs: 'id, store_id, product_id, created_at, synced',
+        product_bundles: 'id, store_id, is_active, synced',
+        bundle_components: 'id, store_id, bundle_id, product_id, synced',
+        receipt_tokens: 'id, store_id, transaction_id, receipt_number, token, expires_at, synced',
+      }).upgrade(async (tx) => {
+        await tx.table('stores').toCollection().modify((store: LocalStore) => {
+          if (store.writeoff_enabled !== 0 && store.writeoff_enabled !== 1) store.writeoff_enabled = 1;
+          if (store.bundles_enabled !== 0 && store.bundles_enabled !== 1) store.bundles_enabled = 1;
+          if (store.digital_receipt_enabled !== 0 && store.digital_receipt_enabled !== 1) store.digital_receipt_enabled = 1;
+          if (!Number.isFinite(Number(store.receipt_token_ttl_hours))) store.receipt_token_ttl_hours = 720;
+        });
+      });
   }
 }
 
@@ -1654,6 +1724,10 @@ export async function createStoreWithOwner(
     closing_sms_time: '20:00',
     cashiers_can_record_expenses: 1,
     vat_rate: 0,
+    writeoff_enabled: 1,
+    bundles_enabled: 1,
+    digital_receipt_enabled: 1,
+    receipt_token_ttl_hours: 720,
     session_timeout_minutes: 5,
     momo_account_name: '',
     momo_number: '',
@@ -3291,7 +3365,7 @@ const OPTIONAL_CLOUD_TABLES = new Set([
 ]);
 
 const OPTIONAL_PUSH_COLUMNS: Record<string, string[]> = {
-  stores: ['loyalty_earn_rate', 'loyalty_redeem_value', 'credit_limit_action', 'closing_sms_enabled', 'closing_sms_time', 'cashiers_can_record_expenses', 'vat_rate', 'pickup_verification_enabled', 'pickup_token_ttl_minutes'],
+  stores: ['loyalty_earn_rate', 'loyalty_redeem_value', 'credit_limit_action', 'closing_sms_enabled', 'closing_sms_time', 'cashiers_can_record_expenses', 'vat_rate', 'pickup_verification_enabled', 'pickup_token_ttl_minutes', 'writeoff_enabled', 'bundles_enabled', 'digital_receipt_enabled', 'receipt_token_ttl_hours'],
   expenses: ['expense_date', 'payment_method'],
   products: ['unit', 'allow_decimal'],
   customers: ['loyalty_points_balance', 'credit_limit', 'credit_terms_days'],
@@ -3300,7 +3374,7 @@ const OPTIONAL_PUSH_COLUMNS: Record<string, string[]> = {
     'voided_by', 'voided_by_name', 'voided_at', 'loyalty_points_earned', 'loyalty_points_redeemed',
     'loyalty_redeem_amount', 'promotion_discount', 'promotion_summary', 'coupon_code', 'credit_due_date',
   ],
-  transaction_items: ['variant_id', 'measure_unit', 'list_unit_price', 'promotion_label', 'serial_number'],
+  transaction_items: ['variant_id', 'measure_unit', 'list_unit_price', 'promotion_label', 'serial_number', 'bundle_id'],
   purchase_orders: ['amount_paid', 'due_date'],
   stock_batches: ['variant_id'],
   users: ['photo_url', 'can_record_customer_payments'],
@@ -3869,6 +3943,10 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
           vat_rate: Math.max(0, Math.min(100, Number(store.vat_rate) || 0)),
           pickup_verification_enabled: (store.pickup_verification_enabled ?? 1) === 1,
           pickup_token_ttl_minutes: Math.max(5, Math.min(240, Math.floor(Number(store.pickup_token_ttl_minutes) || 30))),
+          writeoff_enabled: (store.writeoff_enabled ?? 1) === 1,
+          bundles_enabled: (store.bundles_enabled ?? 1) === 1,
+          digital_receipt_enabled: (store.digital_receipt_enabled ?? 1) === 1,
+          receipt_token_ttl_hours: Math.max(1, Math.min(8760, Math.floor(Number(store.receipt_token_ttl_hours) || 720))),
           created_at: store.created_at,
         }],
         async () => { await db.stores.update(storeId, { synced: 1 }); },
@@ -4556,6 +4634,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
         base_quantity: i.base_quantity ?? i.quantity,
         batch_id: uuidOrNull(i.batch_id),
         variant_id: uuidOrNull(i.variant_id),
+        bundle_id: uuidOrNull(i.bundle_id),
         measure_unit: i.measure_unit || '',
         list_unit_price: Number(i.list_unit_price) || Number(i.unit_price) || 0,
         promotion_label: i.promotion_label || '',
@@ -5049,6 +5128,12 @@ export async function syncFromSupabase(opts?: {
           remoteStore.pickup_token_ttl_minutes == null
             ? (localStore?.pickup_token_ttl_minutes ?? 30)
             : Math.max(5, Math.min(240, Math.floor(Number(remoteStore.pickup_token_ttl_minutes) || 30))),
+        writeoff_enabled: remoteStore.writeoff_enabled == null ? (localStore?.writeoff_enabled ?? 1) : remoteStore.writeoff_enabled ? 1 : 0,
+        bundles_enabled: remoteStore.bundles_enabled == null ? (localStore?.bundles_enabled ?? 1) : remoteStore.bundles_enabled ? 1 : 0,
+        digital_receipt_enabled: remoteStore.digital_receipt_enabled == null ? (localStore?.digital_receipt_enabled ?? 1) : remoteStore.digital_receipt_enabled ? 1 : 0,
+        receipt_token_ttl_hours: remoteStore.receipt_token_ttl_hours == null
+          ? (localStore?.receipt_token_ttl_hours ?? 720)
+          : Math.max(1, Math.min(8760, Math.floor(Number(remoteStore.receipt_token_ttl_hours) || 720))),
         created_at: remoteStore.created_at,
         synced: localStore?.synced === 0 ? 0 : 1,
       });
@@ -5434,6 +5519,7 @@ export async function syncFromSupabase(opts?: {
           base_quantity: Number(row.base_quantity) || Number(row.quantity) || 0,
           batch_id: (row.batch_id as string) || undefined,
           variant_id: (row.variant_id as string) || null,
+          bundle_id: (row.bundle_id as string) || null,
           measure_unit: String(row.measure_unit || ''),
           list_unit_price: Number(row.list_unit_price) || Number(row.unit_price) || 0,
           promotion_label: String(row.promotion_label || ''),
@@ -6254,6 +6340,10 @@ export async function restoreStoreFromCloud(
       db.online_order_items,
       db.pickup_tokens,
       db.pickup_verification_logs,
+      db.stock_write_offs,
+      db.product_bundles,
+      db.bundle_components,
+      db.receipt_tokens,
       db.suppliers,
       db.purchase_orders,
       db.bulk_sms_campaigns,
@@ -6280,6 +6370,10 @@ export async function restoreStoreFromCloud(
       await db.online_order_items.clear();
       await db.pickup_tokens.clear();
       await db.pickup_verification_logs.clear();
+      await db.stock_write_offs.clear();
+      await db.product_bundles.clear();
+      await db.bundle_components.clear();
+      await db.receipt_tokens.clear();
       await db.suppliers.clear();
       await db.purchase_orders.clear();
       await db.bulk_sms_campaigns.clear();

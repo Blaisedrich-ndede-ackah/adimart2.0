@@ -44,6 +44,7 @@ import {
   type PosLayout,
   type PosSection,
 } from '@/lib/posLayout';
+import BundlePicker from '@/components/BundlePicker';
 
 type PosTab = 'products' | 'cart';
 type SpeechRecognitionLike = {
@@ -131,6 +132,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   const money = useFormatMoney();
   const t = useT();
   const [posTab, setPosTab] = useState<PosTab>('products');
+  const [showBundles, setShowBundles] = useState(false);
   const [scannerActive, setScannerActive] = useState(true);
   const [showCameraScanner, setShowCameraScanner] = useState(false);
   const [pickupDeskOpen, setPickupDeskOpen] = useState(false);
@@ -1001,6 +1003,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
             </div>
             {voiceSearchError && <p role="status" className="px-1 text-[11px] text-amber-800">{voiceSearchError}</p>}
             <div className="flex items-center gap-3">
+              {(currentStore?.bundles_enabled ?? 1) === 1 && <button type="button" onClick={() => setShowBundles((value) => !value)} aria-pressed={showBundles} className="min-h-9 shrink-0 rounded-lg border border-emerald-200 bg-white px-3 text-xs font-bold text-emerald-800">{showBundles ? t('bundle.products') : t('bundle.title')}</button>}
               <div className="pos-categories flex min-w-0 flex-1 gap-4 overflow-x-auto no-scrollbar" role="tablist" aria-label="Product categories">
                 {categories.map((cat) => (
                   <button
@@ -1064,7 +1067,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
           </div>
 
           <div className={`flex-1 overflow-y-auto px-3 md:px-4 pt-2 no-scrollbar ${cart.items.length > 0 ? 'pb-28 lg:pb-4' : 'pb-4'}`}>
-            {loadingProducts ? (
+            {showBundles ? <BundlePicker storeId={currentStore?.id || ''} locationId={selectedLocationId || null} /> : loadingProducts ? (
               <div className="flex flex-col items-center justify-center py-16 text-gray-400">
                 <Package className="w-10 h-10 mb-2 animate-pulse" />
                 <p className="text-sm">Loading store inventory…</p>
@@ -1298,16 +1301,16 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                             </p>
                             <div className="flex items-center gap-2 mt-1 flex-wrap">
                               <p className="text-xs text-gray-500">
-                                {money(item.unit_price)} / {item.unit_type === 'pack' ? 'pack' : 'unit'}
+                                {money(item.unit_price)} / {item.is_bundle ? t('bundle.perBundle') : item.unit_type === 'pack' ? 'pack' : 'unit'}
                               </p>
                               <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
                                 item.price_label?.startsWith('Wholesale')
                                   ? 'bg-amber-100 text-amber-800'
                                   : 'bg-blue-100 text-blue-800'
                               }`}>
-                                {item.price_label || (item.sale_mode === 'wholesale' ? 'Wholesale' : 'Retail')}
+                                {item.is_bundle ? t('bundle.perBundle') : item.price_label || (item.sale_mode === 'wholesale' ? 'Wholesale' : 'Retail')}
                               </span>
-                              <button
+                              {!item.is_bundle && <button
                                 type="button"
                                 onClick={() => void toggleItemSaleMode(item.id)}
                                 disabled={!canWholesale && item.sale_mode === 'retail'}
@@ -1318,15 +1321,15 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                                 className="rounded-lg border border-gray-200 px-2 py-1 text-[10px] font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 Use {item.sale_mode === 'retail' ? 'wholesale' : 'retail'}
-                              </button>
-                              <button
+                              </button>}
+                              {!item.is_bundle && <button
                                 type="button"
                                 onClick={() => void toggleItemUnitType(item.id)}
                                 aria-label={`Sell ${item.name} ${item.unit_type === 'pack' ? 'by unit' : 'by pack'}`}
                                 className="rounded-lg border border-gray-200 px-2 py-1 text-[10px] font-semibold text-gray-600 hover:bg-gray-50"
                               >
                                 {item.unit_type === 'pack' ? 'By unit' : 'By pack'}
-                              </button>
+                              </button>}
                             </div>
                           </div>
                           <button
@@ -1339,14 +1342,14 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                           </button>
                         </div>
 
-                        <input
+                        {!item.is_bundle && <input
                           value={item.serial_number || ''}
                           onChange={(event) => cart.setItemSerial(item.id, event.target.value)}
                           placeholder="Serial or IMEI"
                           aria-label={`Serial or IMEI for ${item.name}`}
                           maxLength={40}
                           className="mt-2 w-full rounded-lg border border-gray-200 bg-transparent px-2 py-1 text-xs text-gray-800 outline-none"
-                        />
+                        />}
 
                         <div className="mt-3 flex items-center justify-between gap-3">
                           <div role="group" aria-label={`Quantity for ${item.name}`} className="flex items-center gap-2">
