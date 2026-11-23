@@ -4,6 +4,7 @@ import {
   Sparkles, CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare, Moon, Sun,
   ShoppingCart, RotateCcw, QrCode,
   ContactRound, ArrowLeftRight, Building2, Megaphone, Tag, Boxes, ClipboardMinus,
+  PanelLeftClose, PanelLeftOpen, Store,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -35,6 +36,13 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const { currentUser, currentStore, switchUser } = useAuthStore();
   const t = useT();
   const [moreOpen, setMoreOpen] = useState(false);
+  const [sidebarExpanded, setSidebarExpanded] = useState(() => {
+    try {
+      return window.localStorage.getItem('adimat-sidebar-collapsed') !== 'true';
+    } catch {
+      return true;
+    }
+  });
   const [storeCount, setStoreCount] = useState(1);
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window === 'undefined') return true;
@@ -60,6 +68,14 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
       // Keep the current theme for this session when storage is unavailable.
     }
   }, [darkMode]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('adimat-sidebar-collapsed', String(!sidebarExpanded));
+    } catch {
+      // Keep the current sidebar layout for this session if storage is unavailable.
+    }
+  }, [sidebarExpanded]);
 
   useEffect(() => {
     let active = true;
@@ -164,18 +180,20 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className={`food-rail ios-pane hidden lg:flex w-[104px] shrink-0 flex-col self-stretch text-ink ${
-        leftHanded ? 'lg:order-2' : ''
-      }`}>
-        <div className="food-rail-logo" aria-hidden="true">
-          {currentUser?.photo_url?.startsWith('data:image/') ? (
-            <img src={currentUser.photo_url} alt="" />
-          ) : (
-            <span>{(currentUser?.name || 'A').slice(0, 1).toUpperCase()}</span>
-          )}
+      <aside className={`food-rail hidden lg:flex shrink-0 flex-col self-stretch transition-[width] duration-300 ease-out ${sidebarExpanded ? 'is-expanded w-[272px]' : 'is-collapsed w-[88px]'} ${darkMode ? 'is-dark' : 'is-light'} ${leftHanded ? 'lg:order-2' : ''}`}>
+        <div className="food-rail-head">
+          <div className="food-rail-brand">
+            <span className="food-rail-logo" aria-hidden="true">
+              {currentStore?.logo_url ? <img src={currentStore.logo_url} alt="" /> : <Store className="h-5 w-5" />}
+            </span>
+            {sidebarExpanded && <span className="food-rail-brand-copy"><strong>Adimat POS</strong><small>{currentStore?.name || t('common.store')}</small></span>}
+          </div>
+          <button type="button" onClick={() => setSidebarExpanded((expanded) => !expanded)} className="food-rail-toggle touch-target" aria-label={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'} aria-expanded={sidebarExpanded} title={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}>
+            {sidebarExpanded ? <PanelLeftClose className="h-5 w-5" /> : <PanelLeftOpen className="h-5 w-5" />}
+          </button>
         </div>
         <p className="sr-only">{currentUser?.name || 'Signed in'} · {currentStore?.name || 'Store'}</p>
-        <nav className="flex-1 overflow-y-auto py-1 px-2 space-y-1">
+        <nav className="food-rail-nav flex-1 overflow-y-auto px-3 py-2">
           {navGroups.map((group) => {
             const groupItems = navItems.filter((item) => group.ids.includes(item.id));
             if (groupItems.length === 0) return null;
