@@ -34,6 +34,7 @@ import { routeGoodsPaymentToStoreMomo } from '@/lib/storeMomoPayout';
 import { broadcastCfdMessage, type CfdReceiptPayload } from '@/lib/cfdChannel';
 import ReceiptQRDisplay from '@/components/ReceiptQRDisplay';
 import { generateReceiptToken, type ReceiptToken } from '@/lib/receiptWallet';
+import type { TaxComponent } from '@/lib/tax';
 
 interface CheckoutOverlayProps {
   isOpen: boolean;
@@ -49,6 +50,8 @@ interface SaleResult {
   receiptNumber: string;
   items: CartItem[];
   subtotal: number;
+  taxTotal: number;
+  taxBreakdown: TaxComponent[];
   discount: number;
   otherCharges: OtherCharge[];
   otherChargesTotal: number;
@@ -129,6 +132,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       setManualReference('');
       setCreditCustomerId('');
       setWalletCustomerId('');
+      cart.setTaxExempt(false);
       setWalletUseAmount('');
       setCreditCustomers([]);
       setSaleResult(null);
@@ -181,6 +185,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         serial: i.serial_number || '',
       })),
       subtotal: result.subtotal,
+      taxBreakdown: result.taxBreakdown,
       discount: result.discount,
       otherCharges: result.otherCharges || [],
       total: result.total,
@@ -339,6 +344,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         receiptNumber: result.receiptNumber,
         items: result.items,
         subtotal: result.subtotal,
+        taxTotal: result.taxTotal,
+        taxBreakdown: result.taxBreakdown,
         discount: result.discount,
         otherCharges: result.otherCharges || [],
         otherChargesTotal: result.otherChargesTotal || 0,
@@ -760,6 +767,12 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                   <span>-{money(cart.discountAmount)}</span>
                 </div>
               )}
+              {(cart.taxBreakdown || []).map((tax) => (
+                <div key={tax.id} className="flex justify-between text-xs text-slate-600 mb-1">
+                  <span>{tax.label} ({tax.rate}%)</span>
+                  <span>{money(tax.amount)}{cart.taxConfig.inclusive ? ' included' : ''}</span>
+                </div>
+              ))}
               {cart.otherCharges.map((charge) => (
                 <div key={charge.id} className="flex justify-between items-center text-sm text-gray-700 mb-1">
                   <span className="truncate pr-2">{charge.label}</span>
@@ -1360,7 +1373,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                 <select
                   id="credit-customer"
                   value={creditCustomerId}
-                  onChange={(event) => { setCreditCustomerId(event.target.value); setError(''); }}
+                  onChange={(event) => { const id = event.target.value; setCreditCustomerId(id); cart.setTaxExempt(creditCustomers.find((item) => item.id === id)?.tax_exempt === 1); setError(''); }}
                   className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
                   autoFocus
                 >
@@ -1430,6 +1443,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                     const id = event.target.value;
                     const customer = creditCustomers.find((item) => item.id === id);
                     setWalletCustomerId(id);
+                    cart.setTaxExempt(customer?.tax_exempt === 1);
                     setWalletUseAmount(
                       customer
                         ? Math.min(Number(customer.wallet_balance) || 0, cart.total).toFixed(2)

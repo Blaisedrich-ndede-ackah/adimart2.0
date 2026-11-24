@@ -23,6 +23,9 @@ export interface PublicShopProduct {
   stock_level: number;
   image_url: string;
   in_stock: boolean;
+  seo_slug?: string;
+  seo_meta_title?: string;
+  seo_meta_description?: string;
 }
 
 export interface PublicShopCatalog {
@@ -36,6 +39,9 @@ export interface PublicShopCatalog {
     tagline: string;
     slug: string;
     currency_code?: string;
+    seo_meta_title?: string;
+    seo_meta_description?: string;
+    og_image_url?: string;
     links: StorefrontLink[];
   };
   products: PublicShopProduct[];
@@ -174,11 +180,21 @@ export async function fetchPublicShopCatalog(slug: string): Promise<PublicShopCa
   }
 
   const clean = slug.trim().toLowerCase();
-  const { data: store, error: storeError } = await supabase
+  let { data: store, error: storeError } = await supabase
     .from('stores')
-    .select('id, name, address, support_number, logo_url, ecommerce_enabled, ecommerce_slug, ecommerce_tagline, ecommerce_links, currency_code')
+    .select('id, name, address, support_number, logo_url, ecommerce_enabled, ecommerce_slug, ecommerce_tagline, ecommerce_links, currency_code, seo_meta_title, seo_meta_description, og_image_url')
     .eq('ecommerce_slug', clean)
     .maybeSingle();
+
+  if (storeError?.message.toLowerCase().includes('seo_meta_') || storeError?.message.toLowerCase().includes('og_image_url')) {
+    const retry = await supabase
+      .from('stores')
+      .select('id, name, address, support_number, logo_url, ecommerce_enabled, ecommerce_slug, ecommerce_tagline, ecommerce_links, currency_code')
+      .eq('ecommerce_slug', clean)
+      .maybeSingle();
+    store = retry.data as typeof store;
+    storeError = retry.error;
+  }
 
   if (storeError) throw new Error(storeError.message);
   if (!store || !store.ecommerce_enabled) {
@@ -189,15 +205,29 @@ export async function fetchPublicShopCatalog(slug: string): Promise<PublicShopCa
   let catalogError = '';
   const pageSize = 500;
   for (let from = 0; ; from += pageSize) {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('products')
-      .select('id, name, category, selling_price, stock_level, image_url')
+      .select('id, name, category, selling_price, stock_level, image_url, seo_slug, seo_meta_title, seo_meta_description')
       .eq('store_id', store.id)
       .eq('is_active', true)
       .eq('sell_online', true)
       .order('name')
       .order('id')
       .range(from, from + pageSize - 1);
+
+    if (error?.message.toLowerCase().includes('seo_')) {
+      const retry = await supabase
+        .from('products')
+        .select('id, name, category, selling_price, stock_level, image_url')
+        .eq('store_id', store.id)
+        .eq('is_active', true)
+        .eq('sell_online', true)
+        .order('name')
+        .order('id')
+        .range(from, from + pageSize - 1);
+      data = retry.data as typeof data;
+      error = retry.error;
+    }
 
     if (error) {
       catalogError = error.message;
@@ -234,6 +264,9 @@ export async function fetchPublicShopCatalog(slug: string): Promise<PublicShopCa
       tagline: store.ecommerce_tagline || 'Shop online',
       slug: store.ecommerce_slug || clean,
       currency_code: store.currency_code || 'GHS',
+      seo_meta_title: store.seo_meta_title || '',
+      seo_meta_description: store.seo_meta_description || '',
+      og_image_url: store.og_image_url || '',
       links,
     },
     products: products.map((product) => ({
@@ -244,6 +277,9 @@ export async function fetchPublicShopCatalog(slug: string): Promise<PublicShopCa
       stock_level: Number(product.stock_level) || 0,
       image_url: String(product.image_url || ''),
       in_stock: (Number(product.stock_level) || 0) > 0,
+      seo_slug: String(product.seo_slug || ''),
+      seo_meta_title: String(product.seo_meta_title || ''),
+      seo_meta_description: String(product.seo_meta_description || ''),
     })),
   };
 }

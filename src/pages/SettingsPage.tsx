@@ -89,6 +89,13 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [closingSmsTime, setClosingSmsTime] = useState('20:00');
   const [cashiersCanRecordExpenses, setCashiersCanRecordExpenses] = useState(true);
   const [vatRate, setVatRate] = useState('0');
+  const [nhilEnabled, setNhilEnabled] = useState(false);
+  const [nhilRate, setNhilRate] = useState('2.5');
+  const [getfundEnabled, setGetfundEnabled] = useState(false);
+  const [getfundRate, setGetfundRate] = useState('2.5');
+  const [covidLevyEnabled, setCovidLevyEnabled] = useState(false);
+  const [covidLevyRate, setCovidLevyRate] = useState('0');
+  const [taxInclusivePricing, setTaxInclusivePricing] = useState(true);
   const [closingSmsNote, setClosingSmsNote] = useState('');
   const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState(DEFAULT_SESSION_TIMEOUT_MINUTES);
   const [momoAccountName, setMomoAccountName] = useState('');
@@ -191,6 +198,13 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
       setClosingSmsTime(currentStore.closing_sms_time || '20:00');
       setCashiersCanRecordExpenses((currentStore.cashiers_can_record_expenses ?? 1) === 1);
       setVatRate(String(Number(currentStore.vat_rate) || 0));
+      setNhilEnabled(currentStore.nhil_enabled === 1);
+      setNhilRate(String(Number(currentStore.nhil_rate ?? 2.5)));
+      setGetfundEnabled(currentStore.getfund_enabled === 1);
+      setGetfundRate(String(Number(currentStore.getfund_rate ?? 2.5)));
+      setCovidLevyEnabled(currentStore.covid_levy_enabled === 1);
+      setCovidLevyRate(String(Number(currentStore.covid_levy_rate) || 0));
+      setTaxInclusivePricing(currentStore.tax_inclusive_pricing !== 0);
       setSessionTimeoutMinutes(normalizeSessionTimeoutMinutes(currentStore.session_timeout_minutes));
       setMomoAccountName(currentStore.momo_account_name || '');
       setMomoNumber(currentStore.momo_number || '');
@@ -288,6 +302,13 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         closing_sms_time: closingSmsTime || '20:00',
         cashiers_can_record_expenses: cashiersCanRecordExpenses ? 1 : 0,
         vat_rate: Math.max(0, Math.min(100, Number(vatRate) || 0)),
+        nhil_enabled: nhilEnabled ? 1 : 0,
+        nhil_rate: Math.max(0, Math.min(100, Number(nhilRate) || 0)),
+        getfund_enabled: getfundEnabled ? 1 : 0,
+        getfund_rate: Math.max(0, Math.min(100, Number(getfundRate) || 0)),
+        covid_levy_enabled: covidLevyEnabled ? 1 : 0,
+        covid_levy_rate: Math.max(0, Math.min(100, Number(covidLevyRate) || 0)),
+        tax_inclusive_pricing: taxInclusivePricing ? 1 : 0,
         session_timeout_minutes: normalizeSessionTimeoutMinutes(sessionTimeoutMinutes),
         momo_account_name: momoAccountName.trim(),
         momo_number: momoNumber.trim(),
@@ -781,9 +802,9 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">
-          <h3 className="font-bold text-gray-900 mb-1">VAT in the selling price</h3>
-          <p className="text-xs text-gray-500 mb-3">When you change a product’s selling price, this percent is rounded into that price. Receipts charge the selling price and do not print a VAT line. Leave it at 0 to keep prices as you type them.</p>
-          <label className="text-xs font-medium text-gray-600 mb-1 block">VAT percent</label>
+          <h3 className="font-bold text-gray-900 mb-1">Sales tax</h3>
+          <p className="text-xs text-gray-500 mb-3">Configure the rates used at checkout and shown separately on receipts. Confirm applicable rates with your tax adviser before enabling them.</p>
+          <label className="text-xs font-medium text-gray-600 mb-1 block">VAT rate (%)</label>
           <input
             type="number"
             min="0"
@@ -793,6 +814,19 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
             onChange={(event) => setVatRate(event.target.value)}
             className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary focus:border-primary"
           />
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={nhilEnabled} onChange={(event) => setNhilEnabled(event.target.checked)} />NHIL</label>
+            <input aria-label="NHIL rate percent" type="number" min="0" max="100" step="0.01" value={nhilRate} onChange={(event) => setNhilRate(event.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={getfundEnabled} onChange={(event) => setGetfundEnabled(event.target.checked)} />GETFund</label>
+            <input aria-label="GETFund rate percent" type="number" min="0" max="100" step="0.01" value={getfundRate} onChange={(event) => setGetfundRate(event.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={covidLevyEnabled} onChange={(event) => setCovidLevyEnabled(event.target.checked)} />COVID levy</label>
+            <input aria-label="COVID levy rate percent" type="number" min="0" max="100" step="0.01" value={covidLevyRate} onChange={(event) => setCovidLevyRate(event.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
+          </div>
+          <label className="mt-4 flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" checked={taxInclusivePricing} onChange={(event) => setTaxInclusivePricing(event.target.checked)} />
+            Tax is included in displayed selling prices
+          </label>
+          <p className="mt-2 text-[11px] text-amber-800">This calculates and prints tax amounts; it does not connect to or certify receipts through GRA E-VAT.</p>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3 space-y-3">

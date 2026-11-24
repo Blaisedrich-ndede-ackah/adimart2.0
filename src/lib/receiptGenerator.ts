@@ -24,6 +24,7 @@ export interface ReceiptData {
   subtotal: number;
   discount: number;
   otherCharges?: Array<{ label: string; amount: number }>;
+  taxBreakdown?: Array<{ label: string; rate: number; amount: number }>;
   total: number;
   paymentMethod: string;
   cashAmount?: number;
@@ -196,6 +197,11 @@ function generateReceiptPDF(data: ReceiptData): jsPDF {
     doc.setTextColor(0);
     y += 4;
   }
+  for (const tax of data.taxBreakdown || []) {
+    if (tax.amount <= 0) continue;
+    leftRightText(`${tax.label} (${tax.rate}%):`, amt(data, tax.amount), y, 8);
+    y += 4;
+  }
   if ((data.loyaltyRedeemAmount || 0) > 0) {
     leftRightText('Points redeemed:', '-' + amt(data, data.loyaltyRedeemAmount || 0), y, 9);
     y += 4;
@@ -334,6 +340,9 @@ function generateOfficialReceiptPdf(data: ReceiptData): FormalPdf {
     ...(data.discount > 0
       ? [{ label: 'Discount', value: formatGhsOfficial(-data.discount, data.currencyCode) }]
       : []),
+    ...(data.taxBreakdown || []).filter((tax) => tax.amount > 0).map((tax) => ({
+      label: `${tax.label} (${tax.rate}%)`, value: formatGhsOfficial(tax.amount, data.currencyCode),
+    })),
     ...((data.loyaltyRedeemAmount || 0) > 0
       ? [{ label: 'Points redeemed', value: formatGhsOfficial(-(data.loyaltyRedeemAmount || 0), data.currencyCode) }]
       : []),
@@ -532,6 +541,9 @@ function generateReceiptText(data: ReceiptData): string {
   lines.push(leftRight('Subtotal:', amt(data, data.subtotal)));
   if (data.discount > 0) {
     lines.push(leftRight('Discount:', '-' + amt(data, data.discount)));
+  }
+  for (const tax of data.taxBreakdown || []) {
+    if (tax.amount > 0) lines.push(leftRight(`${tax.label} (${tax.rate}%):`, amt(data, tax.amount)));
   }
   if ((data.loyaltyRedeemAmount || 0) > 0) {
     lines.push(leftRight('Points redeemed:', '-' + amt(data, data.loyaltyRedeemAmount || 0)));

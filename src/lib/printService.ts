@@ -39,6 +39,7 @@ export interface EscPosReceiptData {
   subtotal: number;
   discount: number;
   otherCharges?: Array<{ label: string; amount: number }>;
+  taxBreakdown?: Array<{ label: string; rate: number; amount: number }>;
   total: number;
   paymentMethod: string;
   cashAmount?: number;
@@ -113,6 +114,9 @@ function printOnComputer(
   const charges = (data.otherCharges || [])
     .filter((charge) => charge?.amount)
     .map((charge) => `<div class="row"><span>${escapeHtml(charge.label)}:</span><span>${escapeHtml(amt(data, charge.amount))}</span></div>`)
+    .join('');
+  const taxes = (data.taxBreakdown || []).filter((tax) => tax.amount > 0)
+    .map((tax) => `<div class="row"><span>${escapeHtml(`${tax.label} (${tax.rate}%)`)}:</span><span>${escapeHtml(amt(data, tax.amount))}</span></div>`)
     .join('');
   const paymentMethod = data.paymentMethod === 'paystack'
     ? 'Paystack'
@@ -197,6 +201,7 @@ function printOnComputer(
           <hr class="rule">
           <div class="row"><span>Subtotal:</span><span>${escapeHtml(amt(data, data.subtotal))}</span></div>
           ${data.discount > 0 ? `<div class="row"><span>Discount:</span><span>-${escapeHtml(amt(data, data.discount))}</span></div>` : ''}
+          ${taxes}
           ${charges}
           <hr class="rule">
           <div class="row total"><span>TOTAL:</span><span>${escapeHtml(amt(data, data.total))}</span></div>
@@ -325,6 +330,12 @@ export async function buildEscPosReceipt(data: EscPosReceiptData): Promise<Uint8
 
   if (data.discount > 0) {
     bytes.push(...textToBytes(rightAlign('Discount:', `-${amt(data, data.discount)}`)));
+    bytes.push(LF);
+  }
+
+  for (const tax of data.taxBreakdown || []) {
+    if (tax.amount <= 0) continue;
+    bytes.push(...textToBytes(rightAlign(`${tax.label} (${tax.rate}%):`, amt(data, tax.amount))));
     bytes.push(LF);
   }
 

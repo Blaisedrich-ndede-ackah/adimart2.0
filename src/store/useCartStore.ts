@@ -41,6 +41,7 @@ import type { LocalProductVariant } from '@/lib/dexie';
 import { recordActivity } from '@/lib/activityLog';
 import { broadcastCfdMessage } from '@/lib/cfdChannel';
 import { getBundleWithComponents, validateBundleStock } from '@/lib/bundle';
+import { calculateSalesTax, type TaxConfig, type TaxComponent } from '@/lib/tax';
 
 export interface CartItem {
   id: string;
@@ -66,6 +67,10 @@ export interface CartItem {
   serial_number?: string;
   bundle_id?: string;
   is_bundle?: boolean;
+  tax_category?: LocalProduct['tax_category'];
+  tax_rate_override?: number | null;
+  tax_amount?: number;
+  tax_rate?: number;
 }
 
 export type CartDiscountKind = 'none' | 'percentage' | 'fixed';
@@ -109,8 +114,14 @@ interface CartState {
   loyaltyRedeemValue: number;
   promotionDiscount: number;
   promotionSummary: string;
+  taxConfig: TaxConfig;
+  taxExempt: boolean;
+  taxTotal: number;
+  taxBreakdown: TaxComponent[];
 
   setSaleContext: (locationId: string | null, saleMode: SaleMode, unitType?: UnitType) => void;
+  setTaxConfig: (config: TaxConfig) => void;
+  setTaxExempt: (exempt: boolean) => void;
   setCouponCode: (code: string) => Promise<string | null>;
   setLoyaltySelection: (customerId: string, points: number) => Promise<void>;
   addItemByBarcode: (
@@ -169,6 +180,8 @@ interface CartState {
     loyaltyPointsEarned?: number;
     loyaltyPointsRedeemed?: number;
     loyaltyRedeemAmount?: number;
+    taxTotal: number;
+    taxBreakdown: TaxComponent[];
     transactionId: string;
   }>;
 }
@@ -179,7 +192,9 @@ function recalculate(
   discountPercent: number,
   discountFixed: number,
   otherCharges: OtherCharge[],
-  loyaltyDiscount = 0
+  loyaltyDiscount = 0,
+  taxConfig?: TaxConfig,
+  taxExempt = false
 ) {
   const subtotal = roundMoney(items.reduce((sum, i) => sum + i.subtotal, 0));
   let kind = discountKind;
@@ -202,7 +217,16 @@ function recalculate(
   const chargesTotal = otherChargesTotal(otherCharges);
   const beforeLoyalty = roundMoney(subtotal - discountAmount);
   const loyalty = Math.min(roundMoney(Math.max(0, loyaltyDiscount)), Math.max(0, beforeLoyalty));
-  const total = roundMoney(subtotal - discountAmount - loyalty + chargesTotal);
+  const taxableAfterDiscount = roundMoney(subtotal - discountAmount - loyalty);
+  const tax = taxConfig
+    ? calculateSalesTax(items.map((item) => ({
+        id: item.id,
+        subtotal: item.subtotal,
+        taxCategory: item.tax_category,
+        taxRateOverride: item.tax_rate_override,
+      })), taxableAfterDiscount, taxConfig, taxExempt)
+    : { total: 0, breakdown: [], lines: [] };
+  const total = roundMoney(taxableAfterDiscount + chargesTotal + (taxConfig?.inclusive ? 0 : tax.total));
   return {
     subtotal,
     discountAmount,
@@ -210,6 +234,12 @@ function recalculate(
     otherCharges,
     otherChargesTotal: chargesTotal,
     total,
+    taxTotal: tax.total,
+    taxBreakdown: tax.breakdown,
+    items: items.map((item) => {
+      const lineTax = tax.lines.find((line) => line.id === item.id);
+      return { ...item, tax_amount: lineTax?.taxAmount || 0, tax_rate: lineTax?.taxRate || 0 };
+    }),
     discountKind: kind,
     discountPercent: percent,
     discountFixed: fixed,
@@ -223,7 +253,9 @@ function withDiscount(state: CartState, items: CartItem[]) {
     state.discountPercent,
     state.discountFixed,
     state.otherCharges,
-    pointsValue(state.pointsToRedeem || 0, state.loyaltyRedeemValue || 0)
+    pointsValue(state.pointsToRedeem || 0, state.loyaltyRedeemValue || 0),
+    state.taxConfig,
+    state.taxExempt
   );
 }
 
@@ -297,6 +329,8 @@ function buildCartLine(
     measure_unit: product.unit || 'pcs',
     allow_decimal: productAllowsDecimal(product) ? 1 : 0,
     category: product.category || '',
+    tax_category: product.tax_category || 'taxable',
+    tax_rate_override: product.tax_rate_override ?? null,
     list_unit_price: unitPrice,
     promotion_discount: 0,
     promotion_label: '',
@@ -422,6 +456,10 @@ export const useCartStore = create<CartState>((set, get) => ({
   loyaltyRedeemValue: 0,
   promotionDiscount: 0,
   promotionSummary: '',
+  taxConfig: { vatRate: 0, nhilEnabled: false, nhilRate: 2.5, getfundEnabled: false, getfundRate: 2.5, covidLevyEnabled: false, covidLevyRate: 0, inclusive: true },
+  taxExempt: false,
+  taxTotal: 0,
+  taxBreakdown: [],
 
   setCouponCode: async (code) => {
     const couponCode = code.trim();
@@ -452,11 +490,13 @@ export const useCartStore = create<CartState>((set, get) => ({
     const capped = customer
       ? capRedeemPoints(points, customer.loyalty_points_balance || 0, redeemValue, payable)
       : 0;
+    const taxExempt = customer?.tax_exempt === 1;
     set((current) => ({
       loyaltyCustomerId: customer && customer.is_active === 1 ? customer.id : '',
       pointsToRedeem: capped,
       loyaltyRedeemValue: redeemValue,
-      ...withDiscount({ ...current, pointsToRedeem: capped, loyaltyRedeemValue: redeemValue }, current.items),
+      taxExempt,
+      ...withDiscount({ ...current, pointsToRedeem: capped, loyaltyRedeemValue: redeemValue, taxExempt }, current.items),
     }));
   },
 
@@ -466,6 +506,16 @@ export const useCartStore = create<CartState>((set, get) => ({
     if (state.locationId === locationId && state.saleMode === saleMode && state.unitType === nextUnit) return;
     // Price and unit choices apply to the next item. Lines already in the sale stay as they are.
     set({ locationId, saleMode, unitType: nextUnit });
+  },
+
+  setTaxConfig: (taxConfig) => {
+    const state = get();
+    set({ ...withDiscount({ ...state, taxConfig }, state.items), taxConfig });
+  },
+
+  setTaxExempt: (taxExempt) => {
+    const state = get();
+    set({ ...withDiscount({ ...state, taxExempt }, state.items), taxExempt });
   },
 
   addItemByBarcode: async (barcode, opts) => {
@@ -787,6 +837,9 @@ export const useCartStore = create<CartState>((set, get) => ({
       otherChargesTotal: 0,
       subtotal: 0,
       total: 0,
+      taxTotal: 0,
+      taxBreakdown: [],
+      taxExempt: false,
       couponCode: '',
       pointsToRedeem: 0,
       loyaltyCustomerId: '',
@@ -901,7 +954,9 @@ export const useCartStore = create<CartState>((set, get) => ({
       state.discountPercent,
       state.discountFixed,
       state.otherCharges,
-      0
+      0,
+      state.taxConfig,
+      state.taxExempt
     );
 
     if (!isOwner && !cashierCanDiscount && priced.discountAmount > 0) {
@@ -936,7 +991,9 @@ export const useCartStore = create<CartState>((set, get) => ({
       state.discountPercent,
       state.discountFixed,
       state.otherCharges,
-      redeemAmount
+      redeemAmount,
+      state.taxConfig,
+      state.taxExempt
     );
     const earnedPoints = attachedCustomerId
       ? pointsEarned(priced.total, Number(store?.loyalty_earn_rate) || 0)
@@ -1119,6 +1176,8 @@ export const useCartStore = create<CartState>((set, get) => ({
           cashier_name: cashierName,
           total_amount: priced.total,
           discount_applied: priced.discountAmount,
+          tax_total: priced.taxTotal,
+          tax_breakdown_json: JSON.stringify(priced.taxBreakdown),
           other_charges_json: serializeOtherCharges(priced.otherCharges),
           other_charges_total: priced.otherChargesTotal,
           payment_method: paymentMethod,
@@ -1156,7 +1215,7 @@ export const useCartStore = create<CartState>((set, get) => ({
         });
 
         await db.transaction_items.bulkAdd(
-          state.items.map((item) => ({
+          priced.items.map((item) => ({
             bundle_id: item.bundle_id || null,
             id: generateId(),
             store_id: storeId,
@@ -1166,6 +1225,8 @@ export const useCartStore = create<CartState>((set, get) => ({
             quantity: item.quantity,
             unit_price: item.unit_price,
             subtotal: item.subtotal,
+            tax_amount: item.tax_amount || 0,
+            tax_rate: item.tax_rate || 0,
             unit_type: item.unit_type,
             pack_size: item.pack_size,
             base_quantity: item.base_quantity,
@@ -1329,12 +1390,14 @@ export const useCartStore = create<CartState>((set, get) => ({
     const saleData = {
       transactionId: txnId,
       receiptNumber,
-      items: [...state.items],
+      items: [...priced.items],
       subtotal: priced.subtotal,
       discount: priced.discountAmount,
       otherCharges: [...priced.otherCharges],
       otherChargesTotal: priced.otherChargesTotal,
       total: priced.total,
+      taxTotal: priced.taxTotal,
+      taxBreakdown: priced.taxBreakdown,
       customerBalance,
       stockChanges,
       locationId,

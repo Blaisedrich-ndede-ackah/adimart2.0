@@ -57,6 +57,9 @@ export interface LocalStore {
   /** Public URL slug: #/shop/{slug} */
   ecommerce_slug?: string;
   ecommerce_tagline?: string;
+  seo_meta_title?: string;
+  seo_meta_description?: string;
+  og_image_url?: string;
   /** Store-owner-managed external storefront links as a JSON array. */
   ecommerce_links?: string;
   /** Display currency for this store only (prices, receipts, reports). */
@@ -93,6 +96,14 @@ export interface LocalStore {
   cashiers_can_record_expenses?: number;
   /** VAT percent folded into selling prices. 0 leaves prices unchanged. */
   vat_rate?: number;
+  nhil_enabled?: number;
+  nhil_rate?: number;
+  getfund_enabled?: number;
+  getfund_rate?: number;
+  covid_levy_enabled?: number;
+  covid_levy_rate?: number;
+  /** 1 extracts tax from displayed price; 0 adds tax on top. */
+  tax_inclusive_pricing?: number;
   /** Cached store SMS balance in pesewas. The server wallet is the source of truth. */
   sms_balance_pesewas?: number;
   /** Require a paid, one-time pickup token at the store exit (0/1). */
@@ -136,6 +147,7 @@ export interface LocalCustomer {
   debt_reminder_opt_out?: number;
   /** Null or omitted means no credit limit. */
   credit_limit?: number | null;
+  tax_exempt?: number;
   /** Days after a credit sale when payment is due. Null means no due date. */
   credit_terms_days?: number | null;
   created_at: string;
@@ -387,6 +399,16 @@ export interface LocalProduct {
   unit?: string;
   /** 1 when the POS may sell fractional quantities such as 2.5 kg. */
   allow_decimal?: number;
+  tax_category?: 'taxable' | 'exempt' | 'zero_rated' | 'reduced';
+  tax_rate_override?: number | null;
+  seo_slug?: string;
+  seo_meta_title?: string;
+  seo_meta_description?: string;
+  is_rentable?: number;
+  rental_rate_daily?: number;
+  rental_rate_weekly?: number;
+  rental_rate_monthly?: number;
+  deposit_amount?: number;
   created_at: string;
   updated_at: string;
   synced: number;
@@ -515,6 +537,75 @@ export interface LocalReceiptToken {
   synced: number;
 }
 
+export interface LocalGiftCard {
+  id: string;
+  store_id: string;
+  code: string;
+  initial_value: number;
+  balance: number;
+  status: 'active' | 'expired' | 'depleted' | 'disabled';
+  customer_id?: string | null;
+  customer_name?: string;
+  expires_at?: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export interface LocalGiftCardTransaction {
+  id: string;
+  store_id: string;
+  gift_card_id: string;
+  transaction_id?: string | null;
+  type: 'issue' | 'redeem' | 'reload' | 'refund';
+  amount: number;
+  balance_after: number;
+  note: string;
+  created_by: string;
+  created_at: string;
+  synced: number;
+}
+
+export interface LocalRentalAgreement {
+  id: string;
+  store_id: string;
+  agreement_number: string;
+  customer_id?: string | null;
+  customer_name: string;
+  customer_phone: string;
+  status: 'active' | 'overdue' | 'returned' | 'cancelled';
+  starts_at: string;
+  due_at: string;
+  returned_at?: string | null;
+  deposit_amount: number;
+  deposit_returned: number;
+  late_fee: number;
+  damage_fee: number;
+  notes: string;
+  created_by: string;
+  created_by_name: string;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
+export interface LocalRentalItem {
+  id: string;
+  store_id: string;
+  agreement_id: string;
+  product_id: string;
+  product_name: string;
+  quantity: number;
+  rate_amount: number;
+  rate_period: 'daily' | 'weekly' | 'monthly';
+  deposit_amount: number;
+  condition_at_return?: string;
+  created_at: string;
+  updated_at: string;
+  synced: number;
+}
+
 export interface LocalTransaction {
   id: string;
   store_id: string; // Links transaction to a store
@@ -526,6 +617,8 @@ export interface LocalTransaction {
   /** JSON array of extra checkout fees (delivery, packing, service, other) */
   other_charges_json?: string;
   other_charges_total?: number;
+  tax_total?: number;
+  tax_breakdown_json?: string;
   payment_method: PaymentMethod;
   cash_amount: number;
   paystack_amount: number;
@@ -557,6 +650,8 @@ export interface LocalTransaction {
   status: 'completed' | 'pending';
   location_id?: string;
   sale_mode?: 'retail' | 'wholesale' | 'mixed';
+  rental_due_at?: string | null;
+  rental_deposit?: number;
   created_at: string;
   updated_at?: string;
   synced: number;
@@ -582,6 +677,8 @@ export interface LocalTransactionItem {
   promotion_label?: string;
   serial_number?: string;
   bundle_id?: string | null;
+  tax_amount?: number;
+  tax_rate?: number;
   synced: number;
 }
 
@@ -1086,6 +1183,10 @@ class AdimatDB extends Dexie {
   product_bundles!: Table<LocalProductBundle, string>;
   bundle_components!: Table<LocalBundleComponent, string>;
   receipt_tokens!: Table<LocalReceiptToken, string>;
+  gift_cards!: Table<LocalGiftCard, string>;
+  gift_card_transactions!: Table<LocalGiftCardTransaction, string>;
+  rental_agreements!: Table<LocalRentalAgreement, string>;
+  rental_items!: Table<LocalRentalItem, string>;
 
   /* Agent Portal tables */
   agents!: Table<LocalAgent, string>;
@@ -1444,6 +1545,13 @@ class AdimatDB extends Dexie {
           if (!Number.isFinite(Number(store.receipt_token_ttl_hours))) store.receipt_token_ttl_hours = 720;
         });
       });
+      /* Version 31 — gift-card balances/ledger and rental agreements. */
+      this.version(31).stores({
+        gift_cards: 'id, store_id, &code, status, expires_at, updated_at, synced',
+        gift_card_transactions: 'id, store_id, gift_card_id, transaction_id, type, created_at, synced',
+        rental_agreements: 'id, store_id, agreement_number, customer_id, status, due_at, updated_at, synced',
+        rental_items: 'id, store_id, agreement_id, product_id, synced',
+      });
   }
 }
 
@@ -1724,6 +1832,13 @@ export async function createStoreWithOwner(
     closing_sms_time: '20:00',
     cashiers_can_record_expenses: 1,
     vat_rate: 0,
+    nhil_enabled: 0,
+    nhil_rate: 2.5,
+    getfund_enabled: 0,
+    getfund_rate: 2.5,
+    covid_levy_enabled: 0,
+    covid_levy_rate: 0,
+    tax_inclusive_pricing: 1,
     writeoff_enabled: 1,
     bundles_enabled: 1,
     digital_receipt_enabled: 1,
@@ -2220,7 +2335,7 @@ export async function createCustomer(
   openingBalance: number,
   locationId: string | null = null,
   address: string = '',
-  credit?: { creditLimit?: number | null; creditTermsDays?: number | null }
+  credit?: { creditLimit?: number | null; creditTermsDays?: number | null; taxExempt?: boolean }
 ): Promise<LocalCustomer> {
   const storeId = await getCurrentStoreId();
   if (!storeId) throw new Error('No store selected');
@@ -2254,6 +2369,7 @@ export async function createCustomer(
     loyalty_points_balance: 0,
     credit_limit: credit?.creditLimit == null || credit.creditLimit <= 0 ? null : credit.creditLimit,
     credit_terms_days: credit?.creditTermsDays == null || credit.creditTermsDays < 0 ? null : Math.floor(credit.creditTermsDays),
+    tax_exempt: credit?.taxExempt ? 1 : 0,
     created_at: now,
     updated_at: now,
     synced: 0,
@@ -2300,7 +2416,7 @@ export async function updateCustomer(
   phone: string,
   locationId: string | null = null,
   address?: string,
-  credit?: { creditLimit?: number | null; creditTermsDays?: number | null }
+  credit?: { creditLimit?: number | null; creditTermsDays?: number | null; taxExempt?: boolean }
 ): Promise<void> {
   const storeId = await getCurrentStoreId();
   if (!storeId) throw new Error('No store selected');
@@ -2321,6 +2437,7 @@ export async function updateCustomer(
       ? {
           credit_limit: credit.creditLimit == null || credit.creditLimit <= 0 ? null : credit.creditLimit,
           credit_terms_days: credit.creditTermsDays == null || credit.creditTermsDays < 0 ? null : Math.floor(credit.creditTermsDays),
+          tax_exempt: credit.taxExempt ? 1 : 0,
         }
       : {}),
     updated_at: new Date().toISOString(),
@@ -3353,6 +3470,10 @@ const INCREMENTAL_PULL_FIELDS: Record<string, string> = {
   supplier_payments: 'created_at',
   store_promotions: 'updated_at',
   sms_outbox: 'created_at',
+  gift_cards: 'updated_at',
+  gift_card_transactions: 'created_at',
+  rental_agreements: 'updated_at',
+  rental_items: 'updated_at',
 };
 
 const OPTIONAL_CLOUD_TABLES = new Set([
@@ -3362,19 +3483,24 @@ const OPTIONAL_CLOUD_TABLES = new Set([
   'supplier_payments',
   'store_promotions',
   'sms_outbox',
+  'gift_cards',
+  'gift_card_transactions',
+  'rental_agreements',
+  'rental_items',
 ]);
 
 const OPTIONAL_PUSH_COLUMNS: Record<string, string[]> = {
-  stores: ['loyalty_earn_rate', 'loyalty_redeem_value', 'credit_limit_action', 'closing_sms_enabled', 'closing_sms_time', 'cashiers_can_record_expenses', 'vat_rate', 'pickup_verification_enabled', 'pickup_token_ttl_minutes', 'writeoff_enabled', 'bundles_enabled', 'digital_receipt_enabled', 'receipt_token_ttl_hours'],
+  stores: ['loyalty_earn_rate', 'loyalty_redeem_value', 'credit_limit_action', 'closing_sms_enabled', 'closing_sms_time', 'cashiers_can_record_expenses', 'vat_rate', 'nhil_enabled', 'nhil_rate', 'getfund_enabled', 'getfund_rate', 'covid_levy_enabled', 'covid_levy_rate', 'tax_inclusive_pricing', 'pickup_verification_enabled', 'pickup_token_ttl_minutes', 'writeoff_enabled', 'bundles_enabled', 'digital_receipt_enabled', 'receipt_token_ttl_hours', 'seo_meta_title', 'seo_meta_description', 'og_image_url'],
   expenses: ['expense_date', 'payment_method'],
-  products: ['unit', 'allow_decimal'],
-  customers: ['loyalty_points_balance', 'credit_limit', 'credit_terms_days'],
+  products: ['unit', 'allow_decimal', 'tax_category', 'tax_rate_override', 'seo_slug', 'seo_meta_title', 'seo_meta_description', 'is_rentable', 'rental_rate_daily', 'rental_rate_weekly', 'rental_rate_monthly', 'deposit_amount'],
+  customers: ['loyalty_points_balance', 'credit_limit', 'credit_terms_days', 'tax_exempt'],
   transactions: [
     'void_status', 'void_reason', 'void_requested_by', 'void_requested_by_name', 'void_requested_at',
     'voided_by', 'voided_by_name', 'voided_at', 'loyalty_points_earned', 'loyalty_points_redeemed',
     'loyalty_redeem_amount', 'promotion_discount', 'promotion_summary', 'coupon_code', 'credit_due_date',
+    'tax_total', 'tax_breakdown_json',
   ],
-  transaction_items: ['variant_id', 'measure_unit', 'list_unit_price', 'promotion_label', 'serial_number', 'bundle_id'],
+  transaction_items: ['variant_id', 'measure_unit', 'list_unit_price', 'promotion_label', 'serial_number', 'bundle_id', 'tax_amount', 'tax_rate'],
   purchase_orders: ['amount_paid', 'due_date'],
   stock_batches: ['variant_id'],
   users: ['photo_url', 'can_record_customer_payments'],
@@ -3926,6 +4052,9 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
           momo_network: store.momo_network || '',
           logo_url: store.logo_url || '',
           ecommerce_links: store.ecommerce_links || '[]',
+          seo_meta_title: store.seo_meta_title || '',
+          seo_meta_description: store.seo_meta_description || '',
+          og_image_url: store.og_image_url || '',
           currency_code: store.currency_code || 'GHS',
           preferred_language: store.preferred_language === 'fr' ? 'fr' : 'en',
           debt_reminders_enabled: (store.debt_reminders_enabled ?? 0) === 1,
@@ -3941,6 +4070,13 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
           closing_sms_time: store.closing_sms_time || '20:00',
           cashiers_can_record_expenses: (store.cashiers_can_record_expenses ?? 1) === 1,
           vat_rate: Math.max(0, Math.min(100, Number(store.vat_rate) || 0)),
+          nhil_enabled: store.nhil_enabled === 1,
+          nhil_rate: Math.max(0, Math.min(100, Number(store.nhil_rate ?? 2.5) || 0)),
+          getfund_enabled: store.getfund_enabled === 1,
+          getfund_rate: Math.max(0, Math.min(100, Number(store.getfund_rate ?? 2.5) || 0)),
+          covid_levy_enabled: store.covid_levy_enabled === 1,
+          covid_levy_rate: Math.max(0, Math.min(100, Number(store.covid_levy_rate) || 0)),
+          tax_inclusive_pricing: store.tax_inclusive_pricing !== 0,
           pickup_verification_enabled: (store.pickup_verification_enabled ?? 1) === 1,
           pickup_token_ttl_minutes: Math.max(5, Math.min(240, Math.floor(Number(store.pickup_token_ttl_minutes) || 30))),
           writeoff_enabled: (store.writeoff_enabled ?? 1) === 1,
@@ -4093,6 +4229,16 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
         reorder_level: Number(p.reorder_level) || 0,
         unit: p.unit || 'pcs',
         allow_decimal: (p.allow_decimal ?? 0) === 1,
+        is_rentable: (p.is_rentable ?? 0) === 1,
+        rental_rate_daily: Math.max(0, Number(p.rental_rate_daily) || 0),
+        rental_rate_weekly: Math.max(0, Number(p.rental_rate_weekly) || 0),
+        rental_rate_monthly: Math.max(0, Number(p.rental_rate_monthly) || 0),
+        deposit_amount: Math.max(0, Number(p.deposit_amount) || 0),
+        tax_category: p.tax_category || 'taxable',
+        tax_rate_override: p.tax_rate_override == null ? null : Math.max(0, Math.min(100, Number(p.tax_rate_override) || 0)),
+        seo_slug: p.seo_slug || '',
+        seo_meta_title: p.seo_meta_title || '',
+        seo_meta_description: p.seo_meta_description || '',
         created_at: p.created_at,
         updated_at: p.updated_at,
       })),
@@ -4361,6 +4507,7 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
         is_active: customer.is_active === 1,
         debt_reminder_opt_out: (customer.debt_reminder_opt_out ?? 0) === 1,
         loyalty_points_balance: Math.max(0, Math.floor(Number(customer.loyalty_points_balance) || 0)),
+        tax_exempt: customer.tax_exempt === 1,
         credit_limit: customer.credit_limit == null ? null : Math.max(0, Number(customer.credit_limit) || 0),
         credit_terms_days: customer.credit_terms_days == null ? null : Math.max(0, Math.floor(Number(customer.credit_terms_days) || 0)),
         created_at: customer.created_at,
@@ -4481,6 +4628,15 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
         discount_applied: t.discount_applied,
         other_charges_json: t.other_charges_json || '[]',
         other_charges_total: Number(t.other_charges_total) || 0,
+        tax_total: Number(t.tax_total) || 0,
+        tax_breakdown_json: (() => {
+          try {
+            const value = JSON.parse(t.tax_breakdown_json || '[]') as unknown;
+            return Array.isArray(value) ? value : [];
+          } catch {
+            return [];
+          }
+        })(),
         payment_method: t.payment_method,
         cash_amount: t.cash_amount,
         paystack_amount: t.paystack_amount,
@@ -4635,6 +4791,8 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
         batch_id: uuidOrNull(i.batch_id),
         variant_id: uuidOrNull(i.variant_id),
         bundle_id: uuidOrNull(i.bundle_id),
+        tax_amount: Number(i.tax_amount) || 0,
+        tax_rate: Number(i.tax_rate) || 0,
         measure_unit: i.measure_unit || '',
         list_unit_price: Number(i.list_unit_price) || Number(i.unit_price) || 0,
         promotion_label: i.promotion_label || '',
@@ -5060,6 +5218,9 @@ export async function syncFromSupabase(opts?: {
         ecommerce_enabled: remoteStore.ecommerce_enabled ? 1 : 0,
         ecommerce_slug: remoteStore.ecommerce_slug || localStore?.ecommerce_slug || '',
         ecommerce_tagline: remoteStore.ecommerce_tagline || localStore?.ecommerce_tagline || '',
+        seo_meta_title: remoteStore.seo_meta_title || localStore?.seo_meta_title || '',
+        seo_meta_description: remoteStore.seo_meta_description || localStore?.seo_meta_description || '',
+        og_image_url: remoteStore.og_image_url || localStore?.og_image_url || '',
         ecommerce_links: remoteStore.ecommerce_links || localStore?.ecommerce_links || '[]',
         currency_code: String(remoteStore.currency_code || localStore?.currency_code || 'GHS'),
         preferred_language: remoteStore.preferred_language === 'fr' || localStore?.preferred_language === 'fr' ? 'fr' : 'en',
@@ -5120,6 +5281,13 @@ export async function syncFromSupabase(opts?: {
           remoteStore.vat_rate == null
             ? (localStore?.vat_rate ?? 0)
             : Math.max(0, Math.min(100, Number(remoteStore.vat_rate) || 0)),
+        nhil_enabled: remoteStore.nhil_enabled == null ? (localStore?.nhil_enabled ?? 0) : remoteStore.nhil_enabled ? 1 : 0,
+        nhil_rate: remoteStore.nhil_rate == null ? (localStore?.nhil_rate ?? 2.5) : Math.max(0, Math.min(100, Number(remoteStore.nhil_rate) || 0)),
+        getfund_enabled: remoteStore.getfund_enabled == null ? (localStore?.getfund_enabled ?? 0) : remoteStore.getfund_enabled ? 1 : 0,
+        getfund_rate: remoteStore.getfund_rate == null ? (localStore?.getfund_rate ?? 2.5) : Math.max(0, Math.min(100, Number(remoteStore.getfund_rate) || 0)),
+        covid_levy_enabled: remoteStore.covid_levy_enabled == null ? (localStore?.covid_levy_enabled ?? 0) : remoteStore.covid_levy_enabled ? 1 : 0,
+        covid_levy_rate: remoteStore.covid_levy_rate == null ? (localStore?.covid_levy_rate ?? 0) : Math.max(0, Math.min(100, Number(remoteStore.covid_levy_rate) || 0)),
+        tax_inclusive_pricing: remoteStore.tax_inclusive_pricing == null ? (localStore?.tax_inclusive_pricing ?? 1) : remoteStore.tax_inclusive_pricing ? 1 : 0,
         pickup_verification_enabled:
           remoteStore.pickup_verification_enabled == null
             ? (localStore?.pickup_verification_enabled ?? 1)
@@ -5248,6 +5416,7 @@ export async function syncFromSupabase(opts?: {
           loyalty_points_balance: 'loyalty_points_balance' in row
             ? Math.max(0, Math.floor(Number(row.loyalty_points_balance) || 0))
             : undefined,
+          tax_exempt: 'tax_exempt' in row ? (row.tax_exempt === true ? 1 : 0) : undefined,
           credit_limit: 'credit_limit' in row
             ? (row.credit_limit == null || row.credit_limit === '' ? null : Math.max(0, Number(row.credit_limit) || 0))
             : undefined,
@@ -5271,6 +5440,7 @@ export async function syncFromSupabase(opts?: {
                   : remote.location_id,
               address: remote.address === undefined ? local?.address ?? '' : remote.address,
               loyalty_points_balance: remote.loyalty_points_balance ?? local?.loyalty_points_balance ?? 0,
+              tax_exempt: remote.tax_exempt ?? local?.tax_exempt ?? 0,
               credit_limit: remote.credit_limit === undefined ? (local?.credit_limit ?? null) : remote.credit_limit,
               credit_terms_days: remote.credit_terms_days === undefined ? (local?.credit_terms_days ?? null) : remote.credit_terms_days,
             };
@@ -5309,6 +5479,18 @@ export async function syncFromSupabase(opts?: {
             allow_decimal: 'allow_decimal' in local
               ? (local.allow_decimal === true || local.allow_decimal === 1 ? 1 : 0)
               : undefined,
+            is_rentable: 'is_rentable' in local ? (local.is_rentable === true || local.is_rentable === 1 ? 1 : 0) : 0,
+            rental_rate_daily: Math.max(0, Number(local.rental_rate_daily) || 0),
+            rental_rate_weekly: Math.max(0, Number(local.rental_rate_weekly) || 0),
+            rental_rate_monthly: Math.max(0, Number(local.rental_rate_monthly) || 0),
+            deposit_amount: Math.max(0, Number(local.deposit_amount) || 0),
+            tax_category: local.tax_category === 'exempt' || local.tax_category === 'zero_rated' || local.tax_category === 'reduced'
+              ? local.tax_category
+              : 'taxable',
+            tax_rate_override: local.tax_rate_override == null ? null : Math.max(0, Math.min(100, Number(local.tax_rate_override) || 0)),
+            seo_slug: String(local.seo_slug || ''),
+            seo_meta_title: String(local.seo_meta_title || ''),
+            seo_meta_description: String(local.seo_meta_description || ''),
             created_at: local.created_at as string,
             updated_at: (local.updated_at as string) || (local.created_at as string),
             synced: 1,
@@ -5376,6 +5558,10 @@ export async function syncFromSupabase(opts?: {
           promotion_discount: 'promotion_discount' in row ? Number(row.promotion_discount) || 0 : undefined,
           promotion_summary: 'promotion_summary' in row ? String(row.promotion_summary || '') : undefined,
           coupon_code: 'coupon_code' in row ? String(row.coupon_code || '') : undefined,
+          tax_total: 'tax_total' in row ? Number(row.tax_total) || 0 : undefined,
+          tax_breakdown_json: 'tax_breakdown_json' in row
+            ? (typeof row.tax_breakdown_json === 'string' ? row.tax_breakdown_json : JSON.stringify(row.tax_breakdown_json ?? []))
+            : undefined,
           status: row.status as 'completed' | 'pending',
           location_id: (row.location_id as string) || undefined,
           sale_mode:
@@ -5403,6 +5589,8 @@ export async function syncFromSupabase(opts?: {
               promotion_discount: remote.promotion_discount ?? local.promotion_discount ?? 0,
               promotion_summary: remote.promotion_summary ?? local.promotion_summary ?? '',
               coupon_code: remote.coupon_code ?? local.coupon_code ?? '',
+              tax_total: remote.tax_total ?? local.tax_total ?? 0,
+              tax_breakdown_json: remote.tax_breakdown_json ?? local.tax_breakdown_json ?? '[]',
               credit_due_date: remote.credit_due_date ?? local.credit_due_date ?? null,
             };
           }
@@ -5524,6 +5712,8 @@ export async function syncFromSupabase(opts?: {
           list_unit_price: Number(row.list_unit_price) || Number(row.unit_price) || 0,
           promotion_label: String(row.promotion_label || ''),
           serial_number: String(row.serial_number || ''),
+          tax_amount: Number(row.tax_amount) || 0,
+          tax_rate: Number(row.tax_rate) || 0,
           synced: 1,
         }),
         dbTable: db.transaction_items,
@@ -6043,6 +6233,72 @@ export async function syncFromSupabase(opts?: {
         merge: async (remote: LocalSmsOutbox, local: LocalSmsOutbox | undefined) => {
           if (!local || local.synced !== 0) return remote;
           return local;
+        },
+      },
+      {
+        label: 'Gift cards',
+        table: 'gift_cards',
+        map: (row: Record<string, unknown>): LocalGiftCard => ({
+          id: String(row.id), store_id: String(row.store_id), code: String(row.code || '').toUpperCase(),
+          initial_value: Math.max(0, Number(row.initial_value) || 0), balance: Math.max(0, Number(row.balance) || 0),
+          status: (['active', 'expired', 'depleted', 'disabled'].includes(String(row.status)) ? row.status : 'active') as LocalGiftCard['status'],
+          customer_id: (row.customer_id as string) || null, customer_name: String(row.customer_name || ''),
+          expires_at: (row.expires_at as string) || null, created_by: (row.created_by as string) || '',
+          created_at: String(row.created_at || ''), updated_at: String(row.updated_at || row.created_at || ''), synced: 1,
+        }),
+        dbTable: db.gift_cards,
+        merge: async (remote: LocalGiftCard, local: LocalGiftCard | undefined) => {
+          if (!local || local.synced !== 0) return remote;
+          return new Date(remote.updated_at).getTime() >= new Date(local.updated_at).getTime() ? remote : local;
+        },
+      },
+      {
+        label: 'Gift card ledger',
+        table: 'gift_card_transactions',
+        map: (row: Record<string, unknown>): LocalGiftCardTransaction => ({
+          id: String(row.id), store_id: String(row.store_id), gift_card_id: String(row.gift_card_id),
+          transaction_id: (row.transaction_id as string) || null,
+          type: (['issue', 'redeem', 'reload', 'refund'].includes(String(row.type)) ? row.type : 'issue') as LocalGiftCardTransaction['type'],
+          amount: Math.max(0, Number(row.amount) || 0), balance_after: Math.max(0, Number(row.balance_after) || 0),
+          note: String(row.note || ''), created_by: (row.created_by as string) || '', created_at: String(row.created_at || ''), synced: 1,
+        }),
+        dbTable: db.gift_card_transactions,
+        merge: async (remote: LocalGiftCardTransaction, local: LocalGiftCardTransaction | undefined) => !local || local.synced !== 0 ? remote : local,
+      },
+      {
+        label: 'Rental agreements',
+        table: 'rental_agreements',
+        map: (row: Record<string, unknown>): LocalRentalAgreement => ({
+          id: String(row.id), store_id: String(row.store_id), agreement_number: String(row.agreement_number || ''),
+          customer_id: (row.customer_id as string) || null, customer_name: String(row.customer_name || ''), customer_phone: String(row.customer_phone || ''),
+          status: (['active', 'overdue', 'returned', 'cancelled'].includes(String(row.status)) ? row.status : 'active') as LocalRentalAgreement['status'],
+          starts_at: String(row.starts_at || ''), due_at: String(row.due_at || ''), returned_at: (row.returned_at as string) || null,
+          deposit_amount: Math.max(0, Number(row.deposit_amount) || 0), deposit_returned: Math.max(0, Number(row.deposit_returned) || 0),
+          late_fee: Math.max(0, Number(row.late_fee) || 0), damage_fee: Math.max(0, Number(row.damage_fee) || 0), notes: String(row.notes || ''),
+          created_by: (row.created_by as string) || '', created_by_name: String(row.created_by_name || ''),
+          created_at: String(row.created_at || ''), updated_at: String(row.updated_at || row.created_at || ''), synced: 1,
+        }),
+        dbTable: db.rental_agreements,
+        merge: async (remote: LocalRentalAgreement, local: LocalRentalAgreement | undefined) => {
+          if (!local || local.synced !== 0) return remote;
+          return new Date(remote.updated_at).getTime() >= new Date(local.updated_at).getTime() ? remote : local;
+        },
+      },
+      {
+        label: 'Rental items',
+        table: 'rental_items',
+        map: (row: Record<string, unknown>): LocalRentalItem => ({
+          id: String(row.id), store_id: String(row.store_id), agreement_id: String(row.agreement_id), product_id: String(row.product_id),
+          product_name: String(row.product_name || ''), quantity: Math.max(0, Number(row.quantity) || 0),
+          rate_amount: Math.max(0, Number(row.rate_amount) || 0),
+          rate_period: row.rate_period === 'weekly' || row.rate_period === 'monthly' ? row.rate_period : 'daily',
+          deposit_amount: Math.max(0, Number(row.deposit_amount) || 0), condition_at_return: String(row.condition_at_return || ''),
+          created_at: String(row.created_at || ''), updated_at: String(row.updated_at || row.created_at || ''), synced: 1,
+        }),
+        dbTable: db.rental_items,
+        merge: async (remote: LocalRentalItem, local: LocalRentalItem | undefined) => {
+          if (!local || local.synced !== 0) return remote;
+          return new Date(remote.updated_at).getTime() >= new Date(local.updated_at).getTime() ? remote : local;
         },
       },
     ] as const;

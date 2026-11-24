@@ -45,6 +45,7 @@ const PriceScanPage = lazy(() => import('@/pages/PriceScanPage'));
 const VerifyPickupPage = lazy(() => import('@/pages/VerifyPickupPage'));
 const WriteOffPage = lazy(() => import('@/pages/WriteOffPage'));
 const BundlesPage = lazy(() => import('@/pages/BundlesPage'));
+const GiftCardsRentalsPage = lazy(() => import('@/pages/GiftCardsRentalsPage'));
 const ReceiptPage = lazy(() => import('@/pages/ReceiptPage'));
 const TermsPage = lazy(() => import('@/pages/TermsPage'));
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
@@ -652,6 +653,8 @@ function AuthenticatedApp() {
         return role === 'owner' || (role === 'cashier' && currentStore?.cashiers_can_record_expenses === 1) ? <WriteOffPage /> : <POSPage />;
       case 'bundles':
         return role === 'owner' ? <BundlesPage /> : <POSPage />;
+      case 'gift-cards-rentals':
+        return role === 'owner' ? <GiftCardsRentalsPage /> : <POSPage />;
       default:
         return <POSPage />;
     }

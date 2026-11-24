@@ -128,6 +128,7 @@ function moveBy<T>(order: readonly T[], item: T, offset: number): T[] {
 export default function POSPage({ onNavigate }: { onNavigate?: (page: string) => void }) {
   const cart = useCartStore();
   const setSaleContext = useCartStore((s) => s.setSaleContext);
+  const setTaxConfig = useCartStore((s) => s.setTaxConfig);
   const { currentUser, currentStore } = useAuthStore();
   const money = useFormatMoney();
   const t = useT();
@@ -355,6 +356,19 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   useEffect(() => {
     setSaleContext(selectedLocationId || null, saleMode, unitType);
   }, [selectedLocationId, saleMode, unitType, setSaleContext]);
+
+  useEffect(() => {
+    setTaxConfig({
+      vatRate: Number(currentStore?.vat_rate) || 0,
+      nhilEnabled: currentStore?.nhil_enabled === 1,
+      nhilRate: Number(currentStore?.nhil_rate) || 0,
+      getfundEnabled: currentStore?.getfund_enabled === 1,
+      getfundRate: Number(currentStore?.getfund_rate) || 0,
+      covidLevyEnabled: currentStore?.covid_levy_enabled === 1,
+      covidLevyRate: Number(currentStore?.covid_levy_rate) || 0,
+      inclusive: currentStore?.tax_inclusive_pricing !== 0,
+    });
+  }, [currentStore?.vat_rate, currentStore?.nhil_enabled, currentStore?.nhil_rate, currentStore?.getfund_enabled, currentStore?.getfund_rate, currentStore?.covid_levy_enabled, currentStore?.covid_levy_rate, currentStore?.tax_inclusive_pricing, setTaxConfig]);
 
   useEffect(() => {
     void loadProducts();

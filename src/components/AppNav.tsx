@@ -3,7 +3,7 @@ import {
   ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, House, Search, ClipboardCheck,
   Sparkles, CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare, Moon, Sun,
   ShoppingCart, RotateCcw, QrCode,
-  ContactRound, ArrowLeftRight, Building2, Megaphone, Tag, Boxes, ClipboardMinus,
+  ContactRound, ArrowLeftRight, Building2, Megaphone, Tag, Boxes, ClipboardMinus, Gift,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -94,6 +94,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         { id: 'verify-pickup', label: t('pickup.verify'), shortLabel: t('pickup.verify'), icon: QrCode, show: true },
         { id: 'write-offs', label: t('writeoff.title'), shortLabel: t('writeoff.title'), icon: ClipboardMinus, show: isOwner || currentStore?.cashiers_can_record_expenses === 1 },
         { id: 'bundles', label: t('bundle.title'), shortLabel: t('bundle.title'), icon: Boxes, show: isOwner },
+        { id: 'gift-cards-rentals', label: 'Gift cards & rentals', shortLabel: 'Gift cards', icon: Gift, show: isOwner },
         { id: 'learn', label: 'Learn Adimat', icon: BookOpen, show: true },
         { id: 'campaigns', label: 'Promotions', icon: Megaphone, show: true },
         { id: 'store-deals', label: 'Deals & coupons', shortLabel: 'Deals', icon: Tag, show: isOwner },
@@ -136,7 +137,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   type NavGroup = { label: string; ids: string[] };
   const navGroups: NavGroup[] = [
     { label: t('nav.main'), ids: ['home', 'pos', 'search', 'adimat-ai', 'stock-approvals', 'transactions'] },
-    { label: 'Shop', ids: ['inventory', 'purchasing', 'warehouse', 'ecommerce', 'multistore', 'store-deals'] },
+    { label: 'Shop', ids: ['inventory', 'purchasing', 'warehouse', 'ecommerce', 'multistore', 'store-deals', 'gift-cards-rentals'] },
     { label: 'Operations', ids: ['reports', 'expenses', 'cashbook', 'devices', 'verify-pickup', 'write-offs', 'bundles', 'subscription', 'returns', 'customers'] },
     { label: 'Help', ids: ['learn', 'campaigns', 'community', 'settings'] },
   ];

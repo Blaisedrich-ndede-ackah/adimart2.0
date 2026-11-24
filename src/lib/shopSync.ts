@@ -6,7 +6,7 @@ function missingTable(message: string): boolean {
 }
 
 async function pushRows(
-  table: 'product_variants' | 'customer_loyalty_transactions' | 'supplier_payments' | 'store_promotions',
+  table: 'product_variants' | 'customer_loyalty_transactions' | 'supplier_payments' | 'store_promotions' | 'gift_cards' | 'gift_card_transactions' | 'rental_agreements' | 'rental_items',
   rows: Record<string, unknown>[]
 ): Promise<number | 'missing'> {
   if (rows.length === 0 || !isSupabaseConfigured()) return 0;
@@ -109,6 +109,56 @@ export async function pushShopExtensions(storeId: string): Promise<{ synced: num
       if (promoResult > 0) {
         await Promise.all(promos.map((row) => db.store_promotions.update(row.id, { synced: 1 })));
       }
+    }
+
+    const giftCards = await db.gift_cards.where('store_id').equals(storeId).and((row) => row.synced === 0).toArray();
+    const giftCardResult = await pushRows('gift_cards', giftCards.map((row) => ({
+      id: row.id, store_id: row.store_id, code: row.code, initial_value: row.initial_value,
+      balance: row.balance, status: row.status, customer_id: row.customer_id || null,
+      customer_name: row.customer_name || '', expires_at: row.expires_at || null,
+      created_by: row.created_by || null, created_at: row.created_at, updated_at: row.updated_at,
+    })));
+    if (typeof giftCardResult === 'number') {
+      synced += giftCardResult;
+      if (giftCardResult > 0) await Promise.all(giftCards.map((row) => db.gift_cards.update(row.id, { synced: 1 })));
+    }
+
+    const giftLedger = await db.gift_card_transactions.where('store_id').equals(storeId).and((row) => row.synced === 0).toArray();
+    const giftLedgerResult = await pushRows('gift_card_transactions', giftLedger.map((row) => ({
+      id: row.id, store_id: row.store_id, gift_card_id: row.gift_card_id,
+      transaction_id: row.transaction_id || null, type: row.type, amount: row.amount,
+      balance_after: row.balance_after, note: row.note || '', created_by: row.created_by || null,
+      created_at: row.created_at,
+    })));
+    if (typeof giftLedgerResult === 'number') {
+      synced += giftLedgerResult;
+      if (giftLedgerResult > 0) await Promise.all(giftLedger.map((row) => db.gift_card_transactions.update(row.id, { synced: 1 })));
+    }
+
+    const rentals = await db.rental_agreements.where('store_id').equals(storeId).and((row) => row.synced === 0).toArray();
+    const rentalResult = await pushRows('rental_agreements', rentals.map((row) => ({
+      id: row.id, store_id: row.store_id, agreement_number: row.agreement_number,
+      customer_id: row.customer_id || null, customer_name: row.customer_name, customer_phone: row.customer_phone,
+      status: row.status, starts_at: row.starts_at, due_at: row.due_at, returned_at: row.returned_at || null,
+      deposit_amount: row.deposit_amount, deposit_returned: row.deposit_returned, late_fee: row.late_fee,
+      damage_fee: row.damage_fee, notes: row.notes, created_by: row.created_by,
+      created_by_name: row.created_by_name, created_at: row.created_at, updated_at: row.updated_at,
+    })));
+    if (typeof rentalResult === 'number') {
+      synced += rentalResult;
+      if (rentalResult > 0) await Promise.all(rentals.map((row) => db.rental_agreements.update(row.id, { synced: 1 })));
+    }
+
+    const rentalItems = await db.rental_items.where('store_id').equals(storeId).and((row) => row.synced === 0).toArray();
+    const rentalItemResult = await pushRows('rental_items', rentalItems.map((row) => ({
+      id: row.id, store_id: row.store_id, agreement_id: row.agreement_id, product_id: row.product_id,
+      product_name: row.product_name, quantity: row.quantity, rate_amount: row.rate_amount,
+      rate_period: row.rate_period, deposit_amount: row.deposit_amount,
+      condition_at_return: row.condition_at_return || '', created_at: row.created_at, updated_at: row.updated_at,
+    })));
+    if (typeof rentalItemResult === 'number') {
+      synced += rentalItemResult;
+      if (rentalItemResult > 0) await Promise.all(rentalItems.map((row) => db.rental_items.update(row.id, { synced: 1 })));
     }
     return { synced, error: '' };
   } catch (error) {
