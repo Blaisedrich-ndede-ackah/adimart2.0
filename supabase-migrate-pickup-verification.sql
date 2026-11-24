@@ -48,7 +48,7 @@ ALTER TABLE public.pickup_tokens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.pickup_verification_logs ENABLE ROW LEVEL SECURITY;
 
 REVOKE ALL ON public.pickup_tokens FROM anon, authenticated;
-GRANT SELECT ON public.pickup_tokens TO anon, authenticated;
+GRANT SELECT, INSERT ON public.pickup_tokens TO anon, authenticated;
 GRANT UPDATE (status, redeemed_at, redeemed_by, redeemed_by_name, redeemed_method)
   ON public.pickup_tokens TO anon, authenticated;
 GRANT ALL ON public.pickup_tokens TO service_role;
@@ -56,6 +56,25 @@ GRANT ALL ON public.pickup_tokens TO service_role;
 DROP POLICY IF EXISTS pickup_tokens_read ON public.pickup_tokens;
 CREATE POLICY pickup_tokens_read ON public.pickup_tokens
   FOR SELECT TO anon, authenticated USING (true);
+DROP POLICY IF EXISTS pickup_tokens_issue ON public.pickup_tokens;
+CREATE POLICY pickup_tokens_issue ON public.pickup_tokens
+  FOR INSERT TO anon, authenticated
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.online_orders AS orders
+      WHERE orders.id = pickup_tokens.order_id
+        AND orders.store_id = pickup_tokens.store_id
+        AND orders.order_number = pickup_tokens.order_number
+        AND orders.order_number LIKE 'PS-%'
+        AND orders.payment_method = 'paystack'
+        AND orders.notes ~ '^price-scan-paystack:[A-Za-z0-9_-]{4,80}$'
+    )
+    AND EXISTS (
+      SELECT 1 FROM public.stores AS stores
+      WHERE stores.id = pickup_tokens.store_id
+        AND stores.pickup_verification_enabled = TRUE
+    )
+  );
 DROP POLICY IF EXISTS pickup_tokens_redeem ON public.pickup_tokens;
 CREATE POLICY pickup_tokens_redeem ON public.pickup_tokens
   FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);

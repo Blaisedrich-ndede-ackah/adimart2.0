@@ -1,14 +1,5 @@
 {
-  "functions": {
-    "api/shop-checkout.ts": {
-      "maxDuration": 60
-    }
-  },
   "rewrites": [
-    {
-      "source": "/api/price-scan-payment",
-      "destination": "/api/shop-checkout?action=price-scan-payment"
-    },
     {
       "source": "/api/admin-active-devices",
       "destination": "/api/admin-monitoring?action=active-devices"

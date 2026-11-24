@@ -15,9 +15,10 @@ interface PriceScanPickupDeskProps {
   onClose: () => void;
   store: LocalStore;
   cashierName: string;
+  cashierId: string;
 }
 
-export default function PriceScanPickupDesk({ open, onClose, store, cashierName }: PriceScanPickupDeskProps) {
+export default function PriceScanPickupDesk({ open, onClose, store, cashierName, cashierId }: PriceScanPickupDeskProps) {
   const t = useT();
   const money = useFormatMoney();
   const [code, setCode] = useState('');
@@ -140,7 +141,7 @@ export default function PriceScanPickupDesk({ open, onClose, store, cashierName 
     setError('');
     setMessage('');
     try {
-      await updateOnlineOrderStatus(order.id, 'fulfilled');
+      await updateOnlineOrderStatus(order.id, 'fulfilled', cashierId, cashierName);
       const updated = await db.online_orders.get(order.id);
       if (updated) setOrder((current) => current ? { ...current, ...updated } : current);
       setMessage(t('pickup.completed'));

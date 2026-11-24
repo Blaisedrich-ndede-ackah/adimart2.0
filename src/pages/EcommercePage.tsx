@@ -158,7 +158,7 @@ export default function EcommercePage() {
 
   const setStatus = async (orderId: string, status: OnlineOrderStatus) => {
     try {
-      await updateOnlineOrderStatus(orderId, status);
+      await updateOnlineOrderStatus(orderId, status, currentUser?.id || '', currentUser?.name || '');
       await refreshOrders();
       setStatusMsg(`Order marked ${status}`);
     } catch (e) {

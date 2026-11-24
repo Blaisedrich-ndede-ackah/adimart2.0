@@ -11,11 +11,6 @@ export interface PickupTokenValidation {
   reason?: 'invalid' | 'expired' | 'alreadyRedeemed';
 }
 
-interface PickupTokenApiResponse {
-  pickupToken?: LocalPickupToken;
-  error?: string;
-}
-
 export function buildPickupQrPayload(storeId: string, tokenCode: string): string {
   return `${QR_PREFIX}|${storeId}|${tokenCode}`;
 }
@@ -26,7 +21,7 @@ export function parsePickupTokenCode(rawValue: string, storeId: string): string 
   return value.startsWith(prefix) ? value.slice(prefix.length).trim() : value;
 }
 
-/** Ask the server to verify the Paystack charge and issue an idempotent token. */
+/** Create and save the pickup token directly from the checkout device. */
 export async function generatePickupToken(
   storeId: string,
   orderId: string,
@@ -34,58 +29,84 @@ export async function generatePickupToken(
   ttlMinutes: number,
 ): Promise<PickupToken> {
   if (!storeId || !orderId || !orderNumber) throw new Error('Store and paid pickup order are required.');
-  let result: PickupTokenApiResponse | null = null;
-  let lastFailure = '';
-  // Vercel can occasionally return a transient function 5xx after Paystack
-  // has already confirmed payment. The server endpoint is idempotent, so one
-  // short retry safely recovers a token created by the first invocation.
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    let response: Response;
-    try {
-      response = await fetch('/api/price-scan-payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'issue-pickup-token', storeId, orderId, ttlMinutes }),
-      });
-    } catch (error: unknown) {
-      lastFailure = error instanceof Error ? error.message : 'Network error while requesting the pickup token.';
-      if (attempt === 0) {
-        await new Promise((resolve) => globalThis.setTimeout(resolve, 500));
-        continue;
-      }
-      throw new Error(lastFailure);
-    }
-
-    const responseText = await response.text();
-    let payload: unknown = null;
-    try {
-      payload = responseText ? JSON.parse(responseText) : null;
-    } catch {
-      // Include the server response below to expose proxy/HTML errors clearly.
-    }
-    if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
-      const preview = responseText.trim().slice(0, 200);
-      lastFailure = `The pickup token service returned an invalid response (${response.status}).${preview ? ` Body: ${preview}` : ''}`;
-      if (response.status >= 500 && attempt === 0) {
-        await new Promise((resolve) => globalThis.setTimeout(resolve, 500));
-        continue;
-      }
-      throw new Error(lastFailure);
-    }
-    const result = payload as PickupTokenApiResponse;
-    if (!response.ok || !result.pickupToken) {
-      lastFailure = result.error || 'Could not issue a verified pickup token.';
-      if (response.status >= 500 && attempt === 0) {
-        await new Promise((resolve) => globalThis.setTimeout(resolve, 500));
-        continue;
-      }
-      throw new Error(lastFailure);
-    }
-    result = payload as PickupTokenApiResponse;
-    break;
+  if (!isSupabaseConfigured() || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
+    throw new Error('Connect to the internet to create the pickup code. Your payment is recorded; retry when online.');
   }
-  if (!result?.pickupToken) throw new Error(lastFailure || 'Could not issue a verified pickup token.');
-  const token: PickupToken = { ...result.pickupToken, synced: 1 };
+
+  const [{ data: order, error: orderError }, { data: settings, error: settingsError }] = await Promise.all([
+    supabase.from('online_orders')
+      .select('id, store_id, order_number, total_amount, payment_method, notes')
+      .eq('id', orderId).eq('store_id', storeId).maybeSingle(),
+    supabase.from('stores')
+      .select('pickup_verification_enabled, pickup_token_ttl_minutes')
+      .eq('id', storeId).maybeSingle(),
+  ]);
+  if (orderError) throw new Error(orderError.message);
+  if (settingsError) throw new Error(settingsError.message);
+  if (!order || order.order_number !== orderNumber || order.payment_method !== 'paystack'
+    || !String(order.order_number).startsWith('PS-')
+    || !/^price-scan-paystack:[A-Za-z0-9_-]{4,80}$/.test(String(order.notes || ''))) {
+    throw new Error('The paid Scan & Pay order has not synced to the store yet. Retry in a moment.');
+  }
+  if (!settings || settings.pickup_verification_enabled === false) {
+    throw new Error('Pickup verification is disabled for this store.');
+  }
+
+  const { data: existing, error: existingError } = await supabase.from('pickup_tokens')
+    .select('*').eq('store_id', storeId).eq('order_id', orderId).maybeSingle();
+  if (existingError) throw new Error(existingError.message);
+  if (existing && (existing.status === 'redeemed'
+    || (existing.status === 'issued' && Date.parse(existing.expires_at) > Date.now()))) {
+    const token: PickupToken = { ...existing, synced: 1 };
+    await db.pickup_tokens.put(token);
+    return token;
+  }
+
+  const configuredTtl = Number(settings.pickup_token_ttl_minutes);
+  const fallbackTtl = Number.isFinite(ttlMinutes) && ttlMinutes > 0 ? ttlMinutes : 30;
+  const safeTtl = Math.max(5, Math.min(240, Math.floor(Number.isFinite(configuredTtl) ? configuredTtl : fallbackTtl)));
+  const issuedAt = new Date();
+  const tokenCode = Array.from(crypto.getRandomValues(new Uint8Array(8)), (byte) =>
+    'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[byte % 32]).join('');
+  const record: Omit<LocalPickupToken, 'synced'> = {
+    id: existing?.id || crypto.randomUUID(),
+    store_id: storeId,
+    order_id: orderId,
+    order_number: orderNumber,
+    token_code: tokenCode,
+    qr_payload: buildPickupQrPayload(storeId, tokenCode),
+    status: 'issued',
+    issued_at: issuedAt.toISOString(),
+    expires_at: new Date(issuedAt.getTime() + safeTtl * 60_000).toISOString(),
+    redeemed_at: null,
+    redeemed_by: null,
+    redeemed_by_name: null,
+    redeemed_method: null,
+  };
+  const saveResult = existing
+    ? await supabase.from('pickup_tokens').update(record).eq('id', existing.id).eq('status', existing.status).select('*').maybeSingle()
+    : await supabase.from('pickup_tokens').insert(record).select('*').maybeSingle();
+  if (saveResult.error?.code === '23505') {
+    const { data: raced, error: racedError } = await supabase.from('pickup_tokens')
+      .select('*').eq('store_id', storeId).eq('order_id', orderId).maybeSingle();
+    if (racedError) throw new Error(racedError.message);
+    if (raced) {
+      const token: PickupToken = { ...raced, synced: 1 };
+      await db.pickup_tokens.put(token);
+      return token;
+    }
+  }
+  if (saveResult.error) throw new Error(saveResult.error.message);
+  if (!saveResult.data) {
+    const { data: current, error: currentError } = await supabase.from('pickup_tokens')
+      .select('*').eq('store_id', storeId).eq('order_id', orderId).maybeSingle();
+    if (currentError) throw new Error(currentError.message);
+    if (!current) throw new Error('The pickup code could not be saved. Run the pickup-verification database migration and retry.');
+    const token: PickupToken = { ...current, synced: 1 };
+    await db.pickup_tokens.put(token);
+    return token;
+  }
+  const token: PickupToken = { ...saveResult.data, synced: 1 };
   await db.pickup_tokens.put(token);
   return token;
 }
@@ -93,11 +114,19 @@ export async function generatePickupToken(
 export async function validatePickupToken(storeId: string, rawCode: string): Promise<PickupTokenValidation> {
   const code = parsePickupTokenCode(rawCode, storeId);
   if (!storeId || !code) return { valid: false, reason: 'invalid' };
-  const token = await db.pickup_tokens
+  let token = await db.pickup_tokens
     .where('store_id')
     .equals(storeId)
     .filter((row) => row.token_code.toUpperCase() === code)
     .first();
+  if (isSupabaseConfigured() && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
+    const { data: remoteToken } = await supabase.from('pickup_tokens').select('*')
+      .eq('store_id', storeId).eq('token_code', code).maybeSingle();
+    if (remoteToken) {
+      token = { ...remoteToken, synced: 1 } as PickupToken;
+      await db.pickup_tokens.put(token);
+    }
+  }
   if (!token) return { valid: false, reason: 'invalid' };
   if (token.status === 'redeemed') return { valid: false, token, reason: 'alreadyRedeemed' };
   if (token.status === 'expired' || Date.parse(token.expires_at) <= Date.now()) {
@@ -108,19 +137,30 @@ export async function validatePickupToken(storeId: string, rawCode: string): Pro
 }
 
 export async function redeemPickupToken(tokenId: string, redeemedById: string, redeemedByName: string): Promise<void> {
+  const token = await db.pickup_tokens.get(tokenId);
+  if (!token || token.status !== 'issued' || Date.parse(token.expires_at) <= Date.now()) {
+    throw new Error('This pickup token is no longer valid. Scan it again to see its status.');
+  }
+  const redeemedAt = new Date().toISOString();
+  let synced = 0;
+  if (isSupabaseConfigured() && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
+    const { data, error } = await supabase.from('pickup_tokens').update({
+      status: 'redeemed', redeemed_at: redeemedAt, redeemed_by: redeemedById,
+      redeemed_by_name: redeemedByName, redeemed_method: 'scan',
+    }).eq('id', token.id).eq('store_id', token.store_id).eq('status', 'issued')
+      .gt('expires_at', redeemedAt).select('*').maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) throw new Error('This pickup code was already used or expired.');
+    synced = 1;
+  }
   await db.transaction('rw', [db.pickup_tokens, db.pickup_verification_logs], async () => {
-    const token = await db.pickup_tokens.get(tokenId);
-    if (!token || token.status !== 'issued' || Date.parse(token.expires_at) <= Date.now()) {
-      throw new Error('This pickup token is no longer valid. Scan it again to see its status.');
-    }
-    const redeemedAt = new Date().toISOString();
     await db.pickup_tokens.update(token.id, {
       status: 'redeemed',
       redeemed_at: redeemedAt,
       redeemed_by: redeemedById,
       redeemed_by_name: redeemedByName,
       redeemed_method: 'scan',
-      synced: 0,
+      synced,
     });
     await db.pickup_verification_logs.add({
       id: generateId(),
@@ -136,7 +176,25 @@ export async function redeemPickupToken(tokenId: string, redeemedById: string, r
       synced: 0,
     });
   });
-  void syncPickupTokens((await db.pickup_tokens.get(tokenId))?.store_id || '').catch(() => undefined);
+  void syncPickupTokens(token.store_id).catch(() => undefined);
+}
+
+/** Make any issued Scan & Pay pass unusable when an order is completed at the pickup desk. */
+export async function redeemPickupTokenForOrder(
+  orderId: string,
+  redeemedById: string,
+  redeemedByName: string,
+): Promise<void> {
+  let token = await db.pickup_tokens.where('order_id').equals(orderId).first();
+  if (isSupabaseConfigured() && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
+    const { data, error } = await supabase.from('pickup_tokens').select('*').eq('order_id', orderId).maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) return;
+    token = { ...data, synced: 1 } as PickupToken;
+    await db.pickup_tokens.put(token);
+  }
+  if (!token || token.status !== 'issued') return;
+  await redeemPickupToken(token.id, redeemedById, redeemedByName);
 }
 
 export async function recordPickupOverride(

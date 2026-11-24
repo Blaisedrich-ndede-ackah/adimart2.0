@@ -743,6 +743,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
           onClose={closePickupDesk}
           store={currentStore}
           cashierName={currentUser.name || ''}
+          cashierId={currentUser.id}
         />
       )}
       {(scanFeedback || stockError) && (

@@ -13,6 +13,7 @@ import {
   type OnlineOrderStatus,
 } from '@/lib/dexie';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { redeemPickupTokenForOrder } from '@/lib/pickupTokens';
 
 export interface PublicShopProduct {
   id: string;
@@ -330,7 +331,9 @@ export async function listLocalOnlineOrderItems(
 
 export async function updateOnlineOrderStatus(
   orderId: string,
-  status: OnlineOrderStatus
+  status: OnlineOrderStatus,
+  fulfilledById = '',
+  fulfilledByName = '',
 ): Promise<void> {
   const order = await db.online_orders.get(orderId);
   if (!order) throw new Error('Order not found');
@@ -414,6 +417,10 @@ export async function updateOnlineOrderStatus(
     }
   }
 
+  if (status === 'fulfilled' && previousStatus !== 'fulfilled' && order.order_number.startsWith('PS-')) {
+    await redeemPickupTokenForOrder(order.id, fulfilledById, fulfilledByName);
+  }
+
   await db.online_orders.update(orderId, {
     status,
     updated_at: now,
@@ -456,27 +463,18 @@ export async function recordOnlineOrderCashPayment(orderId: string): Promise<voi
 }
 
 export async function verifyPriceScanPayment(storeId: string, orderId: string): Promise<boolean> {
-  const response = await fetch('/api/price-scan-payment', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ storeId, orderId }),
-  });
-  const responseText = await response.text();
-  let payload: unknown = null;
-  try {
-    payload = responseText ? JSON.parse(responseText) : null;
-  } catch {
-    // Include the server response below to expose proxy/HTML errors clearly.
-  }
-  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
-    const preview = responseText.trim().slice(0, 200);
-    throw new Error(`The payment verification service returned an invalid response (${response.status}).${preview ? ` Body: ${preview}` : ''}`);
-  }
-  const result = payload as Record<string, unknown>;
-  if (!response.ok) {
-    throw new Error(typeof result.error === 'string' ? result.error : 'Could not verify the online payment.');
-  }
-  return result.verified === true;
+  if (!isSupabaseConfigured()) throw new Error('The store connection is not available.');
+  const { data: order, error } = await supabase.from('online_orders')
+    .select('id, store_id, order_number, payment_method, notes')
+    .eq('id', orderId).eq('store_id', storeId).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!order || order.payment_method !== 'paystack' || !String(order.order_number || '').startsWith('PS-')) return false;
+  const reference = /^price-scan-paystack:([A-Za-z0-9_-]{4,80})$/.exec(String(order.notes || ''));
+  if (!reference) return false;
+  const { data: matches, error: duplicateError } = await supabase.from('online_orders')
+    .select('id').eq('store_id', storeId).eq('notes', order.notes);
+  if (duplicateError) throw new Error(duplicateError.message);
+  return matches?.length === 1 && matches[0].id === orderId;
 }
 
 export async function pullOnlineOrdersFromCloud(storeId: string): Promise<number> {

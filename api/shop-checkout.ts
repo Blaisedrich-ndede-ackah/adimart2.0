@@ -1,11 +1,5 @@
 import { handleShopCheckout, type ApiRequest, type ApiResponse } from '../src/server/shop';
 import { sendStoreMomoPayout, settleStoreMomoReversal, undoStoreMomoPayout, type StoreMomoPayoutRequest } from '../src/server/storeMomoPayout';
-import { handlePriceScanPaymentVerification } from '../src/server/priceScanPayment';
-
-function isPriceScanPayment(req: ApiRequest): boolean {
-  const url = req.url || '';
-  return url.includes('/api/price-scan-payment') || url.includes('action=price-scan-payment');
-}
 
 function isStoreMomoPayout(req: ApiRequest): boolean {
   const url = req.url || '';
@@ -30,12 +24,6 @@ function payoutBody(body: unknown): StoreMomoPayoutRequest {
 }
 
 export default function handler(req: ApiRequest, res: ApiResponse): Promise<void> {
-  if (isPriceScanPayment(req)) {
-    return handlePriceScanPaymentVerification(req, res).catch((error: unknown) => {
-      console.error('[price-scan-payment] Unhandled handler failure:', error);
-      res.status(500).json({ error: 'Pickup verification is temporarily unavailable. Please retry this paid order.' });
-    });
-  }
   if (!isStoreMomoPayout(req)) return handleShopCheckout(req, res);
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed.' });
