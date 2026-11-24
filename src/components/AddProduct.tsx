@@ -18,6 +18,7 @@ import {
 import { toMoneyAmount, vatInclusivePrice } from '@/lib/money';
 import { getStoreCurrency } from '@/lib/currency';
 import { useAuthStore } from '@/store/useAuthStore';
+import { queuePriceChange } from '@/lib/priceChangeQueue';
 import { recordActivity } from '@/lib/activityLog';
 import { MEASURE_UNITS, productAllowsDecimal, roundStockQtyAllowZero } from '@/lib/measure';
 import ProductVariantsEditor from '@/components/ProductVariantsEditor';

@@ -1512,6 +1512,83 @@ html.dark .pos-mode button[aria-pressed="true"] {
   color: #2C2420;
 }
 
+/* Collapsible dashboard navigation inspired by the supplied Figma sidebar. */
+.food-rail {
+  --rail-bg: #fff;
+  --rail-ink: #172033;
+  --rail-muted: #7b8496;
+  --rail-border: #e8ebf1;
+  --rail-hover: #f3f5f9;
+  --rail-active-bg: #e9f8f1;
+  --rail-active-ink: #138451;
+  width: 272px;
+  min-width: 88px;
+  align-items: stretch;
+  padding: 18px 12px 12px;
+  border-right: 1px solid var(--rail-border);
+  background: var(--rail-bg);
+  color: var(--rail-ink);
+}
+
+.food-rail.is-dark {
+  --rail-bg: #15191f;
+  --rail-ink: #edf2f7;
+  --rail-muted: #8e9aaa;
+  --rail-border: #292f39;
+  --rail-hover: #202630;
+  --rail-active-bg: #153a2b;
+  --rail-active-ink: #68d39a;
+}
+
+.food-rail.is-expanded { width: 272px; }
+.food-rail.is-collapsed { width: 88px; }
+.food-rail-head, .food-rail-brand { display: flex; min-width: 0; align-items: center; }
+.food-rail-head { min-height: 54px; justify-content: space-between; gap: 8px; padding: 0 4px 14px; }
+.food-rail-brand { gap: 11px; }
+.food-rail-brand-copy, .food-rail-profile-copy { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.food-rail-brand-copy strong { color: var(--rail-ink); font-size: 15px; font-weight: 750; letter-spacing: -.025em; white-space: nowrap; }
+.food-rail-brand-copy small, .food-rail-profile-copy small { overflow: hidden; color: var(--rail-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.food-rail-toggle { display: inline-flex; width: 36px; height: 36px; flex-shrink: 0; align-items: center; justify-content: center; border: 1px solid var(--rail-border); border-radius: 11px; background: var(--rail-bg); color: var(--rail-muted); transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease; }
+.food-rail-toggle:hover { color: var(--rail-ink); background: var(--rail-hover); }
+.food-rail-logo { display: flex; width: 42px; height: 42px; flex-shrink: 0; align-items: center; justify-content: center; margin: 0; overflow: hidden; border-radius: 14px; background: #e7f6ee; color: #12844f; }
+.food-rail-logo svg { width: 21px; height: 21px; }
+.food-rail-nav { width: 100%; scrollbar-width: thin; scrollbar-color: var(--rail-border) transparent; }
+.food-rail-group { padding-top: 7px; }
+.food-rail-group + .food-rail-group { margin-top: 8px; border-top: 1px solid var(--rail-border); }
+.food-rail-group-label { padding: 11px 12px 7px; color: var(--rail-muted); font-size: 10px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
+.food-rail-item { position: relative; display: flex; width: 100%; min-height: 44px; align-items: center; justify-content: flex-start; gap: 12px; margin: 3px 0; padding: 0 12px; border: 0; border-radius: 12px; background: transparent; color: var(--rail-muted); font-size: 13px; font-weight: 550; line-height: 1.25; text-align: left; text-decoration: none; transition: color 160ms ease, background-color 160ms ease, transform 160ms ease; }
+.food-rail-item:hover { background: var(--rail-hover); color: var(--rail-ink); }
+.food-rail-item svg { width: 19px; height: 19px; flex-shrink: 0; }
+.food-rail-item span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.food-rail-item.is-active { background: var(--rail-active-bg); color: var(--rail-active-ink); font-weight: 700; box-shadow: none; }
+.food-rail-foot { width: 100%; flex-shrink: 0; overflow: visible; padding-top: 10px; border-top: 1px solid var(--rail-border); }
+.food-rail-profile { display: flex; min-width: 0; align-items: center; gap: 10px; padding: 9px 8px 12px; }
+.food-rail-avatar { display: grid; width: 36px; height: 36px; flex-shrink: 0; place-items: center; overflow: hidden; border-radius: 50%; background: #e5f3eb; color: #147b4b; font-size: 14px; font-weight: 750; }
+.food-rail-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.food-rail-profile-copy strong { overflow: hidden; color: var(--rail-ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.food-rail-tools { display: flex; flex-direction: column; gap: 4px; }
+.food-rail-tool, .food-rail .food-rail-tools > button { display: flex; width: 100%; min-height: 42px; align-items: center; justify-content: flex-start; gap: 11px; margin: 0; padding: 0 12px; border: 0; border-radius: 11px; background: transparent; color: var(--rail-muted); font-size: 12px; font-weight: 600; text-align: left; }
+.food-rail-tool:hover, .food-rail .food-rail-tools > button:hover { background: var(--rail-hover); color: var(--rail-ink); }
+.food-rail-tool svg, .food-rail .food-rail-tools > button svg { width: 18px; height: 18px; flex-shrink: 0; }
+.food-rail-tools [role="group"] { width: 100%; margin: 4px 0; flex-direction: row; padding: 3px; border: 1px solid var(--rail-border); border-radius: 11px; background: var(--rail-hover); }
+.food-rail-tools [role="group"] button { min-height: 34px; border-radius: 8px; font-size: 11px; }
+.food-rail.is-collapsed .food-rail-head { justify-content: center; padding-inline: 0; }
+.food-rail.is-collapsed .food-rail-brand { display: none; }
+.food-rail.is-collapsed .food-rail-toggle { position: absolute; top: 18px; left: 50%; z-index: 2; transform: translateX(-50%); }
+.food-rail.is-collapsed .food-rail-nav { padding: 9px 0 8px; }
+.food-rail.is-collapsed .food-rail-group + .food-rail-group { margin-top: 7px; padding-top: 7px; }
+.food-rail.is-collapsed .food-rail-item { width: 48px; min-height: 46px; justify-content: center; gap: 0; margin: 4px auto; padding: 0; }
+.food-rail.is-collapsed .food-rail-item span, .food-rail.is-collapsed .food-rail-tools > *:not(button) { display: none; }
+.food-rail.is-collapsed .food-rail-item.is-active::before { position: absolute; left: -8px; width: 3px; height: 23px; border-radius: 0 4px 4px 0; background: var(--rail-active-ink); content: ''; }
+.food-rail.is-collapsed .food-rail-tool, .food-rail.is-collapsed .food-rail .food-rail-tools > button { width: 46px; justify-content: center; padding: 0; margin-inline: auto; }
+.food-rail.is-collapsed .food-rail-tool span, .food-rail.is-collapsed .food-rail-tools > button span { display: none; }
+.food-rail.is-collapsed .food-rail-profile { justify-content: center; padding-inline: 0; }
+.food-rail.is-collapsed .food-rail-profile-copy { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .food-rail, .food-rail-item, .food-rail-toggle { transition-duration: .01ms; }
+}
+
 .pos-mode {
   display: flex;
   align-items: center;

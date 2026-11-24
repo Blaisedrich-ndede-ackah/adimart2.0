@@ -39,9 +39,16 @@ export async function generatePickupToken(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: 'issue-pickup-token', storeId, orderId, ttlMinutes }),
   });
-  const payload: unknown = await response.json().catch(() => null);
+  const responseText = await response.text();
+  let payload: unknown = null;
+  try {
+    payload = responseText ? JSON.parse(responseText) : null;
+  } catch {
+    // Include the server response below to expose proxy/HTML errors clearly.
+  }
   if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
-    throw new Error('The pickup token service returned an invalid response.');
+    const preview = responseText.trim().slice(0, 200);
+    throw new Error(`The pickup token service returned an invalid response (${response.status}).${preview ? ` Body: ${preview}` : ''}`);
   }
   const result = payload as PickupTokenApiResponse;
   if (!response.ok || !result.pickupToken) {

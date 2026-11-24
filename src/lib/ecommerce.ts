@@ -461,9 +461,16 @@ export async function verifyPriceScanPayment(storeId: string, orderId: string): 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ storeId, orderId }),
   });
-  const payload: unknown = await response.json().catch(() => null);
+  const responseText = await response.text();
+  let payload: unknown = null;
+  try {
+    payload = responseText ? JSON.parse(responseText) : null;
+  } catch {
+    // Include the server response below to expose proxy/HTML errors clearly.
+  }
   if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
-    throw new Error('The payment verification service returned an invalid response.');
+    const preview = responseText.trim().slice(0, 200);
+    throw new Error(`The payment verification service returned an invalid response (${response.status}).${preview ? ` Body: ${preview}` : ''}`);
   }
   const result = payload as Record<string, unknown>;
   if (!response.ok) {

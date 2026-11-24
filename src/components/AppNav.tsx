@@ -198,10 +198,8 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
             const groupItems = navItems.filter((item) => group.ids.includes(item.id));
             if (groupItems.length === 0) return null;
             return (
-              <div key={group.label} className="pt-1">
-                <p className="px-3 pb-1 pt-3 text-[13px] font-semibold text-muted">
-                  {group.label}
-                </p>
+              <div key={group.label} className="food-rail-group">
+                {sidebarExpanded && <p className="food-rail-group-label">{group.label}</p>}
                 {groupItems.map((item) => {
                   const Icon = item.icon;
                   const isActive = !item.href && currentPage === item.id;
@@ -220,6 +218,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
                         target="_blank"
                         rel="noopener noreferrer"
                         aria-label={t('community.aria')}
+                        title={!sidebarExpanded ? item.label : undefined}
                         className={className}
                       >
                         {content}
@@ -231,6 +230,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
                       key={item.id}
                       type="button"
                       onClick={() => onNavigate(item.id)}
+                      title={!sidebarExpanded ? item.label : undefined}
                       className={className}
                     >
                       {content}
@@ -241,27 +241,25 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
             );
           })}
         </nav>
-        <div className="food-rail-foot p-2 border-t border-white/10 space-y-1">
-          <AccessibilityControls variant="sidebar" />
-          <LanguageSwitcher variant="light" compact />
-          <button
-            type="button"
-            onClick={() => setDarkMode((enabled) => !enabled)}
-            aria-pressed={darkMode}
-            aria-label={darkMode ? 'Light mode' : 'Dark mode'}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-emerald-50 hover:bg-white/10 touch-target"
-          >
-            {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-            {darkMode ? 'Light mode' : 'Dark mode'}
-          </button>
-          <button
-            type="button"
-            onClick={switchUser}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-[12px] text-[15px] font-medium text-ink hover:bg-black/[0.04] touch-target"
-          >
-            <LogOut className="w-5 h-5" />
-            {t('nav.switchUser')}
-          </button>
+        <div className="food-rail-foot">
+          <div className="food-rail-profile" title={!sidebarExpanded ? currentUser?.name || 'Signed in' : undefined}>
+            <span className="food-rail-avatar" aria-hidden="true">
+              {currentUser?.photo_url?.startsWith('data:image/') ? <img src={currentUser.photo_url} alt="" /> : (currentUser?.name || 'A').slice(0, 1).toUpperCase()}
+            </span>
+            {sidebarExpanded && <span className="food-rail-profile-copy"><strong>{currentUser?.name || 'Signed in'}</strong><small>{currentUser?.role === 'owner' ? 'Owner' : 'Cashier'}</small></span>}
+          </div>
+          <div className="food-rail-tools">
+            {sidebarExpanded && <AccessibilityControls variant="sidebar" />}
+            {sidebarExpanded && <LanguageSwitcher variant={darkMode ? 'dark' : 'light'} compact />}
+            <button type="button" onClick={() => setDarkMode((enabled) => !enabled)} aria-pressed={darkMode} aria-label={darkMode ? 'Light mode' : 'Dark mode'} title={sidebarExpanded ? undefined : darkMode ? 'Light mode' : 'Dark mode'} className="food-rail-tool touch-target">
+              {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+              {sidebarExpanded && <span>{darkMode ? 'Light mode' : 'Dark mode'}</span>}
+            </button>
+            <button type="button" onClick={switchUser} title={sidebarExpanded ? undefined : t('nav.switchUser')} aria-label={t('nav.switchUser')} className="food-rail-tool touch-target">
+              <LogOut className="w-5 h-5" />
+              {sidebarExpanded && <span>{t('nav.switchUser')}</span>}
+            </button>
+          </div>
         </div>
       </aside>
 
