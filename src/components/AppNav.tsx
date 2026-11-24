@@ -4,7 +4,6 @@ import {
   Sparkles, CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare, Moon, Sun,
   ShoppingCart, RotateCcw, QrCode,
   ContactRound, ArrowLeftRight, Building2, Megaphone, Tag, Boxes, ClipboardMinus,
-  PanelLeftClose, PanelLeftOpen, Store,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -36,13 +35,6 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const { currentUser, currentStore, switchUser } = useAuthStore();
   const t = useT();
   const [moreOpen, setMoreOpen] = useState(false);
-  const [sidebarExpanded, setSidebarExpanded] = useState(() => {
-    try {
-      return window.localStorage.getItem('adimat-sidebar-collapsed') !== 'true';
-    } catch {
-      return true;
-    }
-  });
   const [storeCount, setStoreCount] = useState(1);
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window === 'undefined') return true;
@@ -68,14 +60,6 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
       // Keep the current theme for this session when storage is unavailable.
     }
   }, [darkMode]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem('adimat-sidebar-collapsed', String(!sidebarExpanded));
-    } catch {
-      // Keep the current sidebar layout for this session if storage is unavailable.
-    }
-  }, [sidebarExpanded]);
 
   useEffect(() => {
     let active = true;
@@ -180,26 +164,24 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className={`food-rail hidden lg:flex shrink-0 flex-col self-stretch transition-[width] duration-300 ease-out ${sidebarExpanded ? 'is-expanded w-[272px]' : 'is-collapsed w-[88px]'} ${darkMode ? 'is-dark' : 'is-light'} ${leftHanded ? 'lg:order-2' : ''}`}>
-        <div className="food-rail-head">
-          <div className="food-rail-brand">
-            <span className="food-rail-logo" aria-hidden="true">
-              {currentStore?.logo_url ? <img src={currentStore.logo_url} alt="" /> : <Store className="h-5 w-5" />}
-            </span>
-            {sidebarExpanded && <span className="food-rail-brand-copy"><strong>Adimat POS</strong><small>{currentStore?.name || t('common.store')}</small></span>}
-          </div>
-          <button type="button" onClick={() => setSidebarExpanded((expanded) => !expanded)} className="food-rail-toggle touch-target" aria-label={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'} aria-expanded={sidebarExpanded} title={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}>
-            {sidebarExpanded ? <PanelLeftClose className="h-5 w-5" /> : <PanelLeftOpen className="h-5 w-5" />}
-          </button>
+      <aside className={`food-rail ios-pane hidden lg:flex w-[104px] shrink-0 flex-col self-stretch text-ink ${
+        leftHanded ? 'lg:order-2' : ''
+      }`}>
+        <div className="food-rail-logo" aria-hidden="true">
+          {currentUser?.photo_url?.startsWith('data:image/') ? (
+            <img src={currentUser.photo_url} alt="" />
+          ) : (
+            <span>{(currentUser?.name || 'A').slice(0, 1).toUpperCase()}</span>
+          )}
         </div>
         <p className="sr-only">{currentUser?.name || 'Signed in'} · {currentStore?.name || 'Store'}</p>
-        <nav className="food-rail-nav flex-1 overflow-y-auto px-3 py-2">
+        <nav className="flex-1 overflow-y-auto py-1 px-2 space-y-1">
           {navGroups.map((group) => {
             const groupItems = navItems.filter((item) => group.ids.includes(item.id));
             if (groupItems.length === 0) return null;
             return (
-              <div key={group.label} className="food-rail-group">
-                {sidebarExpanded && <p className="food-rail-group-label">{group.label}</p>}
+              <div key={group.label} className="pt-1">
+                <p className="px-3 pb-1 pt-3 text-[13px] font-semibold text-muted">{group.label}</p>
                 {groupItems.map((item) => {
                   const Icon = item.icon;
                   const isActive = !item.href && currentPage === item.id;
@@ -218,7 +200,6 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
                         target="_blank"
                         rel="noopener noreferrer"
                         aria-label={t('community.aria')}
-                        title={!sidebarExpanded ? item.label : undefined}
                         className={className}
                       >
                         {content}
@@ -230,7 +211,6 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
                       key={item.id}
                       type="button"
                       onClick={() => onNavigate(item.id)}
-                      title={!sidebarExpanded ? item.label : undefined}
                       className={className}
                     >
                       {content}
@@ -241,25 +221,17 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
             );
           })}
         </nav>
-        <div className="food-rail-foot">
-          <div className="food-rail-profile" title={!sidebarExpanded ? currentUser?.name || 'Signed in' : undefined}>
-            <span className="food-rail-avatar" aria-hidden="true">
-              {currentUser?.photo_url?.startsWith('data:image/') ? <img src={currentUser.photo_url} alt="" /> : (currentUser?.name || 'A').slice(0, 1).toUpperCase()}
-            </span>
-            {sidebarExpanded && <span className="food-rail-profile-copy"><strong>{currentUser?.name || 'Signed in'}</strong><small>{currentUser?.role === 'owner' ? 'Owner' : 'Cashier'}</small></span>}
-          </div>
-          <div className="food-rail-tools">
-            {sidebarExpanded && <AccessibilityControls variant="sidebar" />}
-            {sidebarExpanded && <LanguageSwitcher variant={darkMode ? 'dark' : 'light'} compact />}
-            <button type="button" onClick={() => setDarkMode((enabled) => !enabled)} aria-pressed={darkMode} aria-label={darkMode ? 'Light mode' : 'Dark mode'} title={sidebarExpanded ? undefined : darkMode ? 'Light mode' : 'Dark mode'} className="food-rail-tool touch-target">
-              {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-              {sidebarExpanded && <span>{darkMode ? 'Light mode' : 'Dark mode'}</span>}
-            </button>
-            <button type="button" onClick={switchUser} title={sidebarExpanded ? undefined : t('nav.switchUser')} aria-label={t('nav.switchUser')} className="food-rail-tool touch-target">
-              <LogOut className="w-5 h-5" />
-              {sidebarExpanded && <span>{t('nav.switchUser')}</span>}
-            </button>
-          </div>
+        <div className="food-rail-foot p-2 border-t border-white/10 space-y-1">
+          <AccessibilityControls variant="sidebar" />
+          <LanguageSwitcher variant="light" compact />
+          <button type="button" onClick={() => setDarkMode((enabled) => !enabled)} aria-pressed={darkMode} aria-label={darkMode ? 'Light mode' : 'Dark mode'} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-emerald-50 hover:bg-white/10 touch-target">
+            {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            {darkMode ? 'Light mode' : 'Dark mode'}
+          </button>
+          <button type="button" onClick={switchUser} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-[12px] text-[15px] font-medium text-ink hover:bg-black/[0.04] touch-target">
+            <LogOut className="w-5 h-5" />
+            {t('nav.switchUser')}
+          </button>
         </div>
       </aside>
 
