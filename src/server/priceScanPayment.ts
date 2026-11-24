@@ -36,10 +36,12 @@ export async function handlePriceScanPaymentVerification(req: ApiRequest, res: A
     return reply(res, 503, { error: 'Payment verification is not configured on this server.' });
   }
 
+  let stage = 'create-supabase-client';
   try {
     const supabase = createClient(projectUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
+    stage = 'load-paid-order';
     const { data: order, error } = await supabase
       .from('online_orders')
       .select('id, store_id, order_number, total_amount, payment_method, notes')
@@ -51,8 +53,10 @@ export async function handlePriceScanPaymentVerification(req: ApiRequest, res: A
       return reply(res, 404, { error: 'No online-paid pickup order was found.' });
     }
 
+    stage = 'validate-payment-reference';
     const referenceMatch = /^price-scan-paystack:([A-Za-z0-9_-]{4,80})$/.exec(String(order.notes || ''));
     if (!referenceMatch) return reply(res, 409, { error: 'This order has no payment reference to verify.' });
+    stage = 'check-reference-uniqueness';
     const { data: sameReferenceOrders, error: duplicateError } = await supabase
       .from('online_orders')
       .select('id')
@@ -63,8 +67,10 @@ export async function handlePriceScanPaymentVerification(req: ApiRequest, res: A
       return reply(res, 409, { error: 'This payment reference is linked to more than one order.' });
     }
 
+    stage = 'verify-paystack-payment';
     const verifyResponse = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(referenceMatch[1])}`, {
       headers: { Authorization: `Bearer ${paystackSecret}` },
+      signal: AbortSignal.timeout(12_000),
     });
     const verifyPayload = await verifyResponse.json() as {
       status?: boolean;
@@ -83,6 +89,7 @@ export async function handlePriceScanPaymentVerification(req: ApiRequest, res: A
       && Number(charge.amount) === expectedPesewas;
     if (!verified || action !== 'issue-pickup-token') return reply(res, 200, { verified });
 
+    stage = 'load-store-verification-settings';
     const { data: storeSettings, error: settingsError } = await supabase
       .from('stores')
       .select('pickup_verification_enabled, pickup_token_ttl_minutes')
@@ -93,6 +100,7 @@ export async function handlePriceScanPaymentVerification(req: ApiRequest, res: A
       return reply(res, 409, { error: 'Exit verification is disabled for this store.' });
     }
 
+    stage = 'find-existing-pickup-token';
     const { data: existingToken, error: existingError } = await supabase
       .from('pickup_tokens')
       .select('*')
@@ -127,14 +135,28 @@ export async function handlePriceScanPaymentVerification(req: ApiRequest, res: A
       redeemed_by_name: null,
       redeemed_method: null,
     };
-    const { data: savedToken, error: saveError } = await supabase
-      .from('pickup_tokens')
-      .upsert(pickupToken, { onConflict: 'id' })
-      .select('*')
-      .single();
+    stage = 'save-pickup-token';
+    // `order_id` is unique. Insert for new orders and update an expired token in
+    // place; targeting `id` during upsert does not handle a concurrent request
+    // colliding on the order_id constraint.
+    const saveQuery = existingToken
+      ? supabase.from('pickup_tokens').update(pickupToken).eq('id', existingToken.id)
+      : supabase.from('pickup_tokens').insert(pickupToken);
+    const { data: savedToken, error: saveError } = await saveQuery.select('*').single();
+    if (saveError?.code === '23505' && !existingToken) {
+      // A simultaneous retry may have inserted the token first. Return that
+      // canonical row so both devices show the same code.
+      const { data: racedToken, error: racedError } = await supabase
+        .from('pickup_tokens').select('*').eq('store_id', storeId).eq('order_id', orderId).maybeSingle();
+      if (racedError) throw new Error(racedError.message);
+      if (racedToken && (racedToken.status === 'redeemed' || (racedToken.status === 'issued' && Date.parse(racedToken.expires_at) > Date.now()))) {
+        return reply(res, 200, { verified: true, pickupToken: racedToken });
+      }
+    }
     if (saveError || !savedToken) throw new Error(saveError?.message || 'Could not save the pickup token.');
     return reply(res, 200, { verified: true, pickupToken: savedToken });
   } catch (error: unknown) {
+    console.error(`[price-scan-payment] Failure during ${stage}:`, error);
     return reply(res, 500, { error: error instanceof Error ? error.message : 'Payment verification failed.' });
   }
 }

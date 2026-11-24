@@ -34,26 +34,57 @@ export async function generatePickupToken(
   ttlMinutes: number,
 ): Promise<PickupToken> {
   if (!storeId || !orderId || !orderNumber) throw new Error('Store and paid pickup order are required.');
-  const response = await fetch('/api/price-scan-payment', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'issue-pickup-token', storeId, orderId, ttlMinutes }),
-  });
-  const responseText = await response.text();
-  let payload: unknown = null;
-  try {
-    payload = responseText ? JSON.parse(responseText) : null;
-  } catch {
-    // Include the server response below to expose proxy/HTML errors clearly.
+  let result: PickupTokenApiResponse | null = null;
+  let lastFailure = '';
+  // Vercel can occasionally return a transient function 5xx after Paystack
+  // has already confirmed payment. The server endpoint is idempotent, so one
+  // short retry safely recovers a token created by the first invocation.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let response: Response;
+    try {
+      response = await fetch('/api/price-scan-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'issue-pickup-token', storeId, orderId, ttlMinutes }),
+      });
+    } catch (error: unknown) {
+      lastFailure = error instanceof Error ? error.message : 'Network error while requesting the pickup token.';
+      if (attempt === 0) {
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 500));
+        continue;
+      }
+      throw new Error(lastFailure);
+    }
+
+    const responseText = await response.text();
+    let payload: unknown = null;
+    try {
+      payload = responseText ? JSON.parse(responseText) : null;
+    } catch {
+      // Include the server response below to expose proxy/HTML errors clearly.
+    }
+    if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+      const preview = responseText.trim().slice(0, 200);
+      lastFailure = `The pickup token service returned an invalid response (${response.status}).${preview ? ` Body: ${preview}` : ''}`;
+      if (response.status >= 500 && attempt === 0) {
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 500));
+        continue;
+      }
+      throw new Error(lastFailure);
+    }
+    const result = payload as PickupTokenApiResponse;
+    if (!response.ok || !result.pickupToken) {
+      lastFailure = result.error || 'Could not issue a verified pickup token.';
+      if (response.status >= 500 && attempt === 0) {
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 500));
+        continue;
+      }
+      throw new Error(lastFailure);
+    }
+    result = payload as PickupTokenApiResponse;
+    break;
   }
-  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
-    const preview = responseText.trim().slice(0, 200);
-    throw new Error(`The pickup token service returned an invalid response (${response.status}).${preview ? ` Body: ${preview}` : ''}`);
-  }
-  const result = payload as PickupTokenApiResponse;
-  if (!response.ok || !result.pickupToken) {
-    throw new Error(result.error || 'Could not issue a verified pickup token.');
-  }
+  if (!result?.pickupToken) throw new Error(lastFailure || 'Could not issue a verified pickup token.');
   const token: PickupToken = { ...result.pickupToken, synced: 1 };
   await db.pickup_tokens.put(token);
   return token;
