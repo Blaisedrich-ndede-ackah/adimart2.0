@@ -35,6 +35,7 @@ import { broadcastCfdMessage, type CfdReceiptPayload } from '@/lib/cfdChannel';
 import ReceiptQRDisplay from '@/components/ReceiptQRDisplay';
 import { generateReceiptToken, type ReceiptToken } from '@/lib/receiptWallet';
 import type { TaxComponent } from '@/lib/tax';
+import { findGiftCard, giftCardIsUsable, normalizeGiftCardCode } from '@/lib/phase2';
 
 interface CheckoutOverlayProps {
   isOpen: boolean;
@@ -43,7 +44,7 @@ interface CheckoutOverlayProps {
   onConnectPrinter?: () => void;
 }
 
-type Step = 'method' | 'discount' | 'charges' | 'pin-verify' | 'cash-input' | 'split-input' | 'manual-payment' | 'credit-input' | 'wallet-input' | 'paystack' | 'processing' | 'success';
+type Step = 'method' | 'discount' | 'charges' | 'pin-verify' | 'cash-input' | 'split-input' | 'manual-payment' | 'credit-input' | 'wallet-input' | 'gift-card-input' | 'paystack' | 'processing' | 'success';
 
 interface SaleResult {
   transactionId: string;
@@ -61,6 +62,7 @@ interface SaleResult {
   paystackAmount?: number;
   manualPaymentAmount?: number;
   walletAmount?: number;
+  giftCardAmount?: number;
   paystackReference?: string;
   paymentReference?: string;
   customerName?: string;
@@ -89,6 +91,9 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
   const [creditCustomerId, setCreditCustomerId] = useState('');
   const [walletCustomerId, setWalletCustomerId] = useState('');
   const [walletUseAmount, setWalletUseAmount] = useState('');
+  const [giftCardCodeInput, setGiftCardCodeInput] = useState('');
+  const [giftCardFound, setGiftCardFound] = useState<Awaited<ReturnType<typeof findGiftCard>>>(null);
+  const [giftCardRedeemAmount, setGiftCardRedeemAmount] = useState('');
   const [creditCustomers, setCreditCustomers] = useState<LocalCustomer[]>([]);
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [saleResult, setSaleResult] = useState<SaleResult | null>(null);
@@ -132,6 +137,9 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       setManualReference('');
       setCreditCustomerId('');
       setWalletCustomerId('');
+      setGiftCardCodeInput('');
+      setGiftCardFound(null);
+      setGiftCardRedeemAmount('');
       cart.setTaxExempt(false);
       setWalletUseAmount('');
       setCreditCustomers([]);
@@ -316,7 +324,9 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
     customerName?: string,
     customerPhone?: string,
     customerId?: string,
-    walletAmt?: number
+    walletAmt?: number,
+    giftCardCode?: string,
+    giftCardAmt?: number
   ) {
     if (!currentUser) return;
     if (!canApplyDiscount && cart.discountAmount > 0) {
@@ -336,7 +346,9 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         paystackRef,
         paymentRef,
         customerId,
-        walletAmt
+        walletAmt,
+        giftCardCode,
+        giftCardAmt
       );
       
       const completed: SaleResult = {
@@ -346,6 +358,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         subtotal: result.subtotal,
         taxTotal: result.taxTotal,
         taxBreakdown: result.taxBreakdown,
+        giftCardAmount: result.giftCardAmount,
         discount: result.discount,
         otherCharges: result.otherCharges || [],
         otherChargesTotal: result.otherChargesTotal || 0,
@@ -355,6 +368,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         paystackAmount: isManualPaymentMethod(method) ? 0 : paystackAmt,
         manualPaymentAmount: isManualPaymentMethod(method) ? result.total : 0,
         walletAmount: walletAmt,
+        giftCardAmount: giftCardAmt,
         paystackReference: paystackRef,
         paymentReference: paymentRef || paystackRef,
         customerName: customerName || creditCustomers.find((customer) => customer.id === cart.loyaltyCustomerId)?.name,

@@ -624,6 +624,8 @@ export interface LocalTransaction {
   paystack_amount: number;
   paystack_reference: string;
   manual_payment_amount?: number;
+  gift_card_amount?: number;
+  gift_card_code?: string;
   wallet_amount?: number;
   payment_reference?: string;
   customer_name?: string;
@@ -3499,6 +3501,7 @@ const OPTIONAL_PUSH_COLUMNS: Record<string, string[]> = {
     'voided_by', 'voided_by_name', 'voided_at', 'loyalty_points_earned', 'loyalty_points_redeemed',
     'loyalty_redeem_amount', 'promotion_discount', 'promotion_summary', 'coupon_code', 'credit_due_date',
     'tax_total', 'tax_breakdown_json',
+    'gift_card_amount', 'gift_card_code',
   ],
   transaction_items: ['variant_id', 'measure_unit', 'list_unit_price', 'promotion_label', 'serial_number', 'bundle_id', 'tax_amount', 'tax_rate'],
   purchase_orders: ['amount_paid', 'due_date'],
@@ -4642,6 +4645,8 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
         paystack_amount: t.paystack_amount,
         paystack_reference: t.paystack_reference,
         manual_payment_amount: Number(t.manual_payment_amount) || 0,
+        gift_card_amount: Number(t.gift_card_amount) || 0,
+        gift_card_code: t.gift_card_code || '',
         wallet_amount: Number(t.wallet_amount) || 0,
         payment_reference: t.payment_reference || '',
         customer_name: t.customer_name || '',
@@ -5534,6 +5539,8 @@ export async function syncFromSupabase(opts?: {
           paystack_amount: Number(row.paystack_amount) || 0,
           paystack_reference: (row.paystack_reference as string) || '',
           manual_payment_amount: Number(row.manual_payment_amount) || 0,
+          gift_card_amount: Number(row.gift_card_amount) || 0,
+          gift_card_code: String(row.gift_card_code || ''),
           wallet_amount: Number(row.wallet_amount) || 0,
           payment_reference: (row.payment_reference as string) || '',
           customer_name: String(row.customer_name || ''),
@@ -5559,6 +5566,8 @@ export async function syncFromSupabase(opts?: {
           promotion_summary: 'promotion_summary' in row ? String(row.promotion_summary || '') : undefined,
           coupon_code: 'coupon_code' in row ? String(row.coupon_code || '') : undefined,
           tax_total: 'tax_total' in row ? Number(row.tax_total) || 0 : undefined,
+          gift_card_amount: 'gift_card_amount' in row ? Number(row.gift_card_amount) || 0 : undefined,
+          gift_card_code: 'gift_card_code' in row ? String(row.gift_card_code || '') : undefined,
           tax_breakdown_json: 'tax_breakdown_json' in row
             ? (typeof row.tax_breakdown_json === 'string' ? row.tax_breakdown_json : JSON.stringify(row.tax_breakdown_json ?? []))
             : undefined,
@@ -5590,6 +5599,8 @@ export async function syncFromSupabase(opts?: {
               promotion_summary: remote.promotion_summary ?? local.promotion_summary ?? '',
               coupon_code: remote.coupon_code ?? local.coupon_code ?? '',
               tax_total: remote.tax_total ?? local.tax_total ?? 0,
+              gift_card_amount: remote.gift_card_amount ?? local.gift_card_amount ?? 0,
+              gift_card_code: remote.gift_card_code ?? local.gift_card_code ?? '',
               tax_breakdown_json: remote.tax_breakdown_json ?? local.tax_breakdown_json ?? '[]',
               credit_due_date: remote.credit_due_date ?? local.credit_due_date ?? null,
             };

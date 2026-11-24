@@ -42,6 +42,7 @@ import { recordActivity } from '@/lib/activityLog';
 import { broadcastCfdMessage } from '@/lib/cfdChannel';
 import { getBundleWithComponents, validateBundleStock } from '@/lib/bundle';
 import { calculateSalesTax, type TaxConfig, type TaxComponent } from '@/lib/tax';
+import { giftCardIsUsable, normalizeGiftCardCode } from '@/lib/phase2';
 
 export interface CartItem {
   id: string;
@@ -162,7 +163,9 @@ interface CartState {
     paystackReference?: string,
     paymentReference?: string,
     customerId?: string,
-    walletAmount?: number
+    walletAmount?: number,
+    giftCardCode?: string,
+    giftCardAmount?: number
   ) => Promise<{
     receiptNumber: string;
     items: CartItem[];
@@ -182,6 +185,7 @@ interface CartState {
     loyaltyRedeemAmount?: number;
     taxTotal: number;
     taxBreakdown: TaxComponent[];
+    giftCardAmount: number;
     transactionId: string;
   }>;
 }
@@ -933,7 +937,9 @@ export const useCartStore = create<CartState>((set, get) => ({
     paystackReference = '',
     paymentReference = '',
     customerId = '',
-    walletAmount = 0
+    walletAmount = 0,
+    giftCardCode = '',
+    giftCardAmount = 0
   ) => {
     const state = get();
     if (state.items.length === 0) throw new Error('Cart is empty');
@@ -1002,6 +1008,8 @@ export const useCartStore = create<CartState>((set, get) => ({
     let cash = toMoneyAmount(cashAmount);
     let paystack = toMoneyAmount(paystackAmount);
     const wallet = toMoneyAmount(walletAmount || 0);
+    const giftCard = toMoneyAmount(giftCardAmount || 0);
+    const normalizedGiftCardCode = normalizeGiftCardCode(giftCardCode);
     let manualPayment = 0;
     const recordedPaymentReference = paymentReference.trim();
     if (paymentMethod === 'cash') {
@@ -1026,15 +1034,20 @@ export const useCartStore = create<CartState>((set, get) => ({
       if (!moneyEquals(wallet, priced.total)) {
         throw new Error('Store credit must cover the full sale. Use wallet plus cash for a partial balance.');
       }
+    } else if (paymentMethod === 'gift_card') {
+      if (!normalizedGiftCardCode || giftCard <= 0 || giftCard > priced.total) throw new Error('Enter a valid gift card code and amount.');
+      cash = toMoneyAmount(priced.total - giftCard);
+      paystack = 0;
     } else {
       // split
       if (wallet > 0 && !customerId) throw new Error('Select a registered customer to use store credit.');
-      if (!moneyEquals(cash + paystack + wallet, priced.total)) {
+      if (!moneyEquals(cash + paystack + wallet + giftCard, priced.total)) {
         throw new Error(
           `Split payment must equal total. Cash ${formatStoreMoneyNow(cash)} + MoMo ${formatStoreMoneyNow(paystack)} + store credit ${formatStoreMoneyNow(wallet)} ≠ ${formatStoreMoneyNow(priced.total)}.`
         );
       }
     }
+    if (giftCard > 0 && !normalizedGiftCardCode) throw new Error('Enter a gift card code.');
     if (isManualPaymentMethod(paymentMethod)) {
       if (!recordedPaymentReference) throw new Error('Payment reference is required for manual payments.');
       if (recordedPaymentReference.length > 100) throw new Error('Payment reference must be 100 characters or fewer.');
@@ -1127,6 +1140,8 @@ export const useCartStore = create<CartState>((set, get) => ({
         db.customer_wallet_transactions,
         db.customer_loyalty_transactions,
         db.product_variants,
+        db.gift_cards,
+        db.gift_card_transactions,
       ],
       async () => {
         let creditCustomer: LocalCustomer | undefined;
@@ -1168,6 +1183,19 @@ export const useCartStore = create<CartState>((set, get) => ({
             });
           }
         }
+        if (giftCard > 0) {
+          const card = await db.gift_cards.where('code').equals(normalizedGiftCardCode).first();
+          if (!card || card.store_id !== storeId) throw new Error('Gift card not found for this store.');
+          if (!giftCardIsUsable(card)) throw new Error(card.expires_at && new Date(card.expires_at) <= new Date() ? 'This gift card has expired.' : 'This gift card is not active.');
+          if (giftCard > card.balance) throw new Error(`Gift card balance is ${formatStoreMoneyNow(card.balance)}.`);
+          const balanceAfter = toMoneyAmount(card.balance - giftCard);
+          await db.gift_cards.update(card.id, { balance: balanceAfter, status: balanceAfter <= 0 ? 'depleted' : 'active', updated_at: now, synced: 0 });
+          await db.gift_card_transactions.add({
+            id: generateId(), store_id: storeId, gift_card_id: card.id, transaction_id: txnId,
+            type: 'redeem', amount: giftCard, balance_after: balanceAfter,
+            note: `Redeemed on sale ${receiptNumber}`, created_by: cashierId, created_at: now, synced: 0,
+          });
+        }
         await db.transactions.add({
           id: txnId,
           store_id: storeId,
@@ -1185,6 +1213,8 @@ export const useCartStore = create<CartState>((set, get) => ({
           paystack_amount: paystack,
           paystack_reference: paymentMethod === 'paystack' || paymentMethod === 'split' ? paystackReference : '',
           manual_payment_amount: manualPayment,
+          gift_card_amount: giftCard,
+          gift_card_code: giftCard > 0 ? normalizedGiftCardCode : '',
           wallet_amount: wallet,
           payment_reference: isManualPaymentMethod(paymentMethod) ? recordedPaymentReference : '',
           customer_id: payingCustomer?.id || null,
@@ -1398,6 +1428,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       total: priced.total,
       taxTotal: priced.taxTotal,
       taxBreakdown: priced.taxBreakdown,
+      giftCardAmount: giftCard,
       customerBalance,
       stockChanges,
       locationId,

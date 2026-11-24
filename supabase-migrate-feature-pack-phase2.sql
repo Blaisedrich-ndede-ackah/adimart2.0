@@ -8,6 +8,16 @@ ALTER TABLE public.products
   ADD COLUMN IF NOT EXISTS rental_rate_monthly NUMERIC(12,2) NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS deposit_amount NUMERIC(12,2) NOT NULL DEFAULT 0;
 
+ALTER TABLE public.transactions
+  ADD COLUMN IF NOT EXISTS gift_card_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS gift_card_code TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.transactions DROP CONSTRAINT IF EXISTS transactions_payment_method_check;
+ALTER TABLE public.transactions ADD CONSTRAINT transactions_payment_method_check
+  CHECK (payment_method IN (
+    'cash', 'split', 'paystack', 'momo_mtn', 'momo_telecel', 'momo_airteltigo',
+    'bank_transfer', 'card_terminal', 'credit', 'wallet', 'gift_card'
+  ));
+
 CREATE TABLE IF NOT EXISTS public.gift_cards (
   id UUID PRIMARY KEY,
   store_id UUID NOT NULL REFERENCES public.stores(id) ON DELETE CASCADE,
