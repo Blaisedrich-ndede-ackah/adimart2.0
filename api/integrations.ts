@@ -1,5 +1,3 @@
-import { handleIntegrations } from '../src/server/integrations';
-
 interface ApiRequest {
   method?: string;
   url?: string;
@@ -18,6 +16,9 @@ interface ApiResponse {
 
 export default async function handler(request: ApiRequest, response: ApiResponse): Promise<void> {
   try {
+    // Load server dependencies inside the handler so module-init failures are
+    // caught and written to the Vercel function log instead of crashing cold start.
+    const { handleIntegrations } = await import('../src/server/integrations');
     await handleIntegrations(request, response);
   } catch (error) {
     console.error('[api/integrations] Unhandled request failure:', error);
