@@ -24,8 +24,20 @@ export default function NotificationsPage() {
   const request = useCallback(async (action: string, fields: Record<string, unknown> = {}) => {
     if (!currentStore?.id || !currentUser?.id) throw new Error('Select a store and sign in again.');
     const response = await fetch(`/api/integrations?action=${action}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ store_id: currentStore.id, user_id: currentUser.id, ...fields }) });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || 'Could not complete the notification request.');
+    const responseText = await response.text();
+    let data: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = JSON.parse(responseText);
+      if (parsed && typeof parsed === 'object') data = parsed as Record<string, unknown>;
+    } catch { /* Include a short response preview below for Vercel/proxy HTML errors. */ }
+    if (!response.ok) {
+      const detail = typeof data.error === 'string'
+        ? data.error
+        : typeof data.message === 'string'
+          ? data.message
+          : responseText.trim().slice(0, 240);
+      throw new Error(detail ? `Notification request failed (${response.status}): ${detail}` : `Notification request failed (${response.status}).`);
+    }
     return data;
   }, [currentStore?.id, currentUser?.id]);
 

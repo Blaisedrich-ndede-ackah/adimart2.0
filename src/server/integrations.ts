@@ -31,9 +31,14 @@ function database(): SupabaseClient {
   return createClient(`${parsed.origin}${path}`, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 async function requireStoreUser(db: SupabaseClient, storeId: string, userId: string): Promise<void> {
-  const { data, error } = await db.from('users').select('id').eq('id', userId).eq('store_id', storeId).eq('is_active', true).maybeSingle();
+  const { data, error } = await db.from('users').select('id,is_active').eq('id', userId).eq('store_id', storeId).maybeSingle();
   if (error) throw error;
-  if (!data) throw Object.assign(new Error('The signed-in user was not found for this store.'), { statusCode: 403 });
+  if (!data || (data.is_active !== true && data.is_active !== 1 && data.is_active !== '1')) throw Object.assign(new Error('The signed-in user is inactive or was not found for this store.'), { statusCode: 403 });
+}
+async function activeStoreUserIds(db: SupabaseClient, storeId: string): Promise<string[]> {
+  const { data, error } = await db.from('users').select('id,is_active').eq('store_id', storeId);
+  if (error) throw error;
+  return (data || []).filter((user) => user.is_active === true || user.is_active === 1 || user.is_active === '1').map((user) => String(user.id));
 }
 function publicUrl(value: unknown): string {
   if (typeof value !== 'string' || value.length > 2048) throw new Error('Browser push endpoint is invalid.');
@@ -120,9 +125,7 @@ export async function publishStoreNotification(input: {
   data?: Record<string, unknown>;
 }): Promise<void> {
   const db = database();
-  const { data: users, error } = await db.from('users').select('id').eq('store_id', input.storeId).eq('is_active', true);
-  if (error) throw error;
-  await notifyUsers(db, input.storeId, (users || []).map((user) => String(user.id)), input.type, input.title, input.body, { ...(input.data || {}), id: input.eventKey });
+  await notifyUsers(db, input.storeId, await activeStoreUserIds(db, input.storeId), input.type, input.title, input.body, { ...(input.data || {}), id: input.eventKey });
 }
 async function notificationAction(db: SupabaseClient, action: string, input: Record<string, unknown>, response: ApiResponse): Promise<void> {
   const storeId = typeof input.store_id === 'string' ? input.store_id : '';
@@ -164,19 +167,15 @@ async function notificationAction(db: SupabaseClient, action: string, input: Rec
     response.status(200).json({ ok: true }); return;
   }
   if (action === 'sync_failed') {
-    const { data: users, error } = await db.from('users').select('id').eq('store_id', storeId).eq('is_active', true);
-    if (error) throw error;
     const eventKey = `${userId}:${new Date().toISOString().slice(0, 13)}`;
     const detail = 'Cloud sync could not complete on a store device. Check the connection and sync status.';
-    await notifyUsers(db, storeId, (users || []).map((user) => String(user.id)), 'sync_failed', 'Sync needs attention', detail, { id: eventKey, page: 'devices' });
+    await notifyUsers(db, storeId, await activeStoreUserIds(db, storeId), 'sync_failed', 'Sync needs attention', detail, { id: eventKey, page: 'devices' });
     response.status(202).json({ ok: true }); return;
   }
   if (action === 'debt_reminder_due') {
     const count = Math.max(1, Math.min(500, Math.floor(Number(input.count) || 1)));
     const day = new Date().toISOString().slice(0, 10);
-    const { data: users, error } = await db.from('users').select('id').eq('store_id', storeId).eq('is_active', true);
-    if (error) throw error;
-    await notifyUsers(db, storeId, (users || []).map((user) => String(user.id)), 'debt_reminder_due', 'Debt reminders sent', `${count} due customer debt reminder${count === 1 ? '' : 's'} sent by SMS.`, { id: day });
+    await notifyUsers(db, storeId, await activeStoreUserIds(db, storeId), 'debt_reminder_due', 'Debt reminders sent', `${count} due customer debt reminder${count === 1 ? '' : 's'} sent by SMS.`, { id: day });
     response.status(202).json({ ok: true }); return;
   }
   throw new Error('Unknown notification action.');
@@ -218,12 +217,11 @@ async function emitEvent(db: SupabaseClient, input: Record<string, unknown>): Pr
     throw Object.assign(new Error('Unsupported event.'), { statusCode: 400 });
   }
   if (event !== 'sale.created') {
-    const { data: owners, error: ownersError } = await db.from('users').select('id').eq('store_id', storeId).eq('is_active', true);
-    if (ownersError) throw ownersError;
+    const activeUserIds = await activeStoreUserIds(db, storeId);
     const notificationType = event === 'stock.low' ? 'low_stock' : event === 'order.online' ? 'online_order' : 'customer_created';
     const title = event === 'stock.low' ? 'Low stock alert' : event === 'order.online' ? 'New online order' : 'New customer';
     const description = event === 'stock.low' ? `${String(data.name)} is at ${String(data.stock_level)} in stock.` : event === 'order.online' ? `Order ${String(data.order_number)} from ${String(data.customer_name)}.` : `${String(data.name)} was added.`;
-    await notifyUsers(db, storeId, (owners || []).map((owner) => String(owner.id)), notificationType, title, description, { event, id, notification_key: eventId });
+    await notifyUsers(db, storeId, activeUserIds, notificationType, title, description, { event, id, notification_key: eventId });
   }
 
 }
