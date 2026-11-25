@@ -12,6 +12,7 @@ interface ApiResponse {
   status: (code: number) => ApiResponse;
   json: (value: unknown) => void;
   setHeader: (name: string, value: string) => void;
+  send?: (value: string) => void;
 }
 
 export default function handler(request: ApiRequest, response: ApiResponse): Promise<void> {

@@ -214,7 +214,7 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
     setMeta('meta[property="og:description"]', 'property', 'og:description', description);
     setMeta('meta[property="og:type"]', 'property', 'og:type', 'website');
     if (catalog.store.og_image_url) setMeta('meta[property="og:image"]', 'property', 'og:image', catalog.store.og_image_url);
-    const canonicalHref = `${window.location.origin}${window.location.pathname}#/shop/${encodeURIComponent(catalog.store.slug)}`;
+    const canonicalHref = `${window.location.origin}/shop/${encodeURIComponent(catalog.store.slug)}`;
     let canonical = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]');
     if (!canonical) {
       canonical = document.createElement('link');

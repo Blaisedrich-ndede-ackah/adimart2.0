@@ -74,6 +74,8 @@ type AppMode = 'store' | 'admin-login' | 'admin' | 'agent-login' | 'agent';
 
 function readPublicShopSlug(): string | null {
   if (typeof window === 'undefined') return null;
+  const pathMatch = window.location.pathname.match(/^\/shop\/([^/?#]+)/i);
+  if (pathMatch?.[1]) return decodeURIComponent(pathMatch[1]).trim().toLowerCase();
   const hash = window.location.hash.replace(/^#/, '');
   const match = hash.match(/^\/?shop\/([^/?#]+)/i);
   if (match?.[1]) return decodeURIComponent(match[1]).trim().toLowerCase();

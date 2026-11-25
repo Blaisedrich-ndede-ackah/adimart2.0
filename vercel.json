@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/shop/:slug",
+      "destination": "/"
+    },
+    {
       "source": "/api/admin-active-devices",
       "destination": "/api/admin-monitoring?action=active-devices"
     },
@@ -11,6 +15,10 @@
     {
       "source": "/api/store-momo-payout",
       "destination": "/api/shop-checkout?action=store-momo-payout"
+    },
+    {
+      "source": "/sitemap.xml",
+      "destination": "/api/integrations?action=sitemap"
     }
   ],
   "crons": [

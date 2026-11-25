@@ -14,6 +14,7 @@ interface ApiResponse {
   status: (code: number) => ApiResponse;
   json: (value: unknown) => void;
   setHeader: (name: string, value: string) => void;
+  send?: (value: string) => void;
 }
 
 const RESOURCE_SCOPES = ['products:read', 'products:write', 'customers:read', 'customers:write', 'transactions:read', 'stores:read'] as const;
@@ -159,6 +160,112 @@ async function manage(db: SupabaseClient, input: Record<string, unknown>, respon
     ]);
     if (keys.error) throw keys.error; if (hooks.error) throw hooks.error; if (deliveries.error) throw deliveries.error;
     response.status(200).json({ api_keys: keys.data || [], webhooks: hooks.data || [], deliveries: deliveries.data || [] }); return;
+  }
+  if (action === 'marketplace_list') {
+    const { data, error } = await db.from('marketplace_connections').select('id,platform,name,shop_id,endpoint,sync_frequency,active,last_sync,created_at').eq('store_id', storeId).order('created_at', { ascending: false });
+    if (error) throw error;
+    const [logs, orders] = await Promise.all([
+      db.from('marketplace_sync_logs').select('id,connection_id,direction,status,summary,created_at').eq('store_id', storeId).order('created_at', { ascending: false }).limit(30),
+      db.from('marketplace_orders').select('id,connection_id,external_order_id,status,updated_at').eq('store_id', storeId).order('updated_at', { ascending: false }).limit(50),
+    ]);
+    if (logs.error) throw logs.error; if (orders.error) throw orders.error;
+    response.status(200).json({ connections: data || [], marketplace_logs: logs.data || [], marketplace_orders: orders.data || [] }); return;
+  }
+  if (action === 'marketplace_save') {
+    const id = typeof input.id === 'string' ? input.id : '';
+    const name = typeof input.name === 'string' ? input.name.trim().slice(0, 80) : '';
+    const shopId = typeof input.shop_id === 'string' ? input.shop_id.trim().slice(0, 160) : '';
+    const endpoint = await validatedWebhookUrl(input.endpoint);
+    const apiKey = typeof input.api_key === 'string' ? input.api_key.trim().slice(0, 2048) : '';
+    const apiSecret = typeof input.api_secret === 'string' ? input.api_secret.trim().slice(0, 2048) : '';
+    const syncFrequency = Number(input.sync_frequency);
+    if (!name || !apiKey || !Number.isFinite(syncFrequency) || syncFrequency < 5 || syncFrequency > 1440) throw new Error('Provide a name, API key, and sync interval between 5 and 1,440 minutes.');
+    const encrypted = encryptWebhookSecret(JSON.stringify({ api_key: apiKey, api_secret: apiSecret }));
+    const row = { store_id: storeId, platform: 'generic_rest', name, shop_id: shopId, endpoint, credentials_ciphertext: encrypted, sync_frequency: Math.floor(syncFrequency), active: input.active !== false };
+    const query = id ? db.from('marketplace_connections').update(row).eq('store_id', storeId).eq('id', id) : db.from('marketplace_connections').insert(row);
+    const { data, error } = await query.select('id,platform,name,shop_id,endpoint,sync_frequency,active,last_sync,created_at').single();
+    if (error) throw error;
+    response.status(id ? 200 : 201).json({ connection: data }); return;
+  }
+  if (action === 'marketplace_delete') {
+    const id = typeof input.id === 'string' ? input.id : '';
+    if (!id) throw new Error('A connection ID is required.');
+    const { error } = await db.from('marketplace_connections').delete().eq('store_id', storeId).eq('id', id);
+    if (error) throw error;
+    response.status(200).json({ ok: true }); return;
+  }
+  if (action === 'marketplace_products') {
+    const connectionId = typeof input.connection_id === 'string' ? input.connection_id : '';
+    const { data: connection, error: connectionError } = await db.from('marketplace_connections').select('id').eq('store_id', storeId).eq('id', connectionId).maybeSingle();
+    if (connectionError) throw connectionError; if (!connection) throw new Error('Marketplace connection not found.');
+    const [products, mappings] = await Promise.all([
+      db.from('products').select('id,name,barcode').eq('store_id', storeId).eq('is_active', true).order('name').limit(500),
+      db.from('product_marketplace_mapping').select('id,product_id,external_sku').eq('store_id', storeId).eq('connection_id', connectionId),
+    ]);
+    if (products.error) throw products.error; if (mappings.error) throw mappings.error;
+    response.status(200).json({ products: products.data || [], mappings: mappings.data || [] }); return;
+  }
+  if (action === 'marketplace_map_product') {
+    const connectionId = typeof input.connection_id === 'string' ? input.connection_id : '';
+    const productId = typeof input.product_id === 'string' ? input.product_id : '';
+    const externalSku = typeof input.external_sku === 'string' ? input.external_sku.trim().slice(0, 200) : '';
+    if (!externalSku) throw new Error('Enter the external marketplace SKU.');
+    const [{ data: connection, error: connectionError }, { data: product, error: productError }] = await Promise.all([
+      db.from('marketplace_connections').select('id').eq('store_id', storeId).eq('id', connectionId).maybeSingle(),
+      db.from('products').select('id').eq('store_id', storeId).eq('id', productId).maybeSingle(),
+    ]);
+    if (connectionError) throw connectionError; if (productError) throw productError;
+    if (!connection || !product) throw new Error('The selected connection or product was not found in this store.');
+    const { error } = await db.from('product_marketplace_mapping').upsert({ store_id: storeId, connection_id: connectionId, product_id: productId, external_sku: externalSku }, { onConflict: 'connection_id,product_id' });
+    if (error) throw error;
+    response.status(200).json({ ok: true }); return;
+  }
+  if (action === 'marketplace_sync') {
+    const id = typeof input.id === 'string' ? input.id : '';
+    const direction = input.direction === 'orders' ? 'orders' : 'stock';
+    const { data: connection, error: connectionError } = await db.from('marketplace_connections').select('id,name,shop_id,endpoint,credentials_ciphertext').eq('store_id', storeId).eq('id', id).maybeSingle();
+    if (connectionError) throw connectionError;
+    if (!connection) throw new Error('Marketplace connection not found.');
+    const credentials = JSON.parse(decryptWebhookSecret(String(connection.credentials_ciphertext))) as { api_key?: string; api_secret?: string };
+    const endpoint = await validatedWebhookUrl(connection.endpoint);
+    let summary = '';
+    try {
+      if (direction === 'stock') {
+        const { data: products, error } = await db.from('products').select('id,name,barcode,selling_price,stock_level,is_active').eq('store_id', storeId).eq('is_active', true).limit(5000);
+        if (error) throw error;
+        const { data: mappings, error: mappingError } = await db.from('product_marketplace_mapping').select('product_id,external_sku').eq('store_id', storeId).eq('connection_id', connection.id);
+        if (mappingError) throw mappingError;
+        const skuByProduct = new Map((mappings || []).map((mapping) => [String(mapping.product_id), String(mapping.external_sku)] as const));
+        const providerProducts = (products || []).map((product) => ({ ...product, external_sku: skuByProduct.get(String(product.id)) || product.barcode || product.id }));
+        const responseFromProvider = await fetch(endpoint, { method: 'POST', redirect: 'error', headers: { 'content-type': 'application/json', authorization: `Bearer ${credentials.api_key || ''}`, 'x-adimat-secret': credentials.api_secret || '' }, body: JSON.stringify({ event: 'inventory.sync', shop_id: connection.shop_id, products: providerProducts }), signal: AbortSignal.timeout(12000) });
+        if (!responseFromProvider.ok) throw new Error(`Marketplace returned HTTP ${responseFromProvider.status}.`);
+        summary = `Sent ${providerProducts.length} active product stock records.`;
+      } else {
+        const url = new URL(endpoint); url.searchParams.set('action', 'orders'); if (connection.shop_id) url.searchParams.set('shop_id', connection.shop_id);
+        const responseFromProvider = await fetch(url, { method: 'GET', redirect: 'error', headers: { authorization: `Bearer ${credentials.api_key || ''}`, 'x-adimat-secret': credentials.api_secret || '' }, signal: AbortSignal.timeout(12000) });
+        if (!responseFromProvider.ok) throw new Error(`Marketplace returned HTTP ${responseFromProvider.status}.`);
+        const payload = await responseFromProvider.json() as { orders?: unknown } | unknown[];
+        const orders = Array.isArray(payload) ? payload : Array.isArray(payload.orders) ? payload.orders : [];
+        let saved = 0;
+        for (const item of orders.slice(0, 200)) {
+          if (!item || typeof item !== 'object') continue;
+          const order = item as Record<string, unknown>;
+          const externalId = typeof order.id === 'string' || typeof order.id === 'number' ? String(order.id).slice(0, 200) : '';
+          if (!externalId) continue;
+          const { error: saveError } = await db.from('marketplace_orders').upsert({ store_id: storeId, connection_id: connection.id, external_order_id: externalId, status: String(order.status || 'new').slice(0, 40), payload_json: order, updated_at: new Date().toISOString() }, { onConflict: 'connection_id,external_order_id' });
+          if (saveError) throw saveError;
+          saved++;
+        }
+        summary = `Imported or refreshed ${saved} external orders.`;
+      }
+      await db.from('marketplace_sync_logs').insert({ store_id: storeId, connection_id: connection.id, direction, status: 'success', summary });
+      await db.from('marketplace_connections').update({ last_sync: new Date().toISOString() }).eq('id', connection.id).eq('store_id', storeId);
+      response.status(200).json({ ok: true, summary }); return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message.slice(0, 500) : 'Marketplace sync failed.';
+      await db.from('marketplace_sync_logs').insert({ store_id: storeId, connection_id: connection.id, direction, status: 'failed', summary: message });
+      throw new Error(message);
+    }
   }
   if (action === 'create_key') {
     const name = typeof input.name === 'string' ? input.name.trim().slice(0, 80) : '';
@@ -496,13 +603,31 @@ export async function handleIntegrations(request: ApiRequest, response: ApiRespo
     const db = database();
     const action = one(request.query?.action);
     const input = bodyObject(request.body || {});
+    if (action === 'sitemap') {
+      if (request.method !== 'GET') throw Object.assign(new Error('Use GET for the sitemap.'), { statusCode: 405 });
+      if (!response.send) throw new Error('Sitemap response is unavailable.');
+      const host = one(request.headers['x-forwarded-host']) || one(request.headers.host);
+      if (!host || /[\s/\\]/.test(host)) throw new Error('Could not determine the public site address.');
+      const forwardedProto = one(request.headers['x-forwarded-proto']);
+      const origin = `${forwardedProto === 'http' ? 'http' : 'https'}://${host}`;
+      const { data: shops, error } = await db.from('stores').select('ecommerce_slug,updated_at').eq('ecommerce_enabled', true).not('ecommerce_slug', 'is', null).limit(5000);
+      if (error) throw error;
+      const urls = (shops || []).filter((shop) => typeof shop.ecommerce_slug === 'string' && shop.ecommerce_slug.trim()).map((shop) => {
+        const loc = `${origin}/shop/${encodeURIComponent(String(shop.ecommerce_slug).trim())}`;
+        const lastmod = shop.updated_at ? `<lastmod>${new Date(shop.updated_at).toISOString()}</lastmod>` : '';
+        return `<url><loc>${loc}</loc>${lastmod}</url>`;
+      }).join('');
+      response.setHeader('Content-Type', 'application/xml; charset=utf-8');
+      response.setHeader('Cache-Control', 'public, max-age=300, s-maxage=300');
+      response.status(200).send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>`); return;
+    }
     if (action === 'retry-webhooks') {
       const cronSecret = clean(process.env.CRON_SECRET);
       const authorization = one(request.headers.authorization);
       if (!cronSecret || !safeEqual(authorization, `Bearer ${cronSecret}`)) throw Object.assign(new Error('Unauthorized.'), { statusCode: 401 });
       response.status(200).json({ attempted: await retryWebhookDeliveries(db) }); return;
     }
-    if (action && request.method !== 'POST') throw Object.assign(new Error('Use POST for integration actions.'), { statusCode: 405 });
+    if (action && action !== 'sitemap' && request.method !== 'POST') throw Object.assign(new Error('Use POST for integration actions.'), { statusCode: 405 });
     if (action === 'emit') {
       await emitEvent(db, input);
       response.status(202).json({ accepted: true }); return;
