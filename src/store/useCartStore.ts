@@ -1242,6 +1242,7 @@ export const useCartStore = create<CartState>((set, get) => ({
           created_at: now,
           updated_at: now,
           synced: 0,
+          integration_events_pending: 1,
         });
 
         await db.transaction_items.bulkAdd(

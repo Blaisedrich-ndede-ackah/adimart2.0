@@ -14,6 +14,7 @@ import {
 } from '@/lib/dexie';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { redeemPickupTokenForOrder } from '@/lib/pickupTokens';
+import { emitIntegrationEvent } from '@/lib/integrationEvents';
 
 export interface PublicShopProduct {
   id: string;
@@ -344,6 +345,8 @@ export async function placePublicOnlineOrder(params: {
   if (itemsError) {
     throw new Error(itemsError.message);
   }
+
+  void emitIntegrationEvent({ storeId: params.storeId, event: 'order.online', id: orderId });
 
   return { orderId, orderNumber };
 }

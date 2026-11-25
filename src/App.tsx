@@ -46,6 +46,8 @@ const VerifyPickupPage = lazy(() => import('@/pages/VerifyPickupPage'));
 const WriteOffPage = lazy(() => import('@/pages/WriteOffPage'));
 const BundlesPage = lazy(() => import('@/pages/BundlesPage'));
 const GiftCardsRentalsPage = lazy(() => import('@/pages/GiftCardsRentalsPage'));
+const IntegrationsPage = lazy(() => import('@/pages/IntegrationsPage'));
+const NotificationsPage = lazy(() => import('@/pages/NotificationsPage'));
 const ReceiptPage = lazy(() => import('@/pages/ReceiptPage'));
 const TermsPage = lazy(() => import('@/pages/TermsPage'));
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
@@ -168,7 +170,13 @@ function AuthenticatedApp() {
   const t = useT();
   const initializeAgent = useAgentAuthStore((state) => state.initialize);
   const leftHanded = useAccessibilityStore((state) => state.leftHanded);
-  const [currentPage, setCurrentPage] = useState(() => readVerifyPickupRoute() ? 'verify-pickup' : readStaffFeatureRoute() || 'home');
+  const [currentPage, setCurrentPage] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const pushPage = params.get('open-page');
+    const allowedPushPages = ['inventory', 'ecommerce', 'devices', 'customers', 'notifications'];
+    if (params.has('open-notifications')) return pushPage && allowedPushPages.includes(pushPage) ? pushPage : 'notifications';
+    return readVerifyPickupRoute() ? 'verify-pickup' : readStaffFeatureRoute() || 'home';
+  });
   const [quickAction, setQuickAction] = useState<'add-product' | 'add-expense' | null>(null);
   const [appMode, setAppMode] = useState<AppMode>(() => (readAgentHash() ? 'agent-login' : 'store'));
   const [adminSessionResolved, setAdminSessionResolved] = useState(false);
@@ -192,6 +200,32 @@ function AuthenticatedApp() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    const onServiceWorkerMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'OPEN_NOTIFICATIONS') {
+        const allowed = ['inventory', 'ecommerce', 'devices', 'customers', 'notifications'];
+        setCurrentPage(allowed.includes(event.data.page) ? event.data.page : 'notifications');
+      }
+    };
+    navigator.serviceWorker?.addEventListener('message', onServiceWorkerMessage);
+    return () => navigator.serviceWorker?.removeEventListener('message', onServiceWorkerMessage);
+  }, []);
+
+  useEffect(() => {
+    if (!currentStore?.id || !currentUser?.id) return;
+    const onSync = (event: Event) => {
+      const detail = (event as CustomEvent<Record<string, unknown>>).detail || {};
+      if (detail.success !== false || (detail.phase !== 'error' && detail.phase !== 'complete')) return;
+      const hour = new Date().toISOString().slice(0, 13);
+      void fetch('/api/integrations?action=sync_failed', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ store_id: currentStore.id, user_id: currentUser.id, event_key: `${currentUser.id}:${hour}`, body: String(detail.message || 'Cloud sync could not complete.').slice(0, 300) }),
+      }).catch(() => undefined);
+    };
+    window.addEventListener('adimat-sync', onSync);
+    return () => window.removeEventListener('adimat-sync', onSync);
+  }, [currentStore?.id, currentUser?.id]);
 
   useEffect(() => {
     const onHashChange = () => setPublicShopSlug(readPublicShopSlug());
@@ -361,7 +395,7 @@ function AuthenticatedApp() {
   useEffect(() => {
     // Cashiers cannot stay on owner-only pages after switch/login
     if (currentUser?.role !== 'cashier') return;
-    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'returns', 'multistore', 'adimat-ai', 'store-deals', 'bundles'];
+    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'returns', 'multistore', 'adimat-ai', 'store-deals', 'bundles', 'integrations'];
     const ecommerceOk = (currentUser.can_manage_ecommerce ?? 0) === 1;
     const cashbookOk = canAccessCashbook(currentUser);
     const customerPaymentsOk = canRecordCustomerPayments(currentUser);
@@ -655,6 +689,10 @@ function AuthenticatedApp() {
         return role === 'owner' ? <BundlesPage /> : <POSPage />;
       case 'gift-cards-rentals':
         return role === 'owner' ? <GiftCardsRentalsPage /> : <POSPage />;
+      case 'integrations':
+        return role === 'owner' ? <IntegrationsPage /> : <POSPage />;
+      case 'notifications':
+        return <NotificationsPage />;
       default:
         return <POSPage />;
     }

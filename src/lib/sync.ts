@@ -1,5 +1,6 @@
 import { isSupabaseConfigured, supabase } from './supabase';
-import { FAST_SYNC_TABLES, syncStockFast, syncToSupabase } from './dexie';
+import { FAST_SYNC_TABLES, db, getCurrentStoreId, syncStockFast, syncToSupabase } from './dexie';
+import { emitIntegrationEvent } from './integrationEvents';
 
 const AUTO_SYNC_KEY = 'adimat_auto_sync';
 const LAST_SYNC_ERROR_KEY = 'adimat_last_sync_error';
@@ -16,6 +17,34 @@ let lastAutoSyncAt = 0;
 let liveChannel: ReturnType<typeof supabase.channel> | null = null;
 let lastOnlineSyncAt = 0;
 let liveCooldownTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function emitPendingSaleEvents(): Promise<void> {
+  const storeId = await getCurrentStoreId();
+  if (!storeId || (typeof navigator !== 'undefined' && !navigator.onLine)) return;
+  const pending = (await db.transactions.where('[store_id+integration_events_pending+synced]').equals([storeId, 1, 1]).toArray())
+    .filter((sale) => sale.status === 'completed')
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))
+    .slice(0, 20);
+  for (const sale of pending) {
+    let ok = await emitIntegrationEvent({ storeId, event: 'sale.created', id: sale.id });
+    const items = await db.transaction_items.where('transaction_id').equals(sale.id).toArray();
+    for (const productId of new Set(items.map((item) => item.product_id))) {
+      const product = await db.products.get(productId);
+      if (!product || Number(product.stock_level) > Math.max(0, Number(product.reorder_level) || 0)) continue;
+      const stockEventOk = await emitIntegrationEvent({ storeId, event: 'stock.low', id: product.id, eventId: sale.id });
+      ok = stockEventOk && ok;
+    }
+    if (ok) await db.transactions.update(sale.id, { integration_events_pending: 0, integration_events_sent: 1 });
+  }
+  const pendingCustomers = await db.customers.where('[store_id+integration_events_pending+synced]').equals([storeId, 1, 1]).toArray()
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))
+    .slice(0, 20);
+  for (const customer of pendingCustomers) {
+    if (await emitIntegrationEvent({ storeId, event: 'customer.created', id: customer.id })) {
+      await db.customers.update(customer.id, { integration_events_pending: 0 });
+    }
+  }
+}
 
 export function isAutoSyncEnabled(): boolean {
   return localStorage.getItem(AUTO_SYNC_KEY) !== 'false';
@@ -116,6 +145,7 @@ export async function triggerAutoSync(reason = 'auto', onlyTables?: string[]): P
         }
         : undefined);
       recordSyncOutcome(result);
+      if (result.success) await emitPendingSaleEvents();
       lastAutoSyncAt = Date.now();
       dispatchSyncEvent('complete', {
         success: result.success,
@@ -166,6 +196,7 @@ export async function triggerPushSync(reason = 'push'): Promise<void> {
       dispatchSyncEvent('start', { reason });
       const result = await syncToSupabase();
       recordSyncOutcome(result);
+      if (result.success) await emitPendingSaleEvents();
       lastAutoSyncAt = Date.now();
       dispatchSyncEvent('complete', {
         success: result.success,

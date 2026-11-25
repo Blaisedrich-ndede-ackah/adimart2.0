@@ -153,6 +153,7 @@ export interface LocalCustomer {
   created_at: string;
   updated_at: string;
   synced: number;
+  integration_events_pending?: number;
 }
 
 export interface LocalCustomerOpeningPayment {
@@ -658,6 +659,10 @@ export interface LocalTransaction {
   created_at: string;
   updated_at?: string;
   synced: number;
+  /** Local-only flag; true after outbound webhook/notification events are accepted. */
+  integration_events_sent?: number;
+  /** Set on-device when a sale is created so offline sales emit events after syncing. */
+  integration_events_pending?: number;
 }
 
 export interface LocalTransactionItem {
@@ -1555,6 +1560,11 @@ class AdimatDB extends Dexie {
         rental_agreements: 'id, store_id, agreement_number, customer_id, status, due_at, updated_at, synced',
         rental_items: 'id, store_id, agreement_id, product_id, synced',
       });
+      /* Version 32 — efficient lookup of offline integration event outbox rows. */
+      this.version(32).stores({
+        transactions: 'id, store_id, receipt_number, cashier_id, customer_id, status, created_at, synced, [store_id+integration_events_pending+synced]',
+        customers: 'id, store_id, name, phone, location_id, is_active, synced, [store_id+integration_events_pending+synced]',
+      });
   }
 }
 
@@ -2376,6 +2386,7 @@ export async function createCustomer(
     created_at: now,
     updated_at: now,
     synced: 0,
+    integration_events_pending: 1,
   };
   await db.transaction('rw', [db.customers, db.customer_opening_payments, db.transactions], async () => {
     await db.customers.add(customer);

@@ -3,7 +3,7 @@ import {
   ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, House, Search, ClipboardCheck,
   Sparkles, CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare, Moon, Sun,
   ShoppingCart, RotateCcw, QrCode,
-  ContactRound, ArrowLeftRight, Building2, Megaphone, Tag, Boxes, ClipboardMinus, Gift,
+  ContactRound, ArrowLeftRight, Building2, Megaphone, Tag, Boxes, ClipboardMinus, Gift, Webhook, Bell,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -36,6 +36,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const t = useT();
   const [moreOpen, setMoreOpen] = useState(false);
   const [storeCount, setStoreCount] = useState(1);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window === 'undefined') return true;
     try {
@@ -71,6 +72,25 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
     };
   }, [currentStore?.id]);
 
+  useEffect(() => {
+    if (!currentStore?.id || !currentUser?.id) { setUnreadNotifications(0); return; }
+    let active = true;
+    const refreshNotifications = async () => {
+      try {
+        const response = await fetch('/api/integrations?action=notification_list', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ store_id: currentStore.id, user_id: currentUser.id }),
+        });
+        if (!response.ok) return;
+        const result = await response.json();
+        if (active) setUnreadNotifications((result.notifications || []).filter((row: { is_read?: boolean }) => !row.is_read).length);
+      } catch { /* Keep the last notification count while offline. */ }
+    };
+    void refreshNotifications();
+    const interval = window.setInterval(() => { void refreshNotifications(); }, 30_000);
+    return () => { active = false; window.clearInterval(interval); };
+  }, [currentStore?.id, currentUser?.id]);
+
   const navItems = useMemo<NavItem[]>(
     () =>
       [
@@ -95,6 +115,8 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         { id: 'write-offs', label: t('writeoff.title'), shortLabel: t('writeoff.title'), icon: ClipboardMinus, show: isOwner || currentStore?.cashiers_can_record_expenses === 1 },
         { id: 'bundles', label: t('bundle.title'), shortLabel: t('bundle.title'), icon: Boxes, show: isOwner },
         { id: 'gift-cards-rentals', label: 'Gift cards & rentals', shortLabel: 'Gift cards', icon: Gift, show: isOwner },
+        { id: 'integrations', label: 'API & webhooks', shortLabel: 'Integrations', icon: Webhook, show: isOwner },
+        { id: 'notifications', label: 'Notifications', icon: Bell, show: true },
         { id: 'learn', label: 'Learn Adimat', icon: BookOpen, show: true },
         { id: 'campaigns', label: 'Promotions', icon: Megaphone, show: true },
         { id: 'store-deals', label: 'Deals & coupons', shortLabel: 'Deals', icon: Tag, show: isOwner },
@@ -138,8 +160,8 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const navGroups: NavGroup[] = [
     { label: t('nav.main'), ids: ['home', 'pos', 'search', 'adimat-ai', 'stock-approvals', 'transactions'] },
     { label: 'Shop', ids: ['inventory', 'purchasing', 'warehouse', 'ecommerce', 'multistore', 'store-deals', 'gift-cards-rentals'] },
-    { label: 'Operations', ids: ['reports', 'expenses', 'cashbook', 'devices', 'verify-pickup', 'write-offs', 'bundles', 'subscription', 'returns', 'customers'] },
-    { label: 'Help', ids: ['learn', 'campaigns', 'community', 'settings'] },
+    { label: 'Operations', ids: ['reports', 'expenses', 'cashbook', 'devices', 'verify-pickup', 'write-offs', 'bundles', 'subscription', 'returns', 'customers', 'notifications'] },
+    { label: 'Help', ids: ['learn', 'campaigns', 'community', 'integrations', 'settings'] },
   ];
   const groupedMoreItems = navGroups
     .map((group) => ({
@@ -191,6 +213,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
                     <>
                       <Icon className="w-5 h-5 flex-shrink-0" />
                       <span className="truncate">{item.label}</span>
+                      {item.id === 'notifications' && unreadNotifications > 0 && <span className="ml-auto min-w-5 rounded-full bg-rose-500 px-1.5 py-0.5 text-center text-[10px] font-bold text-white">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}
                     </>
                   );
                   if (item.href) {
@@ -334,6 +357,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
                           <span className={`text-[17px] tracking-tight ${isActive ? 'font-semibold' : 'font-normal'}`}>
                             {item.label}
                           </span>
+                          {item.id === 'notifications' && unreadNotifications > 0 && <span className="ml-auto min-w-5 rounded-full bg-rose-500 px-1.5 py-0.5 text-center text-[10px] font-bold text-white">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}
                         </>
                       );
                       if (item.href) {
