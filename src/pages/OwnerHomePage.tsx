@@ -17,8 +17,6 @@ import {
   RefreshCw,
   Boxes,
   ClipboardMinus,
-  Boxes,
-  ClipboardMinus,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -107,8 +105,22 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
 
   useEffect(() => {
     void loadPendingPriceChangeCount();
-    const interval = window.setInterval(() => void loadPendingPriceChangeCount(), 30_000);
-    return () => window.clearInterval(interval);
+    let timer = 0;
+    const schedule = () => {
+      if (document.visibilityState === 'visible') {
+        timer = window.setTimeout(() => { void loadPendingPriceChangeCount(); schedule(); }, 30_000);
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') { void loadPendingPriceChangeCount(); schedule(); }
+      else window.clearTimeout(timer);
+    };
+    schedule();
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [loadPendingPriceChangeCount]);
 
   const load = useCallback(async () => {
@@ -118,21 +130,26 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
     try {
       const start = startOfToday().getTime();
       const monthStart = startOfMonth().getTime();
-      const [allTransactions, products, storeRow, balances, stores, expenseRows, itemRows] = await Promise.all([
-        db.transactions.where('store_id').equals(storeId).toArray(),
+      const startIso = new Date(start).toISOString();
+      const monthStartIso = new Date(monthStart).toISOString();
+      const endIso = new Date(start + 24 * 60 * 60 * 1000).toISOString();
+      const [todayRows, monthRows, products, storeRow, balances, stores, expenseRows] = await Promise.all([
+        db.transactions.where('[store_id+created_at]').between([storeId, startIso], [storeId, endIso], true, false).toArray(),
+        db.transactions.where('[store_id+created_at]').between([storeId, monthStartIso], [storeId, endIso], true, false).toArray(),
         db.products.where('store_id').equals(storeId).and((product) => product.is_active === 1).toArray(),
         db.stores.get(storeId),
         buildCustomerBalances(storeId),
         listLocalStores(),
-        db.expenses.where('store_id').equals(storeId).toArray(),
-        db.transaction_items.where('store_id').equals(storeId).toArray(),
+        db.expenses.where('[store_id+created_at]').between([storeId, monthStartIso], [storeId, endIso], true, false).toArray(),
       ]);
 
-      const completed = allTransactions.filter((transaction) => transaction.status === 'completed' && transaction.void_status !== 'voided');
-      const todaySales = completed.filter((transaction) =>
-        new Date(transaction.created_at).getTime() >= start
-      );
-      setTransactions(todaySales);
+      const completedToday = todayRows.filter((transaction) => transaction.status === 'completed' && transaction.void_status !== 'voided');
+      const completedMonth = monthRows.filter((transaction) => transaction.status === 'completed' && transaction.void_status !== 'voided');
+      const todayIds = completedToday.map((sale) => sale.id);
+      const itemRows = todayIds.length
+        ? await db.transaction_items.where('transaction_id').anyOf(todayIds).toArray()
+        : [];
+      setTransactions(completedToday);
       const todayKey = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
       const dayExpenses = expenseRows.filter((expense) => (expense.expense_date || expense.created_at).slice(0, 10) === todayKey || (
         !expense.expense_date && new Date(expense.created_at).getTime() >= start
@@ -140,24 +157,18 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
       const expenseTotal = dayExpenses.reduce((sum, expense) => sum + toNumber(expense.amount), 0);
       const cashSpent = dayExpenses.reduce((sum, expense) => sum + (expense.payment_method === 'cash' ? toNumber(expense.amount) : 0), 0);
       const productCost = new Map(products.map((product) => [product.id, toNumber(product.cost_price)]));
-      const todayIds = new Set(todaySales.map((sale) => sale.id));
+      const todayIdSet = new Set(todayIds);
       const cogs = itemRows.reduce((sum, item) => (
-        todayIds.has(item.transaction_id)
+        todayIdSet.has(item.transaction_id)
           ? sum + (toNumber(item.base_quantity || item.quantity) * (productCost.get(item.product_id) || 0))
           : sum
       ), 0);
-      const salesTotal = todaySales.reduce((sum, sale) => sum + toNumber(sale.total_amount), 0);
+      const salesTotal = completedToday.reduce((sum, sale) => sum + toNumber(sale.total_amount), 0);
       setTodayExpenses(expenseTotal);
       setTodayNet(salesTotal - cogs - expenseTotal);
-      setCashAfterExpenses(todaySales.reduce((sum, sale) => sum + toNumber(sale.cash_amount), 0) - cashSpent);
+      setCashAfterExpenses(completedToday.reduce((sum, sale) => sum + toNumber(sale.cash_amount), 0) - cashSpent);
       setMonthSales(
-        completed.reduce(
-          (total, transaction) =>
-            new Date(transaction.created_at).getTime() >= monthStart
-              ? total + toNumber(transaction.total_amount)
-              : total,
-          0
-        )
+        completedMonth.reduce((total, transaction) => total + toNumber(transaction.total_amount), 0)
       );
       setLowStockCount(products.filter((product: LocalProduct) => {
         const level = toNumber(product.reorder_level) > 0 ? toNumber(product.reorder_level) : 5;
@@ -184,18 +195,12 @@ export default function OwnerHomePage({ onNavigate }: OwnerHomePageProps) {
   // The polling fallback keeps the screen fresh without a cloud connection.
   const { status: liveStatus } = useLiveStoreSales(
     currentStore?.id,
-    useCallback(() => {
-      void load();
-    }, [load]),
-    useCallback(() => {
-      void load();
-    }, [load])
+    useCallback(() => load(), [load]),
+    useCallback(() => load(), [load])
   );
 
   useEffect(() => {
     void load();
-    const interval = window.setInterval(() => void load(), 60_000);
-    return () => window.clearInterval(interval);
   }, [load, currentStore?.id]);
 
   const totalSales = transactions.reduce((total, transaction) => total + toNumber(transaction.total_amount), 0);

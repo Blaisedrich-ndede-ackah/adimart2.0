@@ -1565,6 +1565,14 @@ class AdimatDB extends Dexie {
         transactions: 'id, store_id, receipt_number, cashier_id, customer_id, status, created_at, synced, [store_id+integration_events_pending+synced]',
         customers: 'id, store_id, name, phone, location_id, is_active, synced, [store_id+integration_events_pending+synced]',
       });
+      /* Version 33 — store-scoped date/status indexes for local reports. */
+      this.version(33).stores({
+        transactions: 'id, store_id, receipt_number, cashier_id, customer_id, payment_method, status, void_status, created_at, synced, [store_id+created_at], [store_id+status+created_at], [store_id+void_status+created_at], [store_id+payment_method], [store_id+integration_events_pending+synced]',
+        sales_returns: 'id, store_id, transaction_id, transaction_item_id, product_id, created_at, synced, [store_id+created_at]',
+        credit_payments: 'id, store_id, customer_id, account_receipt_id, transaction_id, created_at, synced, [store_id+created_at]',
+        customer_opening_payments: 'id, store_id, customer_id, account_receipt_id, created_at, synced, [store_id+entry_type+created_at]',
+        expenses: 'id, store_id, category, expense_date, created_at, synced, [store_id+created_at]',
+      });
   }
 }
 

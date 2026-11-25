@@ -161,5 +161,30 @@ export default defineConfig(({ mode }) => {
         "@": path.resolve(__dirname, "src"),
       },
     },
+    build: {
+      sourcemap: false,
+      // Use Vite's installed minifier so production builds do not require an
+      // additional optional Terser dependency.
+      minify: "esbuild",
+      reportCompressedSize: true,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes("node_modules")) return;
+            const path = id.replace(/\\/g, "/");
+            if (/\/node_modules\/(react|react-dom|scheduler)\//.test(path)) return "vendor-react";
+            if (/\/node_modules\/react-router(-dom)?\//.test(path)) return "vendor-router";
+            if (/\/node_modules\/@supabase\//.test(path)) return "vendor-supabase";
+            if (/\/node_modules\/dexie\//.test(path)) return "vendor-dexie";
+            if (/\/node_modules\/zustand\//.test(path)) return "vendor-zustand";
+            if (/\/node_modules\/recharts\//.test(path)) return "vendor-charts";
+            if (/\/node_modules\/(html2canvas|jspdf)\//.test(path)) return "vendor-pdf";
+            if (/\/node_modules\/@zxing\//.test(path)) return "vendor-barcode";
+            if (/\/node_modules\/lucide-react\//.test(path)) return "vendor-icons";
+            return;
+          },
+        },
+      },
+    },
   };
 });

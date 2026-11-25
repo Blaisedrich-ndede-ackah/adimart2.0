@@ -71,6 +71,19 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  if (/^\/(logo\.png|icon-[^/]+\.png|apple-touch-icon\.png|manifest\.json)$/.test(requestUrl.pathname)) {
+    event.respondWith(
+      caches.open(CACHE_NAME).then(async (cache) => {
+        const cachedResponse = await cache.match(event.request);
+        if (cachedResponse) return cachedResponse;
+        const response = await fetch(event.request);
+        if (response.ok) await cache.put(event.request, response.clone());
+        return response;
+      })
+    );
+    return;
+  }
+
   event.respondWith(
     fetch(event.request)
       .then((response) => {

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import Dexie from 'dexie';
 import {
   ShoppingCart, Minus, Plus, Trash2, Search, Package, AlertCircle, Bluetooth,
   ScanBarcode, MapPin, X, Settings2, GripVertical, MoveUp, MoveDown, Mic, Pause, Play,
@@ -10,6 +11,7 @@ import PriceScanPickupDesk from '@/components/PriceScanPickupDesk';
 import CheckoutOverlay from '@/components/CheckoutOverlay';
 import FrequentItems from '@/components/FrequentItems';
 import { useCartStore } from '@/store/useCartStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useAuthStore } from '@/store/useAuthStore';
 import { canViewStockQuantities } from '@/lib/stockVisibility';
 import { useAccessibilityStore } from '@/lib/accessibility';
@@ -126,7 +128,14 @@ function moveBy<T>(order: readonly T[], item: T, offset: number): T[] {
 }
 
 export default function POSPage({ onNavigate }: { onNavigate?: (page: string) => void }) {
-  const cart = useCartStore();
+  const cart = useCartStore(useShallow((s) => ({
+    items: s.items, total: s.total, subtotal: s.subtotal, discountAmount: s.discountAmount,
+    parkedCarts: s.parkedCarts, addItem: s.addItem, addItemByBarcode: s.addItemByBarcode,
+    clearCart: s.clearCart, decrementItem: s.decrementItem, incrementItem: s.incrementItem,
+    parkCart: s.parkCart, removeItem: s.removeItem, removeParkedCart: s.removeParkedCart,
+    resumeParkedCart: s.resumeParkedCart, setItemSaleMode: s.setItemSaleMode,
+    setItemSerial: s.setItemSerial, setItemUnitType: s.setItemUnitType, updateQuantity: s.updateQuantity,
+  })));
   const setSaleContext = useCartStore((s) => s.setSaleContext);
   const setTaxConfig = useCartStore((s) => s.setTaxConfig);
   const { currentUser, currentStore } = useAuthStore();
@@ -142,8 +151,11 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   const [productOptions, setProductOptions] = useState<LocalProductVariant[]>([]);
   const [scanFeedback, setScanFeedback] = useState<{ type: 'success' | 'error' | 'warning'; message: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [products, setProducts] = useState<LocalProduct[]>([]);
+  const [visibleProductLimit, setVisibleProductLimit] = useState(200);
   const [locationStock, setLocationStock] = useState<Record<string, number>>({});
   const [saleLocations, setSaleLocations] = useState<LocalLocation[]>([]);
   const [selectedLocationId, setSelectedLocationId] = useState<string>('');
@@ -159,6 +171,10 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   const [voiceSearchActive, setVoiceSearchActive] = useState(false);
   const [voiceSearchError, setVoiceSearchError] = useState('');
   const speechRecognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const lastVisibilitySyncRef = useRef(0);
+  const cfdTimerRef = useRef<number | null>(null);
+  const quantityTimersRef = useRef<Record<string, number>>({});
+  const stockMapCacheRef = useRef(new Map<string, Record<string, number>>());
   const [showLayoutEditor, setShowLayoutEditor] = useState(false);
   const [layoutStatus, setLayoutStatus] = useState('');
   const [draggedSection, setDraggedSection] = useState<PosSection | null>(null);
@@ -188,6 +204,11 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   useCustomerDisplayChannel(handleCfdMessage);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearchQuery(searchQuery), 250);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
+  useEffect(() => {
     const items = cart.items.map((item) => ({
       id: item.id,
       name: item.name,
@@ -196,17 +217,26 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
       subtotal: item.subtotal,
       ...(item.image_url ? { image_url: item.image_url } : {}),
     }));
-    broadcastCfdMessage({
-      type: 'CartUpdated',
-      payload: {
+    const payload = {
         items,
         subtotal: cart.subtotal,
         total: cart.total,
         itemCount: items.reduce((count, item) => count + item.quantity, 0),
         currency: currentStore?.currency_code || 'GHS',
-      },
-    });
+      };
+    if (cfdTimerRef.current !== null) window.clearTimeout(cfdTimerRef.current);
+    cfdTimerRef.current = window.setTimeout(() => {
+      broadcastCfdMessage({ type: 'CartUpdated', payload });
+      cfdTimerRef.current = null;
+    }, 500);
+    return () => {
+      if (cfdTimerRef.current !== null) window.clearTimeout(cfdTimerRef.current);
+    };
   }, [cart.items, cart.subtotal, cart.total, currentStore?.currency_code]);
+
+  useEffect(() => () => {
+    if (cfdTimerRef.current !== null) window.clearTimeout(cfdTimerRef.current);
+  }, []);
 
   const openCustomerDisplay = () => {
     const displayUrl = new URL(window.location.href);
@@ -317,13 +347,13 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
     if (!soft) setLoadingProducts(true);
     try {
       const storeId = await getCurrentStoreId();
-      if (storeId && !soft) {
+      if (storeId && !soft && navigator.onLine !== false) {
         await ensureStoreLocations(storeId);
         void triggerAutoSync('pos-load');
       }
       let list = await getCurrentStoreActiveProducts();
       // Keep catalog stock_level = batch totals (same truth Inventory uses)
-      if (storeId) {
+      if (storeId && !soft) {
         try {
           list = await alignProductsWithBatchStock(list);
         } catch {
@@ -334,12 +364,17 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
       setProducts(list);
 
       if (storeId) {
-        const map = selectedLocationId
-          ? await getLocationStockMap(storeId, selectedLocationId)
-          : await getStoreBatchStockMap(storeId);
+        const stockCacheKey = `${storeId}:${selectedLocationId || 'store'}`;
+        const cachedMap = stockMapCacheRef.current.get(stockCacheKey);
+        const map = cachedMap
+          ? { ...cachedMap }
+          : selectedLocationId
+            ? await getLocationStockMap(storeId, selectedLocationId)
+            : await getStoreBatchStockMap(storeId);
         for (const product of list) {
           if (map[product.id] === undefined) map[product.id] = toQty(product.stock_level);
         }
+        stockMapCacheRef.current.set(stockCacheKey, map);
         setLocationStock(map);
       } else {
         setLocationStock({});
@@ -377,21 +412,34 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   // Match Inventory: pull cloud stock when returning to POS on this device
   useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState !== 'visible') return;
+      if (document.visibilityState !== 'visible' || navigator.onLine === false) return;
+      if (Date.now() - lastVisibilitySyncRef.current < 5 * 60_000) return;
+      lastVisibilitySyncRef.current = Date.now();
       void (async () => {
         await triggerAutoSync('pos-visible');
-        await loadProducts({ soft: true });
       })();
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [loadProducts]);
+  }, []);
 
   // Instant stock UI after sale / order / adjust — no full catalog reload
   useEffect(() => {
     if (!currentStore?.id) return;
     return subscribeStockChanges((event) => {
       if (event.storeId !== currentStore.id) return;
+
+      for (const [cacheKey, cachedMap] of stockMapCacheRef.current) {
+        const locationKey = cacheKey.slice(cacheKey.lastIndexOf(':') + 1);
+        const nextMap = { ...cachedMap };
+        for (const change of event.changes) {
+          const quantity = locationKey === 'store'
+            ? change.totalQty
+            : event.locationId === locationKey ? change.locationQty : undefined;
+          if (quantity !== undefined) nextMap[change.productId] = quantity;
+        }
+        stockMapCacheRef.current.set(cacheKey, nextMap);
+      }
 
       setProducts((prev) =>
         prev.map((p) => {
@@ -401,19 +449,24 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
         })
       );
 
-      if (!event.locationId || event.locationId === selectedLocationId) {
+      if (!selectedLocationId || !event.locationId || event.locationId === selectedLocationId) {
         setLocationStock((prev) => {
           const next = { ...prev };
           for (const change of event.changes) {
-            if (change.locationQty !== undefined) {
-              next[change.productId] = change.locationQty;
+            const quantity = selectedLocationId ? change.locationQty : change.totalQty;
+            if (quantity !== undefined) {
+              next[change.productId] = quantity;
             }
           }
+          const cacheKey = `${currentStore.id}:${selectedLocationId || 'store'}`;
+          stockMapCacheRef.current.set(cacheKey, next);
           return next;
         });
       }
     });
   }, [currentStore?.id, selectedLocationId]);
+
+  useEffect(() => { setVisibleProductLimit(200); }, [debouncedSearchQuery, selectedCategory]);
 
   useEffect(() => {
     // iOS/Safari often blocks WebAudio until the first user gesture.
@@ -439,7 +492,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   }, [products]);
 
   const filteredProducts = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
+    const q = debouncedSearchQuery.trim().toLowerCase();
     return products
       .filter((product) => selectedCategory === 'All' || product.category === selectedCategory)
       .map((product) => ({
@@ -455,7 +508,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
         new Date(b.product.updated_at || 0).getTime() - new Date(a.product.updated_at || 0).getTime()
       )
       .map(({ product }) => product);
-  }, [products, searchQuery, selectedCategory, salesRank]);
+  }, [products, debouncedSearchQuery, selectedCategory, salesRank]);
 
   useEffect(() => {
     const speech = window as SpeechWindow;
@@ -469,13 +522,14 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
       const storeId = await getCurrentStoreId();
       if (!storeId) return;
       const since = Date.now() - 30 * 24 * 60 * 60 * 1000;
-      const [transactions, items] = await Promise.all([
-        db.transactions.where('store_id').equals(storeId).filter((transaction) =>
-          transaction.status === 'completed' && transaction.void_status !== 'voided' && new Date(transaction.created_at).getTime() >= since
-        ).toArray(),
-        db.transaction_items.where('store_id').equals(storeId).toArray(),
-      ]);
-      const transactionDates = new Map(transactions.map((transaction) => [transaction.id, new Date(transaction.created_at).getTime()]));
+      const transactions = await db.transactions.where('[store_id+status+created_at]')
+        .between([storeId, 'completed', new Date(since).toISOString()], [storeId, 'completed', Dexie.maxKey], true, true).toArray();
+      const validTransactions = transactions.filter((transaction) => transaction.void_status !== 'voided');
+      const transactionIds = validTransactions.map((transaction) => transaction.id);
+      const items = transactionIds.length
+        ? await db.transaction_items.where('transaction_id').anyOf(transactionIds).toArray()
+        : [];
+      const transactionDates = new Map(validTransactions.map((transaction) => [transaction.id, new Date(transaction.created_at).getTime()]));
       const next: Record<string, { quantity: number; lastSold: number }> = {};
       for (const item of items) {
         const soldAt = transactionDates.get(item.transaction_id);
@@ -682,6 +736,31 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
       setTimeout(() => setStockError(null), 3000);
     }
   };
+
+  const commitQuantityDraft = (itemId: string, value: string) => {
+    const timer = quantityTimersRef.current[itemId];
+    if (timer) window.clearTimeout(timer);
+    delete quantityTimersRef.current[itemId];
+    if (value.trim() && Number.isFinite(Number(value))) {
+      void handleUpdateQuantity(itemId, Number(value));
+    }
+    setQuantityDrafts((drafts) => {
+      const next = { ...drafts };
+      delete next[itemId];
+      return next;
+    });
+  };
+
+  const handleQuantityInput = (itemId: string, value: string) => {
+    setQuantityDrafts((drafts) => ({ ...drafts, [itemId]: value }));
+    const previous = quantityTimersRef.current[itemId];
+    if (previous) window.clearTimeout(previous);
+    quantityTimersRef.current[itemId] = window.setTimeout(() => commitQuantityDraft(itemId, value), 180);
+  };
+
+  useEffect(() => () => {
+    for (const timer of Object.values(quantityTimersRef.current)) window.clearTimeout(timer);
+  }, []);
 
   const handleCheckoutComplete = (_receipt: string) => {
     setShowCheckout(false);
@@ -1099,7 +1178,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
               </div>
             ) : (
               <div className="pos-product-grid">
-                {filteredProducts.map((product) => {
+                {filteredProducts.slice(0, visibleProductLimit).map((product) => {
                   const stockHere =
                     locationStock[product.id] !== undefined
                       ? locationStock[product.id]
@@ -1168,6 +1247,15 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                   );
                 })}
               </div>
+            )}
+            {!showBundles && filteredProducts.length > visibleProductLimit && (
+              <button
+                type="button"
+                onClick={() => setVisibleProductLimit((limit) => limit + 200)}
+                className="mx-auto mt-4 block rounded-lg border border-emerald-200 px-4 py-2 text-sm font-semibold text-emerald-700"
+              >
+                Show more products ({filteredProducts.length - visibleProductLimit} remaining)
+              </button>
             )}
           </div>
         </section>
@@ -1378,8 +1466,11 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                             </button>
                             <input
                               type="number"
-                              value={item.quantity}
-                              onChange={(e) => void handleUpdateQuantity(item.id, Number(e.target.value))}
+                              value={quantityDrafts[item.id] ?? item.quantity}
+                              onChange={(e) => handleQuantityInput(item.id, e.target.value)}
+                              onBlur={(e) => {
+                                if (Object.prototype.hasOwnProperty.call(quantityDrafts, item.id)) commitQuantityDraft(item.id, e.currentTarget.value);
+                              }}
                               aria-label={`Quantity of ${item.name}`}
                               inputMode={item.allow_decimal === 1 ? 'decimal' : 'numeric'}
                               className="w-16 text-sm font-bold text-center bg-transparent border-b border-border focus:border-primary outline-none"

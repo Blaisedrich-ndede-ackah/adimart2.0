@@ -273,15 +273,52 @@ function AuthenticatedApp() {
 
   useEffect(() => {
     if (!isAuthenticated || !currentStore?.id) return;
-    const flush = () => { void flushPriceChanges(currentStore.id); };
-    flush();
-    window.addEventListener('online', flush);
-    const interval = window.setInterval(flush, 60_000);
-    return () => {
-      window.removeEventListener('online', flush);
-      window.clearInterval(interval);
+    let active = true;
+    let timer = 0;
+    let running = false;
+    const runHousekeeping = async () => {
+      if (!active || running || document.visibilityState !== 'visible' || navigator.onLine === false) return;
+      running = true;
+      try {
+        await flushPriceChanges(currentStore.id).catch(() => undefined);
+        await syncWriteOffs(currentStore.id).catch(() => undefined);
+        await syncBundles(currentStore.id).catch(() => undefined);
+        await syncReceipts(currentStore.id).catch(() => undefined);
+        if (currentUser?.id) await sendDeviceHeartbeat(currentStore.id, currentUser.id).catch(() => undefined);
+        await flushSmsOutbox(currentStore.id).catch(() => undefined);
+        if (currentUser?.role === 'owner') await sendClosingSummary(currentStore).catch(() => undefined);
+      } catch (error) {
+        console.warn('[Housekeeping] A background task did not complete:', error);
+      } finally {
+        running = false;
+      }
     };
-  }, [isAuthenticated, currentStore?.id]);
+    const schedule = () => {
+      if (!active || document.visibilityState !== 'visible' || navigator.onLine === false) return;
+      timer = window.setTimeout(async () => {
+        await runHousekeeping();
+        schedule();
+      }, 60_000);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        window.clearTimeout(timer);
+        void runHousekeeping().finally(schedule);
+      } else {
+        window.clearTimeout(timer);
+      }
+    };
+    const onOnline = () => { window.clearTimeout(timer); void runHousekeeping().finally(schedule); };
+    void runHousekeeping().finally(schedule);
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', onOnline);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', onOnline);
+    };
+  }, [isAuthenticated, currentStore, currentUser?.id, currentUser?.role]);
 
   useEffect(() => {
     if (!isAuthenticated || !currentStore?.id) return;
@@ -290,77 +327,35 @@ function AuthenticatedApp() {
 
   useEffect(() => {
     if (!isAuthenticated || !currentStore?.id) return;
-    const syncFeatureRecords = () => {
-      void syncWriteOffs(currentStore.id).catch(() => undefined);
-      void syncBundles(currentStore.id).catch(() => undefined);
-      void syncReceipts(currentStore.id).catch(() => undefined);
-    };
-    syncFeatureRecords();
-    const interval = window.setInterval(syncFeatureRecords, 60_000);
-    window.addEventListener('online', syncFeatureRecords);
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener('online', syncFeatureRecords);
-    };
-  }, [isAuthenticated, currentStore?.id]);
-
-  useEffect(() => {
-    if (!isAuthenticated || !currentStore?.id || !currentUser?.id) return;
-    let active = true;
-    let heartbeatInProgress = false;
-    let hasLoggedFailure = false;
-
-    const sendHeartbeat = async () => {
-      if (!active || heartbeatInProgress || navigator.onLine === false) return;
-      heartbeatInProgress = true;
+    let running = false;
+    const runRecurringExpenses = async () => {
+      if (document.visibilityState !== 'visible' || running) return;
+      running = true;
       try {
-        await sendDeviceHeartbeat(currentStore.id, currentUser.id);
-        hasLoggedFailure = false;
-      } catch (error) {
-        if (!hasLoggedFailure) {
-          console.warn('[Presence] Could not update this device session:', error);
-          hasLoggedFailure = true;
-        }
-      } finally {
-        heartbeatInProgress = false;
-      }
-    };
-
-    void sendHeartbeat();
-    const interval = window.setInterval(() => void sendHeartbeat(), 60_000);
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') void sendHeartbeat();
-    };
-    const onOnline = () => void sendHeartbeat();
-    document.addEventListener('visibilitychange', onVisible);
-    window.addEventListener('online', onOnline);
-    return () => {
-      active = false;
-      window.clearInterval(interval);
-      document.removeEventListener('visibilitychange', onVisible);
-      window.removeEventListener('online', onOnline);
-    };
-  }, [isAuthenticated, currentStore?.id, currentUser?.id]);
-
-  useEffect(() => {
-    if (!isAuthenticated || !currentStore?.id) return;
-    const runRecurringExpenses = () => {
-      void createDueRecurringExpenses()
+        await createDueRecurringExpenses()
         .then((created) => {
           if (created > 0) void triggerPushSync('recurring-expenses');
         })
         .catch((error: unknown) => {
           console.error('[Expenses] Could not create scheduled recurring expenses:', error);
         });
+      } finally {
+        running = false;
+      }
     };
-    runRecurringExpenses();
-    const interval = window.setInterval(runRecurringExpenses, 60 * 60 * 1000);
+    let timer = 0;
+    const schedule = () => {
+      if (document.visibilityState !== 'visible') return;
+      timer = window.setTimeout(async () => { await runRecurringExpenses(); schedule(); }, 60 * 60 * 1000);
+    };
+    void runRecurringExpenses().finally(schedule);
     const onVisible = () => {
-      if (document.visibilityState === 'visible') runRecurringExpenses();
+      if (document.visibilityState === 'visible') { window.clearTimeout(timer); void runRecurringExpenses().finally(schedule); }
+      else window.clearTimeout(timer);
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
-      window.clearInterval(interval);
+      window.clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [isAuthenticated, currentStore?.id]);
@@ -372,23 +367,35 @@ function AuthenticatedApp() {
 
   useEffect(() => {
     if (!isAuthenticated || !currentStore?.id) return;
-    const runBackup = () => {
-      void createAutomaticStoreBackup(currentStore.id)
+    let running = false;
+    const runBackup = async () => {
+      if (document.visibilityState !== 'visible' || running) return;
+      running = true;
+      try {
+        await createAutomaticStoreBackup(currentStore.id)
         .then(() => recordBackupIssue(''))
         .catch((error: unknown) => {
           const message = error instanceof Error ? error.message : String(error);
           console.error('[Backup] Automatic store snapshot failed:', error);
           recordBackupIssue(message);
         });
+      } finally {
+        running = false;
+      }
     };
-    runBackup();
-    const interval = window.setInterval(runBackup, 60 * 60 * 1000);
+    let timer = 0;
+    const schedule = () => {
+      if (document.visibilityState !== 'visible') return;
+      timer = window.setTimeout(async () => { await runBackup(); schedule(); }, 60 * 60 * 1000);
+    };
+    void runBackup().finally(schedule);
     const onVisible = () => {
-      if (document.visibilityState === 'visible') runBackup();
+      if (document.visibilityState === 'visible') { window.clearTimeout(timer); void runBackup().finally(schedule); }
+      else window.clearTimeout(timer);
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
-      window.clearInterval(interval);
+      window.clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [isAuthenticated, currentStore?.id]);
@@ -420,9 +427,22 @@ function AuthenticatedApp() {
 
   useEffect(() => {
     if (!isAuthenticated) return;
-    void checkAndSendSubscriptionExpirySms();
-    const timer = window.setInterval(() => void checkAndSendSubscriptionExpirySms(), 6 * 60 * 60 * 1000);
-    return () => window.clearInterval(timer);
+    let timer = 0;
+    let running = false;
+    const run = async () => {
+      if (document.visibilityState !== 'visible' || !navigator.onLine || running) return;
+      running = true;
+      try { await checkAndSendSubscriptionExpirySms(); }
+      catch (error) { console.warn('[Subscription reminders] Could not complete:', error); }
+      finally { running = false; }
+    };
+    const schedule = () => { if (document.visibilityState === 'visible' && navigator.onLine) timer = window.setTimeout(async () => { await run(); schedule(); }, 6 * 60 * 60 * 1000); };
+    void run().finally(schedule);
+    const onVisibility = () => { if (document.visibilityState === 'visible') { window.clearTimeout(timer); void run().finally(schedule); } else window.clearTimeout(timer); };
+    const onOnline = () => { void run().finally(() => { window.clearTimeout(timer); schedule(); }); };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('online', onOnline);
+    return () => { window.clearTimeout(timer); document.removeEventListener('visibilitychange', onVisibility); window.removeEventListener('online', onOnline); };
   }, [isAuthenticated]);
 
   useEffect(() => {
@@ -432,25 +452,23 @@ function AuthenticatedApp() {
     if (currentUser?.role !== 'owner') return;
     // Chase overdue customer credit on its own schedule. The per-customer
     // interval stored on the store keeps this from over-texting anyone.
-    void checkAndSendDebtReminders();
-    const timer = window.setInterval(() => void checkAndSendDebtReminders(), 6 * 60 * 60 * 1000);
-    return () => window.clearInterval(timer);
+    let timer = 0;
+    let running = false;
+    const run = async () => {
+      if (document.visibilityState !== 'visible' || !navigator.onLine || running) return;
+      running = true;
+      try { await checkAndSendDebtReminders(); }
+      catch (error) { console.warn('[Debt reminders] Could not complete:', error); }
+      finally { running = false; }
+    };
+    const schedule = () => { if (document.visibilityState === 'visible' && navigator.onLine) timer = window.setTimeout(async () => { await run(); schedule(); }, 6 * 60 * 60 * 1000); };
+    void run().finally(schedule);
+    const onVisibility = () => { if (document.visibilityState === 'visible') { window.clearTimeout(timer); void run().finally(schedule); } else window.clearTimeout(timer); };
+    const onOnline = () => { void run().finally(() => { window.clearTimeout(timer); schedule(); }); };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('online', onOnline);
+    return () => { window.clearTimeout(timer); document.removeEventListener('visibilitychange', onVisibility); window.removeEventListener('online', onOnline); };
   }, [isAuthenticated, currentStore?.id, currentUser?.role]);
-
-  useEffect(() => {
-    if (!isAuthenticated || !currentStore?.id) return;
-    const run = () => {
-      void flushSmsOutbox(currentStore.id);
-      if (currentUser?.role === 'owner') void sendClosingSummary(currentStore);
-    };
-    run();
-    const timer = window.setInterval(run, 60_000);
-    window.addEventListener('online', run);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener('online', run);
-    };
-  }, [isAuthenticated, currentStore, currentUser?.role]);
 
   if (publicShopSlug) {
     return <PublicShopPage slug={publicShopSlug} />;

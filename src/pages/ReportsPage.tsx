@@ -9,10 +9,11 @@ import {
 } from 'lucide-react';
 import {
   db, LocalTransaction, LocalTransactionItem, LocalSaleReturn, LocalExpense, LocalCreditPayment, LocalCustomerOpeningPayment, LocalStockBatch, LocalLocation,
-  getCurrentStoreTransactions, getCurrentStoreExpenses, getCurrentStoreId,
+  getCurrentStoreId,
   addExpense, deleteExpense
 } from '@/lib/dexie';
 import { useAuthStore } from '@/store/useAuthStore';
+import { getOutstandingCreditTotal } from '@/lib/customerBalances';
 import { roundMoney, toMoneyAmount } from '@/lib/money';
 import {
   buildLocationReportSummary,
@@ -113,28 +114,29 @@ export default function ReportsPage() {
     setLoadError('');
     try {
       const { start, end } = range;
-      const loadedTxns = await getCurrentStoreTransactions();
-      const voidedInPeriod = loadedTxns.filter((sale) => sale.void_status === 'voided');
+      const startKey = start.toISOString();
+      const endKey = end.toISOString();
+      const [periodTxnsRaw, voidedInPeriod] = await Promise.all([
+        db.transactions.where('[store_id+status+created_at]')
+          .between([storeId, 'completed', startKey], [storeId, 'completed', endKey], true, true).toArray(),
+        db.transactions.where('[store_id+void_status+created_at]')
+          .between([storeId, 'voided', startKey], [storeId, 'voided', endKey], true, true).toArray(),
+      ]);
       setVoidedSales(voidedInPeriod);
-      const allTxns = loadedTxns.filter((sale) => sale.status === 'completed' && sale.void_status !== 'voided');
-      const allReturns = await db.sales_returns.where('store_id').equals(storeId).toArray();
-      setPeriodReturns(allReturns.filter((record) => {
-        const returnedAt = new Date(record.created_at);
-        return returnedAt >= start && returnedAt <= end;
-      }));
-      const allCreditPayments = await db.credit_payments.where('store_id').equals(storeId).toArray();
-      const allCustomerOpeningPayments = await db.customer_opening_payments.where('store_id').equals(storeId).toArray();
-      setCustomerOpeningPayments(allCustomerOpeningPayments.filter((payment) => {
-        if (payment.entry_type !== 'payment') return false;
-        const day = payment.created_at.slice(0, 10);
-        return day >= start.toISOString().slice(0, 10) && day <= end.toISOString().slice(0, 10);
-      }));
-      const customers = await db.customers.where('store_id').equals(storeId).toArray();
-      setOutstandingCredit(roundMoney(
-        allTxns.reduce((sum, transaction) => sum + (Number(transaction.credit_balance) || 0), 0) +
-        customers.reduce((sum, customer) => sum + (Number(customer.opening_balance_remaining) || 0), 0)
-      ));
-      const allExpenses = await getCurrentStoreExpenses();
+      const periodTxns = periodTxnsRaw
+        .filter((sale) => sale.void_status !== 'voided')
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      const [periodReturns, periodCreditPayments, periodOpeningPayments] = await Promise.all([
+        db.sales_returns.where('[store_id+created_at]').between([storeId, startKey], [storeId, endKey], true, true).toArray(),
+        db.credit_payments.where('[store_id+created_at]').between([storeId, startKey], [storeId, endKey], true, true).toArray(),
+        db.customer_opening_payments.where('[store_id+entry_type+created_at]')
+          .between([storeId, 'payment', startKey], [storeId, 'payment', endKey], true, true).toArray(),
+      ]);
+      setPeriodReturns(periodReturns);
+      setCustomerOpeningPayments(periodOpeningPayments);
+      setOutstandingCredit(await getOutstandingCreditTotal(storeId));
+      const allExpenses = await db.expenses.where('[store_id+created_at]')
+        .between([storeId, startKey], [storeId, endKey], true, true).toArray();
       const expiring = await getExpiringBatches(storeId, 30);
       setExpiringBatches(expiring.slice(0, 8));
       const products = await db.products.where('store_id').equals(storeId).toArray();
@@ -143,21 +145,13 @@ export default function ReportsPage() {
       setProductNames(names);
       setLocations(await listReportLocations(storeId));
 
-      const periodTxns = allTxns.filter(t => {
-        const d = new Date(t.created_at);
-        return d >= start && d <= end;
-      }).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
       const periodExpenses = allExpenses.filter(e => {
         const d = new Date(e.created_at);
         return d >= start && d <= end;
       }).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
       setTransactions(periodTxns);
-      setCreditPayments(allCreditPayments.filter((payment) => {
-        const paidAt = new Date(payment.created_at);
-        return paidAt >= start && paidAt <= end;
-      }));
+      setCreditPayments(periodCreditPayments);
       setExpenses(periodExpenses);
       setSummary(await buildReportSummary(storeId, range));
 
@@ -173,7 +167,7 @@ export default function ReportsPage() {
         if (d < start) continue;
         const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0);
         const dayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59);
-        const dayTxns = allTxns.filter(t => {
+        const dayTxns = periodTxns.filter(t => {
           const td = new Date(t.created_at);
           return td >= dayStart && td <= dayEnd;
         });

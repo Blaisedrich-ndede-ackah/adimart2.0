@@ -5,6 +5,7 @@ import {
   Smartphone, MessageCircle, CirclePlus, Trash2, Search, Gift
 } from 'lucide-react';
 import { useCartStore, CartItem } from '@/store/useCartStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useAuthStore } from '@/store/useAuthStore';
 import { db, getCurrentStoreCustomers, LocalCustomer } from '@/lib/dexie';
 import { evaluateCreditLimit, normalizeCreditLimitAction } from '@/lib/creditMath';
@@ -76,7 +77,16 @@ interface SaleResult {
 }
 
 export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnectPrinter }: CheckoutOverlayProps) {
-  const cart = useCartStore();
+  const cart = useCartStore(useShallow((s) => ({
+    items: s.items, subtotal: s.subtotal, total: s.total, discountAmount: s.discountAmount,
+    discountFixed: s.discountFixed, discountKind: s.discountKind, discountPercent: s.discountPercent,
+    couponCode: s.couponCode, loyaltyCustomerId: s.loyaltyCustomerId, otherCharges: s.otherCharges,
+    pointsToRedeem: s.pointsToRedeem, promotionSummary: s.promotionSummary, taxBreakdown: s.taxBreakdown,
+    taxConfig: s.taxConfig, removeOtherCharge: s.removeOtherCharge, setCouponCode: s.setCouponCode,
+    setDiscountFixed: s.setDiscountFixed, setDiscountPercent: s.setDiscountPercent,
+    setLoyaltySelection: s.setLoyaltySelection, setOtherCharge: s.setOtherCharge,
+    setTaxExempt: s.setTaxExempt, clearDiscount: s.clearDiscount, completeSale: s.completeSale,
+  })));
   const { currentUser, currentStore, verifyOwnerPin } = useAuthStore();
   const money = useFormatMoney();
   const currencySymbol = getStoreCurrency(currentStore?.currency_code).symbol;

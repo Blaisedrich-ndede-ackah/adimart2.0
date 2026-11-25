@@ -190,7 +190,7 @@ interface CartState {
   }>;
 }
 
-function recalculate(
+function calculateCartTotals(
   items: CartItem[],
   discountKind: CartDiscountKind,
   discountPercent: number,
@@ -249,6 +249,19 @@ function recalculate(
     discountFixed: fixed,
   };
 }
+
+const recalculate = (() => {
+  let previousArgs: Parameters<typeof calculateCartTotals> | null = null;
+  let previousResult: ReturnType<typeof calculateCartTotals> | null = null;
+  return (...args: Parameters<typeof calculateCartTotals>) => {
+    if (previousArgs && args.every((value, index) => Object.is(value, previousArgs?.[index]))) {
+      return previousResult!;
+    }
+    previousArgs = args;
+    previousResult = calculateCartTotals(...args);
+    return previousResult;
+  };
+})();
 
 function withDiscount(state: CartState, items: CartItem[]) {
   return recalculate(
