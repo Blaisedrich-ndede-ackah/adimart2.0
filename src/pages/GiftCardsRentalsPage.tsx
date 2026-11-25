@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CalendarClock, Gift, Loader2, PackageCheck, Plus, RefreshCw, RotateCcw, Search } from 'lucide-react';
+import { CalendarClock, Gift, Loader2, PackageCheck, Plus, Printer, RefreshCw, RotateCcw, Search } from 'lucide-react';
 import { db, type LocalGiftCard, type LocalGiftCardTransaction, type LocalProduct, type LocalRentalAgreement, type LocalRentalItem } from '@/lib/dexie';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useFormatMoney } from '@/lib/currency';
@@ -11,6 +11,19 @@ type RentalRow = { agreement: LocalRentalAgreement; items: LocalRentalItem[] };
 function dateTimeLocal(value: Date): string {
   const local = new Date(value.getTime() - value.getTimezoneOffset() * 60_000);
   return local.toISOString().slice(0, 16);
+}
+
+function escapePrintText(value: unknown): string {
+  return String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character] || character);
+}
+
+function openPrintableDocument(title: string, content: string): boolean {
+  const printWindow = window.open('', '_blank', 'width=720,height=800');
+  if (!printWindow) return false;
+  printWindow.document.open();
+  printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapePrintText(title)}</title><style>body{font:15px Arial,sans-serif;color:#111827;max-width:680px;margin:32px auto;padding:0 20px}header{border-bottom:2px solid #111827;margin-bottom:20px;padding-bottom:12px}h1{font-size:22px;margin:0 0 6px}h2{font-size:16px;margin:22px 0 8px}.row{display:flex;justify-content:space-between;gap:20px;border-bottom:1px solid #e5e7eb;padding:9px 0}.code{font:700 22px monospace;letter-spacing:2px;background:#f3f4f6;padding:14px;text-align:center}.muted{color:#4b5563;font-size:12px}@media print{body{margin:0 auto;padding:0 12px}}</style></head><body>${content}<script>window.onload=()=>{window.focus();window.print()}</script></body></html>`);
+  printWindow.document.close();
+  return true;
 }
 
 export default function GiftCardsRentalsPage() {
@@ -109,6 +122,17 @@ export default function GiftCardsRentalsPage() {
     setError(card ? '' : 'No card found for that code in this store.');
   };
 
+  const printGiftCard = (card: LocalGiftCard) => {
+    const content = `<header><h1>${escapePrintText(currentStore?.name || 'Store')} · Gift card</h1><p class="muted">Stored value card details</p></header><p class="code">${escapePrintText(card.code)}</p><div class="row"><strong>Current balance</strong><strong>${escapePrintText(money(card.balance))}</strong></div><div class="row"><span>Initial value</span><span>${escapePrintText(money(card.initial_value))}</span></div><div class="row"><span>Cardholder</span><span>${escapePrintText(card.customer_name || 'Not assigned')}</span></div><div class="row"><span>Status</span><span>${escapePrintText(card.status)}</span></div><div class="row"><span>Expiry</span><span>${card.expires_at ? escapePrintText(new Date(card.expires_at).toLocaleDateString()) : 'No expiry'}</span></div><p class="muted">Present this code at checkout. Keep the code private; anyone with the code can redeem the balance.</p>`;
+    if (!openPrintableDocument('Gift card', content)) setError('Allow pop-ups to print this gift card.');
+  };
+
+  const printRentalAgreement = (agreement: LocalRentalAgreement, items: LocalRentalItem[]) => {
+    const itemRows = items.map((item) => `<div class="row"><span>${escapePrintText(item.quantity)} × ${escapePrintText(item.product_name)}</span><span>${escapePrintText(money(item.rate_amount))} / ${escapePrintText(item.rate_period)}</span></div>`).join('');
+    const content = `<header><h1>${escapePrintText(currentStore?.name || 'Store')} · Rental agreement</h1><p class="muted">Agreement ${escapePrintText(agreement.agreement_number)} · ${escapePrintText(agreement.status.toUpperCase())}</p></header><div class="row"><span>Customer</span><span>${escapePrintText(agreement.customer_name)}</span></div><div class="row"><span>Phone</span><span>${escapePrintText(agreement.customer_phone || '—')}</span></div><div class="row"><span>Start</span><span>${escapePrintText(new Date(agreement.starts_at).toLocaleString())}</span></div><div class="row"><span>Due back</span><span>${escapePrintText(new Date(agreement.due_at).toLocaleString())}</span></div><h2>Rented items</h2>${itemRows}<div class="row"><span>Rental fee</span><strong>${escapePrintText(money(agreement.rental_amount))}</strong></div><div class="row"><span>Deposit</span><strong>${escapePrintText(money(agreement.deposit_amount))}</strong></div>${agreement.status === 'returned' ? `<div class="row"><span>Late fee / damage</span><span>${escapePrintText(money(agreement.late_fee + agreement.damage_fee))}</span></div><div class="row"><span>Deposit returned</span><span>${escapePrintText(money(agreement.deposit_returned))}</span></div>` : ''}<h2>Notes and condition</h2><p>${escapePrintText(agreement.notes || '—')}</p><div class="row"><span>Customer signature</span><span>________________________</span></div><div class="row"><span>Staff signature</span><span>________________________</span></div>`;
+    if (!openPrintableDocument('Rental agreement', content)) setError('Allow pop-ups to print this rental agreement.');
+  };
+
   const handleReload = () => runAction(async () => {
     if (!storeId || !currentUser) throw new Error('Select a store and sign in first.');
     const card = await changeGiftCardBalance({ storeId, code: giftFound?.code || giftQuery, amount: Number(reloadValue), type: 'reload', createdBy: currentUser.id });
@@ -188,7 +212,7 @@ export default function GiftCardsRentalsPage() {
               <div className="mt-3 flex gap-2"><input value={giftQuery} onChange={(event) => setGiftQuery(normalizeGiftCardCode(event.target.value))} onKeyDown={(event) => { if (event.key === 'Enter') void handleLookup(); }} placeholder="Enter gift card code" className="min-w-0 flex-1 rounded-xl border border-gray-200 px-3 py-2.5 font-mono text-sm uppercase" /><button type="button" onClick={() => void handleLookup()} className="rounded-xl bg-slate-900 px-3 text-white" aria-label="Look up gift card"><Search className="h-4 w-4" /></button></div>
               {giftFound && <div className="mt-3 rounded-xl border border-indigo-100 bg-indigo-50 p-3">
                 <div className="flex items-start justify-between gap-2"><div><p className="font-mono text-sm font-bold tracking-wider text-indigo-950">{giftFound.code}</p><p className="mt-1 text-xs text-indigo-800">Balance {money(giftFound.balance)} · {giftFound.status}{giftFound.expires_at ? ` · expires ${new Date(giftFound.expires_at).toLocaleDateString()}` : ''}</p></div><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${giftCardIsUsable(giftFound) ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}`}>{giftCardIsUsable(giftFound) ? 'USABLE' : 'NOT USABLE'}</span></div>
-                <div className="mt-3 flex gap-2"><input type="number" min="0.01" step="0.01" value={reloadValue} onChange={(event) => setReloadValue(event.target.value)} placeholder="Reload amount" className="min-w-0 flex-1 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm" /><button type="button" disabled={busy || !reloadValue} onClick={handleReload} className="rounded-lg bg-indigo-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Reload</button><button type="button" disabled={busy} onClick={handleDisable} className="rounded-lg border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-900">{giftFound.status === 'disabled' ? 'Enable' : 'Disable'}</button></div>
+                <div className="mt-3 flex flex-wrap gap-2"><input type="number" min="0.01" step="0.01" value={reloadValue} onChange={(event) => setReloadValue(event.target.value)} placeholder="Reload amount" className="min-w-0 flex-1 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm" /><button type="button" disabled={busy || !reloadValue} onClick={handleReload} className="rounded-lg bg-indigo-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Reload</button><button type="button" disabled={busy} onClick={handleDisable} className="rounded-lg border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-900">{giftFound.status === 'disabled' ? 'Enable' : 'Disable'}</button><button type="button" onClick={() => printGiftCard(giftFound)} className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-900"><Printer className="h-3.5 w-3.5" />Print card</button></div>
               </div>}
             </div>
           </section>
@@ -227,7 +251,7 @@ export default function GiftCardsRentalsPage() {
               return <article key={agreement.id} className={`rounded-xl border p-3 ${overdue ? 'border-red-200 bg-red-50/50' : 'border-gray-100 bg-white'}`}>
                 <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-mono text-xs font-bold text-gray-800">{agreement.agreement_number}</p><p className="mt-1 text-sm font-semibold text-gray-900">{agreement.customer_name} · {agreement.customer_phone || 'No phone'}</p><p className="mt-1 text-xs text-gray-600">{items.map((item) => `${item.quantity} × ${item.product_name}`).join(', ')}</p></div><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${overdue ? 'bg-red-100 text-red-800' : agreement.status === 'returned' ? 'bg-slate-100 text-slate-600' : 'bg-emerald-100 text-emerald-800'}`}>{overdue ? 'OVERDUE' : agreement.status.toUpperCase()}</span></div>
                 <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-600"><p>Due {new Date(agreement.due_at).toLocaleString()}</p><p>Rental fee {money(agreement.rental_amount)}</p><p>Deposit {money(agreement.deposit_amount)}</p>{agreement.status === 'returned' && <><p>Late fee {money(agreement.late_fee)}</p><p>Damage fee {money(agreement.damage_fee)}</p><p className="col-span-2 font-semibold text-gray-900">Refunded deposit {money(agreement.deposit_returned)}</p></>}</div>
-                {(agreement.status === 'active' || agreement.status === 'overdue') && <button type="button" disabled={busy} onClick={() => handleReturnRental(agreement)} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"><RotateCcw className="h-3.5 w-3.5" />Check item in</button>}
+                <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => printRentalAgreement(agreement, items)} className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-900"><Printer className="h-3.5 w-3.5" />Print agreement</button>{(agreement.status === 'active' || agreement.status === 'overdue') && <button type="button" disabled={busy} onClick={() => handleReturnRental(agreement)} className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"><RotateCcw className="h-3.5 w-3.5" />Check item in</button>}</div>
               </article>;
             }) : <p className="py-10 text-center text-sm text-gray-500">No rental agreements recorded yet.</p>}</div>
           </section>

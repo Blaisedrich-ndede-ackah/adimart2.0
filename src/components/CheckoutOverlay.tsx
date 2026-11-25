@@ -93,6 +93,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
   const [walletUseAmount, setWalletUseAmount] = useState('');
   const [giftCardCodeInput, setGiftCardCodeInput] = useState('');
   const [giftCardFound, setGiftCardFound] = useState<Awaited<ReturnType<typeof findGiftCard>>>(null);
+  const [giftCardLookupBusy, setGiftCardLookupBusy] = useState(false);
+  const [giftCardLookupMessage, setGiftCardLookupMessage] = useState('');
   const [giftCardRedeemAmount, setGiftCardRedeemAmount] = useState('');
   const [giftCardRemainderMethod, setGiftCardRemainderMethod] = useState<'cash' | 'paystack'>('cash');
   const [creditCustomers, setCreditCustomers] = useState<LocalCustomer[]>([]);
@@ -140,6 +142,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       setWalletCustomerId('');
       setGiftCardCodeInput('');
       setGiftCardFound(null);
+      setGiftCardLookupBusy(false);
+      setGiftCardLookupMessage('');
       setGiftCardRedeemAmount('');
       setGiftCardRemainderMethod('cash');
       cart.setTaxExempt(false);
@@ -166,6 +170,32 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       }
     }
   }, [isOpen, allowPercentage, canApplyDiscount]);
+
+  useEffect(() => {
+    if (step !== 'gift-card-input' || !currentStore?.id) return;
+    if (giftCardCodeInput.length !== 19) {
+      setGiftCardLookupBusy(false);
+      setGiftCardLookupMessage(giftCardCodeInput.length ? 'Enter the full 19-character card code.' : '');
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setGiftCardLookupBusy(true);
+      setGiftCardLookupMessage('Checking card…');
+      void findGiftCard(currentStore.id, giftCardCodeInput).then((card) => {
+        if (cancelled) return;
+        setGiftCardFound(card);
+        setGiftCardRedeemAmount(card ? String(Math.min(card.balance, cart.total)) : '');
+        setGiftCardLookupMessage(card ? '' : 'Gift card not found for this store.');
+        setError(card ? '' : 'Gift card not found for this store.');
+      }).catch((lookupError: unknown) => {
+        if (cancelled) return;
+        setGiftCardFound(null);
+        setGiftCardLookupMessage(lookupError instanceof Error ? lookupError.message : 'Could not check the gift card.');
+      }).finally(() => { if (!cancelled) setGiftCardLookupBusy(false); });
+    }, 250);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [step, currentStore?.id, giftCardCodeInput, cart.total]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -648,6 +678,8 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
     if (!currentStore?.id) return;
     const card = await findGiftCard(currentStore.id, giftCardCodeInput);
     setGiftCardFound(card);
+    setGiftCardRedeemAmount(card ? String(Math.min(card.balance, cart.total)) : '');
+    setGiftCardLookupMessage(card ? '' : 'Gift card not found for this store.');
     setError(card ? '' : 'Gift card not found for this store.');
     if (card) setGiftCardRedeemAmount(String(Math.min(card.balance, cart.total)));
   }
@@ -1415,10 +1447,11 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
               </div>
               <label className="block text-sm font-semibold text-gray-700">Gift card code
                 <div className="mt-1 flex gap-2">
-                  <input value={giftCardCodeInput} onChange={(event) => { const value = normalizeGiftCardCode(event.target.value); setGiftCardCodeInput(value); setGiftCardFound(null); }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void handleGiftCardLookup(); } }} placeholder="ADIXXXXXXXX" className="min-w-0 flex-1 rounded-xl border border-gray-300 px-3 py-3 font-mono text-sm uppercase" />
-                  <button type="button" onClick={() => void handleGiftCardLookup()} disabled={!giftCardCodeInput} className="rounded-xl bg-indigo-700 px-4 text-white disabled:opacity-50"><Search className="h-4 w-4" /></button>
+                  <input value={giftCardCodeInput} onChange={(event) => { const value = normalizeGiftCardCode(event.target.value); setGiftCardCodeInput(value); setGiftCardFound(null); setGiftCardRedeemAmount(''); setError(''); setGiftCardLookupMessage(''); }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void handleGiftCardLookup(); } }} placeholder="ADIXXXXXXXXXXXXXXXX" autoComplete="off" className="min-w-0 flex-1 rounded-xl border border-gray-300 px-3 py-3 font-mono text-sm uppercase" />
+                  <button type="button" onClick={() => void handleGiftCardLookup()} disabled={!giftCardCodeInput || giftCardLookupBusy} className="rounded-xl bg-indigo-700 px-4 text-white disabled:opacity-50">{giftCardLookupBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}</button>
                 </div>
               </label>
+              {giftCardLookupMessage && <p role="status" className="text-sm text-indigo-800">{giftCardLookupMessage}</p>}
               {giftCardFound && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
                 <p className="text-sm font-semibold text-emerald-900">Balance: {money(giftCardFound.balance)} · {giftCardIsUsable(giftCardFound) ? 'Active' : 'Not usable'}</p>
                 {giftCardFound.expires_at && <p className="mt-1 text-xs text-emerald-800">Expires {new Date(giftCardFound.expires_at).toLocaleDateString()}</p>}

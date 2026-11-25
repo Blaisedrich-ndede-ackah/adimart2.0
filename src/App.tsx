@@ -46,7 +46,6 @@ const VerifyPickupPage = lazy(() => import('@/pages/VerifyPickupPage'));
 const WriteOffPage = lazy(() => import('@/pages/WriteOffPage'));
 const BundlesPage = lazy(() => import('@/pages/BundlesPage'));
 const GiftCardsRentalsPage = lazy(() => import('@/pages/GiftCardsRentalsPage'));
-const IntegrationsPage = lazy(() => import('@/pages/IntegrationsPage'));
 const NotificationsPage = lazy(() => import('@/pages/NotificationsPage'));
 const ReceiptPage = lazy(() => import('@/pages/ReceiptPage'));
 const TermsPage = lazy(() => import('@/pages/TermsPage'));
@@ -397,7 +396,7 @@ function AuthenticatedApp() {
   useEffect(() => {
     // Cashiers cannot stay on owner-only pages after switch/login
     if (currentUser?.role !== 'cashier') return;
-    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'returns', 'multistore', 'adimat-ai', 'store-deals', 'bundles', 'integrations'];
+    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'returns', 'multistore', 'adimat-ai', 'store-deals', 'bundles'];
     const ecommerceOk = (currentUser.can_manage_ecommerce ?? 0) === 1;
     const cashbookOk = canAccessCashbook(currentUser);
     const customerPaymentsOk = canRecordCustomerPayments(currentUser);
@@ -691,8 +690,6 @@ function AuthenticatedApp() {
         return role === 'owner' ? <BundlesPage /> : <POSPage />;
       case 'gift-cards-rentals':
         return role === 'owner' ? <GiftCardsRentalsPage /> : <POSPage />;
-      case 'integrations':
-        return role === 'owner' ? <IntegrationsPage /> : <POSPage />;
       case 'notifications':
         return <NotificationsPage />;
       default:

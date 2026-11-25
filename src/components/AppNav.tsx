@@ -3,7 +3,7 @@ import {
   ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, House, Search, ClipboardCheck,
   Sparkles, CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare, Moon, Sun,
   ShoppingCart, RotateCcw, QrCode,
-  ContactRound, ArrowLeftRight, Building2, Megaphone, Tag, Boxes, ClipboardMinus, Gift, Webhook, Bell,
+  ContactRound, ArrowLeftRight, Building2, Megaphone, Tag, Boxes, ClipboardMinus, Gift, Bell,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -83,7 +83,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         });
         if (!response.ok) return;
         const result = await response.json();
-        if (active) setUnreadNotifications((result.notifications || []).filter((row: { is_read?: boolean }) => !row.is_read).length);
+        if (active) setUnreadNotifications(Number.isFinite(Number(result.unread_count)) ? Number(result.unread_count) : (result.notifications || []).filter((row: { is_read?: boolean }) => !row.is_read).length);
       } catch { /* Keep the last notification count while offline. */ }
     };
     void refreshNotifications();
@@ -115,7 +115,6 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         { id: 'write-offs', label: t('writeoff.title'), shortLabel: t('writeoff.title'), icon: ClipboardMinus, show: isOwner || currentStore?.cashiers_can_record_expenses === 1 },
         { id: 'bundles', label: t('bundle.title'), shortLabel: t('bundle.title'), icon: Boxes, show: isOwner },
         { id: 'gift-cards-rentals', label: 'Gift cards & rentals', shortLabel: 'Gift cards', icon: Gift, show: isOwner },
-        { id: 'integrations', label: 'API & webhooks', shortLabel: 'Integrations', icon: Webhook, show: isOwner },
         { id: 'notifications', label: 'Notifications', icon: Bell, show: true },
         { id: 'learn', label: 'Learn Adimat', icon: BookOpen, show: true },
         { id: 'campaigns', label: 'Promotions', icon: Megaphone, show: true },
@@ -161,7 +160,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
     { label: t('nav.main'), ids: ['home', 'pos', 'search', 'adimat-ai', 'stock-approvals', 'transactions'] },
     { label: 'Shop', ids: ['inventory', 'purchasing', 'warehouse', 'ecommerce', 'multistore', 'store-deals', 'gift-cards-rentals'] },
     { label: 'Operations', ids: ['reports', 'expenses', 'cashbook', 'devices', 'verify-pickup', 'write-offs', 'bundles', 'subscription', 'returns', 'customers', 'notifications'] },
-    { label: 'Help', ids: ['learn', 'campaigns', 'community', 'integrations', 'settings'] },
+    { label: 'Help', ids: ['learn', 'campaigns', 'community', 'settings'] },
   ];
   const groupedMoreItems = navGroups
     .map((group) => ({

@@ -25,10 +25,6 @@
     {
       "path": "/api/send-cloud-sync-reminders",
       "schedule": "0 9 * * *"
-    },
-    {
-      "path": "/api/integrations?action=retry-webhooks",
-      "schedule": "0 10 * * *"
     }
   ]
 }
