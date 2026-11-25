@@ -13,8 +13,15 @@ interface ApiResponse {
   json: (value: unknown) => void;
   setHeader: (name: string, value: string) => void;
   send?: (value: string) => void;
+  headersSent?: boolean;
 }
 
-export default function handler(request: ApiRequest, response: ApiResponse): Promise<void> {
-  return handleIntegrations(request, response);
+export default async function handler(request: ApiRequest, response: ApiResponse): Promise<void> {
+  try {
+    await handleIntegrations(request, response);
+  } catch (error) {
+    console.error('[api/integrations] Unhandled request failure:', error);
+    if (response.headersSent) return;
+    response.status(500).json({ error: 'Notification service failed before it could complete the request.' });
+  }
 }

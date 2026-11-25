@@ -227,12 +227,12 @@ async function emitEvent(db: SupabaseClient, input: Record<string, unknown>): Pr
 }
 
 export async function handleIntegrations(request: ApiRequest, response: ApiResponse): Promise<void> {
-  response.setHeader('Cache-Control', 'no-store');
-  response.setHeader('Access-Control-Allow-Origin', '*');
-  response.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-  response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  if (request.method === 'OPTIONS') { response.status(204).json({}); return; }
   try {
+    response.setHeader('Cache-Control', 'no-store');
+    response.setHeader('Access-Control-Allow-Origin', '*');
+    response.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+    response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    if (request.method === 'OPTIONS') { response.status(204).json({}); return; }
     const db = database();
     const action = one(request.query?.action);
     const input = bodyObject(request.body || {});
@@ -268,6 +268,7 @@ export async function handleIntegrations(request: ApiRequest, response: ApiRespo
   } catch (error) {
     const explicitStatus = Number((error as { statusCode?: number })?.statusCode);
     const statusCode = explicitStatus || ((error as { code?: string })?.code ? 500 : 400);
+    console.error('[integrations] Request failed:', error);
     response.status(statusCode).json({ error: error instanceof Error ? error.message : 'Integration request failed.' });
   }
 }
