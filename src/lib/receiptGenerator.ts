@@ -28,6 +28,7 @@ export interface ReceiptData {
   total: number;
   paymentMethod: string;
   cashAmount?: number;
+  giftCardAmount?: number;
   paystackAmount?: number;
   momoAmount?: number;
   chequeAmount?: number;
@@ -257,6 +258,14 @@ function generateReceiptPDF(data: ReceiptData): jsPDF {
       y += 4;
     }
   }
+  if (data.giftCardAmount) {
+    leftRightText('  Gift card:', amt(data, data.giftCardAmount), y, 8);
+    y += 4;
+  }
+  if (data.paymentMethod === 'gift_card' && data.cashAmount) {
+    leftRightText('  Cash:', amt(data, data.cashAmount), y, 8);
+    y += 4;
+  }
 
   if (data.manualPaymentAmount && data.manualPaymentAmount > 0) {
     leftRightText('  Paid:', amt(data, data.manualPaymentAmount), y, 8);
@@ -370,6 +379,12 @@ function generateOfficialReceiptPdf(data: ReceiptData): FormalPdf {
     ...(data.customerName ? [{ label: 'Customer', value: data.customerName }] : []),
     ...(data.walletAmount
       ? [{ label: 'Store credit used', value: formatGhsOfficial(data.walletAmount, data.currencyCode) }]
+      : []),
+    ...(data.giftCardAmount
+      ? [{ label: 'Gift card used', value: formatGhsOfficial(data.giftCardAmount, data.currencyCode) }]
+      : []),
+    ...(data.paymentMethod === 'gift_card' && data.cashAmount
+      ? [{ label: 'Cash due', value: formatGhsOfficial(data.cashAmount, data.currencyCode) }]
       : []),
     ...(data.receiptPurpose === 'credit-payment'
       ? [
@@ -579,6 +594,8 @@ function generateReceiptText(data: ReceiptData): string {
     if (data.cashAmount) lines.push(leftRight('  Cash:', amt(data, data.cashAmount)));
     if (data.paystackAmount) lines.push(leftRight('  MoMo:', amt(data, data.paystackAmount)));
   }
+  if (data.giftCardAmount) lines.push(leftRight('  Gift card:', amt(data, data.giftCardAmount)));
+  if (data.paymentMethod === 'gift_card' && data.cashAmount) lines.push(leftRight('  Cash:', amt(data, data.cashAmount)));
   if (data.momoAmount) lines.push(leftRight('  MoMo:', amt(data, data.momoAmount)));
   if (data.chequeAmount) lines.push(leftRight('  Cheque:', amt(data, data.chequeAmount)));
   if (data.manualPaymentAmount) lines.push(leftRight('  Amount received:', amt(data, data.manualPaymentAmount)));

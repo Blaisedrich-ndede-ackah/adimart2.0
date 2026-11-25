@@ -78,7 +78,9 @@ export async function changeGiftCardBalance(input: {
     const active = giftCardIsUsable(card);
     if (input.type === 'redeem' && !active) throw new Error(card.expires_at && new Date(card.expires_at) <= new Date() ? 'This gift card has expired.' : 'This gift card is not active.');
     if (input.type === 'redeem' && amount > card.balance) throw new Error('Gift card balance is too low.');
-    if (input.type === 'reload' && card.status !== 'active') throw new Error('Only active gift cards can be reloaded.');
+    if (input.type === 'reload' && (card.status !== 'active' || (card.expires_at && new Date(card.expires_at) <= new Date()))) {
+      throw new Error('Only unexpired active gift cards can be reloaded.');
+    }
     const balance = roundMoney(card.balance + (input.type === 'reload' ? amount : -amount));
     const now = new Date().toISOString();
     const updated: LocalGiftCard = { ...card, balance, status: balance <= 0 ? 'depleted' : 'active', updated_at: now, synced: 0 };
@@ -96,7 +98,9 @@ export async function changeGiftCardBalance(input: {
 export async function setGiftCardDisabled(storeId: string, cardId: string, disabled: boolean): Promise<void> {
   const card = await db.gift_cards.get(cardId);
   if (!card || card.store_id !== storeId) throw new Error('Gift card not found.');
-  await db.gift_cards.update(cardId, { status: disabled ? 'disabled' : card.balance > 0 ? 'active' : 'depleted', updated_at: new Date().toISOString(), synced: 0 });
+  const isExpired = Boolean(card.expires_at && new Date(card.expires_at) <= new Date());
+  const status: LocalGiftCard['status'] = disabled ? 'disabled' : isExpired ? 'expired' : card.balance > 0 ? 'active' : 'depleted';
+  await db.gift_cards.update(cardId, { status, updated_at: new Date().toISOString(), synced: 0 });
 }
 
 function rentalAgreementNumber(): string {
@@ -130,12 +134,15 @@ export async function createRentalAgreement(input: {
   const rates = { daily: Number(product.rental_rate_daily) || 0, weekly: Number(product.rental_rate_weekly) || 0, monthly: Number(product.rental_rate_monthly) || 0 };
   const rate = roundMoney(rates[input.ratePeriod]);
   if (rate <= 0) throw new Error(`Set a ${input.ratePeriod} rental rate on this product first.`);
+  const periodMs = input.ratePeriod === 'weekly' ? 7 * 86_400_000 : input.ratePeriod === 'monthly' ? 30 * 86_400_000 : 86_400_000;
+  const billedPeriods = Math.max(1, Math.ceil((dueAt.getTime() - startsAt.getTime()) / periodMs));
   const now = new Date().toISOString();
   const agreement: LocalRentalAgreement = {
     id: generateId(), store_id: input.storeId, agreement_number: rentalAgreementNumber(),
     customer_id: input.customerId || null, customer_name: input.customerName.trim(), customer_phone: input.customerPhone?.trim() || '',
     status: dueAt.getTime() < Date.now() ? 'overdue' : 'active', starts_at: startsAt.toISOString(), due_at: dueAt.toISOString(),
-    returned_at: null, deposit_amount: roundMoney((Number(product.deposit_amount) || 0) * qty), deposit_returned: 0,
+    returned_at: null, rental_amount: roundMoney(rate * qty * billedPeriods),
+    deposit_amount: roundMoney((Number(product.deposit_amount) || 0) * qty), deposit_returned: 0,
     late_fee: 0, damage_fee: 0, notes: input.notes?.trim() || '', created_by: input.createdBy,
     created_by_name: input.createdByName, created_at: now, updated_at: now, synced: 0,
   };

@@ -1364,10 +1364,27 @@ export const useCartStore = create<CartState>((set, get) => ({
       const items = await db.transaction_items.where('transaction_id').equals(txnId).toArray();
       await db.transaction(
         'rw',
-        [db.transaction_items, db.transactions, db.customer_wallet_transactions, db.customers, db.customer_loyalty_transactions, db.product_variants],
+        [db.transaction_items, db.transactions, db.customer_wallet_transactions, db.customers, db.customer_loyalty_transactions, db.product_variants, db.gift_cards, db.gift_card_transactions],
         async () => {
           await Promise.all(items.map((item) => db.transaction_items.delete(item.id)));
           await db.transactions.delete(txnId);
+          if (giftCard > 0) {
+            const redemptions = await db.gift_card_transactions.where('transaction_id').equals(txnId).toArray();
+            for (const redemption of redemptions) {
+              const card = await db.gift_cards.get(redemption.gift_card_id);
+              if (card) {
+                const restoredBalance = toMoneyAmount(card.balance + redemption.amount);
+                const expired = Boolean(card.expires_at && new Date(card.expires_at) <= new Date());
+                await db.gift_cards.update(card.id, {
+                  balance: restoredBalance,
+                  status: expired ? 'expired' : restoredBalance > 0 ? 'active' : 'depleted',
+                  updated_at: new Date().toISOString(),
+                  synced: 0,
+                });
+              }
+              await db.gift_card_transactions.delete(redemption.id);
+            }
+          }
           for (const item of state.items) {
             if (!item.variant_id) continue;
             const variant = await db.product_variants.get(item.variant_id);

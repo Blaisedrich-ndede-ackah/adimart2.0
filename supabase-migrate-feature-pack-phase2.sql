@@ -74,6 +74,9 @@ CREATE TABLE IF NOT EXISTS public.rental_agreements (
 );
 CREATE INDEX IF NOT EXISTS idx_rental_agreements_store_due ON public.rental_agreements(store_id, status, due_at);
 
+ALTER TABLE public.rental_agreements
+  ADD COLUMN IF NOT EXISTS rental_amount NUMERIC(12,2) NOT NULL DEFAULT 0;
+
 CREATE TABLE IF NOT EXISTS public.rental_items (
   id UUID PRIMARY KEY,
   store_id UUID NOT NULL REFERENCES public.stores(id) ON DELETE CASCADE,

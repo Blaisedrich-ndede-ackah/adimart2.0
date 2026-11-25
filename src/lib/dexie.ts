@@ -578,6 +578,7 @@ export interface LocalRentalAgreement {
   starts_at: string;
   due_at: string;
   returned_at?: string | null;
+  rental_amount: number;
   deposit_amount: number;
   deposit_returned: number;
   late_fee: number;
@@ -6284,6 +6285,7 @@ export async function syncFromSupabase(opts?: {
           customer_id: (row.customer_id as string) || null, customer_name: String(row.customer_name || ''), customer_phone: String(row.customer_phone || ''),
           status: (['active', 'overdue', 'returned', 'cancelled'].includes(String(row.status)) ? row.status : 'active') as LocalRentalAgreement['status'],
           starts_at: String(row.starts_at || ''), due_at: String(row.due_at || ''), returned_at: (row.returned_at as string) || null,
+          rental_amount: Math.max(0, Number(row.rental_amount) || 0),
           deposit_amount: Math.max(0, Number(row.deposit_amount) || 0), deposit_returned: Math.max(0, Number(row.deposit_returned) || 0),
           late_fee: Math.max(0, Number(row.late_fee) || 0), damage_fee: Math.max(0, Number(row.damage_fee) || 0), notes: String(row.notes || ''),
           created_by: (row.created_by as string) || '', created_by_name: String(row.created_by_name || ''),

@@ -140,7 +140,7 @@ export async function pushShopExtensions(storeId: string): Promise<{ synced: num
       id: row.id, store_id: row.store_id, agreement_number: row.agreement_number,
       customer_id: row.customer_id || null, customer_name: row.customer_name, customer_phone: row.customer_phone,
       status: row.status, starts_at: row.starts_at, due_at: row.due_at, returned_at: row.returned_at || null,
-      deposit_amount: row.deposit_amount, deposit_returned: row.deposit_returned, late_fee: row.late_fee,
+      rental_amount: row.rental_amount, deposit_amount: row.deposit_amount, deposit_returned: row.deposit_returned, late_fee: row.late_fee,
       damage_fee: row.damage_fee, notes: row.notes, created_by: row.created_by,
       created_by_name: row.created_by_name, created_at: row.created_at, updated_at: row.updated_at,
     })));

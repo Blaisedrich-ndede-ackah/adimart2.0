@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import {
   X, Banknote, CreditCard, Split, Percent, Shield,
   CheckCircle2, Loader2, Printer, AlertTriangle, Share2, Download,
-  Smartphone, MessageCircle, CirclePlus, Trash2, Search
+  Smartphone, MessageCircle, CirclePlus, Trash2, Search, Gift
 } from 'lucide-react';
 import { useCartStore, CartItem } from '@/store/useCartStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -94,6 +94,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
   const [giftCardCodeInput, setGiftCardCodeInput] = useState('');
   const [giftCardFound, setGiftCardFound] = useState<Awaited<ReturnType<typeof findGiftCard>>>(null);
   const [giftCardRedeemAmount, setGiftCardRedeemAmount] = useState('');
+  const [giftCardRemainderMethod, setGiftCardRemainderMethod] = useState<'cash' | 'paystack'>('cash');
   const [creditCustomers, setCreditCustomers] = useState<LocalCustomer[]>([]);
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [saleResult, setSaleResult] = useState<SaleResult | null>(null);
@@ -140,6 +141,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       setGiftCardCodeInput('');
       setGiftCardFound(null);
       setGiftCardRedeemAmount('');
+      setGiftCardRemainderMethod('cash');
       cart.setTaxExempt(false);
       setWalletUseAmount('');
       setCreditCustomers([]);
@@ -199,6 +201,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       total: result.total,
       paymentMethod: method,
       cashAmount: result.cashAmount,
+      giftCardAmount: result.giftCardAmount,
       paystackAmount: result.paystackAmount,
       manualPaymentAmount: result.manualPaymentAmount,
       walletAmount: result.walletAmount,
@@ -368,7 +371,6 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         paystackAmount: isManualPaymentMethod(method) ? 0 : paystackAmt,
         manualPaymentAmount: isManualPaymentMethod(method) ? result.total : 0,
         walletAmount: walletAmt,
-        giftCardAmount: giftCardAmt,
         paystackReference: paystackRef,
         paymentReference: paymentRef || paystackRef,
         customerName: customerName || creditCustomers.find((customer) => customer.id === cart.loyaltyCustomerId)?.name,
@@ -642,6 +644,36 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
     );
   }
 
+  async function handleGiftCardLookup() {
+    if (!currentStore?.id) return;
+    const card = await findGiftCard(currentStore.id, giftCardCodeInput);
+    setGiftCardFound(card);
+    setError(card ? '' : 'Gift card not found for this store.');
+    if (card) setGiftCardRedeemAmount(String(Math.min(card.balance, cart.total)));
+  }
+
+  function handleGiftCardSaleConfirm() {
+    if (!giftCardFound || !giftCardIsUsable(giftCardFound)) {
+      setError(giftCardFound?.expires_at && new Date(giftCardFound.expires_at) <= new Date() ? 'This gift card has expired.' : 'Check an active gift card first.');
+      return;
+    }
+    const amount = Math.round((Number(giftCardRedeemAmount) || 0) * 100) / 100;
+    if (amount <= 0 || amount > giftCardFound.balance || amount > cart.total) {
+      setError('Gift card amount must be within both the card balance and sale total.');
+      return;
+    }
+    const cashDue = Math.round((cart.total - amount) * 100) / 100;
+    if (cashDue > 0 && giftCardRemainderMethod === 'paystack') {
+      if (!isPaystackConfigured()) {
+        setError('Paystack is not configured for the remaining balance. Choose cash or contact the store owner.');
+        return;
+      }
+      handlePaystackPayment(cashDue, generatePaystackReference(), 0, { code: giftCardFound.code, amount });
+      return;
+    }
+    processSale('gift_card', cashDue, 0, '', '', '', '', undefined, 0, giftCardFound.code, amount);
+  }
+
   function handleCashConfirm() {
     const received = Math.round((parseFloat(cashAmount) || 0) * 100) / 100;
     if (isNaN(received) || received < cart.total) {
@@ -680,7 +712,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
     handlePaystackPayment(cart.total, ref, 0);
   }
 
-  async function handlePaystackPayment(amount: number, reference: string, cashPortion: number) {
+  async function handlePaystackPayment(amount: number, reference: string, cashPortion: number, giftCardPayment?: { code: string; amount: number }) {
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       setPaystackError('No internet. Choose Cash for this sale, or reconnect before using Mobile Money.');
       setStep('method');
@@ -704,7 +736,9 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         amount: Math.round(amount * 100),
         reference,
         onSuccess: (ref) => {
-          if (cashPortion > 0) {
+          if (giftCardPayment) {
+            processSale('split', cashPortion, amount, ref, '', '', '', undefined, 0, giftCardPayment.code, giftCardPayment.amount);
+          } else if (cashPortion > 0) {
             processSale('split', cashPortion, amount, ref);
           } else {
             processSale('paystack', 0, amount, ref);
@@ -732,6 +766,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
           <h2 className="text-lg font-bold text-gray-900">
             {step === 'method' && 'Checkout'}
+            {step === 'gift-card-input' && 'Gift Card Payment'}
             {step === 'discount' && 'Apply Discount'}
             {step === 'charges' && 'Add Other Charges'}
             {step === 'pin-verify' && 'Owner Authorization'}
@@ -1016,6 +1051,11 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                   </div>
                 </button>
               )}
+
+              <button type="button" onClick={() => { setGiftCardCodeInput(''); setGiftCardFound(null); setGiftCardRedeemAmount(''); setGiftCardRemainderMethod('cash'); setError(''); setStep('gift-card-input'); }} className="w-full flex items-center gap-3 p-4 rounded-xl border border-indigo-200 hover:border-indigo-500 hover:bg-indigo-50 transition touch-target">
+                <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center"><Gift className="w-5 h-5 text-indigo-700" /></div>
+                <div className="text-left flex-1"><p className="font-semibold text-gray-900">Gift Card</p><p className="text-xs text-gray-500">Use a gift card for all or part of this sale</p></div>
+              </button>
 
               <details className="rounded-xl border border-gray-200 p-4">
                 <summary className="text-sm font-medium text-gray-700 cursor-pointer">Customer email (optional)</summary>
@@ -1364,6 +1404,34 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                   Complete Sale
                 </button>
               </div>
+            </div>
+          )}
+
+          {step === 'gift-card-input' && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4 text-center">
+                <p className="text-sm text-indigo-800">Sale total</p>
+                <p className="mt-1 text-2xl font-bold text-gray-900">{money(cart.total)}</p>
+              </div>
+              <label className="block text-sm font-semibold text-gray-700">Gift card code
+                <div className="mt-1 flex gap-2">
+                  <input value={giftCardCodeInput} onChange={(event) => { const value = normalizeGiftCardCode(event.target.value); setGiftCardCodeInput(value); setGiftCardFound(null); }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void handleGiftCardLookup(); } }} placeholder="ADIXXXXXXXX" className="min-w-0 flex-1 rounded-xl border border-gray-300 px-3 py-3 font-mono text-sm uppercase" />
+                  <button type="button" onClick={() => void handleGiftCardLookup()} disabled={!giftCardCodeInput} className="rounded-xl bg-indigo-700 px-4 text-white disabled:opacity-50"><Search className="h-4 w-4" /></button>
+                </div>
+              </label>
+              {giftCardFound && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="text-sm font-semibold text-emerald-900">Balance: {money(giftCardFound.balance)} · {giftCardIsUsable(giftCardFound) ? 'Active' : 'Not usable'}</p>
+                {giftCardFound.expires_at && <p className="mt-1 text-xs text-emerald-800">Expires {new Date(giftCardFound.expires_at).toLocaleDateString()}</p>}
+                {giftCardIsUsable(giftCardFound) && <label className="mt-3 block text-xs font-semibold text-gray-700">Amount to redeem
+                  <input type="number" inputMode="decimal" min="0.01" max={Math.min(giftCardFound.balance, cart.total)} step="0.01" value={giftCardRedeemAmount} onChange={(event) => setGiftCardRedeemAmount(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm" />
+                </label>}
+                {giftCardIsUsable(giftCardFound) && <>
+                  <p className="mt-2 text-xs text-gray-600">Remaining balance: {money(Math.max(0, cart.total - (Number(giftCardRedeemAmount) || 0)))}</p>
+                  {Number(giftCardRedeemAmount) > 0 && Number(giftCardRedeemAmount) < cart.total && <label className="mt-2 block text-xs font-semibold text-gray-700">Pay remaining amount by<select value={giftCardRemainderMethod} onChange={(event) => setGiftCardRemainderMethod(event.target.value as 'cash' | 'paystack')} className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm"><option value="cash">Cash</option><option value="paystack" disabled={!isPaystackConfigured()}>Mobile Money / card{isPaystackConfigured() ? '' : ' (not configured)'}</option></select></label>}
+                </>}
+              </div>}
+              {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+              <div className="flex gap-3"><button type="button" onClick={() => { setError(''); setStep('method'); }} className="flex-1 rounded-xl border border-gray-300 py-3 font-medium text-gray-700">Back</button><button type="button" onClick={handleGiftCardSaleConfirm} disabled={!giftCardFound || !giftCardRedeemAmount} className="flex-1 rounded-xl bg-primary py-3 font-semibold text-white disabled:opacity-50">Apply gift card</button></div>
             </div>
           )}
 

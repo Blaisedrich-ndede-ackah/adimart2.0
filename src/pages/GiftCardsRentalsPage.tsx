@@ -44,6 +44,15 @@ export default function GiftCardsRentalsPage() {
 
   const storeId = currentStore?.id || '';
   const selectedRentalProduct = products.find((product) => product.id === rentalProductId);
+  const selectedRentalRate = selectedRentalProduct
+    ? rentalRatePeriod === 'weekly' ? selectedRentalProduct.rental_rate_weekly
+      : rentalRatePeriod === 'monthly' ? selectedRentalProduct.rental_rate_monthly
+        : selectedRentalProduct.rental_rate_daily
+    : 0;
+  const rentalPeriodDays = rentalRatePeriod === 'weekly' ? 7 : rentalRatePeriod === 'monthly' ? 30 : 1;
+  const rentalDurationDays = (new Date(rentalDueAt).getTime() - Date.now()) / 86_400_000;
+  const estimatedRentalPeriods = Number.isFinite(rentalDurationDays) ? Math.max(1, Math.ceil(rentalDurationDays / rentalPeriodDays)) : 1;
+  const estimatedRentalFee = (selectedRentalRate || 0) * (Number(rentalQty) || 0) * estimatedRentalPeriods;
 
   const load = useCallback(async () => {
     if (!storeId) return;
@@ -60,7 +69,7 @@ export default function GiftCardsRentalsPage() {
       allLedger.sort((a, b) => b.created_at.localeCompare(a.created_at));
       allAgreements.sort((a, b) => b.created_at.localeCompare(a.created_at));
       setCards(allCards);
-      setLedger(allLedger.slice(0, 30));
+      setLedger(allLedger);
       setProducts(allProducts.filter((product) => product.is_rentable === 1 && product.is_active === 1).sort((a, b) => a.name.localeCompare(b.name)));
       setCustomers(allCustomers.filter((customer) => customer.is_active === 1).map((customer) => ({ id: customer.id, name: customer.name, phone: customer.phone })));
       setRentals(await Promise.all(allAgreements.map(async (agreement) => ({
@@ -110,7 +119,8 @@ export default function GiftCardsRentalsPage() {
     if (!storeId || !giftFound) throw new Error('Look up a gift card first.');
     const disabled = giftFound.status !== 'disabled';
     await setGiftCardDisabled(storeId, giftFound.id, disabled);
-    setGiftFound({ ...giftFound, status: disabled ? 'disabled' : giftFound.balance > 0 ? 'active' : 'depleted' });
+    const expired = Boolean(giftFound.expires_at && new Date(giftFound.expires_at) <= new Date());
+    setGiftFound({ ...giftFound, status: disabled ? 'disabled' : expired ? 'expired' : giftFound.balance > 0 ? 'active' : 'depleted' });
     setMessage(disabled ? 'Gift card disabled.' : 'Gift card re-enabled.');
   });
 
@@ -123,7 +133,7 @@ export default function GiftCardsRentalsPage() {
       startsAt: new Date().toISOString(), dueAt: new Date(rentalDueAt).toISOString(), ratePeriod: rentalRatePeriod,
       createdBy: currentUser.id, createdByName: currentUser.name || '', notes: rentalNotes,
     });
-    setMessage(`Rental ${agreement.agreement_number} created. Record the rental charge and deposit through the till.`);
+    setMessage(`Rental ${agreement.agreement_number} created. Collect the ${money(agreement.rental_amount)} rental fee and ${money(agreement.deposit_amount)} deposit through the till.`);
     setRentalQty('1'); setRentalNotes('');
   });
 
@@ -156,6 +166,14 @@ export default function GiftCardsRentalsPage() {
 
         {tab === 'gift-cards' ? <div className="grid gap-4 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
           <section className="space-y-4">
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                ['Outstanding balance', money(cards.reduce((sum, card) => sum + card.balance, 0))],
+                ['Value issued', money(ledger.filter((entry) => entry.type === 'issue').reduce((sum, entry) => sum + entry.amount, 0))],
+                ['Reloaded', money(ledger.filter((entry) => entry.type === 'reload').reduce((sum, entry) => sum + entry.amount, 0))],
+                ['Redeemed', money(ledger.filter((entry) => entry.type === 'redeem').reduce((sum, entry) => sum + entry.amount, 0))],
+              ].map(([label, value]) => <div key={label} className="rounded-xl border border-gray-100 bg-white p-3 shadow-sm"><p className="text-[11px] text-gray-500">{label}</p><p className="mt-1 text-sm font-bold text-gray-900">{value}</p></div>)}
+            </div>
             <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
               <h2 className="flex items-center gap-2 font-bold text-gray-900"><Plus className="h-4 w-4 text-primary" />Issue a gift card</h2>
               <label className="mt-3 block text-xs font-semibold text-gray-600">Starting value<input type="number" min="0.01" step="0.01" value={giftValue} onChange={(event) => setGiftValue(event.target.value)} className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-3 text-sm" placeholder="0.00" /></label>
@@ -181,9 +199,13 @@ export default function GiftCardsRentalsPage() {
               {cards.length === 0 ? <p className="py-8 text-center text-sm text-gray-500">No gift cards issued on this store yet.</p> : cards.map((card) => <button key={card.id} type="button" onClick={() => { setGiftFound(card); setGiftQuery(card.code); }} className="flex w-full items-center justify-between gap-3 rounded-xl border border-gray-100 p-3 text-left hover:border-indigo-200 hover:bg-indigo-50/50"><span className="min-w-0"><span className="block truncate font-mono text-sm font-bold text-gray-900">{card.code}</span><span className="mt-1 block truncate text-xs text-gray-500">{card.customer_name || 'Unassigned'} · {card.status}</span></span><span className="shrink-0 text-right"><span className="block font-bold text-gray-900">{money(card.balance)}</span><span className="text-[10px] text-gray-500">of {money(card.initial_value)}</span></span></button>)}
             </div>
             <h3 className="mt-4 border-t border-gray-100 pt-3 text-xs font-bold uppercase tracking-wide text-gray-500">Recent card activity</h3>
-            <div className="mt-2 max-h-52 space-y-2 overflow-y-auto">{ledger.length ? ledger.map((entry) => <div key={entry.id} className="flex items-center justify-between gap-2 text-xs"><span className="truncate text-gray-600">{cards.find((card) => card.id === entry.gift_card_id)?.code || 'Gift card'} · {entry.type}</span><span className="shrink-0 font-semibold text-gray-900">{money(entry.amount)} → {money(entry.balance_after)}</span></div>) : <p className="text-xs text-gray-500">No activity recorded.</p>}</div>
+            <div className="mt-2 max-h-52 space-y-2 overflow-y-auto">{ledger.length ? ledger.slice(0, 30).map((entry) => <div key={entry.id} className="flex items-center justify-between gap-2 text-xs"><span className="truncate text-gray-600">{cards.find((card) => card.id === entry.gift_card_id)?.code || 'Gift card'} · {entry.type}</span><span className="shrink-0 font-semibold text-gray-900">{money(entry.amount)} → {money(entry.balance_after)}</span></div>) : <p className="text-xs text-gray-500">No activity recorded.</p>}</div>
           </section>
         </div> : <div className="grid gap-4 xl:grid-cols-[minmax(300px,0.8fr)_minmax(0,1.2fr)]">
+          <div className="grid grid-cols-2 gap-2 xl:col-span-2">
+            <div className="rounded-xl border border-gray-100 bg-white p-3 shadow-sm"><p className="text-[11px] text-gray-500">Active rentals</p><p className="mt-1 text-lg font-bold text-gray-900">{activeRentals.length}</p></div>
+            <div className="rounded-xl border border-red-100 bg-red-50 p-3 shadow-sm"><p className="text-[11px] text-red-700">Overdue rentals</p><p className="mt-1 text-lg font-bold text-red-900">{activeRentals.filter(({ agreement }) => agreement.due_at < new Date().toISOString()).length}</p></div>
+          </div>
           <section className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
             <h2 className="flex items-center gap-2 font-bold text-gray-900"><PackageCheck className="h-4 w-4 text-primary" />Start a rental</h2>
             {products.length === 0 ? <p className="mt-3 rounded-xl bg-amber-50 p-3 text-xs text-amber-800">Mark a product as rentable in Inventory and set at least one rental rate first.</p> : <>
@@ -192,7 +214,7 @@ export default function GiftCardsRentalsPage() {
               {!rentalCustomerId && <div className="mt-2 grid grid-cols-2 gap-2"><input value={rentalCustomerName} onChange={(event) => setRentalCustomerName(event.target.value)} placeholder="Customer name" className="rounded-xl border border-gray-200 px-3 py-2.5 text-sm" /><input value={rentalCustomerPhone} onChange={(event) => setRentalCustomerPhone(event.target.value)} placeholder="Phone" className="rounded-xl border border-gray-200 px-3 py-2.5 text-sm" /></div>}
               <div className="mt-3 grid grid-cols-2 gap-2"><label className="text-xs font-semibold text-gray-600">Quantity<input type="number" min="1" step="1" value={rentalQty} onChange={(event) => setRentalQty(event.target.value)} className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-3 text-sm" /></label><label className="text-xs font-semibold text-gray-600">Rate period<select value={rentalRatePeriod} onChange={(event) => setRentalRatePeriod(event.target.value as LocalRentalItem['rate_period'])} className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-3 text-sm"><option value="daily">Daily · {money(selectedRentalProduct?.rental_rate_daily || 0)}</option><option value="weekly">Weekly · {money(selectedRentalProduct?.rental_rate_weekly || 0)}</option><option value="monthly">Monthly · {money(selectedRentalProduct?.rental_rate_monthly || 0)}</option></select></label></div>
               <label className="mt-3 block text-xs font-semibold text-gray-600">Due back<input type="datetime-local" value={rentalDueAt} onChange={(event) => setRentalDueAt(event.target.value)} className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-3 text-sm" /></label>
-              <p className="mt-2 rounded-xl bg-indigo-50 p-3 text-xs text-indigo-900">Deposit to collect: <strong>{money((selectedRentalProduct?.deposit_amount || 0) * (Number(rentalQty) || 0))}</strong>. The app records the deposit obligation; collect it through the till.</p>
+              <p className="mt-2 rounded-xl bg-indigo-50 p-3 text-xs text-indigo-900">Estimated rental fee: <strong>{money(estimatedRentalFee)}</strong> · Deposit to collect: <strong>{money((selectedRentalProduct?.deposit_amount || 0) * (Number(rentalQty) || 0))}</strong>. This records the amounts due; collect them through the till.</p>
               <textarea value={rentalNotes} onChange={(event) => setRentalNotes(event.target.value)} rows={2} placeholder="Notes or item condition at handover" className="mt-3 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm" />
               <button type="button" disabled={busy || !rentalProductId || !(rentalCustomerId || rentalCustomerName.trim())} onClick={handleCreateRental} className="mt-3 w-full rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">Create agreement & release stock</button>
             </>}
@@ -204,7 +226,7 @@ export default function GiftCardsRentalsPage() {
               const overdue = (agreement.status === 'active' || agreement.status === 'overdue') && agreement.due_at < new Date().toISOString();
               return <article key={agreement.id} className={`rounded-xl border p-3 ${overdue ? 'border-red-200 bg-red-50/50' : 'border-gray-100 bg-white'}`}>
                 <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-mono text-xs font-bold text-gray-800">{agreement.agreement_number}</p><p className="mt-1 text-sm font-semibold text-gray-900">{agreement.customer_name} · {agreement.customer_phone || 'No phone'}</p><p className="mt-1 text-xs text-gray-600">{items.map((item) => `${item.quantity} × ${item.product_name}`).join(', ')}</p></div><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${overdue ? 'bg-red-100 text-red-800' : agreement.status === 'returned' ? 'bg-slate-100 text-slate-600' : 'bg-emerald-100 text-emerald-800'}`}>{overdue ? 'OVERDUE' : agreement.status.toUpperCase()}</span></div>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-600"><p>Due {new Date(agreement.due_at).toLocaleString()}</p><p>Deposit {money(agreement.deposit_amount)}</p>{agreement.status === 'returned' && <><p>Late fee {money(agreement.late_fee)}</p><p>Damage fee {money(agreement.damage_fee)}</p><p className="col-span-2 font-semibold text-gray-900">Refunded deposit {money(agreement.deposit_returned)}</p></>}</div>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-600"><p>Due {new Date(agreement.due_at).toLocaleString()}</p><p>Rental fee {money(agreement.rental_amount)}</p><p>Deposit {money(agreement.deposit_amount)}</p>{agreement.status === 'returned' && <><p>Late fee {money(agreement.late_fee)}</p><p>Damage fee {money(agreement.damage_fee)}</p><p className="col-span-2 font-semibold text-gray-900">Refunded deposit {money(agreement.deposit_returned)}</p></>}</div>
                 {(agreement.status === 'active' || agreement.status === 'overdue') && <button type="button" disabled={busy} onClick={() => handleReturnRental(agreement)} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"><RotateCcw className="h-3.5 w-3.5" />Check item in</button>}
               </article>;
             }) : <p className="py-10 text-center text-sm text-gray-500">No rental agreements recorded yet.</p>}</div>

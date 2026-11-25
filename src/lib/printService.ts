@@ -43,6 +43,7 @@ export interface EscPosReceiptData {
   total: number;
   paymentMethod: string;
   cashAmount?: number;
+  giftCardAmount?: number;
   paystackAmount?: number;
   momoAmount?: number;
   chequeAmount?: number;
@@ -122,6 +123,12 @@ function printOnComputer(
     ? 'Paystack'
     : getPaymentMethodLabel(data.paymentMethod);
   const paymentDetails = [
+    data.giftCardAmount
+      ? `<div class="row"><span>Gift card used:</span><span>${escapeHtml(amt(data, data.giftCardAmount))}</span></div>`
+      : '',
+    data.paymentMethod === 'gift_card' && data.cashAmount
+      ? `<div class="row"><span>Cash:</span><span>${escapeHtml(amt(data, data.cashAmount))}</span></div>`
+      : '',
     data.paymentMethod === 'split' && data.cashAmount
       ? `<div class="row"><span>Cash:</span><span>${escapeHtml(amt(data, data.cashAmount))}</span></div>`
       : '',
@@ -398,6 +405,14 @@ export async function buildEscPosReceipt(data: EscPosReceiptData): Promise<Uint8
       bytes.push(...textToBytes(rightAlign('  Mobile money/card:', amt(data, data.paystackAmount))));
       bytes.push(LF);
     }
+  }
+  if (data.giftCardAmount) {
+    bytes.push(...textToBytes(rightAlign('  Gift card used:', amt(data, data.giftCardAmount))));
+    bytes.push(LF);
+  }
+  if (data.paymentMethod === 'gift_card' && data.cashAmount) {
+    bytes.push(...textToBytes(rightAlign('  Cash:', amt(data, data.cashAmount))));
+    bytes.push(LF);
   }
 
   if (data.manualPaymentAmount) {
