@@ -36,7 +36,7 @@ async function emitPendingSaleEvents(): Promise<void> {
     }
     if (ok) await db.transactions.update(sale.id, { integration_events_pending: 0, integration_events_sent: 1 });
   }
-  const pendingCustomers = await db.customers.where('[store_id+integration_events_pending+synced]').equals([storeId, 1, 1]).toArray()
+  const pendingCustomers = (await db.customers.where('[store_id+integration_events_pending+synced]').equals([storeId, 1, 1]).toArray())
     .sort((a, b) => a.created_at.localeCompare(b.created_at))
     .slice(0, 20);
   for (const customer of pendingCustomers) {
