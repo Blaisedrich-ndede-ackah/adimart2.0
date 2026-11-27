@@ -24,9 +24,11 @@ export interface ReceiptData {
   subtotal: number;
   discount: number;
   otherCharges?: Array<{ label: string; amount: number }>;
+  taxBreakdown?: Array<{ label: string; rate: number; amount: number }>;
   total: number;
   paymentMethod: string;
   cashAmount?: number;
+  giftCardAmount?: number;
   paystackAmount?: number;
   momoAmount?: number;
   chequeAmount?: number;
@@ -196,6 +198,11 @@ function generateReceiptPDF(data: ReceiptData): jsPDF {
     doc.setTextColor(0);
     y += 4;
   }
+  for (const tax of data.taxBreakdown || []) {
+    if (tax.amount <= 0) continue;
+    leftRightText(`${tax.label} (${tax.rate}%):`, amt(data, tax.amount), y, 8);
+    y += 4;
+  }
   if ((data.loyaltyRedeemAmount || 0) > 0) {
     leftRightText('Points redeemed:', '-' + amt(data, data.loyaltyRedeemAmount || 0), y, 9);
     y += 4;
@@ -250,6 +257,14 @@ function generateReceiptPDF(data: ReceiptData): jsPDF {
       leftRightText('  MoMo/Card:', amt(data, data.paystackAmount), y, 8);
       y += 4;
     }
+  }
+  if (data.giftCardAmount) {
+    leftRightText('  Gift card:', amt(data, data.giftCardAmount), y, 8);
+    y += 4;
+  }
+  if (data.paymentMethod === 'gift_card' && data.cashAmount) {
+    leftRightText('  Cash:', amt(data, data.cashAmount), y, 8);
+    y += 4;
   }
 
   if (data.manualPaymentAmount && data.manualPaymentAmount > 0) {
@@ -334,6 +349,9 @@ function generateOfficialReceiptPdf(data: ReceiptData): FormalPdf {
     ...(data.discount > 0
       ? [{ label: 'Discount', value: formatGhsOfficial(-data.discount, data.currencyCode) }]
       : []),
+    ...(data.taxBreakdown || []).filter((tax) => tax.amount > 0).map((tax) => ({
+      label: `${tax.label} (${tax.rate}%)`, value: formatGhsOfficial(tax.amount, data.currencyCode),
+    })),
     ...((data.loyaltyRedeemAmount || 0) > 0
       ? [{ label: 'Points redeemed', value: formatGhsOfficial(-(data.loyaltyRedeemAmount || 0), data.currencyCode) }]
       : []),
@@ -361,6 +379,12 @@ function generateOfficialReceiptPdf(data: ReceiptData): FormalPdf {
     ...(data.customerName ? [{ label: 'Customer', value: data.customerName }] : []),
     ...(data.walletAmount
       ? [{ label: 'Store credit used', value: formatGhsOfficial(data.walletAmount, data.currencyCode) }]
+      : []),
+    ...(data.giftCardAmount
+      ? [{ label: 'Gift card used', value: formatGhsOfficial(data.giftCardAmount, data.currencyCode) }]
+      : []),
+    ...(data.paymentMethod === 'gift_card' && data.cashAmount
+      ? [{ label: 'Cash due', value: formatGhsOfficial(data.cashAmount, data.currencyCode) }]
       : []),
     ...(data.receiptPurpose === 'credit-payment'
       ? [
@@ -533,6 +557,9 @@ function generateReceiptText(data: ReceiptData): string {
   if (data.discount > 0) {
     lines.push(leftRight('Discount:', '-' + amt(data, data.discount)));
   }
+  for (const tax of data.taxBreakdown || []) {
+    if (tax.amount > 0) lines.push(leftRight(`${tax.label} (${tax.rate}%):`, amt(data, tax.amount)));
+  }
   if ((data.loyaltyRedeemAmount || 0) > 0) {
     lines.push(leftRight('Points redeemed:', '-' + amt(data, data.loyaltyRedeemAmount || 0)));
   }
@@ -567,6 +594,8 @@ function generateReceiptText(data: ReceiptData): string {
     if (data.cashAmount) lines.push(leftRight('  Cash:', amt(data, data.cashAmount)));
     if (data.paystackAmount) lines.push(leftRight('  MoMo:', amt(data, data.paystackAmount)));
   }
+  if (data.giftCardAmount) lines.push(leftRight('  Gift card:', amt(data, data.giftCardAmount)));
+  if (data.paymentMethod === 'gift_card' && data.cashAmount) lines.push(leftRight('  Cash:', amt(data, data.cashAmount)));
   if (data.momoAmount) lines.push(leftRight('  MoMo:', amt(data, data.momoAmount)));
   if (data.chequeAmount) lines.push(leftRight('  Cheque:', amt(data, data.chequeAmount)));
   if (data.manualPaymentAmount) lines.push(leftRight('  Amount received:', amt(data, data.manualPaymentAmount)));

@@ -2082,6 +2082,7 @@ export async function processSaleReturn(params: {
             created_at: nowCustomer,
             updated_at: nowCustomer,
             synced: 0,
+            integration_events_pending: 1,
           };
           await db.customers.add(customer);
         }

@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
 import { useFormatMoney } from '@/lib/currency';
 
@@ -29,7 +30,7 @@ function formatGhs(amount: number): string {
   return amount < 0 ? `-GHS ${formatted}` : `GHS ${formatted}`;
 }
 
-export default function FinancialDonutChart({
+function FinancialDonutChart({
   metrics,
   title = 'Cost · Selling · Profit',
   className = '',
@@ -122,5 +123,7 @@ export default function FinancialDonutChart({
     </div>
   );
 }
+
+export default memo(FinancialDonutChart);
 
 export { formatGhs as formatGhsAmount };

@@ -12,6 +12,8 @@ export interface PriceScanStore {
   name: string;
   logo_url: string;
   currency_code: string;
+  pickup_verification_enabled: boolean;
+  pickup_token_ttl_minutes: number;
 }
 
 export interface ScanResult {
@@ -60,6 +62,8 @@ export async function resolvePriceScanStore(slug: string): Promise<PriceScanStor
       name: localStore.name,
       logo_url: localStore.logo_url || '',
       currency_code: localStore.currency_code || 'GHS',
+      pickup_verification_enabled: (localStore.pickup_verification_enabled ?? 1) === 1,
+      pickup_token_ttl_minutes: Math.max(5, Math.min(240, Math.floor(Number(localStore.pickup_token_ttl_minutes) || 30))),
     };
     persistStoreCache(cleanSlug, result);
     return result;
@@ -69,7 +73,7 @@ export async function resolvePriceScanStore(slug: string): Promise<PriceScanStor
     try {
       const { data, error } = await supabase
         .from('stores')
-        .select('id, name, logo_url, currency_code, ecommerce_slug')
+        .select('id, name, logo_url, currency_code, ecommerce_slug, pickup_verification_enabled, pickup_token_ttl_minutes')
         .eq(isStoreId ? 'id' : 'ecommerce_slug', cleanSlug)
         .maybeSingle();
       if (!error && data) {
@@ -80,6 +84,8 @@ export async function resolvePriceScanStore(slug: string): Promise<PriceScanStor
             name: stringValue(row.name),
             logo_url: stringValue(row.logo_url),
             currency_code: stringValue(row.currency_code) || 'GHS',
+            pickup_verification_enabled: row.pickup_verification_enabled !== false,
+            pickup_token_ttl_minutes: Math.max(5, Math.min(240, Math.floor(numberValue(row.pickup_token_ttl_minutes) || 30))),
           };
           persistStoreCache(cleanSlug, result);
           return result;
@@ -198,7 +204,7 @@ export async function flushPendingPickupOrders(storeId: string): Promise<number>
         customer_name: '',
         customer_phone: '',
         customer_address: '',
-        notes: '',
+        notes: order.notes,
         status: order.status,
         payment_method: order.payment_method,
         total_amount: order.total_amount,
@@ -279,6 +285,8 @@ function readStoreCache(slug: string): PriceScanStore | null {
       name: stringValue(stored.name),
       logo_url: stringValue(stored.logo_url),
       currency_code: stringValue(stored.currency_code) || 'GHS',
+      pickup_verification_enabled: stored.pickup_verification_enabled !== false,
+      pickup_token_ttl_minutes: Math.max(5, Math.min(240, Math.floor(numberValue(stored.pickup_token_ttl_minutes) || 30))),
     };
   } catch {
     return null;

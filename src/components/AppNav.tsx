@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, House, Search, ClipboardCheck,
   Sparkles, CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare, Moon, Sun,
-  ShoppingCart, RotateCcw,
-  ContactRound, ArrowLeftRight, Building2, Megaphone, Tag, Wallet,
+  ShoppingCart, RotateCcw, QrCode,
+  ContactRound, ArrowLeftRight, Building2, Megaphone, Tag, Boxes, ClipboardMinus, Gift, Bell,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -36,6 +36,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const t = useT();
   const [moreOpen, setMoreOpen] = useState(false);
   const [storeCount, setStoreCount] = useState(1);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window === 'undefined') return true;
     try {
@@ -71,6 +72,25 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
     };
   }, [currentStore?.id]);
 
+  useEffect(() => {
+    if (!currentStore?.id || !currentUser?.id) { setUnreadNotifications(0); return; }
+    let active = true;
+    const refreshNotifications = async () => {
+      try {
+        const response = await fetch('/api/integrations?action=notification_list', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ store_id: currentStore.id, user_id: currentUser.id }),
+        });
+        if (!response.ok) return;
+        const result = await response.json();
+        if (active) setUnreadNotifications(Number.isFinite(Number(result.unread_count)) ? Number(result.unread_count) : (result.notifications || []).filter((row: { is_read?: boolean }) => !row.is_read).length);
+      } catch { /* Keep the last notification count while offline. */ }
+    };
+    void refreshNotifications();
+    const interval = window.setInterval(() => { void refreshNotifications(); }, 30_000);
+    return () => { active = false; window.clearInterval(interval); };
+  }, [currentStore?.id, currentUser?.id]);
+
   const navItems = useMemo<NavItem[]>(
     () =>
       [
@@ -92,6 +112,11 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         { id: 'cashbook', label: t('nav.cashbook'), icon: BookOpen, show: cashbookOk },
         { id: 'payroll', label: isOwner ? 'Payroll' : 'My Pay', shortLabel: isOwner ? 'Payroll' : 'My Pay', icon: Wallet, show: true },
         { id: 'devices', label: t('nav.devices'), icon: Bluetooth, show: true },
+        { id: 'verify-pickup', label: t('pickup.verify'), shortLabel: t('pickup.verify'), icon: QrCode, show: true },
+        { id: 'write-offs', label: t('writeoff.title'), shortLabel: t('writeoff.title'), icon: ClipboardMinus, show: isOwner || currentStore?.cashiers_can_record_expenses === 1 },
+        { id: 'bundles', label: t('bundle.title'), shortLabel: t('bundle.title'), icon: Boxes, show: isOwner },
+        { id: 'gift-cards-rentals', label: 'Gift cards & rentals', shortLabel: 'Gift cards', icon: Gift, show: isOwner },
+        { id: 'notifications', label: 'Notifications', icon: Bell, show: true },
         { id: 'learn', label: 'Learn Adimat', icon: BookOpen, show: true },
         { id: 'campaigns', label: 'Promotions', icon: Megaphone, show: true },
         { id: 'store-deals', label: 'Deals & coupons', shortLabel: 'Deals', icon: Tag, show: isOwner },
@@ -116,7 +141,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
           href: COMMUNITY_CHAT_URL,
         },
       ].filter((item) => item.show),
-    [isOwner, ecommerceEnabled, canManageEcommerce, cashbookOk, storeCount, t]
+    [isOwner, ecommerceEnabled, canManageEcommerce, cashbookOk, currentStore?.cashiers_can_record_expenses, storeCount, t]
   );
 
   // Keep bottom bar to a few primary destinations; rest live under More
@@ -134,8 +159,8 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   type NavGroup = { label: string; ids: string[] };
   const navGroups: NavGroup[] = [
     { label: t('nav.main'), ids: ['home', 'pos', 'search', 'adimat-ai', 'stock-approvals', 'transactions'] },
-    { label: 'Shop', ids: ['inventory', 'purchasing', 'warehouse', 'ecommerce', 'multistore', 'store-deals'] },
-    { label: 'Operations', ids: ['reports', 'expenses', 'cashbook', 'payroll', 'devices', 'subscription', 'returns', 'customers'] },
+    { label: 'Shop', ids: ['inventory', 'purchasing', 'warehouse', 'ecommerce', 'multistore', 'store-deals', 'gift-cards-rentals'] },
+    { label: 'Operations', ids: ['reports', 'expenses', 'cashbook', 'devices', 'verify-pickup', 'write-offs', 'bundles', 'subscription', 'returns', 'customers', 'notifications'] },
     { label: 'Help', ids: ['learn', 'campaigns', 'community', 'settings'] },
   ];
   const groupedMoreItems = navGroups
@@ -179,9 +204,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
             if (groupItems.length === 0) return null;
             return (
               <div key={group.label} className="pt-1">
-                <p className="px-3 pb-1 pt-3 text-[13px] font-semibold text-muted">
-                  {group.label}
-                </p>
+                <p className="px-3 pb-1 pt-3 text-[13px] font-semibold text-muted">{group.label}</p>
                 {groupItems.map((item) => {
                   const Icon = item.icon;
                   const isActive = !item.href && currentPage === item.id;
@@ -190,6 +213,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
                     <>
                       <Icon className="w-5 h-5 flex-shrink-0" />
                       <span className="truncate">{item.label}</span>
+                      {item.id === 'notifications' && unreadNotifications > 0 && <span className="ml-auto min-w-5 rounded-full bg-rose-500 px-1.5 py-0.5 text-center text-[10px] font-bold text-white">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}
                     </>
                   );
                   if (item.href) {
@@ -224,21 +248,11 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
         <div className="food-rail-foot p-2 border-t border-white/10 space-y-1">
           <AccessibilityControls variant="sidebar" />
           <LanguageSwitcher variant="light" compact />
-          <button
-            type="button"
-            onClick={() => setDarkMode((enabled) => !enabled)}
-            aria-pressed={darkMode}
-            aria-label={darkMode ? 'Light mode' : 'Dark mode'}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-emerald-50 hover:bg-white/10 touch-target"
-          >
+          <button type="button" onClick={() => setDarkMode((enabled) => !enabled)} aria-pressed={darkMode} aria-label={darkMode ? 'Light mode' : 'Dark mode'} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-emerald-50 hover:bg-white/10 touch-target">
             {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
             {darkMode ? 'Light mode' : 'Dark mode'}
           </button>
-          <button
-            type="button"
-            onClick={switchUser}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-[12px] text-[15px] font-medium text-ink hover:bg-black/[0.04] touch-target"
-          >
+          <button type="button" onClick={switchUser} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-[12px] text-[15px] font-medium text-ink hover:bg-black/[0.04] touch-target">
             <LogOut className="w-5 h-5" />
             {t('nav.switchUser')}
           </button>
@@ -343,6 +357,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
                           <span className={`text-[17px] tracking-tight ${isActive ? 'font-semibold' : 'font-normal'}`}>
                             {item.label}
                           </span>
+                          {item.id === 'notifications' && unreadNotifications > 0 && <span className="ml-auto min-w-5 rounded-full bg-rose-500 px-1.5 py-0.5 text-center text-[10px] font-bold text-white">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}
                         </>
                       );
                       if (item.href) {

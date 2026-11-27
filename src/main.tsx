@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./index.css";
 import App from "./App";
 import AppErrorBoundary from "./components/AppErrorBoundary";
+import { SWRConfig } from "swr";
 
 function LoadingFallback() {
   const [isTakingLong, setIsTakingLong] = useState(false);
@@ -127,9 +128,11 @@ document.addEventListener('contextmenu', (event) => {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <AppErrorBoundary>
-      <Suspense fallback={<LoadingFallback />}>
-        <App />
-      </Suspense>
+      <SWRConfig value={{ dedupingInterval: 30_000, revalidateOnFocus: false, revalidateOnReconnect: true }}>
+        <Suspense fallback={<LoadingFallback />}>
+          <App />
+        </Suspense>
+      </SWRConfig>
     </AppErrorBoundary>
   </StrictMode>
 );

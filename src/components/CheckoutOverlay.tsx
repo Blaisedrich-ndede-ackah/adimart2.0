@@ -2,9 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import {
   X, Banknote, CreditCard, Split, Percent, Shield,
   CheckCircle2, Loader2, Printer, AlertTriangle, Share2, Download,
-  Smartphone, MessageCircle, CirclePlus, Trash2, Search
+  Smartphone, MessageCircle, CirclePlus, Trash2, Search, Gift
 } from 'lucide-react';
 import { useCartStore, CartItem } from '@/store/useCartStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useAuthStore } from '@/store/useAuthStore';
 import { db, getCurrentStoreCustomers, LocalCustomer } from '@/lib/dexie';
 import { evaluateCreditLimit, normalizeCreditLimitAction } from '@/lib/creditMath';
@@ -31,7 +32,11 @@ import { recordActivity } from '@/lib/activityLog';
 import { queueSms, receiptSmsText } from '@/lib/smsOutbox';
 import { parseGhanaPhone } from '@/lib/ghanaPhone';
 import { routeGoodsPaymentToStoreMomo } from '@/lib/storeMomoPayout';
-import { broadcastCfdMessage } from '@/lib/cfdChannel';
+import { broadcastCfdMessage, type CfdReceiptPayload } from '@/lib/cfdChannel';
+import ReceiptQRDisplay from '@/components/ReceiptQRDisplay';
+import { generateReceiptToken, type ReceiptToken } from '@/lib/receiptWallet';
+import type { TaxComponent } from '@/lib/tax';
+import { findGiftCard, giftCardIsUsable, normalizeGiftCardCode } from '@/lib/phase2';
 
 interface CheckoutOverlayProps {
   isOpen: boolean;
@@ -40,12 +45,15 @@ interface CheckoutOverlayProps {
   onConnectPrinter?: () => void;
 }
 
-type Step = 'method' | 'discount' | 'charges' | 'pin-verify' | 'cash-input' | 'split-input' | 'manual-payment' | 'credit-input' | 'wallet-input' | 'paystack' | 'processing' | 'success';
+type Step = 'method' | 'discount' | 'charges' | 'pin-verify' | 'cash-input' | 'split-input' | 'manual-payment' | 'credit-input' | 'wallet-input' | 'gift-card-input' | 'paystack' | 'processing' | 'success';
 
 interface SaleResult {
+  transactionId: string;
   receiptNumber: string;
   items: CartItem[];
   subtotal: number;
+  taxTotal: number;
+  taxBreakdown: TaxComponent[];
   discount: number;
   otherCharges: OtherCharge[];
   otherChargesTotal: number;
@@ -55,6 +63,7 @@ interface SaleResult {
   paystackAmount?: number;
   manualPaymentAmount?: number;
   walletAmount?: number;
+  giftCardAmount?: number;
   paystackReference?: string;
   paymentReference?: string;
   customerName?: string;
@@ -68,7 +77,16 @@ interface SaleResult {
 }
 
 export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnectPrinter }: CheckoutOverlayProps) {
-  const cart = useCartStore();
+  const cart = useCartStore(useShallow((s) => ({
+    items: s.items, subtotal: s.subtotal, total: s.total, discountAmount: s.discountAmount,
+    discountFixed: s.discountFixed, discountKind: s.discountKind, discountPercent: s.discountPercent,
+    couponCode: s.couponCode, loyaltyCustomerId: s.loyaltyCustomerId, otherCharges: s.otherCharges,
+    pointsToRedeem: s.pointsToRedeem, promotionSummary: s.promotionSummary, taxBreakdown: s.taxBreakdown,
+    taxConfig: s.taxConfig, removeOtherCharge: s.removeOtherCharge, setCouponCode: s.setCouponCode,
+    setDiscountFixed: s.setDiscountFixed, setDiscountPercent: s.setDiscountPercent,
+    setLoyaltySelection: s.setLoyaltySelection, setOtherCharge: s.setOtherCharge,
+    setTaxExempt: s.setTaxExempt, clearDiscount: s.clearDiscount, completeSale: s.completeSale,
+  })));
   const { currentUser, currentStore, verifyOwnerPin } = useAuthStore();
   const money = useFormatMoney();
   const currencySymbol = getStoreCurrency(currentStore?.currency_code).symbol;
@@ -83,9 +101,17 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
   const [creditCustomerId, setCreditCustomerId] = useState('');
   const [walletCustomerId, setWalletCustomerId] = useState('');
   const [walletUseAmount, setWalletUseAmount] = useState('');
+  const [giftCardCodeInput, setGiftCardCodeInput] = useState('');
+  const [giftCardFound, setGiftCardFound] = useState<Awaited<ReturnType<typeof findGiftCard>>>(null);
+  const [giftCardLookupBusy, setGiftCardLookupBusy] = useState(false);
+  const [giftCardLookupMessage, setGiftCardLookupMessage] = useState('');
+  const [giftCardRedeemAmount, setGiftCardRedeemAmount] = useState('');
+  const [giftCardRemainderMethod, setGiftCardRemainderMethod] = useState<'cash' | 'paystack'>('cash');
   const [creditCustomers, setCreditCustomers] = useState<LocalCustomer[]>([]);
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [saleResult, setSaleResult] = useState<SaleResult | null>(null);
+  const [receiptToken, setReceiptToken] = useState<ReceiptToken | null>(null);
+  const [receiptTokenError, setReceiptTokenError] = useState('');
   const [error, setError] = useState('');
   const [isPrinting, setIsPrinting] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
@@ -124,9 +150,18 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       setManualReference('');
       setCreditCustomerId('');
       setWalletCustomerId('');
+      setGiftCardCodeInput('');
+      setGiftCardFound(null);
+      setGiftCardLookupBusy(false);
+      setGiftCardLookupMessage('');
+      setGiftCardRedeemAmount('');
+      setGiftCardRemainderMethod('cash');
+      cart.setTaxExempt(false);
       setWalletUseAmount('');
       setCreditCustomers([]);
       setSaleResult(null);
+      setReceiptToken(null);
+      setReceiptTokenError('');
       setError('');
       setPaystackError('');
       setPrintError('');
@@ -145,6 +180,32 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       }
     }
   }, [isOpen, allowPercentage, canApplyDiscount]);
+
+  useEffect(() => {
+    if (step !== 'gift-card-input' || !currentStore?.id) return;
+    if (giftCardCodeInput.length !== 19) {
+      setGiftCardLookupBusy(false);
+      setGiftCardLookupMessage(giftCardCodeInput.length ? 'Enter the full 19-character card code.' : '');
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setGiftCardLookupBusy(true);
+      setGiftCardLookupMessage('Checking card…');
+      void findGiftCard(currentStore.id, giftCardCodeInput).then((card) => {
+        if (cancelled) return;
+        setGiftCardFound(card);
+        setGiftCardRedeemAmount(card ? String(Math.min(card.balance, cart.total)) : '');
+        setGiftCardLookupMessage(card ? '' : 'Gift card not found for this store.');
+        setError(card ? '' : 'Gift card not found for this store.');
+      }).catch((lookupError: unknown) => {
+        if (cancelled) return;
+        setGiftCardFound(null);
+        setGiftCardLookupMessage(lookupError instanceof Error ? lookupError.message : 'Could not check the gift card.');
+      }).finally(() => { if (!cancelled) setGiftCardLookupBusy(false); });
+    }, 250);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [step, currentStore?.id, giftCardCodeInput, cart.total]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -174,11 +235,13 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         serial: i.serial_number || '',
       })),
       subtotal: result.subtotal,
+      taxBreakdown: result.taxBreakdown,
       discount: result.discount,
       otherCharges: result.otherCharges || [],
       total: result.total,
       paymentMethod: method,
       cashAmount: result.cashAmount,
+      giftCardAmount: result.giftCardAmount,
       paystackAmount: result.paystackAmount,
       manualPaymentAmount: result.manualPaymentAmount,
       walletAmount: result.walletAmount,
@@ -304,7 +367,9 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
     customerName?: string,
     customerPhone?: string,
     customerId?: string,
-    walletAmt?: number
+    walletAmt?: number,
+    giftCardCode?: string,
+    giftCardAmt?: number
   ) {
     if (!currentUser) return;
     if (!canApplyDiscount && cart.discountAmount > 0) {
@@ -324,13 +389,19 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         paystackRef,
         paymentRef,
         customerId,
-        walletAmt
+        walletAmt,
+        giftCardCode,
+        giftCardAmt
       );
       
       const completed: SaleResult = {
+        transactionId: result.transactionId,
         receiptNumber: result.receiptNumber,
         items: result.items,
         subtotal: result.subtotal,
+        taxTotal: result.taxTotal,
+        taxBreakdown: result.taxBreakdown,
+        giftCardAmount: result.giftCardAmount,
         discount: result.discount,
         otherCharges: result.otherCharges || [],
         otherChargesTotal: result.otherChargesTotal || 0,
@@ -352,6 +423,25 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         loyaltyRedeemAmount: result.loyaltyRedeemAmount,
       };
       setSaleResult(completed);
+      let customerReceipt: CfdReceiptPayload | undefined;
+      if ((currentStore?.digital_receipt_enabled ?? 1) === 1) {
+        try {
+          const generatedToken = await generateReceiptToken(
+            result.transactionId,
+            result.receiptNumber,
+            currentStore?.receipt_token_ttl_hours ?? 720,
+          );
+          setReceiptToken(generatedToken);
+          customerReceipt = {
+            receiptNumber: generatedToken.receipt_number,
+            token: generatedToken.token,
+            qrPayload: generatedToken.qr_payload,
+            expiresAt: generatedToken.expires_at,
+          };
+        } catch (receiptError: unknown) {
+          setReceiptTokenError(receiptError instanceof Error ? receiptError.message : 'Digital receipt could not be created.');
+        }
+      }
       if (currentStore?.id && paystackRef && (paystackAmt || 0) > 0) {
         void routeGoodsPaymentToStoreMomo({
           storeId: currentStore.id,
@@ -364,7 +454,9 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
       setSmsPhone(customerPhone || creditCustomers.find((customer) => customer.id === (customerId || cart.loyaltyCustomerId))?.phone || '');
       setSmsNote('');
       setStep('success');
-      broadcastCfdMessage({ type: 'PaymentSuccess' });
+      broadcastCfdMessage(customerReceipt
+        ? { type: 'PaymentSuccess', payload: customerReceipt }
+        : { type: 'PaymentSuccess' });
       if (currentStore?.id) {
         recordActivity({
           storeId: currentStore.id,
@@ -592,6 +684,38 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
     );
   }
 
+  async function handleGiftCardLookup() {
+    if (!currentStore?.id) return;
+    const card = await findGiftCard(currentStore.id, giftCardCodeInput);
+    setGiftCardFound(card);
+    setGiftCardRedeemAmount(card ? String(Math.min(card.balance, cart.total)) : '');
+    setGiftCardLookupMessage(card ? '' : 'Gift card not found for this store.');
+    setError(card ? '' : 'Gift card not found for this store.');
+    if (card) setGiftCardRedeemAmount(String(Math.min(card.balance, cart.total)));
+  }
+
+  function handleGiftCardSaleConfirm() {
+    if (!giftCardFound || !giftCardIsUsable(giftCardFound)) {
+      setError(giftCardFound?.expires_at && new Date(giftCardFound.expires_at) <= new Date() ? 'This gift card has expired.' : 'Check an active gift card first.');
+      return;
+    }
+    const amount = Math.round((Number(giftCardRedeemAmount) || 0) * 100) / 100;
+    if (amount <= 0 || amount > giftCardFound.balance || amount > cart.total) {
+      setError('Gift card amount must be within both the card balance and sale total.');
+      return;
+    }
+    const cashDue = Math.round((cart.total - amount) * 100) / 100;
+    if (cashDue > 0 && giftCardRemainderMethod === 'paystack') {
+      if (!isPaystackConfigured()) {
+        setError('Paystack is not configured for the remaining balance. Choose cash or contact the store owner.');
+        return;
+      }
+      handlePaystackPayment(cashDue, generatePaystackReference(), 0, { code: giftCardFound.code, amount });
+      return;
+    }
+    processSale('gift_card', cashDue, 0, '', '', '', '', undefined, 0, giftCardFound.code, amount);
+  }
+
   function handleCashConfirm() {
     const received = Math.round((parseFloat(cashAmount) || 0) * 100) / 100;
     if (isNaN(received) || received < cart.total) {
@@ -630,7 +754,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
     handlePaystackPayment(cart.total, ref, 0);
   }
 
-  async function handlePaystackPayment(amount: number, reference: string, cashPortion: number) {
+  async function handlePaystackPayment(amount: number, reference: string, cashPortion: number, giftCardPayment?: { code: string; amount: number }) {
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       setPaystackError('No internet. Choose Cash for this sale, or reconnect before using Mobile Money.');
       setStep('method');
@@ -654,7 +778,9 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         amount: Math.round(amount * 100),
         reference,
         onSuccess: (ref) => {
-          if (cashPortion > 0) {
+          if (giftCardPayment) {
+            processSale('split', cashPortion, amount, ref, '', '', '', undefined, 0, giftCardPayment.code, giftCardPayment.amount);
+          } else if (cashPortion > 0) {
             processSale('split', cashPortion, amount, ref);
           } else {
             processSale('paystack', 0, amount, ref);
@@ -682,6 +808,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
           <h2 className="text-lg font-bold text-gray-900">
             {step === 'method' && 'Checkout'}
+            {step === 'gift-card-input' && 'Gift Card Payment'}
             {step === 'discount' && 'Apply Discount'}
             {step === 'charges' && 'Add Other Charges'}
             {step === 'pin-verify' && 'Owner Authorization'}
@@ -731,6 +858,12 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                   <span>-{money(cart.discountAmount)}</span>
                 </div>
               )}
+              {(cart.taxBreakdown || []).map((tax) => (
+                <div key={tax.id} className="flex justify-between text-xs text-slate-600 mb-1">
+                  <span>{tax.label} ({tax.rate}%)</span>
+                  <span>{money(tax.amount)}{cart.taxConfig.inclusive ? ' included' : ''}</span>
+                </div>
+              ))}
               {cart.otherCharges.map((charge) => (
                 <div key={charge.id} className="flex justify-between items-center text-sm text-gray-700 mb-1">
                   <span className="truncate pr-2">{charge.label}</span>
@@ -960,6 +1093,11 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                   </div>
                 </button>
               )}
+
+              <button type="button" onClick={() => { setGiftCardCodeInput(''); setGiftCardFound(null); setGiftCardRedeemAmount(''); setGiftCardRemainderMethod('cash'); setError(''); setStep('gift-card-input'); }} className="w-full flex items-center gap-3 p-4 rounded-xl border border-indigo-200 hover:border-indigo-500 hover:bg-indigo-50 transition touch-target">
+                <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center"><Gift className="w-5 h-5 text-indigo-700" /></div>
+                <div className="text-left flex-1"><p className="font-semibold text-gray-900">Gift Card</p><p className="text-xs text-gray-500">Use a gift card for all or part of this sale</p></div>
+              </button>
 
               <details className="rounded-xl border border-gray-200 p-4">
                 <summary className="text-sm font-medium text-gray-700 cursor-pointer">Customer email (optional)</summary>
@@ -1311,6 +1449,35 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
             </div>
           )}
 
+          {step === 'gift-card-input' && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4 text-center">
+                <p className="text-sm text-indigo-800">Sale total</p>
+                <p className="mt-1 text-2xl font-bold text-gray-900">{money(cart.total)}</p>
+              </div>
+              <label className="block text-sm font-semibold text-gray-700">Gift card code
+                <div className="mt-1 flex gap-2">
+                  <input value={giftCardCodeInput} onChange={(event) => { const value = normalizeGiftCardCode(event.target.value); setGiftCardCodeInput(value); setGiftCardFound(null); setGiftCardRedeemAmount(''); setError(''); setGiftCardLookupMessage(''); }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void handleGiftCardLookup(); } }} placeholder="ADIXXXXXXXXXXXXXXXX" autoComplete="off" className="min-w-0 flex-1 rounded-xl border border-gray-300 px-3 py-3 font-mono text-sm uppercase" />
+                  <button type="button" onClick={() => void handleGiftCardLookup()} disabled={!giftCardCodeInput || giftCardLookupBusy} className="rounded-xl bg-indigo-700 px-4 text-white disabled:opacity-50">{giftCardLookupBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}</button>
+                </div>
+              </label>
+              {giftCardLookupMessage && <p role="status" className="text-sm text-indigo-800">{giftCardLookupMessage}</p>}
+              {giftCardFound && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="text-sm font-semibold text-emerald-900">Balance: {money(giftCardFound.balance)} · {giftCardIsUsable(giftCardFound) ? 'Active' : 'Not usable'}</p>
+                {giftCardFound.expires_at && <p className="mt-1 text-xs text-emerald-800">Expires {new Date(giftCardFound.expires_at).toLocaleDateString()}</p>}
+                {giftCardIsUsable(giftCardFound) && <label className="mt-3 block text-xs font-semibold text-gray-700">Amount to redeem
+                  <input type="number" inputMode="decimal" min="0.01" max={Math.min(giftCardFound.balance, cart.total)} step="0.01" value={giftCardRedeemAmount} onChange={(event) => setGiftCardRedeemAmount(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm" />
+                </label>}
+                {giftCardIsUsable(giftCardFound) && <>
+                  <p className="mt-2 text-xs text-gray-600">Remaining balance: {money(Math.max(0, cart.total - (Number(giftCardRedeemAmount) || 0)))}</p>
+                  {Number(giftCardRedeemAmount) > 0 && Number(giftCardRedeemAmount) < cart.total && <label className="mt-2 block text-xs font-semibold text-gray-700">Pay remaining amount by<select value={giftCardRemainderMethod} onChange={(event) => setGiftCardRemainderMethod(event.target.value as 'cash' | 'paystack')} className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm"><option value="cash">Cash</option><option value="paystack" disabled={!isPaystackConfigured()}>Mobile Money / card{isPaystackConfigured() ? '' : ' (not configured)'}</option></select></label>}
+                </>}
+              </div>}
+              {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+              <div className="flex gap-3"><button type="button" onClick={() => { setError(''); setStep('method'); }} className="flex-1 rounded-xl border border-gray-300 py-3 font-medium text-gray-700">Back</button><button type="button" onClick={handleGiftCardSaleConfirm} disabled={!giftCardFound || !giftCardRedeemAmount} className="flex-1 rounded-xl bg-primary py-3 font-semibold text-white disabled:opacity-50">Apply gift card</button></div>
+            </div>
+          )}
+
           {step === 'credit-input' && (
             <div className="space-y-4">
               <div className="rounded-xl bg-amber-50 border border-amber-100 p-4 text-center">
@@ -1331,7 +1498,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                 <select
                   id="credit-customer"
                   value={creditCustomerId}
-                  onChange={(event) => { setCreditCustomerId(event.target.value); setError(''); }}
+                  onChange={(event) => { const id = event.target.value; setCreditCustomerId(id); cart.setTaxExempt(creditCustomers.find((item) => item.id === id)?.tax_exempt === 1); setError(''); }}
                   className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
                   autoFocus
                 >
@@ -1401,6 +1568,7 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                     const id = event.target.value;
                     const customer = creditCustomers.find((item) => item.id === id);
                     setWalletCustomerId(id);
+                    cart.setTaxExempt(customer?.tax_exempt === 1);
                     setWalletUseAmount(
                       customer
                         ? Math.min(Number(customer.wallet_balance) || 0, cart.total).toFixed(2)
@@ -1566,6 +1734,9 @@ export default function CheckoutOverlay({ isOpen, onClose, onComplete, onConnect
                   Credit for {saleResult.customerName}; account balance {money(saleResult.customerBalance ?? saleResult.creditBalance ?? 0)}
                 </p>
               )}
+
+              {receiptToken && <ReceiptQRDisplay token={receiptToken} onDone={() => onComplete(saleResult.receiptNumber)} />}
+              {receiptTokenError && <p role="status" className="mb-3 w-full rounded-lg bg-amber-50 p-2 text-center text-xs text-amber-900">{receiptTokenError}</p>}
 
               {isPrinting && (
                 <div className="flex items-center gap-2 text-gray-500 text-sm mb-4">

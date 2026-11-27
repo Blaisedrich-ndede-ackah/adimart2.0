@@ -37,7 +37,7 @@ export async function buildCustomerBalances(storeId: string): Promise<Map<string
 
   const [customers, transactions] = await Promise.all([
     db.customers.where('store_id').equals(storeId).toArray(),
-    db.transactions.where('store_id').equals(storeId).toArray(),
+    db.transactions.where('[store_id+payment_method]').equals([storeId, 'credit']).toArray(),
   ]);
 
   for (const customer of customers) {

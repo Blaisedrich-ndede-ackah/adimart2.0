@@ -40,6 +40,9 @@ import { findVariantByCode, variantLabel, variantSellingPrice } from '@/lib/vari
 import type { LocalProductVariant } from '@/lib/dexie';
 import { recordActivity } from '@/lib/activityLog';
 import { broadcastCfdMessage } from '@/lib/cfdChannel';
+import { getBundleWithComponents, validateBundleStock } from '@/lib/bundle';
+import { calculateSalesTax, type TaxConfig, type TaxComponent } from '@/lib/tax';
+import { giftCardIsUsable, normalizeGiftCardCode } from '@/lib/phase2';
 
 export interface CartItem {
   id: string;
@@ -63,6 +66,12 @@ export interface CartItem {
   promotion_label?: string;
   promotion_discount?: number;
   serial_number?: string;
+  bundle_id?: string;
+  is_bundle?: boolean;
+  tax_category?: LocalProduct['tax_category'];
+  tax_rate_override?: number | null;
+  tax_amount?: number;
+  tax_rate?: number;
 }
 
 export type CartDiscountKind = 'none' | 'percentage' | 'fixed';
@@ -106,8 +115,14 @@ interface CartState {
   loyaltyRedeemValue: number;
   promotionDiscount: number;
   promotionSummary: string;
+  taxConfig: TaxConfig;
+  taxExempt: boolean;
+  taxTotal: number;
+  taxBreakdown: TaxComponent[];
 
   setSaleContext: (locationId: string | null, saleMode: SaleMode, unitType?: UnitType) => void;
+  setTaxConfig: (config: TaxConfig) => void;
+  setTaxExempt: (exempt: boolean) => void;
   setCouponCode: (code: string) => Promise<string | null>;
   setLoyaltySelection: (customerId: string, points: number) => Promise<void>;
   addItemByBarcode: (
@@ -118,6 +133,7 @@ interface CartState {
     product: LocalProduct,
     opts?: { unitType?: UnitType; quantity?: number; saleMode?: SaleMode; variant?: LocalProductVariant }
   ) => Promise<{ success: boolean; error?: string }>;
+  addBundle: (bundleId: string, locationId?: string | null) => Promise<{ success: boolean; error?: string }>;
   removeItem: (itemId: string) => void;
   updateQuantity: (itemId: string, quantity: number) => Promise<{ success: boolean; error?: string }>;
   incrementItem: (itemId: string) => Promise<{ success: boolean; error?: string }>;
@@ -147,7 +163,9 @@ interface CartState {
     paystackReference?: string,
     paymentReference?: string,
     customerId?: string,
-    walletAmount?: number
+    walletAmount?: number,
+    giftCardCode?: string,
+    giftCardAmount?: number
   ) => Promise<{
     receiptNumber: string;
     items: CartItem[];
@@ -165,16 +183,22 @@ interface CartState {
     loyaltyPointsEarned?: number;
     loyaltyPointsRedeemed?: number;
     loyaltyRedeemAmount?: number;
+    taxTotal: number;
+    taxBreakdown: TaxComponent[];
+    giftCardAmount: number;
+    transactionId: string;
   }>;
 }
 
-function recalculate(
+function calculateCartTotals(
   items: CartItem[],
   discountKind: CartDiscountKind,
   discountPercent: number,
   discountFixed: number,
   otherCharges: OtherCharge[],
-  loyaltyDiscount = 0
+  loyaltyDiscount = 0,
+  taxConfig?: TaxConfig,
+  taxExempt = false
 ) {
   const subtotal = roundMoney(items.reduce((sum, i) => sum + i.subtotal, 0));
   let kind = discountKind;
@@ -197,7 +221,16 @@ function recalculate(
   const chargesTotal = otherChargesTotal(otherCharges);
   const beforeLoyalty = roundMoney(subtotal - discountAmount);
   const loyalty = Math.min(roundMoney(Math.max(0, loyaltyDiscount)), Math.max(0, beforeLoyalty));
-  const total = roundMoney(subtotal - discountAmount - loyalty + chargesTotal);
+  const taxableAfterDiscount = roundMoney(subtotal - discountAmount - loyalty);
+  const tax = taxConfig
+    ? calculateSalesTax(items.map((item) => ({
+        id: item.id,
+        subtotal: item.subtotal,
+        taxCategory: item.tax_category,
+        taxRateOverride: item.tax_rate_override,
+      })), taxableAfterDiscount, taxConfig, taxExempt)
+    : { total: 0, breakdown: [], lines: [] };
+  const total = roundMoney(taxableAfterDiscount + chargesTotal + (taxConfig?.inclusive ? 0 : tax.total));
   return {
     subtotal,
     discountAmount,
@@ -205,11 +238,30 @@ function recalculate(
     otherCharges,
     otherChargesTotal: chargesTotal,
     total,
+    taxTotal: tax.total,
+    taxBreakdown: tax.breakdown,
+    items: items.map((item) => {
+      const lineTax = tax.lines.find((line) => line.id === item.id);
+      return { ...item, tax_amount: lineTax?.taxAmount || 0, tax_rate: lineTax?.taxRate || 0 };
+    }),
     discountKind: kind,
     discountPercent: percent,
     discountFixed: fixed,
   };
 }
+
+const recalculate = (() => {
+  let previousArgs: Parameters<typeof calculateCartTotals> | null = null;
+  let previousResult: ReturnType<typeof calculateCartTotals> | null = null;
+  return (...args: Parameters<typeof calculateCartTotals>) => {
+    if (previousArgs && args.every((value, index) => Object.is(value, previousArgs?.[index]))) {
+      return previousResult!;
+    }
+    previousArgs = args;
+    previousResult = calculateCartTotals(...args);
+    return previousResult;
+  };
+})();
 
 function withDiscount(state: CartState, items: CartItem[]) {
   return recalculate(
@@ -218,7 +270,9 @@ function withDiscount(state: CartState, items: CartItem[]) {
     state.discountPercent,
     state.discountFixed,
     state.otherCharges,
-    pointsValue(state.pointsToRedeem || 0, state.loyaltyRedeemValue || 0)
+    pointsValue(state.pointsToRedeem || 0, state.loyaltyRedeemValue || 0),
+    state.taxConfig,
+    state.taxExempt
   );
 }
 
@@ -292,6 +346,8 @@ function buildCartLine(
     measure_unit: product.unit || 'pcs',
     allow_decimal: productAllowsDecimal(product) ? 1 : 0,
     category: product.category || '',
+    tax_category: product.tax_category || 'taxable',
+    tax_rate_override: product.tax_rate_override ?? null,
     list_unit_price: unitPrice,
     promotion_discount: 0,
     promotion_label: '',
@@ -417,6 +473,10 @@ export const useCartStore = create<CartState>((set, get) => ({
   loyaltyRedeemValue: 0,
   promotionDiscount: 0,
   promotionSummary: '',
+  taxConfig: { vatRate: 0, nhilEnabled: false, nhilRate: 2.5, getfundEnabled: false, getfundRate: 2.5, covidLevyEnabled: false, covidLevyRate: 0, inclusive: true },
+  taxExempt: false,
+  taxTotal: 0,
+  taxBreakdown: [],
 
   setCouponCode: async (code) => {
     const couponCode = code.trim();
@@ -447,11 +507,13 @@ export const useCartStore = create<CartState>((set, get) => ({
     const capped = customer
       ? capRedeemPoints(points, customer.loyalty_points_balance || 0, redeemValue, payable)
       : 0;
+    const taxExempt = customer?.tax_exempt === 1;
     set((current) => ({
       loyaltyCustomerId: customer && customer.is_active === 1 ? customer.id : '',
       pointsToRedeem: capped,
       loyaltyRedeemValue: redeemValue,
-      ...withDiscount({ ...current, pointsToRedeem: capped, loyaltyRedeemValue: redeemValue }, current.items),
+      taxExempt,
+      ...withDiscount({ ...current, pointsToRedeem: capped, loyaltyRedeemValue: redeemValue, taxExempt }, current.items),
     }));
   },
 
@@ -461,6 +523,16 @@ export const useCartStore = create<CartState>((set, get) => ({
     if (state.locationId === locationId && state.saleMode === saleMode && state.unitType === nextUnit) return;
     // Price and unit choices apply to the next item. Lines already in the sale stay as they are.
     set({ locationId, saleMode, unitType: nextUnit });
+  },
+
+  setTaxConfig: (taxConfig) => {
+    const state = get();
+    set({ ...withDiscount({ ...state, taxConfig }, state.items), taxConfig });
+  },
+
+  setTaxExempt: (taxExempt) => {
+    const state = get();
+    set({ ...withDiscount({ ...state, taxExempt }, state.items), taxExempt });
   },
 
   addItemByBarcode: async (barcode, opts) => {
@@ -558,6 +630,29 @@ export const useCartStore = create<CartState>((set, get) => ({
     return { success: true };
   },
 
+  addBundle: async (bundleId, locationId) => {
+    const state = get();
+    const bundle = await getBundleWithComponents(bundleId);
+    if (!bundle || bundle.bundle.is_active !== 1) return { success: false, error: 'Bundle is unavailable.' };
+    const validation = await validateBundleStock(bundle.bundle.store_id, bundleId, 1, locationId ?? state.locationId);
+    if (!validation.ok) return { success: false, error: `Not enough stock for ${validation.missing || 'a bundle product'}.` };
+    const existing = state.items.find((item) => item.is_bundle && item.bundle_id === bundleId);
+    const quantity = (existing?.quantity || 0) + 1;
+    const totalValidation = await validateBundleStock(bundle.bundle.store_id, bundleId, quantity, locationId ?? state.locationId);
+    if (!totalValidation.ok) return { success: false, error: `Not enough stock for ${totalValidation.missing || 'a bundle product'}.` };
+    const line: CartItem = {
+      id: existing?.id || generateId(), product_id: '', bundle_id: bundle.bundle.id,
+      is_bundle: true, name: bundle.bundle.name, unit_price: bundle.bundle.combo_price,
+      quantity, base_quantity: quantity, unit_type: 'base', sale_mode: 'retail', pack_size: 1,
+      subtotal: roundMoney(bundle.bundle.combo_price * quantity), category: '',
+      list_unit_price: bundle.bundle.combo_price, promotion_discount: 0,
+    };
+    const items = existing ? state.items.map((item) => item.id === existing.id ? line : item) : [...state.items, line];
+    const dealt = await applyDeals(items, state.couponCode);
+    set((current) => ({ ...withDiscount(current, dealt.items), items: dealt.items, promotionDiscount: dealt.promotionDiscount, promotionSummary: dealt.promotionSummary }));
+    return { success: true };
+  },
+
   removeItem: (itemId) => {
     const state = get();
     const items = state.items.filter((item) => item.id !== itemId);
@@ -581,6 +676,19 @@ export const useCartStore = create<CartState>((set, get) => ({
     const state = get();
     const item = state.items.find((i) => i.id === itemId);
     if (!item) return { success: false, error: 'Item not found' };
+    if (item.is_bundle && item.bundle_id) {
+      const bundle = await getBundleWithComponents(item.bundle_id);
+      if (!bundle) return { success: false, error: 'Bundle is no longer available.' };
+      const validation = await validateBundleStock(bundle.bundle.store_id, item.bundle_id, qty, state.locationId);
+      if (!validation.ok) return { success: false, error: `Not enough stock for ${validation.missing || 'a bundle product'}.` };
+      const draft = state.items.map((line) => line.id === itemId ? {
+        ...line, quantity: qty, base_quantity: qty,
+        subtotal: roundMoney((line.list_unit_price ?? line.unit_price) * qty),
+      } : line);
+      const dealt = await applyDeals(draft, state.couponCode);
+      set((current) => ({ ...withDiscount(current, dealt.items), items: dealt.items, promotionDiscount: dealt.promotionDiscount, promotionSummary: dealt.promotionSummary }));
+      return { success: true };
+    }
     const product = await db.products.get(item.product_id);
     if (!product) return { success: false, error: 'Product not found' };
 
@@ -746,6 +854,9 @@ export const useCartStore = create<CartState>((set, get) => ({
       otherChargesTotal: 0,
       subtotal: 0,
       total: 0,
+      taxTotal: 0,
+      taxBreakdown: [],
+      taxExempt: false,
       couponCode: '',
       pointsToRedeem: 0,
       loyaltyCustomerId: '',
@@ -839,7 +950,9 @@ export const useCartStore = create<CartState>((set, get) => ({
     paystackReference = '',
     paymentReference = '',
     customerId = '',
-    walletAmount = 0
+    walletAmount = 0,
+    giftCardCode = '',
+    giftCardAmount = 0
   ) => {
     const state = get();
     if (state.items.length === 0) throw new Error('Cart is empty');
@@ -860,7 +973,9 @@ export const useCartStore = create<CartState>((set, get) => ({
       state.discountPercent,
       state.discountFixed,
       state.otherCharges,
-      0
+      0,
+      state.taxConfig,
+      state.taxExempt
     );
 
     if (!isOwner && !cashierCanDiscount && priced.discountAmount > 0) {
@@ -895,7 +1010,9 @@ export const useCartStore = create<CartState>((set, get) => ({
       state.discountPercent,
       state.discountFixed,
       state.otherCharges,
-      redeemAmount
+      redeemAmount,
+      state.taxConfig,
+      state.taxExempt
     );
     const earnedPoints = attachedCustomerId
       ? pointsEarned(priced.total, Number(store?.loyalty_earn_rate) || 0)
@@ -904,6 +1021,8 @@ export const useCartStore = create<CartState>((set, get) => ({
     let cash = toMoneyAmount(cashAmount);
     let paystack = toMoneyAmount(paystackAmount);
     const wallet = toMoneyAmount(walletAmount || 0);
+    const giftCard = toMoneyAmount(giftCardAmount || 0);
+    const normalizedGiftCardCode = normalizeGiftCardCode(giftCardCode);
     let manualPayment = 0;
     const recordedPaymentReference = paymentReference.trim();
     if (paymentMethod === 'cash') {
@@ -928,15 +1047,20 @@ export const useCartStore = create<CartState>((set, get) => ({
       if (!moneyEquals(wallet, priced.total)) {
         throw new Error('Store credit must cover the full sale. Use wallet plus cash for a partial balance.');
       }
+    } else if (paymentMethod === 'gift_card') {
+      if (!normalizedGiftCardCode || giftCard <= 0 || giftCard > priced.total) throw new Error('Enter a valid gift card code and amount.');
+      cash = toMoneyAmount(priced.total - giftCard);
+      paystack = 0;
     } else {
       // split
       if (wallet > 0 && !customerId) throw new Error('Select a registered customer to use store credit.');
-      if (!moneyEquals(cash + paystack + wallet, priced.total)) {
+      if (!moneyEquals(cash + paystack + wallet + giftCard, priced.total)) {
         throw new Error(
           `Split payment must equal total. Cash ${formatStoreMoneyNow(cash)} + MoMo ${formatStoreMoneyNow(paystack)} + store credit ${formatStoreMoneyNow(wallet)} ≠ ${formatStoreMoneyNow(priced.total)}.`
         );
       }
     }
+    if (giftCard > 0 && !normalizedGiftCardCode) throw new Error('Enter a gift card code.');
     if (isManualPaymentMethod(paymentMethod)) {
       if (!recordedPaymentReference) throw new Error('Payment reference is required for manual payments.');
       if (recordedPaymentReference.length > 100) throw new Error('Payment reference must be 100 characters or fewer.');
@@ -954,7 +1078,22 @@ export const useCartStore = create<CartState>((set, get) => ({
 
     // Aggregate needed qty per product (packs + duplicate lines)
     const needByProduct = new Map<string, { qty: number; name: string }>();
+    if (store?.bundles_enabled === 0 && state.items.some((item) => item.is_bundle)) {
+      throw new Error('Product bundles are disabled for this store.');
+    }
     for (const item of state.items) {
+      if (item.is_bundle && item.bundle_id) {
+        const bundle = await getBundleWithComponents(item.bundle_id);
+        if (!bundle || bundle.bundle.store_id !== storeId || bundle.bundle.is_active !== 1) throw new Error(`Bundle "${item.name}" is no longer available.`);
+        for (const component of bundle.components) {
+          const previous = needByProduct.get(component.product_id);
+          needByProduct.set(component.product_id, {
+            qty: (previous?.qty || 0) + component.quantity * item.quantity,
+            name: component.product.name,
+          });
+        }
+        continue;
+      }
       const prev = needByProduct.get(item.product_id);
       needByProduct.set(item.product_id, {
         qty: (prev?.qty || 0) + item.base_quantity,
@@ -1014,6 +1153,8 @@ export const useCartStore = create<CartState>((set, get) => ({
         db.customer_wallet_transactions,
         db.customer_loyalty_transactions,
         db.product_variants,
+        db.gift_cards,
+        db.gift_card_transactions,
       ],
       async () => {
         let creditCustomer: LocalCustomer | undefined;
@@ -1055,6 +1196,19 @@ export const useCartStore = create<CartState>((set, get) => ({
             });
           }
         }
+        if (giftCard > 0) {
+          const card = await db.gift_cards.where('code').equals(normalizedGiftCardCode).first();
+          if (!card || card.store_id !== storeId) throw new Error('Gift card not found for this store.');
+          if (!giftCardIsUsable(card)) throw new Error(card.expires_at && new Date(card.expires_at) <= new Date() ? 'This gift card has expired.' : 'This gift card is not active.');
+          if (giftCard > card.balance) throw new Error(`Gift card balance is ${formatStoreMoneyNow(card.balance)}.`);
+          const balanceAfter = toMoneyAmount(card.balance - giftCard);
+          await db.gift_cards.update(card.id, { balance: balanceAfter, status: balanceAfter <= 0 ? 'depleted' : 'active', updated_at: now, synced: 0 });
+          await db.gift_card_transactions.add({
+            id: generateId(), store_id: storeId, gift_card_id: card.id, transaction_id: txnId,
+            type: 'redeem', amount: giftCard, balance_after: balanceAfter,
+            note: `Redeemed on sale ${receiptNumber}`, created_by: cashierId, created_at: now, synced: 0,
+          });
+        }
         await db.transactions.add({
           id: txnId,
           store_id: storeId,
@@ -1063,6 +1217,8 @@ export const useCartStore = create<CartState>((set, get) => ({
           cashier_name: cashierName,
           total_amount: priced.total,
           discount_applied: priced.discountAmount,
+          tax_total: priced.taxTotal,
+          tax_breakdown_json: JSON.stringify(priced.taxBreakdown),
           other_charges_json: serializeOtherCharges(priced.otherCharges),
           other_charges_total: priced.otherChargesTotal,
           payment_method: paymentMethod,
@@ -1070,6 +1226,8 @@ export const useCartStore = create<CartState>((set, get) => ({
           paystack_amount: paystack,
           paystack_reference: paymentMethod === 'paystack' || paymentMethod === 'split' ? paystackReference : '',
           manual_payment_amount: manualPayment,
+          gift_card_amount: giftCard,
+          gift_card_code: giftCard > 0 ? normalizedGiftCardCode : '',
           wallet_amount: wallet,
           payment_reference: isManualPaymentMethod(paymentMethod) ? recordedPaymentReference : '',
           customer_id: payingCustomer?.id || null,
@@ -1097,10 +1255,12 @@ export const useCartStore = create<CartState>((set, get) => ({
           created_at: now,
           updated_at: now,
           synced: 0,
+          integration_events_pending: 1,
         });
 
         await db.transaction_items.bulkAdd(
-          state.items.map((item) => ({
+          priced.items.map((item) => ({
+            bundle_id: item.bundle_id || null,
             id: generateId(),
             store_id: storeId,
             transaction_id: txnId,
@@ -1109,6 +1269,8 @@ export const useCartStore = create<CartState>((set, get) => ({
             quantity: item.quantity,
             unit_price: item.unit_price,
             subtotal: item.subtotal,
+            tax_amount: item.tax_amount || 0,
+            tax_rate: item.tax_rate || 0,
             unit_type: item.unit_type,
             pack_size: item.pack_size,
             base_quantity: item.base_quantity,
@@ -1161,6 +1323,7 @@ export const useCartStore = create<CartState>((set, get) => ({
           });
         }
         for (const item of state.items) {
+          if (item.is_bundle) continue;
           if (!item.variant_id) continue;
           const variant = await db.product_variants.get(item.variant_id);
           if (!variant || variant.store_id !== storeId) {
@@ -1199,21 +1362,43 @@ export const useCartStore = create<CartState>((set, get) => ({
         userId: cashierId,
         transactionId: txnId,
         reason: 'sale',
-        items: state.items.map((item) => ({
-          productId: item.product_id,
-          baseQty: item.base_quantity,
-          name: item.name,
-        })),
+        items: (await Promise.all(state.items.map(async (item) => {
+          if (!item.is_bundle || !item.bundle_id) return [{ productId: item.product_id, baseQty: item.base_quantity, name: item.name }];
+          const bundle = await getBundleWithComponents(item.bundle_id);
+          if (!bundle) throw new Error(`Bundle "${item.name}" is no longer available.`);
+          return bundle.components.map((component) => ({
+            productId: component.product_id,
+            baseQty: component.quantity * item.quantity,
+            name: component.product.name,
+          }));
+        }))).flat(),
       });
     } catch (err) {
       // Roll back the sale so we never sync revenue without a stock movement
       const items = await db.transaction_items.where('transaction_id').equals(txnId).toArray();
       await db.transaction(
         'rw',
-        [db.transaction_items, db.transactions, db.customer_wallet_transactions, db.customers, db.customer_loyalty_transactions, db.product_variants],
+        [db.transaction_items, db.transactions, db.customer_wallet_transactions, db.customers, db.customer_loyalty_transactions, db.product_variants, db.gift_cards, db.gift_card_transactions],
         async () => {
           await Promise.all(items.map((item) => db.transaction_items.delete(item.id)));
           await db.transactions.delete(txnId);
+          if (giftCard > 0) {
+            const redemptions = await db.gift_card_transactions.where('transaction_id').equals(txnId).toArray();
+            for (const redemption of redemptions) {
+              const card = await db.gift_cards.get(redemption.gift_card_id);
+              if (card) {
+                const restoredBalance = toMoneyAmount(card.balance + redemption.amount);
+                const expired = Boolean(card.expires_at && new Date(card.expires_at) <= new Date());
+                await db.gift_cards.update(card.id, {
+                  balance: restoredBalance,
+                  status: expired ? 'expired' : restoredBalance > 0 ? 'active' : 'depleted',
+                  updated_at: new Date().toISOString(),
+                  synced: 0,
+                });
+              }
+              await db.gift_card_transactions.delete(redemption.id);
+            }
+          }
           for (const item of state.items) {
             if (!item.variant_id) continue;
             const variant = await db.product_variants.get(item.variant_id);
@@ -1264,13 +1449,17 @@ export const useCartStore = create<CartState>((set, get) => ({
     }
 
     const saleData = {
+      transactionId: txnId,
       receiptNumber,
-      items: [...state.items],
+      items: [...priced.items],
       subtotal: priced.subtotal,
       discount: priced.discountAmount,
       otherCharges: [...priced.otherCharges],
       otherChargesTotal: priced.otherChargesTotal,
       total: priced.total,
+      taxTotal: priced.taxTotal,
+      taxBreakdown: priced.taxBreakdown,
+      giftCardAmount: giftCard,
       customerBalance,
       stockChanges,
       locationId,

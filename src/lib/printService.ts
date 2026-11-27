@@ -39,9 +39,11 @@ export interface EscPosReceiptData {
   subtotal: number;
   discount: number;
   otherCharges?: Array<{ label: string; amount: number }>;
+  taxBreakdown?: Array<{ label: string; rate: number; amount: number }>;
   total: number;
   paymentMethod: string;
   cashAmount?: number;
+  giftCardAmount?: number;
   paystackAmount?: number;
   momoAmount?: number;
   chequeAmount?: number;
@@ -114,10 +116,19 @@ function printOnComputer(
     .filter((charge) => charge?.amount)
     .map((charge) => `<div class="row"><span>${escapeHtml(charge.label)}:</span><span>${escapeHtml(amt(data, charge.amount))}</span></div>`)
     .join('');
+  const taxes = (data.taxBreakdown || []).filter((tax) => tax.amount > 0)
+    .map((tax) => `<div class="row"><span>${escapeHtml(`${tax.label} (${tax.rate}%)`)}:</span><span>${escapeHtml(amt(data, tax.amount))}</span></div>`)
+    .join('');
   const paymentMethod = data.paymentMethod === 'paystack'
     ? 'Paystack'
     : getPaymentMethodLabel(data.paymentMethod);
   const paymentDetails = [
+    data.giftCardAmount
+      ? `<div class="row"><span>Gift card used:</span><span>${escapeHtml(amt(data, data.giftCardAmount))}</span></div>`
+      : '',
+    data.paymentMethod === 'gift_card' && data.cashAmount
+      ? `<div class="row"><span>Cash:</span><span>${escapeHtml(amt(data, data.cashAmount))}</span></div>`
+      : '',
     data.paymentMethod === 'split' && data.cashAmount
       ? `<div class="row"><span>Cash:</span><span>${escapeHtml(amt(data, data.cashAmount))}</span></div>`
       : '',
@@ -197,6 +208,7 @@ function printOnComputer(
           <hr class="rule">
           <div class="row"><span>Subtotal:</span><span>${escapeHtml(amt(data, data.subtotal))}</span></div>
           ${data.discount > 0 ? `<div class="row"><span>Discount:</span><span>-${escapeHtml(amt(data, data.discount))}</span></div>` : ''}
+          ${taxes}
           ${charges}
           <hr class="rule">
           <div class="row total"><span>TOTAL:</span><span>${escapeHtml(amt(data, data.total))}</span></div>
@@ -328,6 +340,12 @@ export async function buildEscPosReceipt(data: EscPosReceiptData): Promise<Uint8
     bytes.push(LF);
   }
 
+  for (const tax of data.taxBreakdown || []) {
+    if (tax.amount <= 0) continue;
+    bytes.push(...textToBytes(rightAlign(`${tax.label} (${tax.rate}%):`, amt(data, tax.amount))));
+    bytes.push(LF);
+  }
+
   for (const charge of data.otherCharges || []) {
     if (!charge?.amount) continue;
     bytes.push(...textToBytes(rightAlign(`${charge.label}:`, amt(data, charge.amount))));
@@ -387,6 +405,14 @@ export async function buildEscPosReceipt(data: EscPosReceiptData): Promise<Uint8
       bytes.push(...textToBytes(rightAlign('  Mobile money/card:', amt(data, data.paystackAmount))));
       bytes.push(LF);
     }
+  }
+  if (data.giftCardAmount) {
+    bytes.push(...textToBytes(rightAlign('  Gift card used:', amt(data, data.giftCardAmount))));
+    bytes.push(LF);
+  }
+  if (data.paymentMethod === 'gift_card' && data.cashAmount) {
+    bytes.push(...textToBytes(rightAlign('  Cash:', amt(data, data.cashAmount))));
+    bytes.push(LF);
   }
 
   if (data.manualPaymentAmount) {

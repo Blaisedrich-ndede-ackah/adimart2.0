@@ -84,7 +84,7 @@ function dayEnd(value: unknown): string | null {
   return `${value}T23:59:59.999Z`;
 }
 
-export default async function handler(request: ApiRequest, response: ApiResponse): Promise<void> {
+export async function handleAdminActivityLog(request: ApiRequest, response: ApiResponse): Promise<void> {
   response.setHeader('Cache-Control', 'no-store');
   if (request.method !== 'POST') {
     response.status(405).json({ error: 'Method not allowed.' });

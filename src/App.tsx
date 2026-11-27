@@ -43,6 +43,12 @@ const CampaignsPage = lazy(() => import('@/pages/CampaignsPage'));
 const StoreDealsPage = lazy(() => import('@/pages/StoreDealsPage'));
 const PublicShopPage = lazy(() => import('@/pages/PublicShopPage'));
 const PriceScanPage = lazy(() => import('@/pages/PriceScanPage'));
+const VerifyPickupPage = lazy(() => import('@/pages/VerifyPickupPage'));
+const WriteOffPage = lazy(() => import('@/pages/WriteOffPage'));
+const BundlesPage = lazy(() => import('@/pages/BundlesPage'));
+const GiftCardsRentalsPage = lazy(() => import('@/pages/GiftCardsRentalsPage'));
+const NotificationsPage = lazy(() => import('@/pages/NotificationsPage'));
+const ReceiptPage = lazy(() => import('@/pages/ReceiptPage'));
 const TermsPage = lazy(() => import('@/pages/TermsPage'));
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
 const AdminLoginPage = lazy(() => import('@/pages/AdminLoginPage'));
@@ -60,11 +66,16 @@ import { createDueRecurringExpenses } from '@/lib/dexie';
 import { flushPriceChanges } from '@/lib/priceChangeQueue';
 import { useAccessibilityStore } from '@/lib/accessibility';
 import { useT } from '@/lib/i18n';
+import { syncWriteOffs } from '@/lib/writeOff';
+import { syncBundles } from '@/lib/bundle';
+import { syncReceipts } from '@/lib/receiptWallet';
 
 type AppMode = 'store' | 'admin-login' | 'admin' | 'agent-login' | 'agent';
 
 function readPublicShopSlug(): string | null {
   if (typeof window === 'undefined') return null;
+  const pathMatch = window.location.pathname.match(/^\/shop\/([^/?#]+)/i);
+  if (pathMatch?.[1]) return decodeURIComponent(pathMatch[1]).trim().toLowerCase();
   const hash = window.location.hash.replace(/^#/, '');
   const match = hash.match(/^\/?shop\/([^/?#]+)/i);
   if (match?.[1]) return decodeURIComponent(match[1]).trim().toLowerCase();
@@ -92,12 +103,33 @@ function readPriceScanSlug(): string | null {
   return match?.[1] ? decodeURIComponent(match[1]).trim().toLowerCase() : null;
 }
 
+function readVerifyPickupRoute(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.location.hash.replace(/^#\/?/, '').replace(/\/$/, '').toLowerCase() === 'verify-pickup';
+}
+
+function readReceiptToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  const match = window.location.hash.replace(/^#/, '').match(/^\/?receipt\/([^/?#]+)/i);
+  if (!match?.[1]) return null;
+  try { return decodeURIComponent(match[1]); } catch { return null; }
+}
+
+function readStaffFeatureRoute(): 'write-offs' | 'bundles' | null {
+  if (typeof window === 'undefined') return null;
+  const route = window.location.hash.replace(/^#\/?/, '').replace(/\/$/, '').toLowerCase();
+  return route === 'write-offs' || route === 'bundles' ? route : null;
+}
+
 function readPublicUtilityRoute(): 'terms' | '404' | null {
   if (typeof window === 'undefined') return null;
   const hash = window.location.hash.replace(/^#/, '').replace(/^\//, '').replace(/\/$/, '');
   if (!hash) return null;
   if (hash.toLowerCase() === 'terms') return 'terms';
   if (hash.toLowerCase() === 'agent') return null;
+  if (hash.toLowerCase() === 'verify-pickup') return null;
+  if (hash.toLowerCase() === 'write-offs' || hash.toLowerCase() === 'bundles') return null;
+  if (/^receipt\//i.test(hash)) return null;
   if (/^shop\//i.test(hash)) return null;
   if (/^price-scan\//i.test(hash)) return null;
   return '404';
@@ -121,6 +153,8 @@ function userNeedsPhone(user: { phone?: string | null } | null | undefined): boo
 
 export default function App() {
   if (isCustomerDisplayRoute()) return <CustomerDisplayRoute />;
+  const receiptToken = readReceiptToken();
+  if (receiptToken) return <Suspense fallback={<div className="min-h-screen bg-gray-50" />}><ReceiptPage token={receiptToken} /></Suspense>;
   return <AuthenticatedApp />;
 }
 
@@ -138,7 +172,13 @@ function AuthenticatedApp() {
   const t = useT();
   const initializeAgent = useAgentAuthStore((state) => state.initialize);
   const leftHanded = useAccessibilityStore((state) => state.leftHanded);
-  const [currentPage, setCurrentPage] = useState('home');
+  const [currentPage, setCurrentPage] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const pushPage = params.get('open-page');
+    const allowedPushPages = ['inventory', 'ecommerce', 'devices', 'customers', 'notifications'];
+    if (params.has('open-notifications')) return pushPage && allowedPushPages.includes(pushPage) ? pushPage : 'notifications';
+    return readVerifyPickupRoute() ? 'verify-pickup' : readStaffFeatureRoute() || 'home';
+  });
   const [quickAction, setQuickAction] = useState<'add-product' | 'add-expense' | null>(null);
   const [appMode, setAppMode] = useState<AppMode>(() => (readAgentHash() ? 'agent-login' : 'store'));
   const [adminSessionResolved, setAdminSessionResolved] = useState(false);
@@ -164,16 +204,53 @@ function AuthenticatedApp() {
   }, []);
 
   useEffect(() => {
+    const onServiceWorkerMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'OPEN_NOTIFICATIONS') {
+        const allowed = ['inventory', 'ecommerce', 'devices', 'customers', 'notifications'];
+        setCurrentPage(allowed.includes(event.data.page) ? event.data.page : 'notifications');
+      }
+    };
+    navigator.serviceWorker?.addEventListener('message', onServiceWorkerMessage);
+    return () => navigator.serviceWorker?.removeEventListener('message', onServiceWorkerMessage);
+  }, []);
+
+  useEffect(() => {
+    if (!currentStore?.id || !currentUser?.id) return;
+    const onSync = (event: Event) => {
+      const detail = (event as CustomEvent<Record<string, unknown>>).detail || {};
+      if (detail.success !== false || (detail.phase !== 'error' && detail.phase !== 'complete')) return;
+      const hour = new Date().toISOString().slice(0, 13);
+      void fetch('/api/integrations?action=sync_failed', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ store_id: currentStore.id, user_id: currentUser.id, event_key: `${currentUser.id}:${hour}`, body: String(detail.message || 'Cloud sync could not complete.').slice(0, 300) }),
+      }).catch(() => undefined);
+    };
+    window.addEventListener('adimat-sync', onSync);
+    return () => window.removeEventListener('adimat-sync', onSync);
+  }, [currentStore?.id, currentUser?.id]);
+
+  useEffect(() => {
     const onHashChange = () => setPublicShopSlug(readPublicShopSlug());
     const onPriceScanHashChange = () => setPriceScanSlug(readPriceScanSlug());
     const onUtilityHashChange = () => setPublicUtilityRoute(readPublicUtilityRoute());
+    const onVerifyPickupHashChange = () => {
+      if (readVerifyPickupRoute()) setCurrentPage('verify-pickup');
+    };
+    const onStaffFeatureHashChange = () => {
+      const route = readStaffFeatureRoute();
+      if (route) setCurrentPage(route);
+    };
     window.addEventListener('hashchange', onHashChange);
     window.addEventListener('hashchange', onPriceScanHashChange);
     window.addEventListener('hashchange', onUtilityHashChange);
+    window.addEventListener('hashchange', onVerifyPickupHashChange);
+    window.addEventListener('hashchange', onStaffFeatureHashChange);
     return () => {
       window.removeEventListener('hashchange', onHashChange);
       window.removeEventListener('hashchange', onPriceScanHashChange);
       window.removeEventListener('hashchange', onUtilityHashChange);
+      window.removeEventListener('hashchange', onVerifyPickupHashChange);
+      window.removeEventListener('hashchange', onStaffFeatureHashChange);
     };
   }, []);
 
@@ -197,15 +274,52 @@ function AuthenticatedApp() {
 
   useEffect(() => {
     if (!isAuthenticated || !currentStore?.id) return;
-    const flush = () => { void flushPriceChanges(currentStore.id); };
-    flush();
-    window.addEventListener('online', flush);
-    const interval = window.setInterval(flush, 60_000);
-    return () => {
-      window.removeEventListener('online', flush);
-      window.clearInterval(interval);
+    let active = true;
+    let timer = 0;
+    let running = false;
+    const runHousekeeping = async () => {
+      if (!active || running || document.visibilityState !== 'visible' || navigator.onLine === false) return;
+      running = true;
+      try {
+        await flushPriceChanges(currentStore.id).catch(() => undefined);
+        await syncWriteOffs(currentStore.id).catch(() => undefined);
+        await syncBundles(currentStore.id).catch(() => undefined);
+        await syncReceipts(currentStore.id).catch(() => undefined);
+        if (currentUser?.id) await sendDeviceHeartbeat(currentStore.id, currentUser.id).catch(() => undefined);
+        await flushSmsOutbox(currentStore.id).catch(() => undefined);
+        if (currentUser?.role === 'owner') await sendClosingSummary(currentStore).catch(() => undefined);
+      } catch (error) {
+        console.warn('[Housekeeping] A background task did not complete:', error);
+      } finally {
+        running = false;
+      }
     };
-  }, [isAuthenticated, currentStore?.id]);
+    const schedule = () => {
+      if (!active || document.visibilityState !== 'visible' || navigator.onLine === false) return;
+      timer = window.setTimeout(async () => {
+        await runHousekeeping();
+        schedule();
+      }, 60_000);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        window.clearTimeout(timer);
+        void runHousekeeping().finally(schedule);
+      } else {
+        window.clearTimeout(timer);
+      }
+    };
+    const onOnline = () => { window.clearTimeout(timer); void runHousekeeping().finally(schedule); };
+    void runHousekeeping().finally(schedule);
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', onOnline);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', onOnline);
+    };
+  }, [isAuthenticated, currentStore, currentUser?.id, currentUser?.role]);
 
   useEffect(() => {
     if (!isAuthenticated || !currentStore?.id) return;
@@ -213,90 +327,76 @@ function AuthenticatedApp() {
   }, [isAuthenticated, currentStore?.id]);
 
   useEffect(() => {
-    if (!isAuthenticated || !currentStore?.id || !currentUser?.id) return;
-    let active = true;
-    let heartbeatInProgress = false;
-    let hasLoggedFailure = false;
-
-    const sendHeartbeat = async () => {
-      if (!active || heartbeatInProgress || navigator.onLine === false) return;
-      heartbeatInProgress = true;
-      try {
-        await sendDeviceHeartbeat(currentStore.id, currentUser.id);
-        hasLoggedFailure = false;
-      } catch (error) {
-        if (!hasLoggedFailure) {
-          console.warn('[Presence] Could not update this device session:', error);
-          hasLoggedFailure = true;
-        }
-      } finally {
-        heartbeatInProgress = false;
-      }
-    };
-
-    void sendHeartbeat();
-    const interval = window.setInterval(() => void sendHeartbeat(), 60_000);
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') void sendHeartbeat();
-    };
-    const onOnline = () => void sendHeartbeat();
-    document.addEventListener('visibilitychange', onVisible);
-    window.addEventListener('online', onOnline);
-    return () => {
-      active = false;
-      window.clearInterval(interval);
-      document.removeEventListener('visibilitychange', onVisible);
-      window.removeEventListener('online', onOnline);
-    };
-  }, [isAuthenticated, currentStore?.id, currentUser?.id]);
-
-  useEffect(() => {
     if (!isAuthenticated || !currentStore?.id) return;
-    const runRecurringExpenses = () => {
-      void createDueRecurringExpenses()
+    let running = false;
+    const runRecurringExpenses = async () => {
+      if (document.visibilityState !== 'visible' || running) return;
+      running = true;
+      try {
+        await createDueRecurringExpenses()
         .then((created) => {
           if (created > 0) void triggerPushSync('recurring-expenses');
         })
         .catch((error: unknown) => {
           console.error('[Expenses] Could not create scheduled recurring expenses:', error);
         });
+      } finally {
+        running = false;
+      }
     };
-    runRecurringExpenses();
-    const interval = window.setInterval(runRecurringExpenses, 60 * 60 * 1000);
+    let timer = 0;
+    const schedule = () => {
+      if (document.visibilityState !== 'visible') return;
+      timer = window.setTimeout(async () => { await runRecurringExpenses(); schedule(); }, 60 * 60 * 1000);
+    };
+    void runRecurringExpenses().finally(schedule);
     const onVisible = () => {
-      if (document.visibilityState === 'visible') runRecurringExpenses();
+      if (document.visibilityState === 'visible') { window.clearTimeout(timer); void runRecurringExpenses().finally(schedule); }
+      else window.clearTimeout(timer);
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
-      window.clearInterval(interval);
+      window.clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [isAuthenticated, currentStore?.id]);
 
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return;
-    setCurrentPage(currentUser.role === 'owner' ? 'home' : 'pos');
+    setCurrentPage(readVerifyPickupRoute() ? 'verify-pickup' : currentUser.role === 'owner' ? 'home' : 'pos');
   }, [isAuthenticated, currentUser?.id, currentUser?.role]);
 
   useEffect(() => {
     if (!isAuthenticated || !currentStore?.id) return;
-    const runBackup = () => {
-      void createAutomaticStoreBackup(currentStore.id)
+    let running = false;
+    const runBackup = async () => {
+      if (document.visibilityState !== 'visible' || running) return;
+      running = true;
+      try {
+        await createAutomaticStoreBackup(currentStore.id)
         .then(() => recordBackupIssue(''))
         .catch((error: unknown) => {
           const message = error instanceof Error ? error.message : String(error);
           console.error('[Backup] Automatic store snapshot failed:', error);
           recordBackupIssue(message);
         });
+      } finally {
+        running = false;
+      }
     };
-    runBackup();
-    const interval = window.setInterval(runBackup, 60 * 60 * 1000);
+    let timer = 0;
+    const schedule = () => {
+      if (document.visibilityState !== 'visible') return;
+      timer = window.setTimeout(async () => { await runBackup(); schedule(); }, 60 * 60 * 1000);
+    };
+    void runBackup().finally(schedule);
     const onVisible = () => {
-      if (document.visibilityState === 'visible') runBackup();
+      if (document.visibilityState === 'visible') { window.clearTimeout(timer); void runBackup().finally(schedule); }
+      else window.clearTimeout(timer);
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
-      window.clearInterval(interval);
+      window.clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [isAuthenticated, currentStore?.id]);
@@ -304,7 +404,7 @@ function AuthenticatedApp() {
   useEffect(() => {
     // Cashiers cannot stay on owner-only pages after switch/login
     if (currentUser?.role !== 'cashier') return;
-    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'returns', 'multistore', 'adimat-ai', 'store-deals'];
+    const ownerOnly = ['home', 'inventory', 'purchasing', 'reports', 'settings', 'warehouse', 'subscription', 'returns', 'multistore', 'adimat-ai', 'store-deals', 'bundles'];
     const ecommerceOk = (currentUser.can_manage_ecommerce ?? 0) === 1;
     const cashbookOk = canAccessCashbook(currentUser);
     const customerPaymentsOk = canRecordCustomerPayments(currentUser);
@@ -328,9 +428,22 @@ function AuthenticatedApp() {
 
   useEffect(() => {
     if (!isAuthenticated) return;
-    void checkAndSendSubscriptionExpirySms();
-    const timer = window.setInterval(() => void checkAndSendSubscriptionExpirySms(), 6 * 60 * 60 * 1000);
-    return () => window.clearInterval(timer);
+    let timer = 0;
+    let running = false;
+    const run = async () => {
+      if (document.visibilityState !== 'visible' || !navigator.onLine || running) return;
+      running = true;
+      try { await checkAndSendSubscriptionExpirySms(); }
+      catch (error) { console.warn('[Subscription reminders] Could not complete:', error); }
+      finally { running = false; }
+    };
+    const schedule = () => { if (document.visibilityState === 'visible' && navigator.onLine) timer = window.setTimeout(async () => { await run(); schedule(); }, 6 * 60 * 60 * 1000); };
+    void run().finally(schedule);
+    const onVisibility = () => { if (document.visibilityState === 'visible') { window.clearTimeout(timer); void run().finally(schedule); } else window.clearTimeout(timer); };
+    const onOnline = () => { void run().finally(() => { window.clearTimeout(timer); schedule(); }); };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('online', onOnline);
+    return () => { window.clearTimeout(timer); document.removeEventListener('visibilitychange', onVisibility); window.removeEventListener('online', onOnline); };
   }, [isAuthenticated]);
 
   useEffect(() => {
@@ -340,25 +453,23 @@ function AuthenticatedApp() {
     if (currentUser?.role !== 'owner') return;
     // Chase overdue customer credit on its own schedule. The per-customer
     // interval stored on the store keeps this from over-texting anyone.
-    void checkAndSendDebtReminders();
-    const timer = window.setInterval(() => void checkAndSendDebtReminders(), 6 * 60 * 60 * 1000);
-    return () => window.clearInterval(timer);
+    let timer = 0;
+    let running = false;
+    const run = async () => {
+      if (document.visibilityState !== 'visible' || !navigator.onLine || running) return;
+      running = true;
+      try { await checkAndSendDebtReminders(); }
+      catch (error) { console.warn('[Debt reminders] Could not complete:', error); }
+      finally { running = false; }
+    };
+    const schedule = () => { if (document.visibilityState === 'visible' && navigator.onLine) timer = window.setTimeout(async () => { await run(); schedule(); }, 6 * 60 * 60 * 1000); };
+    void run().finally(schedule);
+    const onVisibility = () => { if (document.visibilityState === 'visible') { window.clearTimeout(timer); void run().finally(schedule); } else window.clearTimeout(timer); };
+    const onOnline = () => { void run().finally(() => { window.clearTimeout(timer); schedule(); }); };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('online', onOnline);
+    return () => { window.clearTimeout(timer); document.removeEventListener('visibilitychange', onVisibility); window.removeEventListener('online', onOnline); };
   }, [isAuthenticated, currentStore?.id, currentUser?.role]);
-
-  useEffect(() => {
-    if (!isAuthenticated || !currentStore?.id) return;
-    const run = () => {
-      void flushSmsOutbox(currentStore.id);
-      if (currentUser?.role === 'owner') void sendClosingSummary(currentStore);
-    };
-    run();
-    const timer = window.setInterval(run, 60_000);
-    window.addEventListener('online', run);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener('online', run);
-    };
-  }, [isAuthenticated, currentStore, currentUser?.role]);
 
   if (publicShopSlug) {
     return <PublicShopPage slug={publicShopSlug} />;
@@ -592,6 +703,16 @@ function AuthenticatedApp() {
         ) : (
           <POSPage />
         );
+      case 'verify-pickup':
+        return role === 'owner' || role === 'cashier' ? <VerifyPickupPage /> : <POSPage />;
+      case 'write-offs':
+        return role === 'owner' || (role === 'cashier' && currentStore?.cashiers_can_record_expenses === 1) ? <WriteOffPage /> : <POSPage />;
+      case 'bundles':
+        return role === 'owner' ? <BundlesPage /> : <POSPage />;
+      case 'gift-cards-rentals':
+        return role === 'owner' ? <GiftCardsRentalsPage /> : <POSPage />;
+      case 'notifications':
+        return <NotificationsPage />;
       default:
         return <POSPage />;
     }

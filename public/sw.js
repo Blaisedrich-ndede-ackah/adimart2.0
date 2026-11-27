@@ -1,4 +1,4 @@
-const CACHE_NAME = 'adimat-v13';
+const CACHE_NAME = 'adimat-v14';
 const CAMPAIGN_MEDIA_CACHE = 'adimat-campaign-media-v1';
 const OFFLINE_URL = '/';
 const PRECACHE_MANIFEST_URL = '/precache-manifest.json';
@@ -71,6 +71,19 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  if (/^\/(logo\.png|icon-[^/]+\.png|apple-touch-icon\.png|manifest\.json)$/.test(requestUrl.pathname)) {
+    event.respondWith(
+      caches.open(CACHE_NAME).then(async (cache) => {
+        const cachedResponse = await cache.match(event.request);
+        if (cachedResponse) return cachedResponse;
+        const response = await fetch(event.request);
+        if (response.ok) await cache.put(event.request, response.clone());
+        return response;
+      })
+    );
+    return;
+  }
+
   event.respondWith(
     fetch(event.request)
       .then((response) => {
@@ -104,4 +117,40 @@ self.addEventListener('message', (event) => {
   if (event.data === 'skipWaiting') {
     self.skipWaiting();
   }
+});
+
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try { payload = event.data ? event.data.json() : {}; } catch { payload = { body: event.data?.text() || '' }; }
+  const title = typeof payload.title === 'string' ? payload.title : 'Adimat notification';
+  const options = {
+    body: typeof payload.body === 'string' ? payload.body : '',
+    icon: '/icon-192x192.png',
+    badge: '/icon-192x192.png',
+    tag: typeof payload.type === 'string' ? `adimat-${payload.type}` : 'adimat-notification',
+    data: { ...(payload.data && typeof payload.data === 'object' ? payload.data : {}) },
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const type = event.notification.data?.event || event.notification.data?.type;
+  const page = type === 'stock.low' || type === 'low_stock'
+    ? 'inventory'
+    : type === 'order.online' || type === 'online_order'
+      ? 'ecommerce'
+      : type === 'sync_failed'
+        ? 'devices'
+        : type === 'customer.created' || type === 'customer_created' || type === 'debt_reminder_due'
+          ? 'customers'
+          : event.notification.data?.purpose === 'topup'
+            ? 'notifications'
+            : 'ecommerce';
+  event.waitUntil((async () => {
+    const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const matching = clients.find((client) => client.url.startsWith(self.location.origin));
+    if (matching) { matching.postMessage({ type: 'OPEN_NOTIFICATIONS', page }); return matching.focus(); }
+    return self.clients.openWindow(`/?open-notifications=1&open-page=${encodeURIComponent(page)}`);
+  })());
 });

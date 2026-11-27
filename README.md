@@ -12,6 +12,15 @@ A mobile-first Point of Sale (POS) and inventory management Progressive Web App 
 
 ## Features
 
+**Recent feature guide:** [Scan and Pay, pickup verification, bundles, write-offs, and digital receipts](./docs/RECENT_FEATURES.md).
+
+### Recent customer and stock tools
+- **Scan and Pay** — Customers scan or search a store's public catalog, pay with Paystack, and receive a pickup code and downloadable QR pass.
+- **Pickup verification** — Staff validate and redeem pickup passes, with a recorded release history and owner-authorized override.
+- **Product bundles** — Owners configure bundles for POS checkout; bundle sales deduct the component products from stock.
+- **Stock write-offs** — Authorized staff record expired, damaged, or other unusable stock with notes and an optional photo; owners can review and export the dated log.
+- **Digital receipts** — Checkout generates a customer QR for saving a receipt, and the customer display can show the QR during checkout.
+
 ### 🛒 Point of Sale
 - **Barcode Scanning** — Camera-based scanning using ZXing library with back camera preference
 - **Manual Entry** — Search products by name or enter barcodes manually

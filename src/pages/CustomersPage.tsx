@@ -101,6 +101,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
   const [openingBalance, setOpeningBalance] = useState('');
   const [creditLimit, setCreditLimit] = useState('');
   const [creditTermsDays, setCreditTermsDays] = useState('');
+  const [taxExempt, setTaxExempt] = useState(false);
   const [locationId, setLocationId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [locations, setLocations] = useState<LocalLocation[]>([]);
@@ -241,6 +242,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
     setOpeningBalance('');
     setCreditLimit('');
     setCreditTermsDays('');
+    setTaxExempt(false);
     setLocationId(null);
     setError('');
   };
@@ -257,6 +259,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
     setOpeningBalance('');
     setCreditLimit(customer.credit_limit ? String(customer.credit_limit) : '');
     setCreditTermsDays(customer.credit_terms_days == null ? '' : String(customer.credit_terms_days));
+    setTaxExempt(customer.tax_exempt === 1);
     setLocationId(customer.location_id ?? null);
     setError('');
   };
@@ -270,6 +273,7 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
       const credit = {
         creditLimit: creditLimit.trim() ? Number(creditLimit) : null,
         creditTermsDays: creditTermsDays.trim() ? Number(creditTermsDays) : null,
+        taxExempt,
       };
       if (credit.creditLimit != null && (!Number.isFinite(credit.creditLimit) || credit.creditLimit < 0)) {
         throw new Error('Enter a valid credit limit, or leave it blank.');
@@ -744,6 +748,10 @@ export default function CustomersPage({ onNavigate }: CustomersPageProps = {}) {
                 />
               </label>
             </div>
+            <label className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-950">
+              <input type="checkbox" checked={taxExempt} onChange={(event) => setTaxExempt(event.target.checked)} className="h-4 w-4 accent-amber-700" />
+              Mark this customer tax exempt
+            </label>
             {!editing && (
               <>
                 <label className="block text-sm font-medium text-gray-700">
