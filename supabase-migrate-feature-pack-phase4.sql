@@ -1,0 +1,4 @@
+-- Phase 4 SEO fields are included in supabase-migrate-feature-pack-tax.sql.
+-- Marketplace integrations were removed from the application, so this retired
+-- phase migration intentionally creates no marketplace/API tables.
+-- Existing marketplace data is left untouched in databases where it was applied.

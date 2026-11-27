@@ -26,6 +26,12 @@ const BACKUP_TABLES = [
   'deleted_records',
   'product_variants',
   'customer_loyalty_transactions',
+  'pickup_tokens',
+  'pickup_verification_logs',
+  'stock_write_offs',
+  'product_bundles',
+  'bundle_components',
+  'receipt_tokens',
 ] as const;
 const MAX_BACKUP_SIZE_BYTES = 50 * 1024 * 1024;
 
@@ -146,7 +152,13 @@ export async function restoreStoreBackup(file: File, currentStoreId: string): Pr
       name === 'customer_account_receipts' ||
       name === 'credit_payments' ||
       name === 'sales_returns' ||
-      name === 'customer_wallet_transactions' ? [] : undefined);
+      name === 'customer_wallet_transactions' ||
+      name === 'pickup_tokens' ||
+      name === 'pickup_verification_logs' ||
+      name === 'stock_write_offs' ||
+      name === 'product_bundles' ||
+      name === 'bundle_components' ||
+      name === 'receipt_tokens' ? [] : undefined);
     if (!Array.isArray(rows) || !rows.every((row) => isRecord(row) && row.store_id === currentStoreId)) {
       throw new Error(`The backup contains invalid ${name} records.`);
     }
@@ -177,6 +189,7 @@ export async function getStoreSyncHealth(storeId: string) {
     db.recurring_expenses, db.expense_budgets,
     db.cash_book_entries, db.locations, db.stock_batches, db.stock_movements,
     db.online_orders, db.online_order_items, db.suppliers, db.purchase_orders,
+    db.stock_write_offs, db.product_bundles, db.bundle_components, db.receipt_tokens,
   ];
   const pendingRows = await Promise.all(syncable.map(async (table) => {
     const rows = await table.where('store_id').equals(storeId).toArray();

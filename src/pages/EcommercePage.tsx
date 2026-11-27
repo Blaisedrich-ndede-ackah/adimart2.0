@@ -31,6 +31,10 @@ export default function EcommercePage() {
   const [statusMsg, setStatusMsg] = useState('');
   const [links, setLinks] = useState<StorefrontLink[]>([]);
   const [savingLinks, setSavingLinks] = useState(false);
+  const [seoTitle, setSeoTitle] = useState(currentStore?.seo_meta_title || '');
+  const [seoDescription, setSeoDescription] = useState(currentStore?.seo_meta_description || '');
+  const [ogImageUrl, setOgImageUrl] = useState(currentStore?.og_image_url || '');
+  const [savingSeo, setSavingSeo] = useState(false);
 
   const allowed = canManageEcommerce(currentUser, currentStore);
   const enabled = (currentStore?.ecommerce_enabled ?? 0) === 1;
@@ -51,6 +55,12 @@ export default function EcommercePage() {
       setLinks([]);
     }
   }, [currentStore?.ecommerce_links]);
+
+  useEffect(() => {
+    setSeoTitle(currentStore?.seo_meta_title || '');
+    setSeoDescription(currentStore?.seo_meta_description || '');
+    setOgImageUrl(currentStore?.og_image_url || '');
+  }, [currentStore?.seo_meta_title, currentStore?.seo_meta_description, currentStore?.og_image_url]);
 
   const onlineProducts = useMemo(
     () => catalog.filter((p) => (p.sell_online ?? 0) === 1),
@@ -156,9 +166,29 @@ export default function EcommercePage() {
     }
   };
 
+  const saveSeo = async () => {
+    if (!currentStore) return;
+    setSavingSeo(true);
+    try {
+      await db.stores.update(currentStore.id, {
+        seo_meta_title: seoTitle.trim().slice(0, 70),
+        seo_meta_description: seoDescription.trim().slice(0, 180),
+        og_image_url: /^https:\/\//i.test(ogImageUrl.trim()) ? ogImageUrl.trim() : '',
+        synced: 0,
+      });
+      await refreshStore?.();
+      setStatusMsg('Store search appearance saved');
+    } catch (error) {
+      setStatusMsg(error instanceof Error ? error.message : 'Could not save search appearance');
+    } finally {
+      setSavingSeo(false);
+      setTimeout(() => setStatusMsg(''), 3000);
+    }
+  };
+
   const setStatus = async (orderId: string, status: OnlineOrderStatus) => {
     try {
-      await updateOnlineOrderStatus(orderId, status);
+      await updateOnlineOrderStatus(orderId, status, currentUser?.id || '', currentUser?.name || '');
       await refreshOrders();
       setStatusMsg(`Order marked ${status}`);
     } catch (e) {
@@ -258,6 +288,14 @@ export default function EcommercePage() {
                 </a>
               ) : null}
             </div>
+          </div>
+
+          <div className="mt-3 space-y-3 rounded-xl border border-gray-200 bg-white p-3">
+            <div><p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Search and social preview</p><p className="mt-1 text-xs text-gray-500">These tags are applied when the public shop loads. Social crawlers may need server-rendered pages to read them before JavaScript runs.</p></div>
+            <label className="block text-xs font-medium text-gray-700">Homepage title<input value={seoTitle} onChange={(event) => setSeoTitle(event.target.value)} maxLength={70} className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
+            <label className="block text-xs font-medium text-gray-700">Homepage description<textarea value={seoDescription} onChange={(event) => setSeoDescription(event.target.value)} maxLength={180} rows={2} className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
+            <label className="block text-xs font-medium text-gray-700">Open Graph image URL<input value={ogImageUrl} onChange={(event) => setOgImageUrl(event.target.value)} type="url" placeholder="https://…" className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
+            <button type="button" disabled={savingSeo} onClick={() => void saveSeo()} className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{savingSeo ? 'Saving…' : 'Save search appearance'}</button>
           </div>
 
           {statusMsg ? (
@@ -388,7 +426,7 @@ export default function EcommercePage() {
                     ))}
                   </ul>
 
-                  {order.notes ? (
+                  {order.notes && !order.notes.startsWith('price-scan-paystack:') ? (
                     <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
                       Note: {order.notes}
                     </p>
@@ -400,7 +438,7 @@ export default function EcommercePage() {
                   ) : null}
 
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {STATUS_FLOW.filter((s) => s !== order.status).map((status) => (
+                    {STATUS_FLOW.filter((s) => s !== order.status && !(order.order_number.startsWith('PS-') && s === 'fulfilled')).map((status) => (
                       <button
                         key={status}
                         type="button"

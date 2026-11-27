@@ -10,6 +10,7 @@ import { getLocationInventory, listLocations, toMoney, toQty } from './warehouse
 import { lineBaseQty, roundMoney } from './money';
 import { getPaymentMethodLabel } from './paymentMethods';
 import { isCountedSale } from './saleStatus';
+import jsPDF from 'jspdf';
 
 export interface PeriodRange {
   start: Date;
@@ -630,6 +631,46 @@ export function exportLocationReportCsv(summary: LocationReportSummary): void {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+export function exportTaxSummaryPdf(input: {
+  storeName: string;
+  periodLabel: string;
+  currencyCode?: string | null;
+  transactionCount: number;
+  salesTotal: number;
+  taxTotal: number;
+  components: Array<{ label: string; amount: number }>;
+}): void {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  let y = 22;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(17);
+  doc.text('Tax Summary', 16, y);
+  y += 9;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  doc.text(input.storeName, 16, y);
+  doc.text(input.periodLabel, 16, y + 6);
+  y += 17;
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Completed sales: ${input.transactionCount}`, 16, y);
+  y += 7;
+  doc.text(`Recorded sales total: ${formatGhsOfficial(input.salesTotal, input.currencyCode)}`, 16, y);
+  y += 7;
+  doc.text(`Recorded tax on sales: ${formatGhsOfficial(input.taxTotal, input.currencyCode)}`, 16, y);
+  y += 11;
+  doc.setFont('helvetica', 'normal');
+  for (const component of input.components) {
+    if (y > 270) { doc.addPage(); y = 20; }
+    doc.text(component.label, 18, y);
+    doc.text(formatGhsOfficial(component.amount, input.currencyCode), 192, y, { align: 'right' });
+    y += 7;
+  }
+  y += 8;
+  doc.setFontSize(8);
+  doc.text('Internal sales tax summary only. Not an official tax return or GRA E-VAT receipt.', 16, y, { maxWidth: 175 });
+  doc.save(`adimat-tax-summary-${input.periodLabel.replace(/[^a-z0-9]+/gi, '-')}.pdf`);
 }
 
 export async function exportLocationReportPdf(summary: LocationReportSummary, org?: FormalOrg): Promise<void> {

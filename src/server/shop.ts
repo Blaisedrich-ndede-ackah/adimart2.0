@@ -2,6 +2,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
 import { parseGhanaPhone } from '../lib/ghanaPhone';
 import { sendStoreMomoPayout } from './storeMomoPayout';
+import { publishStoreNotification } from './integrations';
 
 export interface ApiRequest {
   method?: string;
@@ -999,7 +1000,18 @@ export async function handlePaystackWebhook(req: ApiRequest, res: ApiResponse): 
         const { settleSmsTopup } = await import('./smsWallet');
         await settleSmsTopup(charge);
       } else {
-        await finalizeIntent(reference, charge);
+        const finalized = await finalizeIntent(reference, charge);
+        if (finalized) {
+          const { data: intent } = await service().from('shop_payment_intents').select('store_id,purpose').eq('reference', reference).maybeSingle();
+          if (intent?.store_id) {
+            const amount = pesewasToGhs(charge.amount).toFixed(2);
+            await publishStoreNotification({
+              storeId: String(intent.store_id), type: 'payment_received', title: 'Paystack payment received',
+              body: `${amount} GHS received for ${intent.purpose === 'topup' ? 'a wallet top-up' : 'an online order'}.`,
+              eventKey: reference, data: { reference, purpose: intent.purpose },
+            });
+          }
+        }
       }
     }
     return json(res, 200, { received: true });

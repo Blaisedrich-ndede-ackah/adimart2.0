@@ -1,14 +1,17 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import Dexie from 'dexie';
 import {
   ShoppingCart, Minus, Plus, Trash2, Search, Package, AlertCircle, Bluetooth,
   ScanBarcode, MapPin, X, Settings2, GripVertical, MoveUp, MoveDown, Mic, Pause, Play,
-  CircleCheck, CircleX,
+  CircleCheck, CircleX, PackageCheck,
   MonitorUp,
 } from 'lucide-react';
 import BarcodeScanner from '@/components/BarcodeScanner';
+import PriceScanPickupDesk from '@/components/PriceScanPickupDesk';
 import CheckoutOverlay from '@/components/CheckoutOverlay';
 import FrequentItems from '@/components/FrequentItems';
 import { useCartStore } from '@/store/useCartStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useAuthStore } from '@/store/useAuthStore';
 import { canViewStockQuantities } from '@/lib/stockVisibility';
 import { useAccessibilityStore } from '@/lib/accessibility';
@@ -43,6 +46,7 @@ import {
   type PosLayout,
   type PosSection,
 } from '@/lib/posLayout';
+import BundlePicker from '@/components/BundlePicker';
 
 type PosTab = 'products' | 'cart';
 type SpeechRecognitionLike = {
@@ -124,21 +128,34 @@ function moveBy<T>(order: readonly T[], item: T, offset: number): T[] {
 }
 
 export default function POSPage({ onNavigate }: { onNavigate?: (page: string) => void }) {
-  const cart = useCartStore();
+  const cart = useCartStore(useShallow((s) => ({
+    items: s.items, total: s.total, subtotal: s.subtotal, discountAmount: s.discountAmount,
+    parkedCarts: s.parkedCarts, addItem: s.addItem, addItemByBarcode: s.addItemByBarcode,
+    clearCart: s.clearCart, decrementItem: s.decrementItem, incrementItem: s.incrementItem,
+    parkCart: s.parkCart, removeItem: s.removeItem, removeParkedCart: s.removeParkedCart,
+    resumeParkedCart: s.resumeParkedCart, setItemSaleMode: s.setItemSaleMode,
+    setItemSerial: s.setItemSerial, setItemUnitType: s.setItemUnitType, updateQuantity: s.updateQuantity,
+  })));
   const setSaleContext = useCartStore((s) => s.setSaleContext);
+  const setTaxConfig = useCartStore((s) => s.setTaxConfig);
   const { currentUser, currentStore } = useAuthStore();
   const money = useFormatMoney();
   const t = useT();
   const [posTab, setPosTab] = useState<PosTab>('products');
+  const [showBundles, setShowBundles] = useState(false);
   const [scannerActive, setScannerActive] = useState(true);
   const [showCameraScanner, setShowCameraScanner] = useState(false);
+  const [pickupDeskOpen, setPickupDeskOpen] = useState(false);
   const [showCheckout, setShowCheckout] = useState(false);
   const [optionProduct, setOptionProduct] = useState<LocalProduct | null>(null);
   const [productOptions, setProductOptions] = useState<LocalProductVariant[]>([]);
   const [scanFeedback, setScanFeedback] = useState<{ type: 'success' | 'error' | 'warning'; message: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [products, setProducts] = useState<LocalProduct[]>([]);
+  const [visibleProductLimit, setVisibleProductLimit] = useState(200);
   const [locationStock, setLocationStock] = useState<Record<string, number>>({});
   const [saleLocations, setSaleLocations] = useState<LocalLocation[]>([]);
   const [selectedLocationId, setSelectedLocationId] = useState<string>('');
@@ -154,6 +171,10 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   const [voiceSearchActive, setVoiceSearchActive] = useState(false);
   const [voiceSearchError, setVoiceSearchError] = useState('');
   const speechRecognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const lastVisibilitySyncRef = useRef(0);
+  const cfdTimerRef = useRef<number | null>(null);
+  const quantityTimersRef = useRef<Record<string, number>>({});
+  const stockMapCacheRef = useRef(new Map<string, Record<string, number>>());
   const [showLayoutEditor, setShowLayoutEditor] = useState(false);
   const [layoutStatus, setLayoutStatus] = useState('');
   const [draggedSection, setDraggedSection] = useState<PosSection | null>(null);
@@ -183,6 +204,11 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   useCustomerDisplayChannel(handleCfdMessage);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearchQuery(searchQuery), 250);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
+  useEffect(() => {
     const items = cart.items.map((item) => ({
       id: item.id,
       name: item.name,
@@ -191,23 +217,34 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
       subtotal: item.subtotal,
       ...(item.image_url ? { image_url: item.image_url } : {}),
     }));
-    broadcastCfdMessage({
-      type: 'CartUpdated',
-      payload: {
+    const payload = {
         items,
         subtotal: cart.subtotal,
         total: cart.total,
         itemCount: items.reduce((count, item) => count + item.quantity, 0),
         currency: currentStore?.currency_code || 'GHS',
-      },
-    });
+      };
+    if (cfdTimerRef.current !== null) window.clearTimeout(cfdTimerRef.current);
+    cfdTimerRef.current = window.setTimeout(() => {
+      broadcastCfdMessage({ type: 'CartUpdated', payload });
+      cfdTimerRef.current = null;
+    }, 500);
+    return () => {
+      if (cfdTimerRef.current !== null) window.clearTimeout(cfdTimerRef.current);
+    };
   }, [cart.items, cart.subtotal, cart.total, currentStore?.currency_code]);
+
+  useEffect(() => () => {
+    if (cfdTimerRef.current !== null) window.clearTimeout(cfdTimerRef.current);
+  }, []);
 
   const openCustomerDisplay = () => {
     const displayUrl = new URL(window.location.href);
     displayUrl.hash = '/pos/customer-display';
     window.open(displayUrl.toString(), '_blank', 'popup=yes,width=1280,height=800');
   };
+
+  const closePickupDesk = useCallback(() => setPickupDeskOpen(false), []);
 
   const canWholesale = canUserSellWholesale(currentUser);
   const isStoreOwner = currentUser?.role === 'owner';
@@ -310,13 +347,13 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
     if (!soft) setLoadingProducts(true);
     try {
       const storeId = await getCurrentStoreId();
-      if (storeId && !soft) {
+      if (storeId && !soft && navigator.onLine !== false) {
         await ensureStoreLocations(storeId);
         void triggerAutoSync('pos-load');
       }
       let list = await getCurrentStoreActiveProducts();
       // Keep catalog stock_level = batch totals (same truth Inventory uses)
-      if (storeId) {
+      if (storeId && !soft) {
         try {
           list = await alignProductsWithBatchStock(list);
         } catch {
@@ -327,12 +364,17 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
       setProducts(list);
 
       if (storeId) {
-        const map = selectedLocationId
-          ? await getLocationStockMap(storeId, selectedLocationId)
-          : await getStoreBatchStockMap(storeId);
+        const stockCacheKey = `${storeId}:${selectedLocationId || 'store'}`;
+        const cachedMap = stockMapCacheRef.current.get(stockCacheKey);
+        const map = cachedMap
+          ? { ...cachedMap }
+          : selectedLocationId
+            ? await getLocationStockMap(storeId, selectedLocationId)
+            : await getStoreBatchStockMap(storeId);
         for (const product of list) {
           if (map[product.id] === undefined) map[product.id] = toQty(product.stock_level);
         }
+        stockMapCacheRef.current.set(stockCacheKey, map);
         setLocationStock(map);
       } else {
         setLocationStock({});
@@ -351,27 +393,53 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   }, [selectedLocationId, saleMode, unitType, setSaleContext]);
 
   useEffect(() => {
+    setTaxConfig({
+      vatRate: Number(currentStore?.vat_rate) || 0,
+      nhilEnabled: currentStore?.nhil_enabled === 1,
+      nhilRate: Number(currentStore?.nhil_rate) || 0,
+      getfundEnabled: currentStore?.getfund_enabled === 1,
+      getfundRate: Number(currentStore?.getfund_rate) || 0,
+      covidLevyEnabled: currentStore?.covid_levy_enabled === 1,
+      covidLevyRate: Number(currentStore?.covid_levy_rate) || 0,
+      inclusive: currentStore?.tax_inclusive_pricing !== 0,
+    });
+  }, [currentStore?.vat_rate, currentStore?.nhil_enabled, currentStore?.nhil_rate, currentStore?.getfund_enabled, currentStore?.getfund_rate, currentStore?.covid_levy_enabled, currentStore?.covid_levy_rate, currentStore?.tax_inclusive_pricing, setTaxConfig]);
+
+  useEffect(() => {
     void loadProducts();
   }, [loadProducts]);
 
   // Match Inventory: pull cloud stock when returning to POS on this device
   useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState !== 'visible') return;
+      if (document.visibilityState !== 'visible' || navigator.onLine === false) return;
+      if (Date.now() - lastVisibilitySyncRef.current < 5 * 60_000) return;
+      lastVisibilitySyncRef.current = Date.now();
       void (async () => {
         await triggerAutoSync('pos-visible');
-        await loadProducts({ soft: true });
       })();
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [loadProducts]);
+  }, []);
 
   // Instant stock UI after sale / order / adjust — no full catalog reload
   useEffect(() => {
     if (!currentStore?.id) return;
     return subscribeStockChanges((event) => {
       if (event.storeId !== currentStore.id) return;
+
+      for (const [cacheKey, cachedMap] of stockMapCacheRef.current) {
+        const locationKey = cacheKey.slice(cacheKey.lastIndexOf(':') + 1);
+        const nextMap = { ...cachedMap };
+        for (const change of event.changes) {
+          const quantity = locationKey === 'store'
+            ? change.totalQty
+            : event.locationId === locationKey ? change.locationQty : undefined;
+          if (quantity !== undefined) nextMap[change.productId] = quantity;
+        }
+        stockMapCacheRef.current.set(cacheKey, nextMap);
+      }
 
       setProducts((prev) =>
         prev.map((p) => {
@@ -381,19 +449,24 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
         })
       );
 
-      if (!event.locationId || event.locationId === selectedLocationId) {
+      if (!selectedLocationId || !event.locationId || event.locationId === selectedLocationId) {
         setLocationStock((prev) => {
           const next = { ...prev };
           for (const change of event.changes) {
-            if (change.locationQty !== undefined) {
-              next[change.productId] = change.locationQty;
+            const quantity = selectedLocationId ? change.locationQty : change.totalQty;
+            if (quantity !== undefined) {
+              next[change.productId] = quantity;
             }
           }
+          const cacheKey = `${currentStore.id}:${selectedLocationId || 'store'}`;
+          stockMapCacheRef.current.set(cacheKey, next);
           return next;
         });
       }
     });
   }, [currentStore?.id, selectedLocationId]);
+
+  useEffect(() => { setVisibleProductLimit(200); }, [debouncedSearchQuery, selectedCategory]);
 
   useEffect(() => {
     // iOS/Safari often blocks WebAudio until the first user gesture.
@@ -419,7 +492,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   }, [products]);
 
   const filteredProducts = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
+    const q = debouncedSearchQuery.trim().toLowerCase();
     return products
       .filter((product) => selectedCategory === 'All' || product.category === selectedCategory)
       .map((product) => ({
@@ -435,7 +508,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
         new Date(b.product.updated_at || 0).getTime() - new Date(a.product.updated_at || 0).getTime()
       )
       .map(({ product }) => product);
-  }, [products, searchQuery, selectedCategory, salesRank]);
+  }, [products, debouncedSearchQuery, selectedCategory, salesRank]);
 
   useEffect(() => {
     const speech = window as SpeechWindow;
@@ -449,13 +522,14 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
       const storeId = await getCurrentStoreId();
       if (!storeId) return;
       const since = Date.now() - 30 * 24 * 60 * 60 * 1000;
-      const [transactions, items] = await Promise.all([
-        db.transactions.where('store_id').equals(storeId).filter((transaction) =>
-          transaction.status === 'completed' && transaction.void_status !== 'voided' && new Date(transaction.created_at).getTime() >= since
-        ).toArray(),
-        db.transaction_items.where('store_id').equals(storeId).toArray(),
-      ]);
-      const transactionDates = new Map(transactions.map((transaction) => [transaction.id, new Date(transaction.created_at).getTime()]));
+      const transactions = await db.transactions.where('[store_id+status+created_at]')
+        .between([storeId, 'completed', new Date(since).toISOString()], [storeId, 'completed', Dexie.maxKey], true, true).toArray();
+      const validTransactions = transactions.filter((transaction) => transaction.void_status !== 'voided');
+      const transactionIds = validTransactions.map((transaction) => transaction.id);
+      const items = transactionIds.length
+        ? await db.transaction_items.where('transaction_id').anyOf(transactionIds).toArray()
+        : [];
+      const transactionDates = new Map(validTransactions.map((transaction) => [transaction.id, new Date(transaction.created_at).getTime()]));
       const next: Record<string, { quantity: number; lastSold: number }> = {};
       for (const item of items) {
         const soldAt = transactionDates.get(item.transaction_id);
@@ -663,6 +737,31 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
     }
   };
 
+  const commitQuantityDraft = (itemId: string, value: string) => {
+    const timer = quantityTimersRef.current[itemId];
+    if (timer) window.clearTimeout(timer);
+    delete quantityTimersRef.current[itemId];
+    if (value.trim() && Number.isFinite(Number(value))) {
+      void handleUpdateQuantity(itemId, Number(value));
+    }
+    setQuantityDrafts((drafts) => {
+      const next = { ...drafts };
+      delete next[itemId];
+      return next;
+    });
+  };
+
+  const handleQuantityInput = (itemId: string, value: string) => {
+    setQuantityDrafts((drafts) => ({ ...drafts, [itemId]: value }));
+    const previous = quantityTimersRef.current[itemId];
+    if (previous) window.clearTimeout(previous);
+    quantityTimersRef.current[itemId] = window.setTimeout(() => commitQuantityDraft(itemId, value), 180);
+  };
+
+  useEffect(() => () => {
+    for (const timer of Object.values(quantityTimersRef.current)) window.clearTimeout(timer);
+  }, []);
+
   const handleCheckoutComplete = (_receipt: string) => {
     setShowCheckout(false);
     setScannerActive(true);
@@ -731,6 +830,15 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
 
   return (
     <div className="page-shell relative">
+      {currentStore && currentUser && (
+        <PriceScanPickupDesk
+          open={pickupDeskOpen}
+          onClose={closePickupDesk}
+          store={currentStore}
+          cashierName={currentUser.name || ''}
+          cashierId={currentUser.id}
+        />
+      )}
       {(scanFeedback || stockError) && (
         <div
           role="status"
@@ -793,6 +901,16 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
               <span className="hidden sm:inline">{t('cfd.openCustomerDisplay')}</span>
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setPickupDeskOpen(true)}
+            aria-label={t('pickup.title')}
+            title={t('pickup.title')}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-white/20 px-2.5 py-2 text-xs font-semibold text-white touch-target hover:bg-white/30"
+          >
+            <PackageCheck className="h-4 w-4" />
+            <span className="hidden sm:inline">{t('pickup.shortTitle')}</span>
+          </button>
           {(btStatus.hidScannerEnabled || btStatus.scannerConnected) && (
             <div
               className="bg-white/15 px-2 py-1 rounded-lg flex items-center gap-1"
@@ -828,6 +946,21 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
           )}
         </div>
       </div>
+
+      {currentStore && currentUser && (
+        <section className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b border-emerald-100 bg-emerald-50 px-4 py-3" aria-label={t('pickup.title')}>
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-primary shadow-sm"><PackageCheck className="h-5 w-5" /></span>
+            <div className="min-w-0">
+              <h2 className="font-bold text-gray-900">{t('pickup.title')}</h2>
+              <p className="text-xs text-gray-600">{t('pickup.posHint')}</p>
+            </div>
+          </div>
+          <button type="button" onClick={() => setPickupDeskOpen(true)} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white shadow-sm touch-target hover:bg-primary-dark">
+            <PackageCheck className="h-4 w-4" />{t('pickup.openDesk')}
+          </button>
+        </section>
+      )}
 
       {showLayoutEditor && isStoreOwner && (
         <section className="flex-shrink-0 border-b border-emerald-100 bg-white px-3 py-3 md:px-4" aria-label="Customize POS layout">
@@ -964,6 +1097,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
             </div>
             {voiceSearchError && <p role="status" className="px-1 text-[11px] text-amber-800">{voiceSearchError}</p>}
             <div className="flex items-center gap-3">
+              {(currentStore?.bundles_enabled ?? 1) === 1 && <button type="button" onClick={() => setShowBundles((value) => !value)} aria-pressed={showBundles} className="min-h-9 shrink-0 rounded-lg border border-emerald-200 bg-white px-3 text-xs font-bold text-emerald-800">{showBundles ? t('bundle.products') : t('bundle.title')}</button>}
               <div className="pos-categories flex min-w-0 flex-1 gap-4 overflow-x-auto no-scrollbar" role="tablist" aria-label="Product categories">
                 {categories.map((cat) => (
                   <button
@@ -1027,7 +1161,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
           </div>
 
           <div className={`flex-1 overflow-y-auto px-3 md:px-4 pt-2 no-scrollbar ${cart.items.length > 0 ? 'pb-28 lg:pb-4' : 'pb-4'}`}>
-            {loadingProducts ? (
+            {showBundles ? <BundlePicker storeId={currentStore?.id || ''} locationId={selectedLocationId || null} /> : loadingProducts ? (
               <div className="flex flex-col items-center justify-center py-16 text-gray-400">
                 <Package className="w-10 h-10 mb-2 animate-pulse" />
                 <p className="text-sm">Loading store inventory…</p>
@@ -1044,7 +1178,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
               </div>
             ) : (
               <div className="pos-product-grid">
-                {filteredProducts.map((product) => {
+                {filteredProducts.slice(0, visibleProductLimit).map((product) => {
                   const stockHere =
                     locationStock[product.id] !== undefined
                       ? locationStock[product.id]
@@ -1113,6 +1247,15 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                   );
                 })}
               </div>
+            )}
+            {!showBundles && filteredProducts.length > visibleProductLimit && (
+              <button
+                type="button"
+                onClick={() => setVisibleProductLimit((limit) => limit + 200)}
+                className="mx-auto mt-4 block rounded-lg border border-emerald-200 px-4 py-2 text-sm font-semibold text-emerald-700"
+              >
+                Show more products ({filteredProducts.length - visibleProductLimit} remaining)
+              </button>
             )}
           </div>
         </section>
@@ -1261,16 +1404,16 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                             </p>
                             <div className="flex items-center gap-2 mt-1 flex-wrap">
                               <p className="text-xs text-gray-500">
-                                {money(item.unit_price)} / {item.unit_type === 'pack' ? 'pack' : 'unit'}
+                                {money(item.unit_price)} / {item.is_bundle ? t('bundle.perBundle') : item.unit_type === 'pack' ? 'pack' : 'unit'}
                               </p>
                               <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
                                 item.price_label?.startsWith('Wholesale')
                                   ? 'bg-amber-100 text-amber-800'
                                   : 'bg-blue-100 text-blue-800'
                               }`}>
-                                {item.price_label || (item.sale_mode === 'wholesale' ? 'Wholesale' : 'Retail')}
+                                {item.is_bundle ? t('bundle.perBundle') : item.price_label || (item.sale_mode === 'wholesale' ? 'Wholesale' : 'Retail')}
                               </span>
-                              <button
+                              {!item.is_bundle && <button
                                 type="button"
                                 onClick={() => void toggleItemSaleMode(item.id)}
                                 disabled={!canWholesale && item.sale_mode === 'retail'}
@@ -1281,15 +1424,15 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                                 className="rounded-lg border border-gray-200 px-2 py-1 text-[10px] font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 Use {item.sale_mode === 'retail' ? 'wholesale' : 'retail'}
-                              </button>
-                              <button
+                              </button>}
+                              {!item.is_bundle && <button
                                 type="button"
                                 onClick={() => void toggleItemUnitType(item.id)}
                                 aria-label={`Sell ${item.name} ${item.unit_type === 'pack' ? 'by unit' : 'by pack'}`}
                                 className="rounded-lg border border-gray-200 px-2 py-1 text-[10px] font-semibold text-gray-600 hover:bg-gray-50"
                               >
                                 {item.unit_type === 'pack' ? 'By unit' : 'By pack'}
-                              </button>
+                              </button>}
                             </div>
                           </div>
                           <button
@@ -1302,14 +1445,14 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                           </button>
                         </div>
 
-                        <input
+                        {!item.is_bundle && <input
                           value={item.serial_number || ''}
                           onChange={(event) => cart.setItemSerial(item.id, event.target.value)}
                           placeholder="Serial or IMEI"
                           aria-label={`Serial or IMEI for ${item.name}`}
                           maxLength={40}
                           className="mt-2 w-full rounded-lg border border-gray-200 bg-transparent px-2 py-1 text-xs text-gray-800 outline-none"
-                        />
+                        />}
 
                         <div className="mt-3 flex items-center justify-between gap-3">
                           <div role="group" aria-label={`Quantity for ${item.name}`} className="flex items-center gap-2">
@@ -1323,8 +1466,11 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
                             </button>
                             <input
                               type="number"
-                              value={item.quantity}
-                              onChange={(e) => void handleUpdateQuantity(item.id, Number(e.target.value))}
+                              value={quantityDrafts[item.id] ?? item.quantity}
+                              onChange={(e) => handleQuantityInput(item.id, e.target.value)}
+                              onBlur={(e) => {
+                                if (Object.prototype.hasOwnProperty.call(quantityDrafts, item.id)) commitQuantityDraft(item.id, e.currentTarget.value);
+                              }}
                               aria-label={`Quantity of ${item.name}`}
                               inputMode={item.allow_decimal === 1 ? 'decimal' : 'numeric'}
                               className="w-16 text-sm font-bold text-center bg-transparent border-b border-border focus:border-primary outline-none"

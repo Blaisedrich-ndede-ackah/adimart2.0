@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Store, Shield, Percent,
   Save, Loader2, CheckCircle2, UserPlus,
   Trash2, Users, Fingerprint, AlertCircle, Key, Smartphone, Ban, ImagePlus, Timer,
-  BellRing, Target, Eye
+  BellRing, Target, Eye, Monitor, Package, ReceiptText
 } from 'lucide-react';
 import ChangePinModal from '@/components/ChangePinModal';
 import ResetUserPinModal from '@/components/ResetUserPinModal';
@@ -89,6 +89,13 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [closingSmsTime, setClosingSmsTime] = useState('20:00');
   const [cashiersCanRecordExpenses, setCashiersCanRecordExpenses] = useState(true);
   const [vatRate, setVatRate] = useState('0');
+  const [nhilEnabled, setNhilEnabled] = useState(false);
+  const [nhilRate, setNhilRate] = useState('2.5');
+  const [getfundEnabled, setGetfundEnabled] = useState(false);
+  const [getfundRate, setGetfundRate] = useState('2.5');
+  const [covidLevyEnabled, setCovidLevyEnabled] = useState(false);
+  const [covidLevyRate, setCovidLevyRate] = useState('0');
+  const [taxInclusivePricing, setTaxInclusivePricing] = useState(true);
   const [closingSmsNote, setClosingSmsNote] = useState('');
   const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState(DEFAULT_SESSION_TIMEOUT_MINUTES);
   const [momoAccountName, setMomoAccountName] = useState('');
@@ -125,6 +132,12 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [locations, setLocations] = useState<LocalLocation[]>([]);
   const [permUserId, setPermUserId] = useState<string | null>(null);
   const [priceScanEnabled, setPriceScanEnabledState] = useState(isPriceScanPortalEnabled);
+  const [pickupVerificationEnabled, setPickupVerificationEnabled] = useState(true);
+  const [pickupTokenTtlMinutes, setPickupTokenTtlMinutes] = useState('30');
+  const [writeoffEnabled, setWriteoffEnabled] = useState(true);
+  const [bundlesEnabled, setBundlesEnabled] = useState(true);
+  const [digitalReceiptEnabled, setDigitalReceiptEnabled] = useState(true);
+  const [receiptTokenTtlHours, setReceiptTokenTtlHours] = useState('720');
   const [pendingPriceChanges, setPendingPriceChanges] = useState<PendingPriceChangeView[]>([]);
   const [syncingPriceChanges, setSyncingPriceChanges] = useState(false);
   const [priceQueueMessage, setPriceQueueMessage] = useState('');
@@ -185,6 +198,13 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
       setClosingSmsTime(currentStore.closing_sms_time || '20:00');
       setCashiersCanRecordExpenses((currentStore.cashiers_can_record_expenses ?? 1) === 1);
       setVatRate(String(Number(currentStore.vat_rate) || 0));
+      setNhilEnabled(currentStore.nhil_enabled === 1);
+      setNhilRate(String(Number(currentStore.nhil_rate ?? 2.5)));
+      setGetfundEnabled(currentStore.getfund_enabled === 1);
+      setGetfundRate(String(Number(currentStore.getfund_rate ?? 2.5)));
+      setCovidLevyEnabled(currentStore.covid_levy_enabled === 1);
+      setCovidLevyRate(String(Number(currentStore.covid_levy_rate) || 0));
+      setTaxInclusivePricing(currentStore.tax_inclusive_pricing !== 0);
       setSessionTimeoutMinutes(normalizeSessionTimeoutMinutes(currentStore.session_timeout_minutes));
       setMomoAccountName(currentStore.momo_account_name || '');
       setMomoNumber(currentStore.momo_number || '');
@@ -202,6 +222,12 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
       );
       setSalesTargetDaily(String(Number(currentStore.sales_target_daily) || 0));
       setSalesTargetMonthly(String(Number(currentStore.sales_target_monthly) || 0));
+      setPickupVerificationEnabled((currentStore.pickup_verification_enabled ?? 1) === 1);
+      setPickupTokenTtlMinutes(String(Math.max(5, Math.min(240, Math.floor(Number(currentStore.pickup_token_ttl_minutes) || 30)))));
+      setWriteoffEnabled((currentStore.writeoff_enabled ?? 1) === 1);
+      setBundlesEnabled((currentStore.bundles_enabled ?? 1) === 1);
+      setDigitalReceiptEnabled((currentStore.digital_receipt_enabled ?? 1) === 1);
+      setReceiptTokenTtlHours(String(Math.max(1, Math.min(8760, Math.floor(Number(currentStore.receipt_token_ttl_hours) || 720)))));
       await ensureStoreLocations(currentStore.id);
       setLocations(await listLocations(currentStore.id));
     }
@@ -276,6 +302,13 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         closing_sms_time: closingSmsTime || '20:00',
         cashiers_can_record_expenses: cashiersCanRecordExpenses ? 1 : 0,
         vat_rate: Math.max(0, Math.min(100, Number(vatRate) || 0)),
+        nhil_enabled: nhilEnabled ? 1 : 0,
+        nhil_rate: Math.max(0, Math.min(100, Number(nhilRate) || 0)),
+        getfund_enabled: getfundEnabled ? 1 : 0,
+        getfund_rate: Math.max(0, Math.min(100, Number(getfundRate) || 0)),
+        covid_levy_enabled: covidLevyEnabled ? 1 : 0,
+        covid_levy_rate: Math.max(0, Math.min(100, Number(covidLevyRate) || 0)),
+        tax_inclusive_pricing: taxInclusivePricing ? 1 : 0,
         session_timeout_minutes: normalizeSessionTimeoutMinutes(sessionTimeoutMinutes),
         momo_account_name: momoAccountName.trim(),
         momo_number: momoNumber.trim(),
@@ -288,6 +321,12 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         debt_reminder_message: normalizeDebtReminderTemplate(debtReminderMessage),
         sales_target_daily: Math.max(0, Number(salesTargetDaily) || 0),
         sales_target_monthly: Math.max(0, Number(salesTargetMonthly) || 0),
+        pickup_verification_enabled: pickupVerificationEnabled ? 1 : 0,
+        pickup_token_ttl_minutes: Math.max(5, Math.min(240, Math.floor(Number(pickupTokenTtlMinutes) || 30))),
+        writeoff_enabled: writeoffEnabled ? 1 : 0,
+        bundles_enabled: bundlesEnabled ? 1 : 0,
+        digital_receipt_enabled: digitalReceiptEnabled ? 1 : 0,
+        receipt_token_ttl_hours: Math.max(1, Math.min(8760, Math.floor(Number(receiptTokenTtlHours) || 720))),
         synced: 0,
       });
       
@@ -460,14 +499,18 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
           <p className="text-[11px] text-gray-500 mt-2">{t('settings.currencyHint')}</p>
         </div>
 
-        <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3" aria-labelledby="cfd-settings-title">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h3 id="cfd-settings-title" className="font-bold text-gray-900">{t('cfd.settings.label')}</h3>
-              <p className="mt-1 text-xs text-gray-500">{t('cfd.settings.hint')}</p>
+        <section className="relative mb-4 overflow-hidden rounded-2xl border border-emerald-100 bg-gradient-to-br from-white via-white to-emerald-50/70 p-5 shadow-sm sm:p-6" aria-labelledby="cfd-settings-title">
+          <div className="absolute -right-10 -top-16 h-40 w-40 rounded-full bg-emerald-100/60 blur-2xl" aria-hidden="true" />
+          <div className="relative flex flex-wrap items-center justify-between gap-5">
+            <div className="flex min-w-0 items-center gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-md shadow-emerald-900/10"><Monitor className="h-6 w-6" /></div>
+              <div>
+                <h3 id="cfd-settings-title" className="font-bold text-gray-900 sm:text-lg">{t('cfd.settings.label')}</h3>
+                <p className="mt-1 max-w-2xl text-sm leading-relaxed text-gray-500">{t('cfd.settings.hint')}</p>
+              </div>
             </div>
-            <label className="inline-flex cursor-pointer items-center gap-3">
-              <span className="sr-only">{t('cfd.settings.label')}</span>
+            <label className="inline-flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border border-gray-200 bg-white px-4 py-2 shadow-sm transition hover:border-emerald-200 focus-within:ring-2 focus-within:ring-emerald-500/30">
+              <span className="text-sm font-semibold text-gray-700">{customerDisplayEnabled ? t('common.on') : t('common.off')}</span>
               <input
                 type="checkbox"
                 checked={customerDisplayEnabled}
@@ -475,10 +518,35 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
                   setCustomerDisplayEnabledState(event.target.checked);
                   setCustomerDisplayEnabled(event.target.checked);
                 }}
-                className="h-5 w-5 accent-emerald-600"
+                className="peer sr-only"
+                aria-label={t('cfd.settings.label')}
               />
-              <span className="text-sm font-medium text-gray-700">{customerDisplayEnabled ? t('common.on') : t('common.off')}</span>
+              <span aria-hidden="true" className={`relative h-6 w-11 rounded-full transition-colors after:absolute after:left-1 after:top-1 after:h-4 after:w-4 after:rounded-full after:bg-white after:shadow after:transition-transform ${customerDisplayEnabled ? 'bg-emerald-600 after:translate-x-5' : 'bg-gray-300'}`} />
             </label>
+          </div>
+        </section>
+
+        <section className="mb-4 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="new-pos-features-title">
+          <div className="mb-5">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Adimat POS</p>
+            <h3 id="new-pos-features-title" className="mt-1 text-lg font-bold text-gray-900 sm:text-xl">{t('settings.newFeatures')}</h3>
+          </div>
+          <div className="grid gap-3 lg:grid-cols-3">
+            <label className="flex min-h-[92px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/70 p-4 transition hover:border-emerald-200 hover:bg-emerald-50/50 focus-within:ring-2 focus-within:ring-emerald-500/30">
+              <span className="flex min-w-0 items-center gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700"><Package className="h-5 w-5" /></span><span className="text-sm font-semibold leading-snug text-gray-800">{t('settings.writeoffEnabled')}</span></span>
+              <input type="checkbox" checked={writeoffEnabled} onChange={(event) => setWriteoffEnabled(event.target.checked)} className="h-5 w-5 shrink-0 accent-emerald-600" />
+            </label>
+            <label className="flex min-h-[92px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/70 p-4 transition hover:border-emerald-200 hover:bg-emerald-50/50 focus-within:ring-2 focus-within:ring-emerald-500/30">
+              <span className="flex min-w-0 items-center gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-100 text-sky-700"><Package className="h-5 w-5" /></span><span className="text-sm font-semibold leading-snug text-gray-800">{t('settings.bundlesEnabled')}</span></span>
+              <input type="checkbox" checked={bundlesEnabled} onChange={(event) => setBundlesEnabled(event.target.checked)} className="h-5 w-5 shrink-0 accent-emerald-600" />
+            </label>
+            <div className="rounded-xl border border-gray-100 bg-gray-50/70 p-4 transition hover:border-emerald-200 hover:bg-emerald-50/50">
+              <label className="flex min-h-[56px] cursor-pointer items-center justify-between gap-3 focus-within:rounded-lg focus-within:ring-2 focus-within:ring-emerald-500/30">
+                <span className="flex min-w-0 items-center gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700"><ReceiptText className="h-5 w-5" /></span><span className="text-sm font-semibold leading-snug text-gray-800">{t('settings.digitalReceiptEnabled')}</span></span>
+                <input type="checkbox" checked={digitalReceiptEnabled} onChange={(event) => setDigitalReceiptEnabled(event.target.checked)} className="h-5 w-5 shrink-0 accent-emerald-600" />
+              </label>
+              {digitalReceiptEnabled && <label className="mt-3 block border-t border-gray-200 pt-3 text-xs font-semibold text-gray-600">{t('receipt.tokenExpiry')} ({t('common.hours')})<input type="number" min={1} max={8760} value={receiptTokenTtlHours} onChange={(event) => setReceiptTokenTtlHours(event.target.value)} className="mt-1.5 min-h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm font-medium text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20" /></label>}
+            </div>
           </div>
         </section>
 
@@ -511,6 +579,39 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
                 />
               )}
             </div>
+          )}
+        </section>
+
+        <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3" aria-labelledby="pickup-verification-settings-title">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 id="pickup-verification-settings-title" className="font-bold text-gray-900">{t('settings.exitVerification')}</h3>
+              <p className="mt-1 text-xs text-gray-500">{t('pickup.settingsHint')}</p>
+            </div>
+            <label className="inline-flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                checked={pickupVerificationEnabled}
+                onChange={(event) => setPickupVerificationEnabled(event.target.checked)}
+                className="h-5 w-5 accent-emerald-600"
+                aria-label={t('settings.exitVerification')}
+              />
+              <span className="text-sm font-medium text-gray-700">{pickupVerificationEnabled ? t('common.on') : t('common.off')}</span>
+            </label>
+          </div>
+          {pickupVerificationEnabled && (
+            <label className="mt-4 block max-w-xs text-sm font-medium text-gray-800">
+              {t('pickup.expiryMinutes')}
+              <input
+                type="number"
+                min={5}
+                max={240}
+                step={5}
+                value={pickupTokenTtlMinutes}
+                onChange={(event) => setPickupTokenTtlMinutes(event.target.value)}
+                className="mt-2 min-h-11 w-full rounded-lg border border-gray-300 px-3 py-2"
+              />
+            </label>
           )}
         </section>
 
@@ -701,9 +802,9 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3">
-          <h3 className="font-bold text-gray-900 mb-1">VAT in the selling price</h3>
-          <p className="text-xs text-gray-500 mb-3">When you change a product’s selling price, this percent is rounded into that price. Receipts charge the selling price and do not print a VAT line. Leave it at 0 to keep prices as you type them.</p>
-          <label className="text-xs font-medium text-gray-600 mb-1 block">VAT percent</label>
+          <h3 className="font-bold text-gray-900 mb-1">Sales tax</h3>
+          <p className="text-xs text-gray-500 mb-3">Configure the rates used at checkout and shown separately on receipts. Confirm applicable rates with your tax adviser before enabling them.</p>
+          <label className="text-xs font-medium text-gray-600 mb-1 block">VAT rate (%)</label>
           <input
             type="number"
             min="0"
@@ -713,6 +814,19 @@ export default function SettingsPage({ onNavigate }: SettingsPageProps) {
             onChange={(event) => setVatRate(event.target.value)}
             className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary focus:border-primary"
           />
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={nhilEnabled} onChange={(event) => setNhilEnabled(event.target.checked)} />NHIL</label>
+            <input aria-label="NHIL rate percent" type="number" min="0" max="100" step="0.01" value={nhilRate} onChange={(event) => setNhilRate(event.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={getfundEnabled} onChange={(event) => setGetfundEnabled(event.target.checked)} />GETFund</label>
+            <input aria-label="GETFund rate percent" type="number" min="0" max="100" step="0.01" value={getfundRate} onChange={(event) => setGetfundRate(event.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={covidLevyEnabled} onChange={(event) => setCovidLevyEnabled(event.target.checked)} />COVID levy</label>
+            <input aria-label="COVID levy rate percent" type="number" min="0" max="100" step="0.01" value={covidLevyRate} onChange={(event) => setCovidLevyRate(event.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
+          </div>
+          <label className="mt-4 flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" checked={taxInclusivePricing} onChange={(event) => setTaxInclusivePricing(event.target.checked)} />
+            Tax is included in displayed selling prices
+          </label>
+          <p className="mt-2 text-[11px] text-amber-800">This calculates and prints tax amounts; it does not connect to or certify receipts through GRA E-VAT.</p>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-3 space-y-3">

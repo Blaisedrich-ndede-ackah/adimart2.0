@@ -13,6 +13,7 @@ import {
   db,
   generateId,
   getCurrentStore,
+  getCurrentUserId,
   type LocalCustomer,
   type LocalDebtReminder,
   type LocalStore,
@@ -336,6 +337,15 @@ export async function sendDebtRemindersForStore(
     result.sent > 0
       ? `Sent ${result.sent} reminder${result.sent === 1 ? '' : 's'}.`
       : `Could not send reminders (${result.failed} failed, ${result.skipped} skipped).`;
+  if (result.sent > 0 && typeof navigator !== 'undefined' && navigator.onLine) {
+    const userId = await getCurrentUserId();
+    if (userId) {
+      void fetch('/api/integrations?action=debt_reminder_due', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ store_id: store.id, user_id: userId, count: result.sent }),
+      }).catch(() => undefined);
+    }
+  }
   return result;
 }
 

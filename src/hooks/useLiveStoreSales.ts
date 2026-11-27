@@ -15,18 +15,19 @@ export interface UseLiveStoreSalesResult {
 /**
  * Keep a screen in step with sales happening on other devices.
  *
- * Uses the Supabase realtime feed when the cloud is configured and always
- * keeps a slow polling fallback so the dashboard still refreshes on a
- * device that is offline or on a network that blocks websockets.
+ * Uses Supabase Realtime while connected and polls only when the browser or
+ * realtime feed is offline, so local data still refreshes without the cloud.
  */
 export function useLiveStoreSales(
   storeId: string | null | undefined,
   onSale: (sale: LiveSaleEvent) => void,
-  onRefresh?: () => void,
+  onRefresh?: () => void | Promise<void>,
   pollIntervalMs = 30_000
 ): UseLiveStoreSalesResult {
   const [status, setStatus] = useState<LiveSalesStatus>('offline');
   const [lastSale, setLastSale] = useState<LiveSaleEvent | null>(null);
+  const [online, setOnline] = useState(() => navigator.onLine);
+  const [visible, setVisible] = useState(() => document.visibilityState === 'visible');
   const saleHandlerRef = useRef(onSale);
   const refreshHandlerRef = useRef(onRefresh);
   saleHandlerRef.current = onSale;
@@ -47,15 +48,47 @@ export function useLiveStoreSales(
       setStatus
     );
 
-    const timer = window.setInterval(() => {
-      refreshHandlerRef.current?.();
-    }, pollIntervalMs);
-
     return () => {
       unsubscribe();
-      window.clearInterval(timer);
     };
-  }, [storeId, pollIntervalMs]);
+  }, [storeId]);
+
+  useEffect(() => {
+    const updateOnline = () => setOnline(navigator.onLine);
+    window.addEventListener('online', updateOnline);
+    window.addEventListener('offline', updateOnline);
+    return () => {
+      window.removeEventListener('online', updateOnline);
+      window.removeEventListener('offline', updateOnline);
+    };
+  }, []);
+
+  useEffect(() => {
+    const updateVisibility = () => setVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', updateVisibility);
+    return () => document.removeEventListener('visibilitychange', updateVisibility);
+  }, []);
+
+  useEffect(() => {
+    if (!storeId || !visible || (online && status !== 'offline')) return;
+    let active = true;
+    let timer = 0;
+    const schedule = () => {
+      timer = window.setTimeout(async () => {
+        try {
+          await refreshHandlerRef.current?.();
+        } catch (error) {
+          console.warn('[Live sales] Offline refresh failed:', error);
+        }
+        if (active) schedule();
+      }, pollIntervalMs);
+    };
+    schedule();
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [storeId, online, status, visible, pollIntervalMs]);
 
   return { status, lastSale };
 }

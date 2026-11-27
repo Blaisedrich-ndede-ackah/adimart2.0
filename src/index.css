@@ -9,37 +9,37 @@
   --color-accent-light: #ffb340;
   --color-danger: #ff3b30;
   --color-success: #34c759;
-  --color-surface: #f2f2f7;
-  --color-surface-muted: #e5e5ea;
+  --color-surface: #f4f7f5;
+  --color-surface-muted: #eaf0ec;
   --color-surface-card: #ffffff;
-  --color-border: #d1d1d6;
-  --color-ink: #1c1c1e;
-  --color-muted: #636366;
+  --color-border: #d9e3dc;
+  --color-ink: #17231d;
+  --color-muted: #627168;
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
   /* Semantic aliases used by the shared UI kit */
-  --color-bg: #f2f2f7;
-  --color-text: #1c1c1e;
-  --color-text-muted: #636366;
-  --color-border-subtle: rgba(60, 60, 67, 0.16);
+  --color-bg: #f4f7f5;
+  --color-text: #17231d;
+  --color-text-muted: #627168;
+  --color-border-subtle: rgba(36, 68, 48, 0.14);
 }
 
 @layer base {
   :root {
     color-scheme: light;
-    --ios-label: #1c1c1e;
-    --ios-secondary-label: #636366;
-    --ios-tertiary-label: #8e8e93;
-    --ios-separator: rgba(60, 60, 67, 0.29);
+    --ios-label: #17231d;
+    --ios-secondary-label: #627168;
+    --ios-tertiary-label: #849188;
+    --ios-separator: rgba(36, 68, 48, 0.2);
     --ios-fill: rgba(118, 118, 128, 0.12);
     --ios-fill-strong: rgba(118, 118, 128, 0.2);
-    --ios-grouped: #e8eef6;
+    --ios-grouped: #edf3ef;
     --ios-bar: rgba(255, 255, 255, 0.62);
     --ios-radius: 14px;
     --ios-glass: rgba(255, 255, 255, 0.46);
     --ios-glass-strong: rgba(255, 255, 255, 0.68);
     --ios-blur: saturate(185%) blur(28px);
     --ios-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.78), inset 0 -1px 0 rgba(255, 255, 255, 0.22);
-    --ios-depth: 0 12px 32px rgba(36, 54, 78, 0.08);
+    --ios-depth: 0 12px 32px rgba(30, 65, 43, 0.08);
     --ios-ease: cubic-bezier(0.22, 1, 0.36, 1);
     accent-color: var(--color-primary);
   }
@@ -56,14 +56,14 @@
     --color-surface-card: #24222A;
     --color-border: #4A4654;
     --color-ink: #F4EFE8;
-    --color-muted: #C9BEB4;
+    --color-muted: #D0D8D1;
     --color-bg: #2B2830;
     --color-text: #F4EFE8;
-    --color-text-muted: #C9BEB4;
+    --color-text-muted: #D0D8D1;
     --color-border-subtle: #4A4654;
     --ios-label: #F4EFE8;
-    --ios-secondary-label: #C9BEB4;
-    --ios-tertiary-label: #A89C93;
+    --ios-secondary-label: #D0D8D1;
+    --ios-tertiary-label: #B1BDB4;
     --ios-separator: #4A4654;
     --ios-fill: #35323C;
     --ios-fill-strong: #4A4654;
@@ -142,11 +142,9 @@ body {
   -webkit-font-smoothing: antialiased;
   color: var(--color-ink);
   background:
-    radial-gradient(78% 62% at 12% 8%, rgba(64, 164, 255, 0.62), transparent 68%),
-    radial-gradient(58% 48% at 96% 0%, rgba(36, 196, 148, 0.48), transparent 64%),
-    radial-gradient(70% 58% at 84% 100%, rgba(255, 148, 96, 0.46), transparent 66%),
-    radial-gradient(46% 40% at 36% 78%, rgba(168, 140, 255, 0.28), transparent 70%),
-    linear-gradient(165deg, #d4e7f8 0%, #e5f3ee 46%, #fbe8dc 100%);
+    radial-gradient(72% 55% at 0% 0%, rgba(16, 143, 87, 0.09), transparent 70%),
+    radial-gradient(55% 48% at 100% 0%, rgba(92, 170, 126, 0.08), transparent 68%),
+    linear-gradient(160deg, #f7faf7 0%, #f0f5f1 56%, #f7f8f5 100%);
   overscroll-behavior: none;
   position: fixed;
   inset: 0;
@@ -165,8 +163,8 @@ body {
 /* Keep utility-heavy legacy screens readable when dark mode is enabled. */
 .dark body {
   background:
-    radial-gradient(900px 500px at 0% -10%, rgba(59, 130, 246, 0.16), transparent 58%),
-    radial-gradient(800px 480px at 100% 0%, rgba(124, 58, 237, 0.14), transparent 56%),
+    radial-gradient(900px 500px at 0% -10%, rgba(16, 185, 129, 0.1), transparent 58%),
+    radial-gradient(800px 480px at 100% 0%, rgba(134, 239, 172, 0.05), transparent 56%),
     var(--color-surface);
 }
 
@@ -175,20 +173,43 @@ body {
 }
 
 .dark .bg-gray-50,
-.dark .bg-slate-50 {
+.dark .bg-gray-100,
+.dark .bg-slate-50,
+.dark .bg-slate-100 {
   background-color: var(--color-surface-muted);
 }
 
 .dark .bg-emerald-50,
-.dark .bg-green-50 {
-  background-color: #172554;
+.dark .bg-emerald-100,
+.dark .bg-green-50,
+.dark .bg-green-100 {
+  background-color: #183628;
 }
 
 .dark .bg-emerald-600,
 .dark .bg-emerald-700,
 .dark .bg-green-600,
 .dark .bg-green-700 {
-  background-color: #2563eb;
+  background-color: #087a50;
+}
+
+.dark .bg-blue-50,
+.dark .bg-indigo-50,
+.dark .bg-violet-50,
+.dark .bg-teal-50 {
+  background-color: #26323c;
+}
+
+.dark .bg-blue-100,
+.dark .bg-indigo-100,
+.dark .bg-violet-100,
+.dark .bg-teal-100 {
+  background-color: #303c46;
+}
+
+.dark .bg-gray-200,
+.dark .bg-slate-200 {
+  background-color: #45414b;
 }
 
 .dark .bg-amber-50,
@@ -196,13 +217,26 @@ body {
   background-color: #3a2b15;
 }
 
-.dark .bg-red-50 {
+.dark .bg-amber-100,
+.dark .bg-yellow-50,
+.dark .bg-yellow-100 {
+  background-color: #3a2d19;
+}
+
+.dark .bg-red-50,
+.dark .bg-red-100,
+.dark .bg-rose-50,
+.dark .bg-rose-100 {
   background-color: #3b1d27;
 }
 
 .dark .text-gray-900,
+.dark .text-gray-950,
+.dark .text-gray-700,
 .dark .text-gray-800,
 .dark .text-slate-900,
+.dark .text-slate-950,
+.dark .text-slate-700,
 .dark .text-slate-800 {
   color: var(--color-ink);
 }
@@ -216,19 +250,70 @@ body {
 
 .dark .text-emerald-700,
 .dark .text-emerald-800,
-.dark .text-green-700 {
-  color: #93c5fd;
+.dark .text-emerald-900,
+.dark .text-emerald-600,
+.dark .text-green-700,
+.dark .text-green-800,
+.dark .text-green-900,
+.dark .text-green-600 {
+  color: #86efac;
+}
+
+.dark .text-blue-500,
+.dark .text-blue-600,
+.dark .text-blue-700,
+.dark .text-blue-800,
+.dark .text-blue-900,
+.dark .text-indigo-600,
+.dark .text-violet-600,
+.dark .text-purple-600 {
+  color: #a5c8ff;
+}
+
+.dark .text-teal-500,
+.dark .text-teal-600,
+.dark .text-teal-700,
+.dark .text-teal-800,
+.dark .text-teal-900 {
+  color: #72e6d1;
 }
 
 .dark .text-amber-700,
-.dark .text-orange-700 {
+.dark .text-amber-800,
+.dark .text-amber-900,
+.dark .text-amber-600,
+.dark .text-orange-600,
+.dark .text-orange-700,
+.dark .text-orange-800,
+.dark .text-orange-900,
+.dark .text-yellow-700,
+.dark .text-yellow-800 {
   color: #fbbf74;
 }
 
 .dark .text-red-700,
-.dark .text-red-800 {
+.dark .text-red-800,
+.dark .text-red-900,
+.dark .text-rose-500,
+.dark .text-rose-600,
+.dark .text-rose-700,
+.dark .text-rose-800,
+.dark .text-rose-900 {
   color: #fda4af;
 }
+
+/* Keep the customer display light and readable when the cashier POS uses dark mode. */
+html.dark .customer-facing-display .bg-white { background-color: #fff !important; }
+html.dark .customer-facing-display .bg-slate-50 { background-color: #f8fafc !important; }
+html.dark .customer-facing-display .bg-emerald-50 { background-color: #ecfdf5 !important; }
+html.dark .customer-facing-display .bg-emerald-600 { background-color: #059669 !important; }
+html.dark .customer-facing-display .text-slate-900 { color: #0f172a !important; }
+html.dark .customer-facing-display .text-slate-800 { color: #1e293b !important; }
+html.dark .customer-facing-display .text-slate-600 { color: #475569 !important; }
+html.dark .customer-facing-display .text-slate-500 { color: #64748b !important; }
+html.dark .customer-facing-display .text-slate-400 { color: #64748b !important; }
+html.dark .customer-facing-display .text-emerald-700 { color: #047857 !important; }
+html.dark .customer-facing-display .text-emerald-800 { color: #065f46 !important; }
 
 .dark .border-gray-100,
 .dark .border-gray-200,
@@ -505,6 +590,27 @@ input[type="number"] {
   scrollbar-width: thin;
   scrollbar-color: rgba(60, 60, 67, 0.28) transparent;
   padding: 0.85rem 1rem 1.15rem;
+}
+
+/* Public pages render inside the app's fixed, overflow-hidden root. Give the
+   scanned receipt route its own native scrolling surface, including on iOS. */
+.public-receipt-scroll {
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 0px));
+}
+
+@media print {
+  .public-receipt-scroll {
+    height: auto;
+    overflow: visible;
+    padding-bottom: 0;
+  }
 }
 
 @supports not (overscroll-behavior: none) {
@@ -1471,6 +1577,67 @@ html.dark textarea:focus-visible {
   color: #F4EFE8;
   font-size: 16px;
   outline: none;
+}
+
+/* Shared visual polish for page chrome and everyday controls. */
+:root {
+  --app-card-radius: 18px;
+  --app-control-radius: 12px;
+  --app-shadow-soft: 0 8px 24px rgba(29, 61, 41, 0.07);
+}
+
+.surface-card {
+  border-color: rgba(255, 255, 255, 0.78);
+  border-radius: var(--app-card-radius);
+  box-shadow: var(--ios-highlight), var(--app-shadow-soft);
+}
+
+.page-header,
+.ios-bar {
+  border-bottom-color: rgba(44, 91, 59, 0.1);
+  box-shadow: var(--ios-highlight), 0 7px 22px rgba(29, 61, 41, 0.045);
+}
+
+.ios-canvas :where(.bg-white):not(button):not(a):not(input):not(select):not(textarea),
+.page-body :where(.bg-white):not(button):not(a):not(input):not(select):not(textarea) {
+  border-radius: var(--app-card-radius);
+  border-color: rgba(76, 112, 87, 0.12);
+  box-shadow: var(--ios-highlight), var(--app-shadow-soft);
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+input:not([type="checkbox"]):not([type="radio"]),
+select,
+textarea {
+  border-radius: var(--app-control-radius);
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 3px solid rgba(5, 150, 105, 0.42);
+  outline-offset: 2px;
+}
+
+button:disabled,
+button[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  button, a, input, select, textarea { transition-duration: 0.01ms; }
 }
 
 html.dark .pos-mode button[aria-pressed="true"] {

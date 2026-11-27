@@ -197,9 +197,61 @@ export default function PublicShopPage({ slug }: PublicShopPageProps) {
 
   useEffect(() => {
     if (!catalog) return;
-    document.title = `${catalog.store.name} | Online shop`;
+    const title = catalog.store.seo_meta_title || `${catalog.store.name} | Online shop`;
+    const description = catalog.store.seo_meta_description || catalog.store.tagline || `Shop products from ${catalog.store.name}.`;
+    document.title = title;
+    const setMeta = (selector: string, attribute: string, key: string, content: string) => {
+      let node = document.head.querySelector<HTMLMetaElement>(selector);
+      if (!node) {
+        node = document.createElement('meta');
+        node.setAttribute(attribute, key);
+        document.head.appendChild(node);
+      }
+      node.content = content;
+    };
+    setMeta('meta[name="description"]', 'name', 'description', description);
+    setMeta('meta[property="og:title"]', 'property', 'og:title', title);
+    setMeta('meta[property="og:description"]', 'property', 'og:description', description);
+    setMeta('meta[property="og:type"]', 'property', 'og:type', 'website');
+    if (catalog.store.og_image_url) setMeta('meta[property="og:image"]', 'property', 'og:image', catalog.store.og_image_url);
+    const canonicalHref = `${window.location.origin}/shop/${encodeURIComponent(catalog.store.slug)}`;
+    let canonical = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]');
+    if (!canonical) {
+      canonical = document.createElement('link');
+      canonical.rel = 'canonical';
+      document.head.appendChild(canonical);
+    }
+    canonical.href = canonicalHref;
+    const structuredData = document.createElement('script');
+    structuredData.type = 'application/ld+json';
+    structuredData.dataset.adimatShopSeo = 'true';
+    structuredData.textContent = JSON.stringify({
+      '@context': 'https://schema.org',
+      '@type': 'ItemList',
+      name: title,
+      itemListElement: catalog.products.slice(0, 500).map((product, index) => ({
+        '@type': 'ListItem',
+        position: index + 1,
+        item: {
+          '@type': 'Product',
+          name: product.seo_meta_title || product.name,
+          description: product.seo_meta_description || undefined,
+          image: product.image_url || undefined,
+          sku: product.seo_slug || product.id,
+          offers: { '@type': 'Offer', priceCurrency: catalog.store.currency_code || 'GHS', price: product.selling_price, availability: product.in_stock ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock' },
+        },
+      })),
+    });
+    document.head.appendChild(structuredData);
     return () => {
       document.title = 'Adimat POS';
+      document.head.querySelector('meta[name="description"]')?.setAttribute('content', 'Mobile POS & Inventory Management for Ghana SMEs');
+      document.head.querySelector('meta[property="og:title"]')?.remove();
+      document.head.querySelector('meta[property="og:description"]')?.remove();
+      document.head.querySelector('meta[property="og:type"]')?.remove();
+      if (catalog.store.og_image_url) document.head.querySelector('meta[property="og:image"]')?.remove();
+      document.head.querySelector('link[rel="canonical"]')?.remove();
+      document.head.querySelector('script[data-adimat-shop-seo="true"]')?.remove();
     };
   }, [catalog]);
 

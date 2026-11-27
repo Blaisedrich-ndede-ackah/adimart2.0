@@ -18,6 +18,7 @@ import {
 import { toMoneyAmount, vatInclusivePrice } from '@/lib/money';
 import { getStoreCurrency } from '@/lib/currency';
 import { useAuthStore } from '@/store/useAuthStore';
+import { queuePriceChange } from '@/lib/priceChangeQueue';
 import { recordActivity } from '@/lib/activityLog';
 import { MEASURE_UNITS, productAllowsDecimal, roundStockQtyAllowZero } from '@/lib/measure';
 import ProductVariantsEditor from '@/components/ProductVariantsEditor';
@@ -69,6 +70,16 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
   const [imageUrl, setImageUrl] = useState('');
   const [unit, setUnit] = useState('pcs');
   const [allowDecimal, setAllowDecimal] = useState(false);
+  const [taxCategory, setTaxCategory] = useState<NonNullable<LocalProduct['tax_category']>>('taxable');
+  const [taxRateOverride, setTaxRateOverride] = useState('');
+  const [seoSlug, setSeoSlug] = useState('');
+  const [seoTitle, setSeoTitle] = useState('');
+  const [seoDescription, setSeoDescription] = useState('');
+  const [isRentable, setIsRentable] = useState(false);
+  const [rentalRateDaily, setRentalRateDaily] = useState('');
+  const [rentalRateWeekly, setRentalRateWeekly] = useState('');
+  const [rentalRateMonthly, setRentalRateMonthly] = useState('');
+  const [rentalDeposit, setRentalDeposit] = useState('');
   const [imageBusy, setImageBusy] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -113,6 +124,16 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
         setSellOnline((editProduct.sell_online ?? 0) === 1);
         setUnit(editProduct.unit || 'pcs');
         setAllowDecimal(productAllowsDecimal(editProduct));
+        setTaxCategory(editProduct.tax_category || 'taxable');
+        setTaxRateOverride(editProduct.tax_rate_override == null ? '' : String(editProduct.tax_rate_override));
+        setSeoSlug(editProduct.seo_slug || '');
+        setSeoTitle(editProduct.seo_meta_title || '');
+        setSeoDescription(editProduct.seo_meta_description || '');
+        setIsRentable(editProduct.is_rentable === 1);
+        setRentalRateDaily(String(editProduct.rental_rate_daily || ''));
+        setRentalRateWeekly(String(editProduct.rental_rate_weekly || ''));
+        setRentalRateMonthly(String(editProduct.rental_rate_monthly || ''));
+        setRentalDeposit(String(editProduct.deposit_amount || ''));
         const mode = (editProduct.wholesale_mode || 'none') as WholesaleMode;
         setWholesaleMode(
           mode === 'pack' || mode === 'unit_discount' || mode === 'tiers' ? mode : 'none'
@@ -128,6 +149,16 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
       } else {
         setUnit('pcs');
         setAllowDecimal(false);
+        setTaxCategory('taxable');
+        setTaxRateOverride('');
+        setSeoSlug('');
+        setSeoTitle('');
+        setSeoDescription('');
+        setIsRentable(false);
+        setRentalRateDaily('');
+        setRentalRateWeekly('');
+        setRentalRateMonthly('');
+        setRentalDeposit('');
         setName('');
         setCategory(categories.includes('Food') ? 'Food' : categories[0] || 'Other');
         setBarcode(initialBarcode?.trim() || '');
@@ -274,6 +305,10 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
       setError('Enter a valid stock level');
       return;
     }
+    if (isRentable && ![rentalRateDaily, rentalRateWeekly, rentalRateMonthly].some((rate) => toMoneyAmount(rate) > 0)) {
+      setError('Set at least one rental rate before marking this product rentable.');
+      return;
+    }
 
     const packSizeNum = Math.max(1, Math.floor(Number(packSize) || 1));
     if (wholesaleMode === 'pack' && !(toMoneyAmount(wholesalePackPrice) > 0)) {
@@ -322,6 +357,20 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
               )
             : serializeTiers([]),
       };
+      const taxFields = {
+        tax_category: taxCategory,
+        tax_rate_override: taxRateOverride.trim() ? Math.max(0, Math.min(100, Number(taxRateOverride) || 0)) : null,
+        seo_slug: seoSlug.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+        seo_meta_title: seoTitle.trim().slice(0, 70),
+        seo_meta_description: seoDescription.trim().slice(0, 180),
+      };
+      const rentalFields = {
+        is_rentable: isRentable ? 1 : 0,
+        rental_rate_daily: isRentable ? toMoneyAmount(rentalRateDaily) : 0,
+        rental_rate_weekly: isRentable ? toMoneyAmount(rentalRateWeekly) : 0,
+        rental_rate_monthly: isRentable ? toMoneyAmount(rentalRateMonthly) : 0,
+        deposit_amount: isRentable ? toMoneyAmount(rentalDeposit) : 0,
+      };
 
       if (editProduct) {
         if (Math.abs(Number(editProduct.selling_price) - sell) >= 0.005) {
@@ -337,6 +386,8 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           sku_type: skuType,
           image_url: imageUrl || '',
           ...wholesaleFields,
+          ...taxFields,
+          ...rentalFields,
           updated_at: now,
           synced: 0,
         });
@@ -363,6 +414,8 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
           is_active: 1,
           image_url: imageUrl || '',
           ...wholesaleFields,
+          ...taxFields,
+          ...rentalFields,
           created_at: now,
           updated_at: now,
           synced: 0,
@@ -681,12 +734,35 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
               {vatRate > 0 && (
                 <p className="mt-1 text-[11px] text-gray-500">
                   {sellingPriceTouched
-                    ? `Saved selling price ${currencySymbol}${vatInclusivePrice(sellingPrice, vatRate).toFixed(2)}. VAT is rounded into this price and is not printed on the receipt.`
-                    : 'This selling price already includes VAT. Change it only if you are entering a price before VAT. Receipts do not show a VAT line.'}
+                    ? `Saved selling price ${currencySymbol}${vatInclusivePrice(sellingPrice, vatRate).toFixed(2)} including configured VAT.`
+                    : 'This selling price already includes VAT when tax-inclusive pricing is enabled.'}
                 </p>
               )}
             </div>
           </div>
+
+          <div className="grid grid-cols-2 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <label className="text-sm font-medium text-gray-700">
+              Tax category
+              <select value={taxCategory} onChange={(event) => setTaxCategory(event.target.value as NonNullable<LocalProduct['tax_category']>)} className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm">
+                <option value="taxable">Taxable</option>
+                <option value="exempt">Exempt</option>
+                <option value="zero_rated">Zero rated</option>
+                <option value="reduced">Reduced rate</option>
+              </select>
+            </label>
+            <label className="text-sm font-medium text-gray-700">
+              VAT override (%)
+              <input type="number" min="0" max="100" step="0.01" value={taxRateOverride} onChange={(event) => setTaxRateOverride(event.target.value)} disabled={taxCategory === 'exempt' || taxCategory === 'zero_rated'} placeholder={taxCategory === 'reduced' ? 'Required for reduced rate' : 'Use store rate'} className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm disabled:bg-gray-100" />
+            </label>
+          </div>
+
+          {sellOnline && <section className="space-y-3 rounded-xl border border-sky-200 bg-sky-50/60 p-3">
+            <h3 className="text-sm font-semibold text-slate-800">Search appearance</h3>
+            <label className="block text-xs font-medium text-slate-700">Product URL slug<input value={seoSlug} onChange={(event) => setSeoSlug(event.target.value)} placeholder={name.toLowerCase().replace(/[^a-z0-9]+/g, '-')} maxLength={100} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" /></label>
+            <label className="block text-xs font-medium text-slate-700">Search title<input value={seoTitle} onChange={(event) => setSeoTitle(event.target.value)} maxLength={70} placeholder={name} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" /></label>
+            <label className="block text-xs font-medium text-slate-700">Search description<textarea value={seoDescription} onChange={(event) => setSeoDescription(event.target.value)} maxLength={180} rows={2} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" /></label>
+          </section>}
 
           {profitMargin !== null && (
             <div className={`text-sm px-4 py-2.5 rounded-xl font-medium ${
@@ -791,6 +867,19 @@ export default function AddProduct({ isOpen, onClose, onSaved, editProduct, init
               />
             </button>
           </div>
+
+          <section className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4">
+            <label className="flex items-center justify-between gap-3">
+              <span><span className="block text-sm font-semibold text-gray-900">Rentable product</span><span className="mt-0.5 block text-[11px] text-gray-600">Track rentals separately from regular sales and hold rented units out of available stock.</span></span>
+              <input type="checkbox" checked={isRentable} onChange={(event) => setIsRentable(event.target.checked)} className="h-5 w-5 accent-indigo-600" />
+            </label>
+            {isRentable && <div className="mt-3 grid grid-cols-2 gap-3 border-t border-indigo-100 pt-3 sm:grid-cols-4">
+              <label className="text-xs font-medium text-gray-700">Daily rate<input type="number" min="0" step="0.01" value={rentalRateDaily} onChange={(event) => setRentalRateDaily(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm" /></label>
+              <label className="text-xs font-medium text-gray-700">Weekly rate<input type="number" min="0" step="0.01" value={rentalRateWeekly} onChange={(event) => setRentalRateWeekly(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm" /></label>
+              <label className="text-xs font-medium text-gray-700">Monthly rate<input type="number" min="0" step="0.01" value={rentalRateMonthly} onChange={(event) => setRentalRateMonthly(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm" /></label>
+              <label className="text-xs font-medium text-gray-700">Deposit per unit<input type="number" min="0" step="0.01" value={rentalDeposit} onChange={(event) => setRentalDeposit(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm" /></label>
+            </div>}
+          </section>
 
           <div className="rounded-xl border border-gray-200 p-4 space-y-3">
             <div>
