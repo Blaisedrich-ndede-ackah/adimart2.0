@@ -14,6 +14,18 @@ import {
   normalizeDebtReminderMinBalance,
 } from './debtReminderConfig';
 import type { PaymentMethod } from './paymentMethods';
+import type {
+  LocalPayrollAdjustment,
+  LocalPayrollAttendance,
+  LocalPayrollAuditLog,
+  LocalPayrollDeduction,
+  LocalPayrollDeductionRepayment,
+  LocalPayrollRules,
+  LocalPayrollRun,
+  LocalPayrollRunItem,
+  LocalPayrollStaff,
+  LocalPayrollTaxConfig,
+} from './payroll/types';
 
 // Store represents a business/shop
 export interface LocalStore {
@@ -992,6 +1004,18 @@ class AdimatDB extends Dexie {
   sms_outbox!: Table<LocalSmsOutbox, string>;
   price_changes!: Table<PriceChange, string>;
 
+  /* Store Owner Payroll module tables */
+  payroll_staff!: Table<LocalPayrollStaff, string>;
+  payroll_deductions!: Table<LocalPayrollDeduction, string>;
+  payroll_deduction_repayments!: Table<LocalPayrollDeductionRepayment, string>;
+  payroll_attendance!: Table<LocalPayrollAttendance, string>;
+  payroll_tax_configs!: Table<LocalPayrollTaxConfig, string>;
+  payroll_rules!: Table<LocalPayrollRules, string>;
+  payroll_runs!: Table<LocalPayrollRun, string>;
+  payroll_run_items!: Table<LocalPayrollRunItem, string>;
+  payroll_adjustments!: Table<LocalPayrollAdjustment, string>;
+  payroll_audit_logs!: Table<LocalPayrollAuditLog, string>;
+
   /* Agent Portal tables */
   agents!: Table<LocalAgent, string>;
   prospects!: Table<LocalProspect, string>;
@@ -1320,6 +1344,19 @@ class AdimatDB extends Dexie {
       /* Version 28 — durable offline queue for product selling price changes. */
       this.version(28).stores({
         price_changes: 'id, store_id, product_id, changed_at, synced, applied',
+      });
+      /* Version 29 — offline-first Store Owner Payroll module tables. */
+      this.version(29).stores({
+        payroll_staff: 'id, store_id, location_id, user_id, is_active, updated_at, synced',
+        payroll_deductions: 'id, store_id, staff_id, kind, status, updated_at, synced',
+        payroll_deduction_repayments: 'id, store_id, deduction_id, staff_id, pay_run_id, created_at, synced',
+        payroll_attendance: 'id, store_id, staff_id, location_id, work_date, status, updated_at, synced',
+        payroll_tax_configs: 'id, store_id, effective_from, is_active, updated_at, synced',
+        payroll_rules: 'id, store_id, updated_at, synced',
+        payroll_runs: 'id, store_id, pay_month, status, updated_at, synced',
+        payroll_run_items: 'id, store_id, pay_run_id, staff_id, location_id, pay_month, payment_status, updated_at, synced',
+        payroll_adjustments: 'id, store_id, pay_run_id, run_item_id, staff_id, created_at, synced',
+        payroll_audit_logs: 'id, store_id, entity_type, entity_id, created_at, synced',
       });
   }
 }
@@ -4797,6 +4834,9 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
     const smsSync = await import('./smsOutbox').then((mod) => mod.pushSmsOutbox(storeId));
     syncedCount += smsSync.synced;
     if (smsSync.error) errors.push(smsSync.error);
+    const payrollSync = await import('./payroll/sync').then((mod) => mod.pushPayrollRecords(storeId));
+    syncedCount += payrollSync.synced;
+    if (payrollSync.error) errors.push(payrollSync.error);
 
     if (errors.length > 0) {
       return { success: false, message: `Partial sync. Errors: ${errors.join('; ')}` };
@@ -5976,6 +6016,16 @@ export async function syncFromSupabase(opts?: {
       const message = pullError instanceof Error ? pullError.message : String(pullError);
       if (!/does not exist|PGRST205|schema cache|permission denied|42501/i.test(message)) {
         errors.push(`Stock approvals: ${message}`);
+      }
+    }
+
+    try {
+      const { pullPayrollRecords } = await import('./payroll/sync');
+      pulledCount += await pullPayrollRecords(storeId);
+    } catch (pullError) {
+      const message = pullError instanceof Error ? pullError.message : String(pullError);
+      if (!/does not exist|PGRST205|schema cache|permission denied|42501/i.test(message)) {
+        errors.push(`Payroll: ${message}`);
       }
     }
 
