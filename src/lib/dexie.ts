@@ -14,6 +14,18 @@ import {
   normalizeDebtReminderMinBalance,
 } from './debtReminderConfig';
 import type { PaymentMethod } from './paymentMethods';
+import type {
+  LocalPayrollAdjustment,
+  LocalPayrollAttendance,
+  LocalPayrollAuditLog,
+  LocalPayrollDeduction,
+  LocalPayrollDeductionRepayment,
+  LocalPayrollRules,
+  LocalPayrollRun,
+  LocalPayrollRunItem,
+  LocalPayrollStaff,
+  LocalPayrollTaxConfig,
+} from './payroll/types';
 
 // Store represents a business/shop
 export interface LocalStore {
@@ -1195,6 +1207,18 @@ class AdimatDB extends Dexie {
   gift_card_transactions!: Table<LocalGiftCardTransaction, string>;
   rental_agreements!: Table<LocalRentalAgreement, string>;
   rental_items!: Table<LocalRentalItem, string>;
+
+  /* Store Owner Payroll module tables */
+  payroll_staff!: Table<LocalPayrollStaff, string>;
+  payroll_deductions!: Table<LocalPayrollDeduction, string>;
+  payroll_deduction_repayments!: Table<LocalPayrollDeductionRepayment, string>;
+  payroll_attendance!: Table<LocalPayrollAttendance, string>;
+  payroll_tax_configs!: Table<LocalPayrollTaxConfig, string>;
+  payroll_rules!: Table<LocalPayrollRules, string>;
+  payroll_runs!: Table<LocalPayrollRun, string>;
+  payroll_run_items!: Table<LocalPayrollRunItem, string>;
+  payroll_adjustments!: Table<LocalPayrollAdjustment, string>;
+  payroll_audit_logs!: Table<LocalPayrollAuditLog, string>;
 
   /* Agent Portal tables */
   agents!: Table<LocalAgent, string>;
@@ -5114,6 +5138,9 @@ export async function syncToSupabase(opts?: { skipPing?: boolean; skipCanonicali
     const smsSync = await import('./smsOutbox').then((mod) => mod.pushSmsOutbox(storeId));
     syncedCount += smsSync.synced;
     if (smsSync.error) errors.push(smsSync.error);
+    const payrollSync = await import('./payroll/sync').then((mod) => mod.pushPayrollRecords(storeId));
+    syncedCount += payrollSync.synced;
+    if (payrollSync.error) errors.push(payrollSync.error);
 
     if (errors.length > 0) {
       return { success: false, message: `Partial sync. Errors: ${errors.join('; ')}` };
@@ -6412,6 +6439,16 @@ export async function syncFromSupabase(opts?: {
       const message = pullError instanceof Error ? pullError.message : String(pullError);
       if (!/does not exist|PGRST205|schema cache|permission denied|42501/i.test(message)) {
         errors.push(`Stock approvals: ${message}`);
+      }
+    }
+
+    try {
+      const { pullPayrollRecords } = await import('./payroll/sync');
+      pulledCount += await pullPayrollRecords(storeId);
+    } catch (pullError) {
+      const message = pullError instanceof Error ? pullError.message : String(pullError);
+      if (!/does not exist|PGRST205|schema cache|permission denied|42501/i.test(message)) {
+        errors.push(`Payroll: ${message}`);
       }
     }
 

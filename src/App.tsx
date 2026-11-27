@@ -24,6 +24,7 @@ const InventoryPage = lazy(() => import('@/pages/InventoryPage'));
 const ReportsPage = lazy(() => import('@/pages/ReportsPage'));
 const ExpensesPage = lazy(() => import('@/pages/ExpensesPage'));
 const CashBookPage = lazy(() => import('@/pages/CashBookPage'));
+const PayrollPage = lazy(() => import('@/pages/PayrollPage'));
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'));
 const DevicesPage = lazy(() => import('@/pages/DevicesPage'));
 const TransactionsPage = lazy(() => import('@/pages/TransactionsPage'));
@@ -694,6 +695,8 @@ function AuthenticatedApp() {
         return <ExpensesPage openAddOnLoad={quickAction === 'add-expense'} onQuickActionHandled={() => setQuickAction(null)} />;
       case 'cashbook':
         return canAccessCashbook(currentUser) ? <CashBookPage /> : <POSPage />;
+      case 'payroll':
+        return currentUser ? <PayrollPage /> : <POSPage />;
       case 'settings':
         return role === 'owner' ? (
           <SettingsPage onNavigate={setCurrentPage} />
