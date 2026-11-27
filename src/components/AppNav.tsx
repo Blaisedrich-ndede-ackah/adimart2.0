@@ -3,7 +3,7 @@ import {
   ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, House, Search, ClipboardCheck,
   Sparkles, CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare, Moon, Sun,
   ShoppingCart, RotateCcw, QrCode,
-  ContactRound, ArrowLeftRight, Building2, Megaphone, Tag, Boxes, ClipboardMinus, Gift, Bell,
+  ContactRound, ArrowLeftRight, Building2, Megaphone, Tag, Boxes, ClipboardMinus, Gift, Bell, Wallet,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -160,7 +160,7 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   const navGroups: NavGroup[] = [
     { label: t('nav.main'), ids: ['home', 'pos', 'search', 'adimat-ai', 'stock-approvals', 'transactions'] },
     { label: 'Shop', ids: ['inventory', 'purchasing', 'warehouse', 'ecommerce', 'multistore', 'store-deals', 'gift-cards-rentals'] },
-    { label: 'Operations', ids: ['reports', 'expenses', 'cashbook', 'devices', 'verify-pickup', 'write-offs', 'bundles', 'subscription', 'returns', 'customers', 'notifications'] },
+    { label: 'Operations', ids: ['reports', 'expenses', 'cashbook', 'payroll', 'devices', 'verify-pickup', 'write-offs', 'bundles', 'subscription', 'returns', 'customers', 'notifications'] },
     { label: 'Help', ids: ['learn', 'campaigns', 'community', 'settings'] },
   ];
   const groupedMoreItems = navGroups

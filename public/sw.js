@@ -1,4 +1,4 @@
-const CACHE_NAME = 'adimat-v14';
+const CACHE_NAME = 'adimat-v15';
 const CAMPAIGN_MEDIA_CACHE = 'adimat-campaign-media-v1';
 const OFFLINE_URL = '/';
 const PRECACHE_MANIFEST_URL = '/precache-manifest.json';
