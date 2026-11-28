@@ -1072,6 +1072,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
       <div className="pos-workspace">
         {/* Products pane */}
         <section
+          data-pos-pane="products"
           style={{ order: posLayout.paneOrder.indexOf('products') * 2 }}
           className={`${
             posTab === 'products' ? 'flex' : 'hidden'
@@ -1195,7 +1196,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
             </div>
           </div>
 
-          <div className={`flex-1 overflow-y-auto px-3 md:px-4 pt-2 no-scrollbar ${cart.items.length > 0 ? 'pb-28 lg:pb-4' : 'pb-4'}`}>
+          <div className={`pos-products-scroll flex-1 overflow-y-auto px-3 md:px-4 pt-2 no-scrollbar ${cart.items.length > 0 ? 'pb-28 lg:pb-4' : 'pb-4'}`}>
             {showBundles ? <BundlePicker storeId={currentStore?.id || ''} locationId={selectedLocationId || null} /> : loadingProducts ? (
               <div className="flex flex-col items-center justify-center py-16 text-gray-400">
                 <Package className="w-10 h-10 mb-2 animate-pulse" />
@@ -1317,6 +1318,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
 
         {/* Cart pane */}
         <section
+          data-pos-pane="cart"
           style={{
             order: posLayout.paneOrder.indexOf('cart') * 2,
             '--pos-cart-width': `${cartPaneWidth}px`,
