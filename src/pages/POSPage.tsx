@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import Dexie from 'dexie';
 import {
   ShoppingCart, Minus, Plus, Trash2, Search, Package, AlertCircle, Bluetooth,
@@ -143,6 +143,14 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   const t = useT();
   const [posTab, setPosTab] = useState<PosTab>('products');
   const [showBundles, setShowBundles] = useState(false);
+  const [cartPaneWidth, setCartPaneWidth] = useState(() => {
+    try {
+      const saved = Number(window.localStorage.getItem('adimat-pos-cart-width'));
+      return Number.isFinite(saved) && saved >= 300 && saved <= 560 ? saved : 420;
+    } catch {
+      return 420;
+    }
+  });
   const [scannerActive, setScannerActive] = useState(true);
   const [showCameraScanner, setShowCameraScanner] = useState(false);
   const [pickupDeskOpen, setPickupDeskOpen] = useState(false);
@@ -179,6 +187,33 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
   const [layoutStatus, setLayoutStatus] = useState('');
   const [draggedSection, setDraggedSection] = useState<PosSection | null>(null);
   const [customerDisplayEnabled] = useState(isCustomerDisplayEnabled);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('adimat-pos-cart-width', String(cartPaneWidth));
+    } catch {
+      // Keep the adjusted POS layout for this session if storage is unavailable.
+    }
+  }, [cartPaneWidth]);
+
+  const resizeCartPane = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (window.innerWidth < 1024) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const cartOnLeft = posLayout.paneOrder.indexOf('cart') < posLayout.paneOrder.indexOf('products');
+    const update = (pointerEvent: PointerEvent) => {
+      const nextWidth = cartOnLeft ? pointerEvent.clientX : window.innerWidth - pointerEvent.clientX;
+      setCartPaneWidth(Math.min(560, Math.max(300, nextWidth)));
+    };
+    const finish = () => {
+      window.removeEventListener('pointermove', update);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+    };
+    window.addEventListener('pointermove', update);
+    window.addEventListener('pointerup', finish, { once: true });
+    window.addEventListener('pointercancel', finish, { once: true });
+  };
 
   const handleCfdMessage = useCallback((message: CfdMessage) => {
     if (message.type !== 'DisplayReady') return;
@@ -1037,7 +1072,8 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
       <div className="pos-workspace">
         {/* Products pane */}
         <section
-          style={{ order: posLayout.paneOrder.indexOf('products') }}
+          data-pos-pane="products"
+          style={{ order: posLayout.paneOrder.indexOf('products') * 2 }}
           className={`${
             posTab === 'products' ? 'flex' : 'hidden'
           } lg:flex flex-col flex-1 min-w-0 min-h-0 lg:border-r lg:border-emerald-100`}
@@ -1160,7 +1196,7 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
             </div>
           </div>
 
-          <div className={`flex-1 overflow-y-auto px-3 md:px-4 pt-2 no-scrollbar ${cart.items.length > 0 ? 'pb-28 lg:pb-4' : 'pb-4'}`}>
+          <div className={`pos-products-scroll flex-1 overflow-y-auto px-3 md:px-4 pt-2 no-scrollbar ${cart.items.length > 0 ? 'pb-28 lg:pb-4' : 'pb-4'}`}>
             {showBundles ? <BundlePicker storeId={currentStore?.id || ''} locationId={selectedLocationId || null} /> : loadingProducts ? (
               <div className="flex flex-col items-center justify-center py-16 text-gray-400">
                 <Package className="w-10 h-10 mb-2 animate-pulse" />
@@ -1260,9 +1296,33 @@ export default function POSPage({ onNavigate }: { onNavigate?: (page: string) =>
           </div>
         </section>
 
+        <div
+          className="pos-pane-resizer hidden lg:block"
+          style={{ order: 1 }}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize product catalog and cart panels"
+          aria-valuemin={300}
+          aria-valuemax={560}
+          aria-valuenow={cartPaneWidth}
+          tabIndex={0}
+          onPointerDown={resizeCartPane}
+          onKeyDown={(event) => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+            event.preventDefault();
+            const cartOnLeft = posLayout.paneOrder.indexOf('cart') < posLayout.paneOrder.indexOf('products');
+            const direction = (event.key === 'ArrowRight' ? 1 : -1) * (cartOnLeft ? 1 : -1);
+            setCartPaneWidth((width) => Math.min(560, Math.max(300, width + direction * (event.shiftKey ? 24 : 8))));
+          }}
+        />
+
         {/* Cart pane */}
         <section
-          style={{ order: posLayout.paneOrder.indexOf('cart') }}
+          data-pos-pane="cart"
+          style={{
+            order: posLayout.paneOrder.indexOf('cart') * 2,
+            '--pos-cart-width': `${cartPaneWidth}px`,
+          } as CSSProperties}
           className={`${
             posTab === 'cart' ? 'flex' : 'hidden'
           } pos-ticket ios-pane lg:flex flex-col w-full flex-shrink-0 min-h-0`}
