@@ -1597,6 +1597,19 @@ class AdimatDB extends Dexie {
         customer_opening_payments: 'id, store_id, customer_id, account_receipt_id, created_at, synced, [store_id+entry_type+created_at]',
         expenses: 'id, store_id, category, expense_date, created_at, synced, [store_id+created_at]',
       });
+      /* Version 34 — offline-first Store Owner Payroll module tables. */
+      this.version(34).stores({
+        payroll_staff: 'id, store_id, location_id, user_id, is_active, updated_at, synced',
+        payroll_deductions: 'id, store_id, staff_id, kind, status, updated_at, synced',
+        payroll_deduction_repayments: 'id, store_id, deduction_id, staff_id, pay_run_id, created_at, synced',
+        payroll_attendance: 'id, store_id, staff_id, location_id, work_date, status, updated_at, synced',
+        payroll_tax_configs: 'id, store_id, effective_from, is_active, updated_at, synced',
+        payroll_rules: 'id, store_id, updated_at, synced',
+        payroll_runs: 'id, store_id, pay_month, status, updated_at, synced',
+        payroll_run_items: 'id, store_id, pay_run_id, staff_id, location_id, pay_month, payment_status, updated_at, synced',
+        payroll_adjustments: 'id, store_id, pay_run_id, run_item_id, staff_id, created_at, synced',
+        payroll_audit_logs: 'id, store_id, entity_type, entity_id, created_at, synced',
+      });
   }
 }
 
