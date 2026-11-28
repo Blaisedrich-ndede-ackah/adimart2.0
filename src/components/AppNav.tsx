@@ -18,6 +18,7 @@ import { canAccessCashbook, canRecordCustomerPayments } from '@/lib/staffAccess'
 interface AppNavProps {
   currentPage: string;
   onNavigate: (page: string) => void;
+  navWidth: number;
 }
 
 interface NavItem {
@@ -31,7 +32,7 @@ interface NavItem {
   href?: string;
 }
 
-export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
+export default function AppNav({ currentPage, onNavigate, navWidth }: AppNavProps) {
   const { currentUser, currentStore, switchUser } = useAuthStore();
   const t = useT();
   const [moreOpen, setMoreOpen] = useState(false);
@@ -187,9 +188,12 @@ export default function AppNav({ currentPage, onNavigate }: AppNavProps) {
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className={`food-rail ios-pane hidden lg:flex w-[104px] shrink-0 flex-col self-stretch text-ink ${
-        leftHanded ? 'lg:order-2' : ''
-      }`}>
+      <aside
+        className={`food-rail ios-pane hidden lg:flex shrink-0 flex-col self-stretch text-ink ${
+          leftHanded ? 'lg:order-2' : 'lg:order-0'
+        }`}
+        style={{ width: navWidth, flexBasis: navWidth }}
+      >
         <div className="food-rail-logo" aria-hidden="true">
           {currentUser?.photo_url?.startsWith('data:image/') ? (
             <img src={currentUser.photo_url} alt="" />

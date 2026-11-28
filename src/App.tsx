@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect, type ReactNode } from 'react';
+import { lazy, Suspense, useState, useEffect, type PointerEvent, type ReactNode } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { initAutoSync, startLiveStockSync, stopAutoSync, triggerPushSync } from '@/lib/sync';
 import { sendDeviceHeartbeat } from '@/lib/devicePresence';
@@ -178,6 +178,14 @@ function AuthenticatedApp() {
     const allowedPushPages = ['inventory', 'ecommerce', 'devices', 'customers', 'notifications'];
     if (params.has('open-notifications')) return pushPage && allowedPushPages.includes(pushPage) ? pushPage : 'notifications';
     return readVerifyPickupRoute() ? 'verify-pickup' : readStaffFeatureRoute() || 'home';
+  });
+  const [navWidth, setNavWidth] = useState(() => {
+    try {
+      const saved = Number(window.localStorage.getItem('adimat-nav-width'));
+      return Number.isFinite(saved) && saved >= 192 && saved <= 352 ? saved : 256;
+    } catch {
+      return 256;
+    }
   });
   const [quickAction, setQuickAction] = useState<'add-product' | 'add-expense' | null>(null);
   const [appMode, setAppMode] = useState<AppMode>(() => (readAgentHash() ? 'agent-login' : 'store'));
@@ -641,6 +649,34 @@ function AuthenticatedApp() {
     switchUser();
   };
 
+  const resizeNavigation = (event: PointerEvent<HTMLDivElement>) => {
+    if (window.innerWidth < 1024) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const update = (pointerEvent: PointerEvent) => {
+      const nextWidth = leftHanded
+        ? window.innerWidth - pointerEvent.clientX
+        : pointerEvent.clientX;
+      setNavWidth(Math.min(352, Math.max(192, nextWidth)));
+    };
+    const finish = () => {
+      window.removeEventListener('pointermove', update);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+    };
+    window.addEventListener('pointermove', update);
+    window.addEventListener('pointerup', finish, { once: true });
+    window.addEventListener('pointercancel', finish, { once: true });
+  };
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('adimat-nav-width', String(navWidth));
+    } catch {
+      // Keep the resized width for this session if storage is unavailable.
+    }
+  }, [navWidth]);
+
   const renderPage = () => {
     const role = currentUser?.role;
     switch (currentPage) {
@@ -727,8 +763,25 @@ function AuthenticatedApp() {
         paddingRight: 'env(safe-area-inset-right)',
       }}
     >
-      <AppNav currentPage={currentPage} onNavigate={setCurrentPage} />
-      <div className={`flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden ${leftHanded ? 'lg:order-1' : ''}`}>
+      <AppNav currentPage={currentPage} onNavigate={setCurrentPage} navWidth={navWidth} />
+      <div
+        className={`workspace-resizer hidden lg:block ${leftHanded ? 'lg:order-3' : 'lg:order-1'}`}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize navigation panel"
+        aria-valuemin={192}
+        aria-valuemax={352}
+        aria-valuenow={navWidth}
+        tabIndex={0}
+        onPointerDown={resizeNavigation}
+        onKeyDown={(event) => {
+          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+          event.preventDefault();
+          const direction = (event.key === 'ArrowRight' ? 1 : -1) * (leftHanded ? -1 : 1);
+          setNavWidth((width) => Math.min(352, Math.max(192, width + direction * (event.shiftKey ? 24 : 8))));
+        }}
+      />
+      <div className={`flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden ${leftHanded ? 'lg:order-1' : 'lg:order-2'}`}>
         <SyncStatusBanner />
         <SyncToast />
         <SubscriptionWarningBanner
