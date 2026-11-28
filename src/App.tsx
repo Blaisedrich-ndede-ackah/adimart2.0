@@ -195,6 +195,14 @@ function AuthenticatedApp() {
   const [publicUtilityRoute, setPublicUtilityRoute] = useState<'terms' | '404' | null>(() => readPublicUtilityRoute());
 
   useEffect(() => {
+    try {
+      window.localStorage.setItem('adimat-nav-width', String(navWidth));
+    } catch {
+      // Keep the resized width for this session if storage is unavailable.
+    }
+  }, [navWidth]);
+
+  useEffect(() => {
     let active = true;
     void restoreAdminSession()
       .then((isActive) => {
@@ -668,14 +676,6 @@ function AuthenticatedApp() {
     window.addEventListener('pointerup', finish, { once: true });
     window.addEventListener('pointercancel', finish, { once: true });
   };
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem('adimat-nav-width', String(navWidth));
-    } catch {
-      // Keep the resized width for this session if storage is unavailable.
-    }
-  }, [navWidth]);
 
   const renderPage = () => {
     const role = currentUser?.role;
