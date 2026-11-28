@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ScanBarcode, Package, BarChart3, Settings, LogOut, Bluetooth, Receipt, House, Search, ClipboardCheck,
   Sparkles, CalendarClock, ShoppingBag, MoreHorizontal, X, PiggyBank, BookOpen, MessagesSquare, Moon, Sun,
-  ShoppingCart, RotateCcw, QrCode,
+  ShoppingCart, RotateCcw, QrCode, Wallet, MessageCircle,
   ContactRound, ArrowLeftRight, Building2, Megaphone, Tag, Boxes, ClipboardMinus, Gift, Bell,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -14,6 +14,7 @@ import LanguageSwitcher from '@/components/LanguageSwitcher';
 import AccessibilityControls from '@/components/AccessibilityControls';
 import { useT } from '@/lib/i18n';
 import { canAccessCashbook, canRecordCustomerPayments } from '@/lib/staffAccess';
+import { getWhatsAppSupportUrl } from '@/lib/support';
 
 interface AppNavProps {
   currentPage: string;
@@ -52,6 +53,7 @@ export default function AppNav({ currentPage, onNavigate, navWidth }: AppNavProp
   const canManageEcommerce =
     isOwner || (currentUser?.can_manage_ecommerce ?? 0) === 1;
   const cashbookOk = canAccessCashbook(currentUser);
+  const supportUrl = getWhatsAppSupportUrl(currentStore?.name);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
@@ -119,6 +121,7 @@ export default function AppNav({ currentPage, onNavigate, navWidth }: AppNavProp
         { id: 'gift-cards-rentals', label: 'Gift cards & rentals', shortLabel: 'Gift cards', icon: Gift, show: isOwner },
         { id: 'notifications', label: 'Notifications', icon: Bell, show: true },
         { id: 'learn', label: 'Learn Adimat', icon: BookOpen, show: true },
+        { id: 'whatsapp-support', label: 'Chat on WhatsApp', icon: MessageCircle, show: true, href: supportUrl },
         { id: 'campaigns', label: 'Promotions', icon: Megaphone, show: true },
         { id: 'store-deals', label: 'Deals & coupons', shortLabel: 'Deals', icon: Tag, show: isOwner },
         { id: 'subscription', label: t('nav.plan'), icon: CalendarClock, show: isOwner },
@@ -142,7 +145,7 @@ export default function AppNav({ currentPage, onNavigate, navWidth }: AppNavProp
           href: COMMUNITY_CHAT_URL,
         },
       ].filter((item) => item.show),
-    [isOwner, ecommerceEnabled, canManageEcommerce, cashbookOk, currentStore?.cashiers_can_record_expenses, storeCount, t]
+    [isOwner, ecommerceEnabled, canManageEcommerce, cashbookOk, currentStore?.cashiers_can_record_expenses, storeCount, t, supportUrl]
   );
 
   // Keep bottom bar to a few primary destinations; rest live under More
@@ -162,7 +165,7 @@ export default function AppNav({ currentPage, onNavigate, navWidth }: AppNavProp
     { label: t('nav.main'), ids: ['home', 'pos', 'search', 'adimat-ai', 'stock-approvals', 'transactions'] },
     { label: 'Shop', ids: ['inventory', 'purchasing', 'warehouse', 'ecommerce', 'multistore', 'store-deals', 'gift-cards-rentals'] },
     { label: 'Operations', ids: ['reports', 'expenses', 'cashbook', 'devices', 'verify-pickup', 'write-offs', 'bundles', 'subscription', 'returns', 'customers', 'notifications'] },
-    { label: 'Help', ids: ['learn', 'campaigns', 'community', 'settings'] },
+    { label: 'Help', ids: ['learn', 'campaigns', 'community', 'whatsapp-support', 'settings'] },
   ];
   const groupedMoreItems = navGroups
     .map((group) => ({
@@ -227,7 +230,7 @@ export default function AppNav({ currentPage, onNavigate, navWidth }: AppNavProp
                         href={item.href}
                         target="_blank"
                         rel="noopener noreferrer"
-                        aria-label={t('community.aria')}
+                        aria-label={item.id === 'community' ? t('community.aria') : item.label}
                         className={className}
                       >
                         {content}
@@ -371,7 +374,7 @@ export default function AppNav({ currentPage, onNavigate, navWidth }: AppNavProp
                             href={item.href}
                             target="_blank"
                             rel="noopener noreferrer"
-                            aria-label={t('community.aria')}
+                            aria-label={item.id === 'community' ? t('community.aria') : item.label}
                             onClick={() => setMoreOpen(false)}
                             className={className}
                           >

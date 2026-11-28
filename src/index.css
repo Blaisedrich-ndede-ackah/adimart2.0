@@ -2052,3 +2052,81 @@ html.dark :is([class*="text-emerald-"], [class*="text-green-"], [class*="text-am
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
+
+.whatsapp-support {
+  position: fixed;
+  z-index: 35;
+  right: max(1.25rem, env(safe-area-inset-right));
+  bottom: max(1.25rem, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: .65rem;
+  pointer-events: none;
+}
+.whatsapp-support.is-obstructed { visibility: hidden; }
+.whatsapp-support-link {
+  display: inline-flex;
+  min-height: 3.25rem;
+  align-items: center;
+  justify-content: center;
+  gap: .6rem;
+  padding: 0 1rem;
+  border: 1px solid rgba(255,255,255,.24);
+  border-radius: 999px;
+  background: #087f45;
+  color: #fff;
+  box-shadow: 0 12px 32px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.2);
+  font-size: .82rem;
+  font-weight: 700;
+  text-decoration: none;
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  pointer-events: auto;
+  transition: transform .18s ease, background-color .18s ease, box-shadow .18s ease;
+}
+.whatsapp-support-link:hover { background: #075b34; box-shadow: 0 16px 36px rgba(0,0,0,.25); }
+.whatsapp-support-link:active { transform: scale(.97); }
+.dark .whatsapp-support-link { background: #18a95d; color: #07130b; }
+.dark .whatsapp-support-link:hover { background: #35c879; }
+.whatsapp-support-note {
+  display: flex;
+  max-width: min(21rem, calc(100vw - 2rem));
+  align-items: center;
+  gap: .55rem;
+  padding: .7rem .75rem .7rem .9rem;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--ios-glass-strong);
+  color: var(--color-ink);
+  box-shadow: var(--ios-depth);
+  font-size: .78rem;
+  line-height: 1.4;
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  pointer-events: auto;
+}
+.whatsapp-support-note button {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: var(--ios-fill);
+  color: var(--color-ink);
+}
+.app-workspace .page-body { padding-bottom: max(5.5rem, calc(4rem + env(safe-area-inset-bottom))); }
+.pos-products-scroll { padding-bottom: 6rem !important; }
+
+@media (max-width: 1023px) {
+  .whatsapp-support {
+    right: max(1rem, env(safe-area-inset-right));
+    bottom: calc(5.25rem + env(safe-area-inset-bottom));
+  }
+  .whatsapp-support.is-pos { bottom: calc(9.25rem + env(safe-area-inset-bottom)); }
+  .whatsapp-support-link { width: 3.5rem; min-height: 3.5rem; padding: 0; }
+  .whatsapp-support-link span { display: none; }
+  .pos-products-scroll { padding-bottom: 9.5rem !important; }
+}

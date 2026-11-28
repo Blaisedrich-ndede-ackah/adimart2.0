@@ -12,6 +12,7 @@ import { SyncStatusBanner } from '@/components/ui/SyncStatusBanner';
 import { SyncToast } from '@/components/ui/Toast';
 import AppNav from '@/components/AppNav';
 import AddPhonePrompt from '@/components/AddPhonePrompt';
+import WhatsAppSupportButton from '@/components/WhatsAppSupportButton';
 import SessionTimeoutGuard from '@/components/SessionTimeoutGuard';
 const StoreSetupPage = lazy(() => import('@/pages/StoreSetupPage'));
 const LoginPage = lazy(() => import('@/pages/LoginPage'));
@@ -627,6 +628,10 @@ function AuthenticatedApp() {
     <>
       <SessionTimeoutGuard />
       {page}
+      <WhatsAppSupportButton
+        storeName={currentStore?.name}
+        isPos={currentPage === 'pos' || (currentPage === 'home' && currentUser?.role !== 'owner')}
+      />
     </>
   );
 
@@ -781,7 +786,7 @@ function AuthenticatedApp() {
           setNavWidth((width) => Math.min(352, Math.max(192, width + direction * (event.shiftKey ? 24 : 8))));
         }}
       />
-      <div className={`flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden ${leftHanded ? 'lg:order-1' : 'lg:order-2'}`}>
+      <div className={`app-workspace flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden ${leftHanded ? 'lg:order-1' : 'lg:order-2'}`}>
         <SyncStatusBanner />
         <SyncToast />
         <SubscriptionWarningBanner
